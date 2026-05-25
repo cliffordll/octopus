@@ -1251,23 +1251,27 @@ packages/runtimes/openclaw-gateway/
 ```text
 docs/
   DESIGN.md
-  API-COMPATIBILITY.md
-  SCHEMA-COMPATIBILITY.md
-  OWNERSHIP-MODEL.md
-  MIGRATION-PLAN.md
+  FEATURE.md
+  step-03/
+    A-CONSTRAINTS.md
+  step-04/
+    SCHEMA-COMPATIBILITY.md
+  step-07/
+    WORKFLOW-NOTES.md
 ```
 
 这些文档的角色分别是：
 
 - `DESIGN.md`
   总体设计说明
-- `API-COMPATIBILITY.md`
-  路由、请求、响应兼容清单
-- `SCHEMA-COMPATIBILITY.md`
-  现有 上游参考实现 业务表兼容清单
-- `OWNERSHIP-MODEL.md`
-  organization ownership 与 failover 设计
-- `MIGRATION-PLAN.md`
+- `FEATURE.md`
+  开发顺序、A/B 分工和步骤验收说明
+- `step-03/A-CONSTRAINTS.md`
+  shared contract 层步骤约束
+- `step-04/SCHEMA-COMPATIBILITY.md`
+  现有业务表与字段兼容清单
+- `step-07/WORKFLOW-NOTES.md`
+  状态流转、副作用和 workflow 约束说明
   分阶段实施计划
 
 当前阶段先写 `DESIGN.md` 是合理的，后续文档再逐步补齐。
@@ -1712,6 +1716,13 @@ Octopus 的实施必须分阶段进行。
 - 依赖方向更清晰，冲突点更少
 
 不建议按“一个人负责一半目录”或“一个人写 server、一个人写 packages 但同时随意改边界”的方式推进，因为那会让契约和实现相互反复拉扯。
+
+在文档流转上，也应保持同样的单向依赖：
+
+- A 先在对应步骤目录内冻结约束文档
+- B 再按步骤约束落实现
+- B 的执行记录和验收材料只能建立在步骤约束已经存在的前提下
+- 如果发现缺口，由 A 回收并更新步骤约束，而不是由 B 直接重写契约
 
 ## 阶段 1：契约盘点
 

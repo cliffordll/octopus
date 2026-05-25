@@ -22,8 +22,26 @@
 - 步骤目录统一按 `docs/step-01/` 到 `docs/step-10/` 命名，与本文件中的 `Step 1` 到 `Step 10` 直接对应
 - `docs/step-01/` 只放 Step 1 的执行记录
 - `docs/step-02/` 只放 Step 2 的执行记录
+- 从 `docs/step-03/` 开始，每个步骤目录都必须先有 A 提供给 B 的 `A-CONSTRAINTS.md`
 - `docs/step-03/` 放 Shared Contract 层文档
-- `docs/step-04/` 到 `docs/step-10/` 分别放对应步骤的约束草案与补充文档
+- `docs/step-04/` 到 `docs/step-10/` 分别放对应步骤的 A 约束文档与专项盘点文档
+- 在 B 完成 `Step 3` 之前，`docs/step-04/` 到 `docs/step-10/` 的 `A-CONSTRAINTS.md` 默认只保留草稿版本，不提前冻结字段级和行为级细节
+- B 的执行文档只在对应步骤已经有 A 约束输入后才允许补充，不允许先有 B 的实现再倒推 A 的约束
+
+当前步骤文档归档：
+
+- `docs/step-01/BASELINE-CLEANUP.md`
+- `docs/step-02/SERVER-SKELETON.md`
+- `docs/step-03/A-CONSTRAINTS.md`
+- `docs/step-04/A-CONSTRAINTS.md`
+- `docs/step-04/SCHEMA-COMPATIBILITY.md`
+- `docs/step-05/A-CONSTRAINTS.md`
+- `docs/step-06/A-CONSTRAINTS.md`
+- `docs/step-07/A-CONSTRAINTS.md`
+- `docs/step-07/WORKFLOW-NOTES.md`
+- `docs/step-08/A-CONSTRAINTS.md`
+- `docs/step-09/A-CONSTRAINTS.md`
+- `docs/step-10/A-CONSTRAINTS.md`
 
 ## 2.1 双人开发分工
 
