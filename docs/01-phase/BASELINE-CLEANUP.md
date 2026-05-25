@@ -156,7 +156,7 @@ pyproject.toml
 
 ## 9. 后续阶段衔接
 
-- Step 2 服务端骨架可以直接在当前 `pyproject.toml` 基础上落 `server/src/app.py`、`config.py`、`lifespan.py`,无需再调依赖
+- Step 2 服务端骨架在 `pyproject.toml` 基础上追加了 `fastapi` 与 `uvicorn[standard]` 运行依赖,以及 `[tool.hatch.build.targets.wheel] packages = ["server"]` 构建配置;具体追加理由见 `docs/02-phase/SERVER-SKELETON.md` §6
 - Step 4 数据库映射层落地时,按 `DESIGN.md` 6.1 增加 PostgreSQL 异步驱动,本文档不预先决定具体包名
 - 任何新增运行依赖都应在引入时同步在对应阶段的操作文档中给出归属与用途,避免再次出现「依赖来源不明」的情况
 - 本文档不再随后续阶段修改;如果未来对基础配置有进一步收敛,新建对应阶段的操作文档,不覆写本文

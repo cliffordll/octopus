@@ -42,6 +42,7 @@ markers = [
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
+exclude = ["upstream-reference", "**/__pycache__", ".venv"]
 reportUnknownVariableType = "none"
 reportUnknownMemberType = "none"
 reportUnknownArgumentType = "none"

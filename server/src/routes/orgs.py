@@ -14,5 +14,7 @@ def get_org_service() -> OrgService:
 
 
 @router.get("")
-async def list_orgs(service: OrgService = Depends(get_org_service)) -> list[dict[str, Any]]:
+async def list_orgs(
+    service: OrgService = Depends(get_org_service),
+) -> list[dict[str, Any]]:
     return await service.list()

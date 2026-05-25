@@ -162,6 +162,7 @@ INFO:     127.0.0.1:... - "GET /api/orgs HTTP/1.1" 200 OK
 - `docs/FEATURE.md` Step 2 接口示例就是 `/api/orgs` 与 `/api/issues`
 - `docs/01-phase/API-COMPATIBILITY.md` 已经把 `/api/orgs` 列入第一批共享契约范围
 - 返回空数组在响应 shape 上不违反任何已盘契约,等 Phase 4/6 落地后由真实查询替换
+- `docs/01-phase/API-COMPATIBILITY.md` §4.1 明确 `GET /api/orgs` 仅 board 可访问;本步骤未接入调用上下文,当前对所有请求开放;board 校验等 Phase 5 ownership 接入 actor / context 解析后补齐
 
 ## 8. 与后续阶段的衔接预留
 
@@ -178,6 +179,7 @@ INFO:     127.0.0.1:... - "GET /api/orgs HTTP/1.1" 200 OK
 ## 9. 当前阶段不做的内容
 
 - 不引入认证 / 鉴权中间件(归外层系统,本项目不实现完整 auth)
+- 不强制 `GET /api/orgs` 的 board-only 校验,理由同 §7.3 最后一条
 - 不引入 request id / trace 中间件(归 Phase 5 ownership 阶段或 observability 单独推进)
 - 不引入 CORS / GZip 等装饰性中间件(等真实前端联调出现需求再加)
 - 不引入 `packages/shared/` 引用(避免抢 A 的 Phase 3 边界)
