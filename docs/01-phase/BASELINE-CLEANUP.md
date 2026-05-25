@@ -15,7 +15,7 @@
 - 顶层目录中与 Python 服务端兼容重写无关的残留文件
 - `pyproject.toml` 中与 Octopus 目标无关的依赖
 - `.gitignore` 中与旧栈相关的忽略规则
-- 本地参考克隆 `rudder/` 的处理方式
+- 本地参考克隆 `upstream-reference/` 的处理方式
 
 不在本次执行范围内的内容：
 
@@ -27,8 +27,8 @@
 
 本次清理的判断标准来自：
 
-- `CLAUDE.md` 的「清理原则」：保留与 Rudder Python 化改造直接相关的内容；删除 Node workspace、Tauri、旧项目协作文档、与兼容重写无关的历史文件
-- `CLAUDE.md` 的「项目定位」与「核心约束」：Octopus 是 Rudder 服务端的 Python 兼容替代实现，不是 CLI 工具、不是桌面应用、不是抓取系统
+- `CLAUDE.md` 的「清理原则」：保留与上游参考实现 Python 化改造直接相关的内容；删除 Node workspace、Tauri、旧项目协作文档、与兼容重写无关的历史文件
+- `CLAUDE.md` 的「项目定位」与「核心约束」：Octopus 是上游控制面服务端的 Python 兼容替代实现，不是 CLI 工具、不是桌面应用、不是抓取系统
 - `docs/DESIGN.md` 第 6.1 节：部署形态为多 server pod + 共享 PostgreSQL，无桌面打包诉求
 - `docs/FEATURE.md` Step 1 验收标准：顶层配置不再混入明显无关的旧项目信息；基础依赖和忽略规则能解释为 Octopus 所需
 
@@ -40,7 +40,7 @@
 .git/
 .github/
 docs/
-rudder/            本地参考克隆,已通过 .gitignore 忽略
+upstream-reference/   本地参考克隆,已通过 .gitignore 忽略
 .gitignore
 .python-version
 CLAUDE.md
@@ -50,7 +50,7 @@ pyproject.toml
 变更：
 
 - 删除 `package.json`：原内容为 Node workspace 声明（`workspaces: ["packages/*"]`），Python 服务端不需要 Node workspace 元数据
-- `rudder/`：保留作为本地对照源，不进仓库；`CLAUDE.md` 已明确「对照实现以 `D:\coding\rudder` 为准」，本目录只是为方便本地查阅
+- `upstream-reference/`：保留作为本地对照源，不进仓库；`CLAUDE.md` 已明确「对照实现以上游参考仓库路径为准」，本目录只是为方便本地查阅
 
 未来如果新增 `server/`、`packages/`、`tests/` 等目录，应按 `docs/DESIGN.md` 第 7 节的结构落地，不再次重复本步骤判断。
 
@@ -64,7 +64,7 @@ pyproject.toml
 | `aiosqlite>=0.19` | 本地开发期 SQLite 驱动 | Step 4 |
 | `httpx>=0.28` | 服务端调用 runtime / 外部 HTTP | Step 8 runtime orchestration |
 | `psutil>=6.0` | lifespan 与后台任务的进程级观测预留 | Step 2 / Step 5 |
-| `python-ulid>=2.0` | Rudder 风格 ID 生成 | Step 3 shared contract |
+| `python-ulid>=2.0` | 上游参考实现风格 ID 生成 | Step 3 shared contract |
 | `pyyaml>=6.0` | 配置文件解析 | Step 2 config |
 | `jsonschema>=4.20` | shared validator | Step 3 shared contract |
 
@@ -84,8 +84,8 @@ pyproject.toml
 |---|---|
 | `typer>=0.13` | CLI 框架,Octopus 是服务端项目,无 CLI 入口诉求 |
 | `prompt_toolkit>=3.0` | 终端交互组件,与服务端无关 |
-| `trafilatura>=1.6` | 网页正文抽取,与 Rudder 兼容重写无关 |
-| `duckduckgo-search>=5.0` | 搜索客户端,与 Rudder 兼容重写无关 |
+| `trafilatura>=1.6` | 网页正文抽取,与上游参考实现兼容重写无关 |
+| `duckduckgo-search>=5.0` | 搜索客户端,与上游参考实现兼容重写无关 |
 | `pyinstaller>=6.0` | 桌面/单文件打包,DESIGN.md 6.1 已说明部署形态为 pod,不需要打包 |
 
 `[dependency-groups] build` 整组随 `pyinstaller` 一并删除。
@@ -100,7 +100,7 @@ pyproject.toml
 
 - 删除 `authors = [{ name = "lianaipeng" }]`：来自旧项目的署名,与 Octopus 无关
 - 删除 `readme = "README.md"`：当前仓库无 `README.md` 文件,保留该字段会形成悬空引用
-- `description` 改为 `Octopus: Python compatibility rewrite of the Rudder server`,与项目定位对齐
+- `description` 改为 `Octopus: Python compatibility rewrite of the upstream control-plane server`,与项目定位对齐
 
 ## 6. `.gitignore` 收敛
 
@@ -120,7 +120,7 @@ pyproject.toml
 
 ### 6.2 新增条目
 
-- `rudder/`：本地参考用的 Rudder 源码副本,不进仓库
+- `upstream-reference/`：本地参考用的上游参考实现源码副本,不进仓库
 
 ### 6.3 删除章节
 
@@ -136,7 +136,7 @@ pyproject.toml
 
 本步骤不修改 `CLAUDE.md`,但需要确认以下章节已稳定,作为后续阶段执行的依据：
 
-- 项目定位：明确为 Rudder 服务端的 Python 兼容替代实现
+- 项目定位：明确为上游控制面服务端的 Python 兼容替代实现
 - 核心约束：业务表 / API / 枚举 / 状态值不变,pod 编排与 organization 分配由外层系统负责
 - 目录规范：与 `DESIGN.md` 第 7 节对齐
 - 编码规范：要求内聚、封装、可扩展,不发明新产品概念
@@ -150,7 +150,7 @@ pyproject.toml
 执行后做以下验证：
 
 - `git status` 显示三处变更：`D package.json`、`M .gitignore`、`M pyproject.toml`
-- `git check-ignore -v rudder` 输出 `.gitignore:<line>:rudder/`,确认本地参考目录已被忽略
+- `git check-ignore -v upstream-reference` 输出 `.gitignore:<line>:upstream-reference/`,确认本地参考目录已被忽略
 - `uv tree` 能完整解析 `pyproject.toml`,所有保留依赖均成功 resolve
 - 全仓 grep `trafilatura|prompt_toolkit|duckduckgo|typer|pyinstaller` 无任何源码引用,确认删除依赖不影响任何已有代码
 
