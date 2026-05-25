@@ -1,22 +1,16 @@
-﻿[project]
+[project]
 name = "octopus"
 version = "0.1.0"
-description = "Octopus Python workspace"
-readme = "README.md"
+description = "Octopus: Python compatibility rewrite of the Rudder server"
 requires-python = ">=3.12"
-authors = [{ name = "lianaipeng" }]
 dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.19",
     "httpx>=0.28",
     "psutil>=6.0",
-    "typer>=0.13",
     "python-ulid>=2.0",
-    "prompt_toolkit>=3.0",
     "pyyaml>=6.0",
     "jsonschema>=4.20",
-    "trafilatura>=1.6",
-    "duckduckgo-search>=5.0",
 ]
 
 [build-system]
@@ -30,9 +24,6 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "types-pyyaml>=6.0",
-]
-build = [
-    "pyinstaller>=6.0",
 ]
 
 [tool.pytest.ini_options]

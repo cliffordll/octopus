@@ -11,7 +11,7 @@ venv/
 env/
 
 # 打包产物
-build/work/
+build/
 dist/
 *.egg-info/
 *.egg
@@ -29,26 +29,6 @@ htmlcov/
 coverage.xml
 *.cover
 
-# ─── Node / Bun(前端 + Tauri workspace) ─────────────────
-node_modules/
-.turbo/
-.parcel-cache/
-*.tsbuildinfo
-
-# Vite / Next 等构建输出
-.next/
-out/
-packages/app/dist/
-
-# ─── Tauri(Rust 侧) ─────────────────────────────────────
-packages/desktop/tauri/target/
-packages/desktop/tauri/gen/
-packages/desktop/tauri/binaries/*.exe
-target/
-
-# ─── PyInstaller ─────────────────────────────────────────
-*.spec.bak
-
 # ─── SQLite 运行时文件(不该被提交) ──────────────────────
 *.db
 *.db-journal
@@ -56,10 +36,6 @@ target/
 *.db-shm
 *.sqlite
 *.sqlite3
-
-# ─── 运行时目录(开发时偶尔会在项目内产生) ────────────────
-.chariot/
-chariot-dev/
 
 # ─── IDE / 编辑器 ─────────────────────────────────────────
 .vscode/
@@ -91,6 +67,9 @@ secrets.json
 *.log
 logs/
 tmp/
+
+# ─── 本地参考用的 Rudder 源码副本(对照实现,不进仓库) ──
+rudder/
 
 # ─── 用户本地 scratch / 笔记 ─────────────────────────────
 # docs/others/ 是开发者个人草稿、todo、临时计划等;不进仓库
