@@ -1,8 +1,8 @@
-﻿# Phase 2 Workflow Notes
+# Step 7 Workflow Notes
 
 ## 目标
 
-本文件用于支持 B 在 Phase 2 之后实现 `issue` / `approval` 的 mutation 与 workflow。这里只记录当前实现必须保持兼容的流转规则、守卫条件和 activity 副作用，不提前扩展 chat、runtime 或完整审计体系。
+本文件归档在 `Step 7. Mutation Workflow` 下，用于支持后续 `issue` / `approval` 的 mutation 与 workflow 实现。这里只记录当前实现必须保持兼容的流转规则、守卫条件和 activity 副作用，不提前扩展 chat、runtime 或完整审计体系。
 
 ## 范围
 
@@ -174,4 +174,3 @@
 - 更细的 wakeup payload 结构
 - 完整 activity payload 字段级清单
 - runtime 执行链路与 workflow 的联动细节
-

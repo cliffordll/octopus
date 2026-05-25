@@ -1,4 +1,4 @@
-﻿# Phase 6 Draft
+# Step 6 Read API Draft
 
 ## 状态
 
@@ -46,4 +46,3 @@
 - chat 读取接口
 - 大量辅助列表接口
 - 非第一批统计与 dashboard 接口
-

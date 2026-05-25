@@ -1,4 +1,4 @@
-﻿# Phase 9 Draft
+# Step 9 Chat Compatibility Draft
 
 ## 状态
 
@@ -48,4 +48,3 @@
 - 全量 messenger / streaming 分支
 - 大量历史消息恢复策略
 - 全量 UI 交互细节
-
