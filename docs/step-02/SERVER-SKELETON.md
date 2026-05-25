@@ -162,8 +162,8 @@ INFO:     127.0.0.1:... - "GET /api/orgs HTTP/1.1" 503 Service Unavailable
 
 - `CLAUDE.md` 与 `docs/DESIGN.md` 第 10.4 节要求不发明上游不存在的新接口前缀
 - `docs/FEATURE.md` Step 2 接口示例就是 `/api/orgs` 与 `/api/issues`
-- `docs/step-03/API-COMPATIBILITY.md` 已经把 `/api/orgs` 列入第一批共享契约范围
-- `docs/step-03/API-COMPATIBILITY.md` §4.1 明确 `GET /api/orgs` 仅 board 可访问
+- `docs/step-03/A-CONSTRAINTS.md` 已经把 `/api/orgs` 列入第一批共享契约范围
+- `docs/step-03/A-CONSTRAINTS.md` 明确 `GET /api/orgs` 仅 board 可访问
 - 在 actor/context 尚未接入前,返回 `503` 比伪造 `200 []` 更安全,不会把错误默认行为固化为后续实现基线
 - 等 Phase 5 ownership 接入 actor / context 解析后,再把该前置 guard 替换为真正的 board 校验
 
