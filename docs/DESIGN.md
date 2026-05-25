@@ -453,6 +453,8 @@ octopus/
     resources/
       skills/
         bundled/
+          conversation-to-skill/
+          skill-creator/
       plugins/
       mcp/
     tests/
@@ -556,6 +558,12 @@ octopus/
 
 这样可以把“怎么和 runtime 说话”与“什么时候调用 runtime、调用后如何修改业务状态”分开，也更利于和 上游参考实现 的现有 runtime 包逐个对照迁移。
 
+这里需要额外明确一条 Python 迁移规则：
+
+- Python 包目录名使用下划线，例如 `claude_local/`
+- 上游兼容 runtime id、配置值、数据库语义、接口语义保持横杠，例如 `claude-local`
+- 两者不能混为一体，必须通过集中 registry 或 mapping 进行对齐
+
 ### 7.1.5 `ui/`
 
 作用：
@@ -652,6 +660,8 @@ server/
   resources/
     skills/
       bundled/
+        conversation-to-skill/
+        skill-creator/
     plugins/
     mcp/
   tests/
@@ -848,6 +858,13 @@ chat attachment、artifact、generated file 等能力都需要这个边界。
 - `skills/bundled/` 用于内置 skills
 - `plugins/` 用于未来插件资源
 - `mcp/` 用于未来 MCP 相关资源或配置
+
+额外约束：
+
+- `skills/bundled/` 只是资源归档路径
+- 其中每个具体 skill 目录名保持上游 skill id 语义，继续使用横杠，例如 `conversation-to-skill/`
+- skill 目录不是 Python 包，不需要为了 import 合法性改成下划线
+- 如果后续代码需要从 skill id 找到本地资源路径，应通过集中 mapping 或扫描逻辑处理，而不是重写 skill id 本身
 
 这样可以为后续扩展留出清晰边界，而不必在后面再做一次资源目录重构。
 
@@ -1086,6 +1103,7 @@ packages/runtimes/shared/
   base.py
   transcript.py
   results.py
+  registry.py
 ```
 
 这层承载：
@@ -1093,6 +1111,16 @@ packages/runtimes/shared/
 - 统一 runtime 接口
 - transcript 通用模型
 - 运行结果通用模型
+- Python 包路径与兼容 runtime id 的集中映射
+
+`registry.py` 或等价模块必须承担一项职责：
+
+- 把 `claude-local` 映射到 `packages.runtimes.claude_local`
+- 把 `codex-local` 映射到 `packages.runtimes.codex_local`
+- 把 `opencode-local` 映射到 `packages.runtimes.opencode_local`
+- 把 `openclaw-gateway` 映射到 `packages.runtimes.openclaw_gateway`
+
+这种映射必须集中管理，不能在各处用临时字符串替换推导。
 
 ### 7.5.3 `packages/runtimes/claude_local/`
 
@@ -1115,6 +1143,7 @@ packages/runtimes/claude_local/
 - `server/` 给 Octopus server 侧调用
 - `ui/` 给顶层前端消费 runtime-specific 的前端适配逻辑
 - `cli/` 给 CLI 或调试工具消费
+- 目录名 `claude_local` 只是 Python 包路径；兼容 runtime id 仍然应保持 `claude-local`
 
 ### 7.5.4 `packages/runtimes/codex_local/`
 
@@ -1136,6 +1165,7 @@ packages/runtimes/codex_local/
 说明：
 
 参考 上游参考实现 的真实结构，`codex_local` 这类 runtime 包内部可能还需要自己的 `shared/`，用于该 runtime 独有但又会被 server/ui/cli 共同消费的逻辑。
+兼容 runtime id 仍然应保持 `codex-local`，不能把下划线路径直接当成外部标识。
 
 ### 7.5.5 `packages/runtimes/opencode_local/`
 
@@ -1152,6 +1182,8 @@ packages/runtimes/opencode_local/
   cli/
   index.py
 ```
+
+兼容 runtime id 仍然应保持 `opencode-local`。
 
 ### 7.5.6 `packages/runtimes/openclaw_gateway/`
 
@@ -1173,6 +1205,7 @@ packages/runtimes/openclaw_gateway/
 说明：
 
 像 gateway 型 runtime，往往会有额外共享逻辑，因此允许保留 runtime 自己的 `shared/` 目录。
+兼容 runtime id 仍然应保持 `openclaw-gateway`。
 
 ### 7.5.7 每个 runtime 包内部的 `server/ui/cli` 分工
 

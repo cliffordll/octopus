@@ -28,6 +28,8 @@
 - `packages/database/` 负责 schema 映射、数据库客户端、查询和迁移
 - `packages/shared/` 负责 API 路径、枚举、契约模型、validator、共享常量
 - `packages/runtimes/` 负责各 runtime 的适配实现和共享 runtime contract
+- `packages/runtimes/` 的 Python 目录名使用下划线，例如 `claude_local/`；但对外兼容的 runtime id、配置值和持久化语义保持横杠命名，例如 `claude-local`
+- `server/resources/skills/bundled/` 这类资源目录不是 Python 包；其中具体 skill 目录名和 skill id 继续保持上游横杠命名，例如 `conversation-to-skill`
 - `tests/` 以兼容测试、工作流测试、ownership 测试为主
 - `docs/` 只保留与架构、兼容性、迁移计划相关的文档
 - `docs/` 下的规划类文档保留在根目录；步骤文档统一按 `docs/step-01/` 到 `docs/step-10/` 归档
@@ -52,6 +54,8 @@
 - `packages/database/queries/` 或等价持久化层只负责查询与写入细节，不定义审批、issue、chat、run 的业务语义
 - `packages/shared/` 统一承载 API path、枚举、请求响应模型和 validator，避免这些契约散落到 route、service 或测试里
 - `packages/runtimes/` 按 runtime 分目录实现适配，保留 shared contract，不把所有 runtime 差异揉进一个大模块
+- runtime 的 Python 包路径与外部兼容标识必须分离处理，不允许在业务代码、配置解析、数据库字段或接口返回里临时用字符串替换推导 `-` 和 `_`
+- skill 资源目录名和 skill id 视为外部兼容语义，不做 `_` 化；如果后续代码需要 Python 合法标识，必须额外建显式映射，不能改 skill 目录名本身
 - organization 是第一层隔离边界；任何请求、后台任务、恢复逻辑、扫描逻辑都不能越过 organization scope
 
 ## 测试规范

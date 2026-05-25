@@ -13,10 +13,19 @@
 ## 本阶段范围
 
 - `packages/runtimes/shared/`
-- `claude_local`
-- `codex_local`
-- `opencode_local`
-- `openclaw_gateway`
+- Python 包路径：
+  - `packages/runtimes/claude_local/`
+  - `packages/runtimes/codex_local/`
+  - `packages/runtimes/opencode_local/`
+  - `packages/runtimes/openclaw_gateway/`
+- 对外兼容 runtime id：
+  - `claude-local`
+  - `codex-local`
+  - `opencode-local`
+  - `openclaw-gateway`
+- skill 资源目录语义参考同一规则：
+  - 资源归档路径可以按 Octopus 目录结构放在 `server/resources/skills/bundled/`
+  - 具体 skill 目录名继续保持上游横杠命名，例如 `conversation-to-skill`
 - run 状态、结果和 transcript 归一化边界
 
 ## A 线必须先冻结的内容
@@ -26,12 +35,14 @@
 - run result / transcript 的统一语义
 - server 与 runtime 的职责边界
 - 不同 runtime 的能力差异如何向上层屏蔽
+- Python 包路径与兼容 runtime id 的集中映射规则
 
 ## B 线实现边界
 
 - 先做最小 shared runtime adapter
 - 让业务 service 只依赖 shared runtime contract
 - 预留新增 runtime 的扩展位
+- runtime 发现和加载必须基于集中 registry，不允许在各处临时 `replace("-", "_")` 或反向推导目录名
 
 ## 验收 demo
 
@@ -52,6 +63,7 @@
 - runtime adapter 的最小方法集
 - result / transcript 归一化字段集
 - fake runtime 和测试注入边界
+- runtime id 与 Python 包路径 registry 的最终结构
 
 ## 当前不冻结
 
