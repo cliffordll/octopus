@@ -4,7 +4,9 @@
 
 当前文件是草稿版本。
 
-用途是先给出 Step 4 的目标和范围，不作为当前阶段的冻结实现约束。等 B 完成 Step 3 后，再按实际 shared contract 落地结果收紧本文件。
+用途是给出 Step 4 的并行设计入口，不要求等 Step 3 全部收尾后再一次性展开全步实现。
+
+当前策略不是整步串行，而是把 Step 4 拆成可以并行推进的三个子块，由 A 先冻结最小边界，B 在不突破边界的前提下提前开始准备实现。
 
 ## 目标
 
@@ -19,19 +21,93 @@
 - 第一批 `organizations` / `issues` / `approvals` 相关表映射
 - 以 `SCHEMA-COMPATIBILITY.md` 作为字段、默认值、外键和约束的盘点输入
 
-## A 线必须先冻结的内容
+## 并行推进策略
 
-- 以下内容暂不视为已冻结，只是后续收口方向：
-- 第一批表的字段命名、nullability、默认值
-- 外键关系与关键唯一约束
-- query 层和 service 层的边界
-- 哪些字段直接服务于 read API，哪些字段服务于 workflow
+Step 4 先拆成以下三个子块：
+
+- `4.1 schema`
+- `4.2 clients`
+- `4.3 queries`
+
+并行原则：
+
+- A 不一次写满整步细节，只先冻结 B 当前不能猜的边界
+- B 可以在 `4.1` 冻结后先建 schema 目录和首批映射入口
+- B 可以在 `4.2` 冻结后先建 client / session 入口
+- `4.3` 只先冻结 query 层职责，不提前展开复杂聚合查询
+
+## 4.1 Schema
+
+### A 线先冻结
+
+- 第一批表范围：
+  - `organizations`
+  - `issues`
+  - `approvals`
+- 首批必须对齐的字段类型边界、nullability、默认值
+- 主键、外键、关键唯一约束
+- 数据库字段命名保持与既有表一致
+
+### B 线可以先做
+
+- 创建 `packages/database/src/schema/` 目录和资源文件
+- 建立首批表映射骨架
+- 为后续 query 层暴露稳定的 schema 入口
+
+### 当前不展开
+
+- 全量业务表
+- 宽表聚合
+- 历史遗留辅助表
+
+## 4.2 Clients
+
+### A 线先冻结
+
+- `packages/database/src/clients/` 是唯一数据库 client 入口
+- session / transaction 入口由 client 层统一暴露
+- route 不得直接拿数据库连接
+- service 只通过 query 或明确约束的 persistence 入口接数据库
+
+### B 线可以先做
+
+- client 初始化骨架
+- session factory / transaction wrapper 骨架
+- 测试环境和应用环境的最小接入点
+
+### 当前不展开
+
+- 连接池调优
+- 读写分离
+- 多数据库拓扑
+
+## 4.3 Queries
+
+### A 线先冻结
+
+- `packages/database/src/queries/` 是 route / service 的唯一数据库读取入口
+- query 层负责查询与持久化细节，不负责业务状态机
+- service 负责业务语义和聚合编排，不在 route 中直接写查询拼装
+- 先冻结第一批最小读取入口，不提前展开复杂统计和跨资源报表
+
+### B 线可以先做
+
+- 首批 query 模块目录和命名
+- 与 `organizations` / `issues` / `approvals` 对应的最小查询入口位
+- service 到 query 的调用链骨架
+
+### 当前不展开
+
+- 复杂搜索
+- 批处理查询
+- 大量统计和 dashboard 查询
 
 ## B 线实现边界
 
 - 提供统一数据库 client / session 入口
 - 让 query 层成为 route / service 的唯一数据库读取入口
 - 避免在 route 中直接写 SQL 或 ORM 拼接逻辑
+- 允许先搭目录、入口和最小调用链，不要求现在把全部查询细节实现完
 
 ## 验收 demo
 
@@ -46,7 +122,7 @@
 - migration 与 schema 定义是否同源维护
 - API 层需要的聚合字段由 query 层还是 service 层拼装
 
-## Step 3 完成后再补
+## 等 B 完成 Step 3 后再补
 
 - 第一批真实落地的 shared types 与数据库字段映射关系
 - read API 首批会实际消费哪些查询入口

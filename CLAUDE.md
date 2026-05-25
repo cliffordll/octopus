@@ -61,6 +61,12 @@
 - 工作流测试至少覆盖 issue、approval、run、budget、chat 等关键控制面流程
 - ownership 测试必须覆盖正确 pod 成功、错误 pod 拒绝、lease 失效拒绝
 - 代理入口与直连入口必须复用同一套业务实现，并验证结果一致
+- 默认本地验证顺序固定为：
+  1. `ruff check . --fix`
+  2. `ruff format .`
+  3. `pytest`
+  4. `pyright`
+- 如果某一步因当前阶段范围需要缩小执行面，必须在汇报中明确说明缩小原因和实际执行的命令范围
 
 ## 提交流程
 
