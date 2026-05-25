@@ -139,7 +139,7 @@ A-CONSTRAINTS 第一批列出 13 个路由,部分路由共享 path(只是 HTTP m
 | approvals | `APPROVAL_APPROVE_PATH` | `/api/approvals/{id}/approve` |
 | approvals | `APPROVAL_REJECT_PATH` | `/api/approvals/{id}/reject` |
 
-`GET /api/issues` 在 A-CONSTRAINTS §Issues 中标注为「兼容语义上保留错误入口角色,不能被 B 当成正常列表接口随意扩写」,本次不纳入 path 常量,等 Step 6 read API 实施时按错误入口语义单独处理。
+`GET /api/issues` 在 Step 3 中继续视为兼容错误入口,不纳入第一批 shared path 常量;等 Step 6 read API 实施时再按错误入口语义单独处理。
 
 ### 5.6 Validator 返回 typed 而非 raise-only
 
@@ -154,7 +154,7 @@ def validate_create_organization(payload: Mapping[str, Any]) -> CreateOrganizati
 - Validator **不**做权限、ownership、事务、状态流转判断(A-CONSTRAINTS §Validator 约束)
 - 共享小型 helper 私有化在同文件内(`_check_optional_org_fields` / `_check_status_priority_origin` / `_check_nullable_ref_fields`),不抽公共 `common.py`
 
-route 层接到 `ValueError` 后转 `HTTPException 422`,这是 Step 6 落 mutation 入口时再统一处理的事;Step 3 暂不在 server 端接 validator。
+route 层接到 `ValueError` 后转 `HTTPException 422`,这是 Step 6 落 mutation 入口时再统一处理的事;Step 3 先要求 validator 文件、命名和契约测试落地,不强制 route 在本步骤完成 validator 接入。
 
 ### 5.7 类型字段集采取「最小可接入」原则
 
@@ -218,8 +218,8 @@ A-CONSTRAINTS §第一批共享状态与枚举写明 `revision_requested`;`docs/
 - 不引入 chat / runtime 共享契约(`A-CONSTRAINTS.md §当前不冻结`)
 - 不引入 `packages/database/` 字段映射(归 Step 4)
 - 不把 validator 与 service 业务流程混合
-- 不在 route 层做 validator 接入(等 Step 6 mutation 入口落地时统一处理)
-- 不发明 `GET /api/issues` 的错误入口路径常量(A-CONSTRAINTS 明确该路径是错误入口,不当正常列表)
+- 不在 route 层强制做 validator 接入(等 Step 6 mutation 入口落地时统一处理)
+- 不把 `GET /api/issues` 当成第一批正常列表 path 常量
 - 不补 step-03/A-CONSTRAINTS.md 之外的 path / 枚举 / 类型
 
 ## 10. 验证方式
