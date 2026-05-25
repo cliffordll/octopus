@@ -38,7 +38,7 @@
 server/
   __init__.py            空,使 server 成为顶层包(hatchling wheel 入口)
   src/
-    __init__.py          空,使 server.src 成为子包
+    __init__.py          空,使 server 成为包
     app.py               FastAPI 应用工厂 + 模块级 app 单例
     config.py            Settings dataclass + 环境变量加载
     lifespan.py          async startup/shutdown context manager
@@ -52,7 +52,7 @@ server/
 
 ## 5. 各文件职责
 
-### 5.1 `server/src/app.py`
+### 5.1 `server/app.py`
 
 应用入口。提供 `create_app()` 工厂函数,负责：
 
@@ -61,9 +61,9 @@ server/
 - 把 `settings` 挂到 `app.state`,后续模块按 `request.app.state.settings` 读取
 - 调用 `register_routes(app)` 集中注册路由
 
-模块级保留 `app = create_app()` 供 `uvicorn server.src.app:app` 直接引用。
+模块级保留 `app = create_app()` 供 `uvicorn server.app:app` 直接引用。
 
-### 5.2 `server/src/config.py`
+### 5.2 `server/config.py`
 
 配置层。当前实现：
 
@@ -73,7 +73,7 @@ server/
 
 刻意不引入 `pydantic-settings` 或自定义配置框架,保持依赖最小。后续阶段如果出现数据库连接、ownership 编号、外层代理上下文等配置项,按字段追加到 `Settings`,框架不必换。
 
-### 5.3 `server/src/lifespan.py`
+### 5.3 `server/lifespan.py`
 
 生命周期入口。当前主体是空 `yield`,但保留以下职责定位：
 
@@ -83,7 +83,7 @@ server/
 
 不允许把后台任务启动逻辑塞回 `app.py` 主入口。
 
-### 5.4 `server/src/routes/`
+### 5.4 `server/routes/`
 
 路由层。当前实现：
 
@@ -92,7 +92,7 @@ server/
 - `orgs.py` 在 route 层先卡住 board-scoped 访问前置条件；在 actor/context 未接入前,不伪造成功响应
 - 当前依赖注入方式使用 FastAPI 原生 `Depends`,在 `get_org_service()` 工厂里返回 `OrgService()`。这是占位实现,A 在 Phase 3 冻结共享依赖注入边界后可以替换为统一 provider
 
-### 5.5 `server/src/services/`
+### 5.5 `server/services/`
 
 服务层。当前实现：
 
@@ -128,7 +128,7 @@ packages = ["server"]
 ### 7.1 启动命令
 
 ```
-uv run uvicorn server.src.app:app --host 127.0.0.1 --port 8000
+uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
 ```
 
 启动日志：
@@ -191,7 +191,7 @@ INFO:     127.0.0.1:... - "GET /api/orgs HTTP/1.1" 503 Service Unavailable
 ## 10. 验证方式
 
 - `uv sync` 能完整解析 `pyproject.toml`,fastapi / uvicorn 与现有依赖均成功 resolve
-- `uv run uvicorn server.src.app:app --host 127.0.0.1 --port 8000` 启动后,uvicorn 日志显示 application startup complete
+- `uv run uvicorn server.app:app --host 127.0.0.1 --port 8000` 启动后,uvicorn 日志显示 application startup complete
 - `curl http://127.0.0.1:8000/api/orgs` 返回 `503`,确认业务路由已注册且未伪造成功语义
 - `pytest tests/contract/test_step2_server_skeleton.py -q` 通过,覆盖 app 导入、路由注册和 `/api/orgs` guard
 - 全仓 grep 上游项目名残留,确认本次新增的代码 / 文档 / 配置均未引入上游项目名字面值

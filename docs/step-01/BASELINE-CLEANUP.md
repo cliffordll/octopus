@@ -20,7 +20,7 @@
 不在本次执行范围内的内容：
 
 - `server/`、`packages/` 等业务目录骨架（属于 Step 2 及之后）
-- 共享契约源文件，例如 `packages/shared/`、`packages/database/src/schema/`（A 主改）
+- 共享契约源文件，例如 `packages/shared/`、`packages/database/schema/`（A 主改）
 - `docs/step-03/A-CONSTRAINTS.md`、`docs/step-04/SCHEMA-COMPATIBILITY.md`（A 已交付）
 
 ## 3. 执行依据

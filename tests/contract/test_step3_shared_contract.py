@@ -2,26 +2,26 @@ from __future__ import annotations
 
 import pytest
 
-from packages.shared.src.api_paths.approvals import (
+from packages.shared.api_paths.approvals import (
     APPROVAL_APPROVE_PATH,
     APPROVAL_DETAIL_PATH,
     APPROVAL_REJECT_PATH,
     ORG_APPROVAL_LIST_PATH,
 )
-from packages.shared.src.api_paths.issues import (
+from packages.shared.api_paths.issues import (
     ISSUE_DETAIL_PATH,
     ORG_ISSUE_LIST_PATH,
 )
-from packages.shared.src.api_paths.organizations import (
+from packages.shared.api_paths.organizations import (
     ORG_DETAIL_PATH,
     ORG_LIST_PATH,
 )
-from packages.shared.src.constants.approval import (
+from packages.shared.constants.approval import (
     APPROVAL_STATUSES,
     APPROVAL_TYPES,
     DEFAULT_APPROVAL_STATUS,
 )
-from packages.shared.src.constants.issue import (
+from packages.shared.constants.issue import (
     DEFAULT_ISSUE_ORIGIN_KIND,
     DEFAULT_ISSUE_PRIORITY,
     DEFAULT_ISSUE_STATUS,
@@ -29,21 +29,21 @@ from packages.shared.src.constants.issue import (
     ISSUE_PRIORITIES,
     ISSUE_STATUSES,
 )
-from packages.shared.src.constants.organization import (
+from packages.shared.constants.organization import (
     DEFAULT_ORGANIZATION_STATUS,
     ORGANIZATION_STATUSES,
 )
-from packages.shared.src.validators.approval import (
+from packages.shared.validators.approval import (
     validate_create_approval,
     validate_list_org_approvals_query,
     validate_resolve_approval,
 )
-from packages.shared.src.validators.issue import (
+from packages.shared.validators.issue import (
     validate_create_issue,
     validate_list_org_issues_query,
     validate_update_issue,
 )
-from packages.shared.src.validators.organization import (
+from packages.shared.validators.organization import (
     validate_create_organization,
     validate_update_organization,
 )
