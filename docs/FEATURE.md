@@ -19,10 +19,11 @@
 
 - 规划类文档保留在 `docs/` 根目录，例如 `docs/DESIGN.md`、`docs/FEATURE.md`
 - 每一步实际执行产生的操作文档必须单独放入步骤文件夹
-- 文件夹命名统一使用短名称，例如 `docs/01-phase/`、`docs/02-phase/`
-- 当前第一步契约盘点文档放在 `docs/01-phase/`
-- 当前第二步 workflow 文档放在 `docs/02-phase/`
-- 后续阶段草案按 `docs/03-phase/` 到 `docs/10-phase/` 组织，先作为可调整草案维护，不视为已冻结契约
+- 步骤目录统一按 `docs/step-01/` 到 `docs/step-10/` 命名，与本文件中的 `Step 1` 到 `Step 10` 直接对应
+- `docs/step-01/` 只放 Step 1 的执行记录
+- `docs/step-02/` 只放 Step 2 的执行记录
+- `docs/step-03/` 放 Shared Contract 层文档
+- `docs/step-04/` 到 `docs/step-10/` 分别放对应步骤的约束草案与补充文档
 
 ## 2.1 双人开发分工
 

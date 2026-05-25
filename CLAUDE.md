@@ -30,7 +30,8 @@
 - `packages/runtimes/` 负责各 runtime 的适配实现和共享 runtime contract
 - `tests/` 以兼容测试、工作流测试、ownership 测试为主
 - `docs/` 只保留与架构、兼容性、迁移计划相关的文档
-- `docs/` 下的规划类文档保留在根目录；每一步执行产生的操作文档必须进入独立步骤文件夹，统一使用简短命名，例如 `docs/01-phase/`、`docs/02-phase/`
+- `docs/` 下的规划类文档保留在根目录；步骤文档统一按 `docs/step-01/` 到 `docs/step-10/` 归档
+- `docs/step-01/` 只放 Step 1 执行记录，`docs/step-02/` 只放 Step 2 执行记录，`docs/step-03/` 到 `docs/step-10/` 分别放对应步骤的共享契约、约束草案和补充文档
 
 ## 编码规范
 

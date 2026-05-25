@@ -1,4 +1,4 @@
-﻿# Phase 3 Draft
+# Step 3 Shared Contract Draft
 
 ## 状态
 
@@ -47,4 +47,3 @@
 - 全量 API 类型
 - chat 相关共享契约
 - runtime transcript/result 全量模型
-

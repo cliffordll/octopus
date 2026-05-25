@@ -1,4 +1,4 @@
-﻿# Phase 5 Draft
+# Step 5 Ownership Draft
 
 ## 状态
 
@@ -45,4 +45,3 @@
 - 完整 failover 策略
 - 多 pod 恢复编排
 - 全量调度系统行为
-
