@@ -14,10 +14,10 @@
 
 ## 本阶段范围
 
-- `packages/database/src/schema/`
-- `packages/database/src/clients/`
-- `packages/database/src/queries/`
-- `packages/database/src/migrations/`
+- `packages/database/schema/`
+- `packages/database/clients/`
+- `packages/database/queries/`
+- `packages/database/migrations/`
 - 第一批 `organizations` / `issues` / `approvals` 相关表映射
 - 以 `SCHEMA-COMPATIBILITY.md` 作为字段、默认值、外键和约束的盘点输入
 
@@ -50,7 +50,7 @@ Step 4 先拆成以下三个子块：
 
 ### B 线可以先做
 
-- 创建 `packages/database/src/schema/` 目录和资源文件
+- 创建 `packages/database/schema/` 目录和资源文件
 - 建立首批表映射骨架
 - 为后续 query 层暴露稳定的 schema 入口
 
@@ -64,7 +64,7 @@ Step 4 先拆成以下三个子块：
 
 ### A 线先冻结
 
-- `packages/database/src/clients/` 是唯一数据库 client 入口
+- `packages/database/clients/` 是唯一数据库 client 入口
 - session / transaction 入口由 client 层统一暴露
 - route 不得直接拿数据库连接
 - service 只通过 query 或明确约束的 persistence 入口接数据库
@@ -85,7 +85,7 @@ Step 4 先拆成以下三个子块：
 
 ### A 线先冻结
 
-- `packages/database/src/queries/` 是 route / service 的唯一数据库读取入口
+- `packages/database/queries/` 是 route / service 的唯一数据库读取入口
 - query 层负责查询与持久化细节，不负责业务状态机
 - service 负责业务语义和聚合编排，不在 route 中直接写查询拼装
 - 先冻结第一批最小读取入口，不提前展开复杂统计和跨资源报表

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.shared.src.types.organization import OrganizationSummary
+from packages.shared.types.organization import OrganizationSummary
 
 
 class OrgService:

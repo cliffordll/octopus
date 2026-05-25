@@ -13,10 +13,10 @@
 ## 本阶段范围
 
 - `packages/runtimes/shared/`
-- `claude-local`
-- `codex-local`
-- `opencode-local`
-- `openclaw-gateway`
+- `claude_local`
+- `codex_local`
+- `opencode_local`
+- `openclaw_gateway`
 - run 状态、结果和 transcript 归一化边界
 
 ## A 线必须先冻结的内容

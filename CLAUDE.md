@@ -45,12 +45,12 @@
 - 命名统一使用功能语义名称，不把上游项目名写进代码、文档、变量、模块说明或验收材料
 - 命名优先贴近 上游参考实现 领域对象，例如 `organizations`、`issues`、`approvals`、`heartbeat_runs`、`chat_conversations`
 - 不发明新的产品概念替代 上游参考实现 既有对象；如果只是语言迁移，应复用既有领域边界
-- `server/src/routes/` 只处理路由注册、参数解析、validator 调用、context 注入和响应组装，不承载复杂业务流程
-- `server/src/services/` 承载 上游参考实现 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用编排和 ownership 校验
-- `server/src/background/` 中的任务必须按 organization 归属分区执行，先筛 owned organizations，再处理 issue、chat、run、budget 等对象
-- `packages/database/src/schema/` 只做 上游参考实现 现有表的 Python 映射；新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
-- `packages/database/src/queries/` 或等价持久化层只负责查询与写入细节，不定义审批、issue、chat、run 的业务语义
-- `packages/shared/src/` 统一承载 API path、枚举、请求响应模型和 validator，避免这些契约散落到 route、service 或测试里
+- `server/routes/` 只处理路由注册、参数解析、validator 调用、context 注入和响应组装，不承载复杂业务流程
+- `server/services/` 承载 上游参考实现 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用编排和 ownership 校验
+- `server/background/` 中的任务必须按 organization 归属分区执行，先筛 owned organizations，再处理 issue、chat、run、budget 等对象
+- `packages/database/schema/` 只做 上游参考实现 现有表的 Python 映射；新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
+- `packages/database/queries/` 或等价持久化层只负责查询与写入细节，不定义审批、issue、chat、run 的业务语义
+- `packages/shared/` 统一承载 API path、枚举、请求响应模型和 validator，避免这些契约散落到 route、service 或测试里
 - `packages/runtimes/` 按 runtime 分目录实现适配，保留 shared contract，不把所有 runtime 差异揉进一个大模块
 - organization 是第一层隔离边界；任何请求、后台任务、恢复逻辑、扫描逻辑都不能越过 organization scope
 
@@ -84,7 +84,7 @@
 - 服务端实现负责人基于既定边界落 `server/`、workflow 和 runtime orchestration
 - 服务端实现负责人默认只消费契约文档和契约边界，不主改契约文档、不反向定义契约
 - 如果实现过程中发现契约缺口、契约歧义或契约与 上游参考实现 不一致，应先提交证据给契约负责人，由契约负责人收口文档后再继续实现
-- `packages/shared/`、`packages/database/src/schema/`、兼容测试基线这类契约源文件，同一阶段只允许一人主改
+- `packages/shared/`、`packages/database/schema/`、兼容测试基线这类契约源文件，同一阶段只允许一人主改
 - `server/` 中消费契约的一侧应跟随契约边界演进，不反向发明新字段、新接口名、新状态语义
 - 阶段验收必须同时包含契约验证结果和功能 demo，不能只演示“功能跑通”
 - 如果两人分工发生冲突，以 上游参考实现 兼容性、边界稳定性和减少返工为优先判断原则

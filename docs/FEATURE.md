@@ -199,11 +199,11 @@ git diff -- pyproject.toml .gitignore CLAUDE.md
 
 输出：
 
-- `server/src/app.py`
-- `server/src/config.py`
-- `server/src/lifespan.py`
-- `server/src/routes/`
-- `server/src/services/`
+- `server/app.py`
+- `server/config.py`
+- `server/lifespan.py`
+- `server/routes/`
+- `server/services/`
 
 验收：
 
@@ -212,7 +212,7 @@ git diff -- pyproject.toml .gitignore CLAUDE.md
 
 验收 demo：
 
-- Demo 1：展示 `server/src/app.py`、`config.py`、`lifespan.py`、`routes/`、`services/` 的最小文件结构
+- Demo 1：展示 `server/app.py`、`config.py`、`lifespan.py`、`routes/`、`services/` 的最小文件结构
 - Demo 2：启动最小服务端进程，展示应用已完成配置加载、应用创建和路由注册
 - Demo 3：调用一个与 上游参考实现 接口命名约束不冲突的最小验证入口，展示返回结果
 - Demo 4：说明当前服务端骨架中 route、service、config、lifespan 的职责边界
@@ -226,7 +226,7 @@ git diff -- pyproject.toml .gitignore CLAUDE.md
 建议命令：
 
 ```powershell
-uv run uvicorn server.src.app:app --host 127.0.0.1 --port 8000
+uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
 ```
 
 接口示例：
@@ -251,10 +251,10 @@ curl http://127.0.0.1:8000/api/issues
 
 输出：
 
-- `packages/shared/src/constants/`
-- `packages/shared/src/types/`
-- `packages/shared/src/validators/`
-- `packages/shared/src/api_paths/`
+- `packages/shared/constants/`
+- `packages/shared/types/`
+- `packages/shared/validators/`
+- `packages/shared/api_paths/`
 
 验收：
 
@@ -289,10 +289,10 @@ uv run pytest tests/contract -q
 
 输出：
 
-- `packages/database/src/schema/`
-- `packages/database/src/clients/`
-- `packages/database/src/queries/`
-- `packages/database/src/migrations/`
+- `packages/database/schema/`
+- `packages/database/clients/`
+- `packages/database/queries/`
+- `packages/database/migrations/`
 
 验收：
 

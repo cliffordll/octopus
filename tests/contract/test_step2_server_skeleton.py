@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from server.src.app import app
+from server.app import app
 
 
 def test_app_registers_orgs_route() -> None:

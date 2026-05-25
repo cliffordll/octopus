@@ -12,9 +12,9 @@
 
 本次落地只动以下内容：
 
-- 在 `packages/shared/src/` 下建立第一批共享契约文件:`api_paths/` `constants/` `types/` `validators/`
-- 在 `pyproject.toml` 把 `packages` 纳入 `[tool.hatch.build.targets.wheel] packages`,让 `packages.shared.src.*` 成为可导入命名空间
-- 把 `server/src/routes/orgs.py` 与 `server/src/services/orgs.py` 接到 shared,替换本地 path 字面量和占位 `OrgSummary`
+- 在 `packages/shared/` 下建立第一批共享契约文件:`api_paths/` `constants/` `types/` `validators/`
+- 在 `pyproject.toml` 把 `packages` 纳入 `[tool.hatch.build.targets.wheel] packages`,让 `packages.shared.*` 成为可导入命名空间
+- 把 `server/routes/orgs.py` 与 `server/services/orgs.py` 接到 shared,替换本地 path 字面量和占位 `OrgSummary`
 - 在 `tests/contract/` 加 Step 3 契约测试,覆盖路径常量、枚举字面值、validator 行为
 
 不在本次执行范围内的内容：
@@ -70,7 +70,7 @@ packages/
 `[tool.hatch.build.targets.wheel]` 配置为 `packages = ["server", "packages"]`,把 `packages/` 整个命名空间包纳入 wheel。
 
 效果:
-- `from packages.shared.src.api_paths.organizations import ORG_LIST_PATH` 直接可用
+- `from packages.shared.api_paths.organizations import ORG_LIST_PATH` 直接可用
 - 后续 Step 4 `packages/database/`、Step 8 `packages/runtimes/` 都落在同一构建配置下,不需要再改 hatchling
 
 约束:
@@ -173,17 +173,17 @@ A-CONSTRAINTS §第一批共享状态与枚举写明 `revision_requested`;`docs/
 
 ## 6. server 接入侧改动
 
-### 6.1 `server/src/routes/orgs.py`
+### 6.1 `server/routes/orgs.py`
 
 - 删 `APIRouter(prefix="/api/orgs", ...)`,改为 `APIRouter(tags=["orgs"])` + 路由 decorator 直接传 shared path 常量
 - `@router.get(ORG_LIST_PATH)` 替代原来的 `@router.get("")`
 - 返回类型从 `list[dict[str, Any]]` 升为 `list[OrganizationSummary]`(经由 service 层)
 - `require_board_access` guard 行为保留不变(Step 2 已锁定)
 
-### 6.2 `server/src/services/orgs.py`
+### 6.2 `server/services/orgs.py`
 
 - 删除本地 `OrgSummary` TypedDict
-- `from packages.shared.src.types.organization import OrganizationSummary` 替代
+- `from packages.shared.types.organization import OrganizationSummary` 替代
 - `OrgService.list()` 返回类型变为 `list[OrganizationSummary]`,占位行为(返回 `[]`)不变
 
 字段集与原 `OrgSummary` 对齐(都是 `id`/`urlKey`/`name`/`status`),响应 shape 完全等价,不影响 Step 2 的 503 guard 测试。
@@ -202,11 +202,11 @@ A-CONSTRAINTS §第一批共享状态与枚举写明 `revision_requested`;`docs/
 
 | 后续阶段 | 在本契约层的接入位 |
 |---|---|
-| Step 4 database | `packages/database/src/schema/` 字段命名按 shared `Literal` 类型对齐;查询返回值与 shared TypedDict 字段名映射(snake_case → camelCase) |
+| Step 4 database | `packages/database/schema/` 字段命名按 shared `Literal` 类型对齐;查询返回值与 shared TypedDict 字段名映射(snake_case → camelCase) |
 | Step 5 ownership | ownership 校验中间层在 route 入口拦截,不污染 shared 契约;ownership 相关请求模型如有需要,在 shared 中独立添加,不混入业务 payload |
 | Step 6 read API | route 在 path 常量上挂 read 实现;service 返回 shared TypedDict;按需求增补 Summary / Detail 字段 |
 | Step 7 mutation | 当前 `validate_create_issue` / `validate_update_issue` 等只做契约层校验,route 接到 `ValueError` 转 422;权限 / 状态机 / 副作用判断由 service / workflow 层承担 |
-| Step 8 runtime | `packages/runtimes/` 落地时如有共享 result / transcript 类型,新建 `packages/shared/src/types/run.py` 等独立模块,不入侵当前 3 个资源类型 |
+| Step 8 runtime | `packages/runtimes/` 落地时如有共享 result / transcript 类型,新建 `packages/shared/types/run.py` 等独立模块,不入侵当前 3 个资源类型 |
 
 所有衔接点都不需要回头重写 `api_paths/` / `constants/`,扩展只会:
 - 在现有文件追加字段(extends TypedDict / 加 Literal 字面值)
@@ -225,8 +225,8 @@ A-CONSTRAINTS §第一批共享状态与枚举写明 `revision_requested`;`docs/
 ## 10. 验证方式
 
 - `uv sync --frozen` 解析通过,无新依赖增加
-- `uv run python -c "from packages.shared.src.api_paths.organizations import ORG_LIST_PATH; print(ORG_LIST_PATH)"` 输出 `/api/orgs`,确认命名空间包链路通
+- `uv run python -c "from packages.shared.api_paths.organizations import ORG_LIST_PATH; print(ORG_LIST_PATH)"` 输出 `/api/orgs`,确认命名空间包链路通
 - `uv run pytest tests/contract -q` 通过 30 个测试(28 Step 3 + 2 Step 2)
 - `uv run ruff check .` / `uv run ruff format --check .` / `uv run pyright .` 全绿
-- `uv run uvicorn server.src.app:app --host 127.0.0.1 --port 8000` 启动后 `curl /api/orgs` 仍返回 503 (Step 2 guard 行为未变,确认 server 接入未破坏现有契约)
+- `uv run uvicorn server.app:app --host 127.0.0.1 --port 8000` 启动后 `curl /api/orgs` 仍返回 503 (Step 2 guard 行为未变,确认 server 接入未破坏现有契约)
 - 全仓 grep 上游项目名残留,确认本次新增的代码 / 文档均未引入字面值

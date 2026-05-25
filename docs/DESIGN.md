@@ -458,23 +458,21 @@ octopus/
     tests/
   packages/
     database/
-      src/
-        schema/
-        clients/
-        queries/
-        migrations/
+      schema/
+      clients/
+      queries/
+      migrations/
     shared/
-      src/
-        constants/
-        types/
-        validators/
-        api_paths/
+      constants/
+      types/
+      validators/
+      api_paths/
     runtimes/
       shared/
-      claude-local/
-      codex-local/
-      opencode-local/
-      openclaw-gateway/
+      claude_local/
+      codex_local/
+      opencode_local/
+      openclaw_gateway/
   ui/
   docs/
   tests/
@@ -662,7 +660,7 @@ server/
     test_background/
 ```
 
-### 7.2.1 `server/src/app.py`
+### 7.2.1 `server/app.py`
 
 作用：
 
@@ -674,7 +672,7 @@ server/
 
 这相当于 上游控制面服务端启动入口的 Python 版本。
 
-### 7.2.2 `server/src/config.py`
+### 7.2.2 `server/config.py`
 
 作用：
 
@@ -684,7 +682,7 @@ server/
 
 不要把配置散在各模块里。
 
-### 7.2.3 `server/src/lifespan.py`
+### 7.2.3 `server/lifespan.py`
 
 作用：
 
@@ -695,7 +693,7 @@ server/
 
 这样可以避免把后台任务启动逻辑塞进主入口文件。
 
-### 7.2.4 `server/src/routes/`
+### 7.2.4 `server/routes/`
 
 作用：
 
@@ -714,7 +712,7 @@ server/
 
 这一层只承载 上游参考实现 兼容业务接口，不混入外层系统专用管理接口。
 
-### 7.2.5 `server/src/services/`
+### 7.2.5 `server/services/`
 
 作用：
 
@@ -734,7 +732,7 @@ server/
 
 这里不只是 CRUD 层，而是控制面语义层。
 
-### 7.2.6 `server/src/middleware/`
+### 7.2.6 `server/middleware/`
 
 作用：
 
@@ -752,7 +750,7 @@ server/
 
 ### 7.2.7 调用上下文边界
 
-本项目不实现完整 auth 体系，因此不单独设计 `server/src/auth/`。
+本项目不实现完整 auth 体系，因此不单独设计 `server/auth/`。
 
 Octopus 只需要消费外层系统传入的调用上下文，例如：
 
@@ -774,7 +772,7 @@ Octopus 在本项目内要处理的是：
 - API key 发放与管理
 - 完整权限系统
 
-### 7.2.8 `server/src/background/`
+### 7.2.8 `server/background/`
 
 作用：
 
@@ -793,7 +791,7 @@ Octopus 在本项目内要处理的是：
 
 `background/` 可以调用 `packages/runtimes/`，但不应在这里重复实现 runtime adapter 本身。
 
-### 7.2.9 `server/src/storage/`
+### 7.2.9 `server/storage/`
 
 作用：
 
@@ -806,7 +804,7 @@ Octopus 在本项目内要处理的是：
 
 chat attachment、artifact、generated file 等能力都需要这个边界。
 
-### 7.2.10 `server/src/observability/`
+### 7.2.10 `server/observability/`
 
 作用：
 
@@ -818,7 +816,7 @@ chat attachment、artifact、generated file 等能力都需要这个边界。
 - 多 pod ownership 问题需要日志证据
 - 外层代理链路需要追踪证据
 
-### 7.2.11 `server/src/lib/`
+### 7.2.11 `server/lib/`
 
 作用：
 
@@ -899,7 +897,7 @@ packages/database/
       versions/
 ```
 
-### 7.3.1 `packages/database/src/schema/`
+### 7.3.1 `packages/database/schema/`
 
 作用：
 
@@ -912,7 +910,7 @@ packages/database/
 - 业务表与 上游参考实现 对齐
 - 若新增基础设施表，例如 ownership，也单独清晰定义
 
-### 7.3.2 `packages/database/src/clients/`
+### 7.3.2 `packages/database/clients/`
 
 作用：
 
@@ -920,7 +918,7 @@ packages/database/
 
 这个目录应只处理数据库接入基础设施，不处理业务查询。
 
-### 7.3.3 `packages/database/src/queries/`
+### 7.3.3 `packages/database/queries/`
 
 作用：
 
@@ -933,7 +931,7 @@ packages/database/
 - 这里适合放“查询”
 - 不适合放“业务决策”
 
-### 7.3.4 `packages/database/src/migrations/`
+### 7.3.4 `packages/database/migrations/`
 
 作用：
 
@@ -977,7 +975,7 @@ packages/shared/
       routes.py
 ```
 
-### 7.4.1 `packages/shared/src/constants/`
+### 7.4.1 `packages/shared/constants/`
 
 作用：
 
@@ -990,7 +988,7 @@ packages/shared/
 - route 相关常量
 - 业务共享键名
 
-### 7.4.2 `packages/shared/src/types/`
+### 7.4.2 `packages/shared/types/`
 
 作用：
 
@@ -998,7 +996,7 @@ packages/shared/
 
 虽然 Python 不会直接复制 TypeScript 的类型系统，但这一层仍然有必要，因为它承载的是“契约对象划分”。
 
-### 7.4.3 `packages/shared/src/validators/`
+### 7.4.3 `packages/shared/validators/`
 
 作用：
 
@@ -1012,7 +1010,7 @@ packages/shared/
 
 这层建议按资源拆，不要做成一个超级 validator 文件。
 
-### 7.4.4 `packages/shared/src/api_paths/`
+### 7.4.4 `packages/shared/api_paths/`
 
 作用：
 
@@ -1031,26 +1029,26 @@ packages/runtimes/
       base.py
       transcript.py
       results.py
-  claude-local/
+  claude_local/
     src/
       server/
       ui/
       cli/
       index.py
-  codex-local/
+  codex_local/
     src/
       server/
       ui/
       cli/
       shared/
       index.py
-  opencode-local/
+  opencode_local/
     src/
       server/
       ui/
       cli/
       index.py
-  openclaw-gateway/
+  openclaw_gateway/
     src/
       server/
       ui/
@@ -1085,10 +1083,9 @@ packages/runtimes/
 
 ```text
 packages/runtimes/shared/
-  src/
-    base.py
-    transcript.py
-    results.py
+  base.py
+  transcript.py
+  results.py
 ```
 
 这层承载：
@@ -1097,7 +1094,7 @@ packages/runtimes/shared/
 - transcript 通用模型
 - 运行结果通用模型
 
-### 7.5.3 `packages/runtimes/claude-local/`
+### 7.5.3 `packages/runtimes/claude_local/`
 
 作用：
 
@@ -1106,12 +1103,11 @@ packages/runtimes/shared/
 推荐结构：
 
 ```text
-packages/runtimes/claude-local/
-  src/
-    server/
-    ui/
-    cli/
-    index.py
+packages/runtimes/claude_local/
+  server/
+  ui/
+  cli/
+  index.py
 ```
 
 说明：
@@ -1120,7 +1116,7 @@ packages/runtimes/claude-local/
 - `ui/` 给顶层前端消费 runtime-specific 的前端适配逻辑
 - `cli/` 给 CLI 或调试工具消费
 
-### 7.5.4 `packages/runtimes/codex-local/`
+### 7.5.4 `packages/runtimes/codex_local/`
 
 作用：
 
@@ -1129,20 +1125,19 @@ packages/runtimes/claude-local/
 推荐结构：
 
 ```text
-packages/runtimes/codex-local/
-  src/
-    server/
-    ui/
-    cli/
-    shared/
-    index.py
+packages/runtimes/codex_local/
+  server/
+  ui/
+  cli/
+  shared/
+  index.py
 ```
 
 说明：
 
-参考 上游参考实现 的真实结构，`codex-local` 这类 runtime 包内部可能还需要自己的 `shared/`，用于该 runtime 独有但又会被 server/ui/cli 共同消费的逻辑。
+参考 上游参考实现 的真实结构，`codex_local` 这类 runtime 包内部可能还需要自己的 `shared/`，用于该 runtime 独有但又会被 server/ui/cli 共同消费的逻辑。
 
-### 7.5.5 `packages/runtimes/opencode-local/`
+### 7.5.5 `packages/runtimes/opencode_local/`
 
 作用：
 
@@ -1151,15 +1146,14 @@ packages/runtimes/codex-local/
 推荐结构：
 
 ```text
-packages/runtimes/opencode-local/
-  src/
-    server/
-    ui/
-    cli/
-    index.py
+packages/runtimes/opencode_local/
+  server/
+  ui/
+  cli/
+  index.py
 ```
 
-### 7.5.6 `packages/runtimes/openclaw-gateway/`
+### 7.5.6 `packages/runtimes/openclaw_gateway/`
 
 作用：
 
@@ -1168,13 +1162,12 @@ packages/runtimes/opencode-local/
 推荐结构：
 
 ```text
-packages/runtimes/openclaw-gateway/
-  src/
-    server/
-    ui/
-    cli/
-    shared/
-    index.py
+packages/runtimes/openclaw_gateway/
+  server/
+  ui/
+  cli/
+  shared/
+  index.py
 ```
 
 说明：
@@ -1188,7 +1181,7 @@ packages/runtimes/openclaw-gateway/
 关系应理解为：
 
 - 顶层前端应用负责页面、交互、路由
-- `packages/runtimes/*/src/ui/` 负责该 runtime 的前端侧适配
+- `packages/runtimes/*/ui/` 负责该 runtime 的前端侧适配
 
 例如：
 
@@ -1201,7 +1194,7 @@ packages/runtimes/openclaw-gateway/
 - `server/` 负责 runtime 的服务端适配
 - `cli/` 负责 runtime 的命令行侧适配
 
-### 7.5.8 `packages/runtimes/shared/src/base.py`
+### 7.5.8 `packages/runtimes/shared/base.py`
 
 作用：
 
@@ -1215,7 +1208,7 @@ packages/runtimes/openclaw-gateway/
 
 这一层只定义运行时交互能力，不定义 上游参考实现 业务语义。
 
-### 7.5.9 `packages/runtimes/shared/src/transcript.py`
+### 7.5.9 `packages/runtimes/shared/transcript.py`
 
 作用：
 
@@ -1226,7 +1219,7 @@ packages/runtimes/openclaw-gateway/
 - stdout/stderr/transcript 归一化
 - runtime 输出到控制平面可消费结构的转换
 
-### 7.5.10 `packages/runtimes/shared/src/results.py`
+### 7.5.10 `packages/runtimes/shared/results.py`
 
 作用：
 
@@ -1317,19 +1310,19 @@ tests/
 
 在第一阶段，不必把全部目录都填满，但下列目录最好从一开始就确立：
 
-- `server/src/routes/`
-- `server/src/services/`
-- `server/src/background/`
-- `server/src/middleware/`
-- `packages/database/src/schema/`
-- `packages/database/src/clients/`
-- `packages/shared/src/types/`
-- `packages/shared/src/validators/`
-- `packages/runtimes/shared/src/`
-- `packages/runtimes/claude-local/src/server/`
-- `packages/runtimes/codex-local/src/server/`
-- `packages/runtimes/opencode-local/src/server/`
-- `packages/runtimes/openclaw-gateway/src/server/`
+- `server/routes/`
+- `server/services/`
+- `server/background/`
+- `server/middleware/`
+- `packages/database/schema/`
+- `packages/database/clients/`
+- `packages/shared/types/`
+- `packages/shared/validators/`
+- `packages/runtimes/shared/`
+- `packages/runtimes/claude_local/server/`
+- `packages/runtimes/codex_local/server/`
+- `packages/runtimes/opencode_local/server/`
+- `packages/runtimes/openclaw_gateway/server/`
 - `docs/`
 - `tests/contract/`
 
@@ -1339,12 +1332,12 @@ tests/
 
 以下目录可以先保留设计位，不必一开始填太多：
 
-- `server/src/observability/`
+- `server/observability/`
 - `server/resources/skills/bundled/`
 - `server/resources/plugins/`
 - `server/resources/mcp/`
-- `packages/runtimes/*/src/ui/`
-- `packages/runtimes/*/src/cli/`
+- `packages/runtimes/*/ui/`
+- `packages/runtimes/*/cli/`
 - `ui/`
 - `tests/workflows/` 的所有细分文件
 
