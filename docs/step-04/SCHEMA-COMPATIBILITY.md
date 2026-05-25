@@ -1,8 +1,8 @@
-﻿# Octopus Schema Compatibility
+# Octopus Schema Compatibility
 
 ## 1. 文档目标
 
-本文档用于盘点 Octopus 第一阶段需要对齐的 上游参考实现 数据库表与关键字段。
+本文档用于盘点 Step 4 第一批需要对齐的业务表、关键字段和数据库约束，作为 Python 数据库基础层的 schema 输入。
 
 当前版本只覆盖第一批范围：
 
@@ -13,7 +13,23 @@
 - issue_approvals
 - activity_log
 
-## 2. 契约来源
+## 2. 本文档在 Step 4 中的作用
+
+本文档不是给整个后续项目平均使用的泛化资料，而是 Step 4 的输入文档。
+
+在 Step 4 中的使用方式固定为：
+
+- `4.1 schema`
+  - 直接以本文档为核心输入
+  - 用于确定表名、字段名、nullability、默认值、主外键和关键约束
+- `4.2 clients`
+  - 只弱参考本文档
+  - client/session/transaction 入口主要受分层职责约束，不受具体字段盘点驱动
+- `4.3 queries`
+  - 部分参考本文档
+  - 用于判断首批 query 至少需要覆盖哪些表和哪些基础字段
+
+## 3. 契约来源
 
 - 上游 schema 源码：`上游参考仓库路径\packages\db\src\schema`
 - 当前对照文件：
@@ -24,14 +40,14 @@
   - `issue_approvals.ts`
   - `activity_log.ts`
 
-## 3. 总体规则
+## 4. 总体规则
 
-- 上游参考实现 业务表结构视为固定边界
+- 上游参考实现业务表结构视为固定边界
 - Octopus 不借重写机会修改业务表名、字段名、状态语义
 - 新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
-- 第一阶段优先盘点支撑 org / issue / approval 最小闭环的表
+- Step 4 只优先盘点支撑 org / issue / approval 最小闭环的表
 
-## 3.1 第一批共享默认值与状态来源
+## 4.1 第一批共享默认值与状态来源
 
 共享默认值来源：
 
@@ -49,9 +65,9 @@
 - `ISSUE_ORIGIN_KINDS = ["manual", "automation_execution"]`
 - `APPROVAL_STATUSES = ["pending", "revision_requested", "approved", "rejected", "cancelled"]`
 
-## 4. 第一批核心表
+## 5. 第一批核心表
 
-### 4.1 `organizations`
+### 5.1 `organizations`
 
 主要角色：
 
@@ -102,33 +118,13 @@
 - `organizations_issue_prefix_idx`
 - `organizations_url_key_idx`
 
-第一阶段关注点：
+Step 4 关注点：
 
 - organization 唯一标识和 URL key 语义
 - status 与 pause 相关字段语义
 - issue 编号相关字段语义
 
-字段到响应映射重点：
-
-- `url_key -> urlKey`
-- `pause_reason -> pauseReason`
-- `paused_at -> pausedAt`
-- `issue_prefix -> issuePrefix`
-- `issue_counter -> issueCounter`
-- `budget_monthly_cents -> budgetMonthlyCents`
-- `spent_monthly_cents -> spentMonthlyCents`
-- `require_board_approval_for_new_agents -> requireBoardApprovalForNewAgents`
-- `default_chat_issue_creation_mode -> defaultChatIssueCreationMode`
-- `brand_color -> brandColor`
-- `created_at -> createdAt`
-- `updated_at -> updatedAt`
-
-附加说明：
-
-- `Organization` 响应里还存在 `workspace`、`logoAssetId`、`logoUrl`，这些不直接来自当前 `organizations` 单表字段
-- 第一阶段只要求记住这类字段属于聚合字段，不要求此时把组装逻辑盘尽
-
-### 4.2 `issues`
+### 5.2 `issues`
 
 主要角色：
 
@@ -227,54 +223,14 @@
 - `issues_identifier_idx`
 - `issues_open_automation_execution_uq`
 
-第一阶段关注点：
+Step 4 关注点：
 
 - `org_id` 是第一层隔离边界
 - `status`、`priority`、`board_order` 决定列表与流转语义
 - `identifier`、`issue_number` 影响前端和业务引用
-- assignee / reviewer / run 相关字段影响 workflow
+- assignee / reviewer / run 相关字段影响后续 workflow
 
-字段到响应映射重点：
-
-- `org_id -> orgId`
-- `project_id -> projectId`
-- `project_workspace_id -> projectWorkspaceId`
-- `goal_id -> goalId`
-- `parent_id -> parentId`
-- `board_order -> boardOrder`
-- `assignee_agent_id -> assigneeAgentId`
-- `assignee_user_id -> assigneeUserId`
-- `reviewer_agent_id -> reviewerAgentId`
-- `reviewer_user_id -> reviewerUserId`
-- `checkout_run_id -> checkoutRunId`
-- `execution_run_id -> executionRunId`
-- `execution_agent_name_key -> executionAgentNameKey`
-- `execution_locked_at -> executionLockedAt`
-- `created_by_agent_id -> createdByAgentId`
-- `created_by_user_id -> createdByUserId`
-- `issue_number -> issueNumber`
-- `origin_kind -> originKind`
-- `origin_id -> originId`
-- `origin_run_id -> originRunId`
-- `request_depth -> requestDepth`
-- `billing_code -> billingCode`
-- `assignee_agent_runtime_overrides -> assigneeAgentRuntimeOverrides`
-- `execution_workspace_id -> executionWorkspaceId`
-- `execution_workspace_preference -> executionWorkspacePreference`
-- `execution_workspace_settings -> executionWorkspaceSettings`
-- `started_at -> startedAt`
-- `completed_at -> completedAt`
-- `cancelled_at -> cancelledAt`
-- `hidden_at -> hiddenAt`
-- `created_at -> createdAt`
-- `updated_at -> updatedAt`
-
-附加说明：
-
-- `Issue` 响应中的 `ancestors`、`labels`、`project`、`goal`、`currentExecutionWorkspace`、`workProducts`、`mentionedProjects`、document 相关字段不直接来自 `issues` 单表
-- 第一阶段只要求区分“单表字段”和“聚合字段”，不要求此时把所有详情聚合结构拆到底
-
-### 4.3 `approvals`
+### 5.3 `approvals`
 
 主要角色：
 
@@ -315,31 +271,15 @@
 
 - `approvals_company_status_type_idx`
 
-第一阶段关注点：
+Step 4 关注点：
 
 - `status` 的流转语义
 - `payload` 结构是审批类型行为的核心输入
 - request / decision 字段影响审计和副作用
 
-字段到响应映射重点：
+## 6. 第一批关联表
 
-- `org_id -> orgId`
-- `requested_by_agent_id -> requestedByAgentId`
-- `requested_by_user_id -> requestedByUserId`
-- `decision_note -> decisionNote`
-- `decided_by_user_id -> decidedByUserId`
-- `decided_at -> decidedAt`
-- `created_at -> createdAt`
-- `updated_at -> updatedAt`
-
-附加说明：
-
-- approval 响应的 `payload` 在 route 层返回前会做 redact
-- 第一阶段只要求记住这条行为约束，具体 redact 细节可在 approval 实现前再补
-
-## 5. 第一批关联表
-
-### 5.1 `issue_comments`
+### 6.1 `issue_comments`
 
 主要角色：
 
@@ -367,21 +307,12 @@
 - `created_at` 非空，默认 now
 - `updated_at` 非空，默认 now
 
-第一阶段关注点：
+Step 4 关注点：
 
 - comment 与 issue 的 organization 一致性
 - author 字段在 activity 与审计中的语义
 
-字段到响应映射重点：
-
-- `org_id -> orgId`
-- `issue_id -> issueId`
-- `author_agent_id -> authorAgentId`
-- `author_user_id -> authorUserId`
-- `created_at -> createdAt`
-- `updated_at -> updatedAt`
-
-### 5.2 `issue_approvals`
+### 6.2 `issue_approvals`
 
 主要角色：
 
@@ -409,26 +340,12 @@
 
 - 复合主键：`issue_approvals_pk`
 
-第一阶段关注点：
+Step 4 关注点：
 
 - issue / approval 关联关系
 - 级联删除语义
 
-字段到响应映射重点：
-
-- `org_id -> orgId`
-- `issue_id -> issueId`
-- `approval_id -> approvalId`
-- `linked_by_agent_id -> linkedByAgentId`
-- `linked_by_user_id -> linkedByUserId`
-- `created_at -> createdAt`
-
-附加说明：
-
-- 在 `IssueLinkedApproval` 这类响应里，关联表字段通常表现为嵌套 `link` 对象
-- 第一阶段先记录这种结构特征，不要求此时把所有关联响应细节盘尽
-
-### 5.3 `activity_log`
+### 6.3 `activity_log`
 
 主要角色：
 
@@ -462,22 +379,12 @@
 - `details` 可空
 - `created_at` 非空，默认 now
 
-第一阶段关注点：
+Step 4 关注点：
 
 - action / entity_type / entity_id 的记录语义
-- issue / approval 关键副作用是否需要稳定写入 activity
+- issue / approval 关键副作用后续是否需要稳定写入 activity
 
-字段到响应映射重点：
-
-- `org_id -> orgId`
-- `actor_type -> actorType`
-- `actor_id -> actorId`
-- `entity_type -> entityType`
-- `entity_id -> entityId`
-- `run_id -> runId`
-- `created_at -> createdAt`
-
-## 6. 第一阶段建议映射顺序
+## 7. Step 4 建议映射顺序
 
 建议按以下顺序建立 Python 映射：
 
@@ -494,24 +401,15 @@
 - 再建核心 workflow 对象
 - 最后补评论、关联和审计
 
-## 7. A 线下一步盘点清单
-
-下一步需要继续补齐：
-
-- 在 B 实现 read API 时，按实际需要补聚合字段明细
-- 在进入 mutation workflow 前，补 activity_log 的 action 清单与副作用触发点
-- 在扩展 read / mutation 范围时，再补更多关联表
-
 ## 8. 当前结论
 
-第一阶段不需要一次映射 上游参考实现 的所有表。
+Step 4 不需要一次映射所有表。
 
-A 线当前应该先把：
+A 在这一步已经固定的重点只有：
 
 - 第一批核心表
 - 第一批关联表
 - 关键字段
-- 关键索引和约束
+- 默认值、主外键和关键约束
 
-固定下来，给 B 线提供清晰的 database 边界和映射优先级。
-
+B 应该基于这些稳定边界先把 database 基础层搭出来，再把更复杂的聚合和 workflow 需求留给 Step 5 之后继续收紧。

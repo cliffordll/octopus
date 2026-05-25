@@ -4,8 +4,8 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from packages.shared.src.api_paths.organizations import ORG_LIST_PATH
-from packages.shared.src.types.organization import OrganizationSummary
+from packages.shared.api_paths.organizations import ORG_LIST_PATH
+from packages.shared.types.organization import OrganizationSummary
 
 from ..services.orgs import OrgService
 
