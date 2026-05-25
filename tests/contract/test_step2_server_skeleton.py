@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from server.src.app import app
 
 
 def test_app_registers_orgs_route() -> None:
-    paths = {route.path for route in app.router.routes}
+    paths = {route.path for route in app.router.routes if isinstance(route, APIRoute)}
     assert "/api/orgs" in paths
 
 
