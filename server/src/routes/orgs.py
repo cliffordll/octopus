@@ -4,9 +4,12 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from ..services.orgs import OrgService, OrgSummary
+from packages.shared.src.api_paths.organizations import ORG_LIST_PATH
+from packages.shared.src.types.organization import OrganizationSummary
 
-router = APIRouter(prefix="/api/orgs", tags=["orgs"])
+from ..services.orgs import OrgService
+
+router = APIRouter(tags=["orgs"])
 
 
 def get_org_service() -> OrgService:
@@ -42,9 +45,9 @@ def require_board_access(request: Request) -> None:
     )
 
 
-@router.get("")
+@router.get(ORG_LIST_PATH)
 async def list_orgs(
     _: None = Depends(require_board_access),
     service: OrgService = Depends(get_org_service),
-) -> list[OrgSummary]:
+) -> list[OrganizationSummary]:
     return await service.list()
