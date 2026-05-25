@@ -68,8 +68,8 @@ secrets.json
 logs/
 tmp/
 
-# ─── 本地参考用的 Rudder 源码副本(对照实现,不进仓库) ──
-rudder/
+# ─── 本地参考用的上游参考实现源码副本(对照实现,不进仓库) ──
+upstream-reference/
 
 # ─── 用户本地 scratch / 笔记 ─────────────────────────────
 # docs/others/ 是开发者个人草稿、todo、临时计划等;不进仓库
