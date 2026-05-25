@@ -1,4 +1,4 @@
-# Phase 2 Workflow Notes
+﻿# Phase 2 Workflow Notes
 
 ## 目标
 
@@ -13,7 +13,7 @@
 
 ## Issue 状态流转
 
-当前第一批实现至少按以下状态语义对齐 Rudder：
+当前第一批实现至少按以下状态语义对齐 上游参考实现：
 
 - `todo`
 - `in_progress`
@@ -23,7 +23,7 @@
 
 ### Reviewer decision 到 issue status 的映射
 
-当 reviewer 记录 review decision 时，状态映射保持与 Rudder 一致：
+当 reviewer 记录 review decision 时，状态映射保持与 上游参考实现 一致：
 
 - `approve` -> `done`
 - `request_changes` -> `in_progress`
@@ -70,7 +70,7 @@
 ### Commit
 
 - `commit` 只允许 agent 身份执行
-- 返回体需要保持 Rudder 的 report 结构
+- 返回体需要保持 上游参考实现 的 report 结构
 
 ## Issue activity action
 
@@ -97,7 +97,7 @@
 
 ## Approval 状态流转
 
-当前第一批实现至少按以下状态语义对齐 Rudder：
+当前第一批实现至少按以下状态语义对齐 上游参考实现：
 
 - `pending`
 - `approved`
@@ -129,7 +129,7 @@
 ### Resubmit
 
 - requester 为 agent 时，只允许 requester 自己 resubmit
-- resubmit 成功后状态回到待处理轨道，B 在实现时保持与 Rudder 当前持久化结果一致
+- resubmit 成功后状态回到待处理轨道，B 在实现时保持与 上游参考实现 当前持久化结果一致
 
 ## Approval activity action
 
@@ -174,3 +174,4 @@
 - 更细的 wakeup payload 结构
 - 完整 activity payload 字段级清单
 - runtime 执行链路与 workflow 的联动细节
+

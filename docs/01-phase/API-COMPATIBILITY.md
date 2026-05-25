@@ -1,8 +1,8 @@
-# Octopus API Compatibility
+﻿# Octopus API Compatibility
 
 ## 1. 文档目标
 
-本文档用于盘点 Octopus 第一阶段需要对齐的 Rudder API 契约。
+本文档用于盘点 Octopus 第一阶段需要对齐的 上游 API 契约。
 
 当前版本只覆盖第一批范围：
 
@@ -10,11 +10,11 @@
 - issues
 - approvals
 
-目标不是一次写完整个 Rudder API 面，而是先固定 A 线需要给 B 线提供的第一批契约边界。
+目标不是一次写完整个 上游 API 面，而是先固定 A 线需要给 B 线提供的第一批契约边界。
 
 ## 2. 契约来源
 
-- Rudder 路由源码：`D:\coding\rudder\server\src\routes`
+- 上游参考实现 路由源码：`上游参考仓库路径\server\src\routes`
 - 当前对照范围：
   - `orgs.ts`
   - `issues.ts`
@@ -23,9 +23,9 @@
 
 ## 3. 总体规则
 
-- Octopus 的接口路径、HTTP method、参数命名、响应结构必须跟 Rudder 保持一致
+- Octopus 的接口路径、HTTP method、参数命名、响应结构必须跟 上游参考实现 保持一致
 - 不新增 Octopus 自定义接口命名
-- 不新增 `/internal/*` 这类 Rudder 中不存在的新接口名前缀
+- 不新增 `/internal/*` 这类 上游参考实现 中不存在的新接口名前缀
 - 当前阶段优先盘点第一批最小闭环接口，不追求一次覆盖全部路由
 
 ## 3.1 第一批共享状态与枚举
@@ -104,7 +104,7 @@
 - `POST /api/orgs`
 - `PATCH /api/orgs/:orgId`
 
-Rudder 路由来源：
+上游参考实现 路由来源：
 
 - `orgs.ts:75`
 - `orgs.ts:107`
@@ -158,7 +158,7 @@ Rudder 路由来源：
 
 - organization 响应直接返回 organization 对象
 - 不做二次包装
-- 第一阶段只要求 B 保持核心字段与 Rudder 一致：
+- 第一阶段只要求 B 保持核心字段与 上游参考实现 一致：
   - `id`
   - `name`
   - `urlKey`
@@ -172,7 +172,7 @@ Rudder 路由来源：
   - `brandColor`
   - `createdAt`
   - `updatedAt`
-- `workspace`、`logoAssetId`、`logoUrl` 等扩展字段留到实现时按 Rudder 对照补齐
+- `workspace`、`logoAssetId`、`logoUrl` 等扩展字段留到实现时按 上游参考实现 对照补齐
 
 ### 4.2 Issues
 
@@ -192,7 +192,7 @@ Rudder 路由来源：
 - `GET /api/issues/:id/approvals`
 - `POST /api/issues/:id/approvals`
 
-Rudder 路由来源：
+上游参考实现 路由来源：
 
 - `issues.ts:311`
 - `issues.ts:317`
@@ -235,7 +235,7 @@ Rudder 路由来源：
     - `q`
 - `GET /api/issues/:id`
   - path: `id`
-  - Rudder 支持把类似 `PAP-39` 的 identifier 解析到内部 UUID
+  - 上游参考实现 支持把类似 `PAP-39` 的 identifier 解析到内部 UUID
 - `POST /api/orgs/:orgId/issues`
   - 关键 body：
     - `title`
@@ -327,7 +327,7 @@ Rudder 路由来源：
 - `POST /api/approvals/:id/comments`
 - `GET /api/approvals/:id/issues`
 
-Rudder 路由来源：
+上游参考实现 路由来源：
 
 - `approvals.ts:218`
 - `approvals.ts:226`
@@ -448,7 +448,7 @@ Rudder 路由来源：
 
 ## 7. 当前结论
 
-第一阶段不应试图一次复刻整个 Rudder 路由面。
+第一阶段不应试图一次复刻整个 上游参考实现 路由面。
 
 A 线当前应先做的事情是：
 
@@ -456,3 +456,4 @@ A 线当前应先做的事情是：
 - 固定第一批路径和 method
 - 固定第一批 payload / response / status 盘点范围
 - 给 B 线提供可直接实现的最小契约面
+
