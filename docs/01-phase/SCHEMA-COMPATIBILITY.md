@@ -1,8 +1,8 @@
-# Octopus Schema Compatibility
+﻿# Octopus Schema Compatibility
 
 ## 1. 文档目标
 
-本文档用于盘点 Octopus 第一阶段需要对齐的 Rudder 数据库表与关键字段。
+本文档用于盘点 Octopus 第一阶段需要对齐的 上游参考实现 数据库表与关键字段。
 
 当前版本只覆盖第一批范围：
 
@@ -15,7 +15,7 @@
 
 ## 2. 契约来源
 
-- Rudder schema 源码：`D:\coding\rudder\packages\db\src\schema`
+- 上游 schema 源码：`上游参考仓库路径\packages\db\src\schema`
 - 当前对照文件：
   - `organizations.ts`
   - `issues.ts`
@@ -26,7 +26,7 @@
 
 ## 3. 总体规则
 
-- Rudder 业务表结构视为固定边界
+- 上游参考实现 业务表结构视为固定边界
 - Octopus 不借重写机会修改业务表名、字段名、状态语义
 - 新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
 - 第一阶段优先盘点支撑 org / issue / approval 最小闭环的表
@@ -504,7 +504,7 @@
 
 ## 8. 当前结论
 
-第一阶段不需要一次映射 Rudder 的所有表。
+第一阶段不需要一次映射 上游参考实现 的所有表。
 
 A 线当前应该先把：
 
@@ -514,3 +514,4 @@ A 线当前应该先把：
 - 关键索引和约束
 
 固定下来，给 B 线提供清晰的 database 边界和映射优先级。
+

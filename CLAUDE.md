@@ -1,19 +1,20 @@
-# Octopus 项目规范
+﻿# Octopus 项目规范
 
-本文件定义 Octopus 仓库内需要长期保留的项目规范。所有规范都以 Rudder 服务端的 Python 兼容式重写为中心，不保留其它项目的历史约定。
+本文件定义 Octopus 仓库内需要长期保留的项目规范。所有规范都以 上游控制面服务端的 Python 兼容式重写为中心，不保留其它项目的历史约定。
 
 ## 项目定位
 
-- Octopus 是 Rudder 服务端的 Python 兼容替代实现，不是新产品
-- 外部契约来源于 Rudder 现有 schema、API 和控制面语义，不来源于个人编码习惯
+- Octopus 是 上游控制面服务端的 Python 兼容替代实现，不是新产品
+- 外部契约来源于 上游参考实现 现有 schema、API 和控制面语义，不来源于个人编码习惯
 - 设计文档以 `docs/DESIGN.md` 为准
-- 对照实现以 `D:\coding\rudder` 为准
+- 对照实现以 `上游参考仓库路径` 为准
 
 ## 核心约束
 
-- 保持 Rudder 现有数据库业务表结构不变
-- 保持 Rudder 现有 API 路径、请求结构、响应结构不变
-- 保持 Rudder 枚举值、状态值、错误码语义和关键副作用时机不变
+- 项目内禁止出现上游项目名，文档、注释、命名和说明统一使用功能语义名称，例如组织管理、问题流转、审批流程、运行编排、预算控制、组织树、技能管理
+- 保持 上游参考实现 现有数据库业务表结构不变
+- 保持 上游参考实现 现有 API 路径、请求结构、响应结构不变
+- 保持 上游参考实现 枚举值、状态值、错误码语义和关键副作用时机不变
 - 支持多 pod 共享同一个数据库
 - 每个 pod 只处理自己独占的一组 organization
 - organization ownership、pod 编排、外层代理路由由其它系统负责，本项目只做适配与校验
@@ -22,7 +23,7 @@
 
 ## 目录规范
 
-- 仓库结构尽量参考 Rudder，优先保留 `server/`、`packages/`、`tests/`、`docs/`、`ui/` 这些边界
+- 仓库结构尽量参考 上游参考实现，优先保留 `server/`、`packages/`、`tests/`、`docs/`、`ui/` 这些边界
 - `server/` 是 Python 服务端主实现，负责路由、service、background、middleware、storage、observability
 - `packages/database/` 负责 schema 映射、数据库客户端、查询和迁移
 - `packages/shared/` 负责 API 路径、枚举、契约模型、validator、共享常量
@@ -33,19 +34,20 @@
 
 ## 编码规范
 
-- 所有实现以 Rudder 兼容性为第一优先级，不按个人 Python 偏好改动 API、schema、状态值和副作用语义
+- 所有实现以 上游参考实现 兼容性为第一优先级，不按个人 Python 偏好改动 API、schema、状态值和副作用语义
 - 编码实现优先内聚，优先把同一领域状态、规则和行为收敛到稳定的模块或类型中，避免语义分散
 - 优先考虑封装，不把核心流程拆成大量松散的临时 helper 或跨层共享的杂项函数
 - 设计扩展点时优先使用清晰的抽象边界，例如领域服务、runtime 适配接口、仓储边界、基础类和实现类分层
 - 当存在稳定的父子语义或多实现分支时，优先使用继承、接口约束或组合后的统一抽象，不写难以演进的分支堆叠逻辑
 - 新实现默认按可扩展架构落地，要求后续新增 organization 策略、runtime、后台任务或业务对象时可以在既有边界内扩展
 - 不接受“先堆功能、以后再重构”的路径；如果当前写法会形成明确技术债，应在实现时直接收敛到可维护结构
-- 命名优先贴近 Rudder 领域对象，例如 `organizations`、`issues`、`approvals`、`heartbeat_runs`、`chat_conversations`
-- 不发明新的产品概念替代 Rudder 既有对象；如果只是语言迁移，应复用既有领域边界
+- 命名统一使用功能语义名称，不把上游项目名写进代码、文档、变量、模块说明或验收材料
+- 命名优先贴近 上游参考实现 领域对象，例如 `organizations`、`issues`、`approvals`、`heartbeat_runs`、`chat_conversations`
+- 不发明新的产品概念替代 上游参考实现 既有对象；如果只是语言迁移，应复用既有领域边界
 - `server/src/routes/` 只处理路由注册、参数解析、validator 调用、context 注入和响应组装，不承载复杂业务流程
-- `server/src/services/` 承载 Rudder 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用编排和 ownership 校验
+- `server/src/services/` 承载 上游参考实现 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用编排和 ownership 校验
 - `server/src/background/` 中的任务必须按 organization 归属分区执行，先筛 owned organizations，再处理 issue、chat、run、budget 等对象
-- `packages/database/src/schema/` 只做 Rudder 现有表的 Python 映射；新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
+- `packages/database/src/schema/` 只做 上游参考实现 现有表的 Python 映射；新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
 - `packages/database/src/queries/` 或等价持久化层只负责查询与写入细节，不定义审批、issue、chat、run 的业务语义
 - `packages/shared/src/` 统一承载 API path、枚举、请求响应模型和 validator，避免这些契约散落到 route、service 或测试里
 - `packages/runtimes/` 按 runtime 分目录实现适配，保留 shared contract，不把所有 runtime 差异揉进一个大模块
@@ -54,7 +56,7 @@
 ## 测试规范
 
 - 优先写契约兼容测试，而不是只写脱离场景的零散单测
-- 重点验证 API shape、字段 nullability、枚举字符串、错误码和默认行为是否与 Rudder 一致
+- 重点验证 API shape、字段 nullability、枚举字符串、错误码和默认行为是否与 上游参考实现 一致
 - 工作流测试至少覆盖 issue、approval、run、budget、chat 等关键控制面流程
 - ownership 测试必须覆盖正确 pod 成功、错误 pod 拒绝、lease 失效拒绝
 - 代理入口与直连入口必须复用同一套业务实现，并验证结果一致
@@ -71,14 +73,14 @@
 ## 双人协作规范
 
 - 双人开发默认按“契约与基础边界”和“服务端实现与运行骨架”两条线分工
-- 契约与基础边界负责人优先定义 shared contract、database 边界、兼容测试基线和 Rudder 对照结论
+- 契约与基础边界负责人优先定义 shared contract、database 边界、兼容测试基线和 上游参考实现 对照结论
 - 服务端实现负责人基于既定边界落 `server/`、workflow 和 runtime orchestration
 - 服务端实现负责人默认只消费契约文档和契约边界，不主改契约文档、不反向定义契约
-- 如果实现过程中发现契约缺口、契约歧义或契约与 Rudder 不一致，应先提交证据给契约负责人，由契约负责人收口文档后再继续实现
+- 如果实现过程中发现契约缺口、契约歧义或契约与 上游参考实现 不一致，应先提交证据给契约负责人，由契约负责人收口文档后再继续实现
 - `packages/shared/`、`packages/database/src/schema/`、兼容测试基线这类契约源文件，同一阶段只允许一人主改
 - `server/` 中消费契约的一侧应跟随契约边界演进，不反向发明新字段、新接口名、新状态语义
 - 阶段验收必须同时包含契约验证结果和功能 demo，不能只演示“功能跑通”
-- 如果两人分工发生冲突，以 Rudder 兼容性、边界稳定性和减少返工为优先判断原则
+- 如果两人分工发生冲突，以 上游参考实现 兼容性、边界稳定性和减少返工为优先判断原则
 
 ## 双人合并规范
 
@@ -87,9 +89,9 @@
 - 同一阶段的推荐顺序是：先合契约分支，再合实现分支
 - 契约分支合入 `main` 后，实现分支必须先同步最新 `main`，再继续实现或发起合并
 - 若分支只由个人本地使用，优先 `rebase main`；若分支已被多人共享，再使用 merge
-- 契约源文件冲突由契约负责人基于 Rudder 对照结果裁定
+- 契约源文件冲突由契约负责人基于 上游参考实现 对照结果裁定
 - 服务实现冲突由实现负责人处理，但不得突破既定契约边界
-- 如果冲突涉及 API shape、schema、状态值、副作用语义，先停下来对照 Rudder，不允许边猜边合
+- 如果冲突涉及 API shape、schema、状态值、副作用语义，先停下来对照 上游参考实现，不允许边猜边合
 - 每次准备合并前，先检查文档、shared/database 边界、server 实现和测试结果是否一致
 - 合并到 `main` 之前，仍然必须先由用户确认结果，并收到明确的 `commit` 或等价指令
 
@@ -98,11 +100,12 @@
 - 不在本项目内实现 pod 创建、销毁、扩缩容
 - 不在本项目内实现 organization 分配系统
 - 不在本项目内实现完整 auth / 鉴权体系
-- 不为了“更 Pythonic”而重构 Rudder 的产品模型或业务表
+- 不为了“更 Pythonic”而重构 上游参考实现 的产品模型或业务表
 - 不保留与旧项目、旧技术栈、旧协作方式相关的历史说明
 
 ## 清理原则
 
-- 保留与 Rudder Python 化改造直接相关的文件和目录
+- 保留与 上游参考实现 Python 化改造直接相关的文件和目录
 - 删除 Node workspace、Tauri、旧项目协作文档、与兼容重写无关的历史文件
 - 如果某个文件未来可能服务于 Octopus 的兼容实现，可以保留并重写；否则直接删除
+
