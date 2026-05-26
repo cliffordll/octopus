@@ -1,26 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.api_paths.organizations import ORG_LIST_PATH
 from packages.shared.types.organization import OrganizationSummary
 
+from ..dependencies.orgs import get_org_service
 from ..services.orgs import OrgService
 
 router = APIRouter(tags=["orgs"])
-
-
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    session_factory = request.app.state.session_factory
-    async with session_factory() as session:
-        yield session
-
-
-def get_org_service(session: AsyncSession = Depends(get_session)) -> OrgService:
-    return OrgService(session)
 
 
 def require_board_access(request: Request) -> None:
