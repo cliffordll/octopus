@@ -69,7 +69,14 @@ async def _seed_org_with_ownership(
     if expires_at is None:
         expires_at = datetime.now(UTC) + timedelta(hours=1)
     async with async_transaction(session):
-        session.add(Organization(id=org_id, url_key=f"u-{org_id[:8]}", name="X"))
+        session.add(
+            Organization(
+                id=org_id,
+                url_key=f"u-{org_id[:8]}",
+                name="X",
+                issue_prefix=org_id[:6],
+            )
+        )
         session.add(
             OrganizationOwnership(
                 organization_id=org_id,
