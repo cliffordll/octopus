@@ -413,11 +413,11 @@ curl http://127.0.0.1:8000/api/issues
 目标：
 
 - 把 `organizations` 从基础列表 / 详情推进到完整组织管理能力
-- 显性补齐组织更新、组织设置类字段和组织范围规则
+- 显性补齐组织创建、组织更新、组织设置类字段和组织范围规则
 
 范围：
 
-- organization 列表、详情、更新
+- organization 列表、详情、创建、更新
 - organization 级配置字段、品牌字段、预算字段
 - organization-scoped 排序、过滤、分页、ownership 语义
 
@@ -429,9 +429,9 @@ curl http://127.0.0.1:8000/api/issues
 验收 demo：
 
 - Demo 1：演示 organization 列表与详情读取
-- Demo 2：演示 organization 更新与配置字段变更
+- Demo 2：演示 organization 创建与配置字段初始化
 - Demo 3：演示 organization ownership 边界和错误语义
-- Demo 4：展示 contract / workflow 测试结果
+- Demo 4：演示 organization 更新与 contract / workflow 测试结果
 
 分工：
 

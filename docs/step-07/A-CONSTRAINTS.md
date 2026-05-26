@@ -5,6 +5,7 @@
 Step 7 的目标是把 `organization management` 从 Step 5/6 的基础可读能力推进到可直接交给 B 连续开发的组织管理模块，确保：
 
 - organization 的读写边界独立成立，不再继续混在 issue / approval 主线里
+- organization 的第一批创建与更新能力都落在独立资源边界内
 - 组织更新能力继续建立在 Step 5 ownership 和 Step 6 read contract 之上
 - organization 字段、默认值、拒绝语义和最小配置行为可以被测试明确验证
 - Step 8 任务管理和 Step 9 审批管理都以稳定的 organization 对象和 organization 配置为前提
@@ -14,6 +15,7 @@ Step 7 的目标是把 `organization management` 从 Step 5/6 的基础可读能
 - 固定第一批 organization management 接口范围
 - 固定 organization response / payload 的最小字段边界
 - 固定 organization ownership、board access 与错误语义
+- 固定 organization create 的最小写语义
 - 固定 organization update 的最小写语义
 - 固定 organization 配置字段更新与最小 activity / audit 记录语义
 - 固定 organization contract / workflow tests 的最小覆盖口径
@@ -46,6 +48,7 @@ Step 7 只能基于以下输入推进：
 
 本步只覆盖 `organization management`：
 
+- `POST /api/orgs`
 - `GET /api/orgs`
 - `GET /api/orgs/{orgId}`
 - `PATCH /api/orgs/{orgId}` 或等价 update 入口
@@ -55,6 +58,7 @@ Step 7 只能基于以下输入推进：
 
 本步允许覆盖的第一批写能力只限：
 
+- organization create
 - organization 基础字段更新
 - organization 配置相关字段更新
 - organization update 成功后的最小 activity / audit 记录
@@ -80,14 +84,16 @@ Step 7 只能基于以下输入推进：
 
 Step 7 完成后，B 至少要交付：
 
+- organization create route / service / query 入口
 - organization route 更新
 - organization update service 入口
 - organization update query 入口
 - organization 配置字段更新链路
 - organization update 成功后的最小 activity / audit 记录位
 - 至少一条 organization update 经过 board / ownership 守卫的真实调用链
+- 至少一条 organization create 经过 board 守卫的真实调用链
 - 至少一组 response / payload assertion tests，明确字段、默认值和拒绝语义
-- 至少一组 organization module demo，能展示 list / detail / update / rejection
+- 至少一组 organization module demo，能展示 list / detail / create / update / rejection
 
 ## 5. 7.1 Route Scope 约束
 
@@ -96,6 +102,7 @@ Step 7 完成后，B 至少要交付：
 - Step 7 只围绕 `orgs`
 - 所有 path 常量必须复用 Step 3 已冻结的 `packages.shared.api_paths.organizations`
 - `GET /api/orgs` 继续作为 board-scoped list 入口
+- `POST /api/orgs` 作为 board-scoped create 入口
 - `GET /api/orgs/{orgId}` 继续作为 organization detail 入口
 - `PATCH /api/orgs/{orgId}` 或等价 update 入口是本步唯一新增 mutation 入口
 - 本步不新增 organization delete / archive / suspend 路由
@@ -117,8 +124,11 @@ Step 7 完成后，B 至少要交付：
 ### 5.3 B 当前可以做
 
 - 在现有 `orgs.py` 上补 organization update 入口
+- 在现有 `orgs.py` 上补 organization create 入口
 - 在现有 org service / dependency 上补 update 调用链
+- 在现有 org service / dependency 上补 create 调用链
 - 为 update route 增加最小 403 / 404 / 422 语义
+- 为 create route 增加最小 403 / 422 语义
 
 ### 5.4 B 当前不能做
 
@@ -132,6 +142,8 @@ Step 7 完成后，B 至少要交付：
 ### 6.1 A 已冻结的边界
 
 - `GET /api/orgs` 继续返回 `list[OrganizationSummary]`
+- `POST /api/orgs` 的 request payload 必须复用 Step 3 的 `CreateOrganizationPayload`
+- `POST /api/orgs` 成功后返回 `OrganizationDetail`
 - `GET /api/orgs/{orgId}` 继续返回 `OrganizationDetail`
 - `PATCH /api/orgs/{orgId}` 的 request payload 必须复用 Step 3 的 `UpdateOrganizationPayload`
 - 更新成功后的 response 继续返回 `OrganizationDetail`
@@ -164,6 +176,15 @@ Step 7 完成后，B 至少要交付：
 - `brandColor`
 - `requireBoardApprovalForNewAgents`
 
+本步 create payload 至少必须稳定：
+
+- `name`
+- 可选 `description`
+- 可选 `budgetMonthlyCents`
+- 可选 `defaultChatIssueCreationMode`
+- 可选 `brandColor`
+- 可选 `requireBoardApprovalForNewAgents`
+
 说明：
 
 - `defaultChatIssueCreationMode` 与 `requireBoardApprovalForNewAgents` 当前已经在 shared types / validators 中存在，但尚未进入 `OrganizationDetail` response；本步先把它们冻结为可写字段，不强制要求同一步补进 detail response
@@ -172,7 +193,9 @@ Step 7 完成后，B 至少要交付：
 ### 6.3 B 必须满足的行为
 
 - update payload 必须先走 shared validator
+- create payload 必须先走 shared validator
 - validator 抛 `ValueError` 时 route 转 `422`
+- create 成功返回最新 organization detail
 - update 成功返回最新 organization detail
 - 资源不存在时返回 `404`
 - foreign / missing / expired ownership 继续沿用 Step 5 拒绝语义
@@ -189,6 +212,7 @@ Step 7 完成后，B 至少要交付：
 ### 7.1 A 已冻结的边界
 
 - `GET /api/orgs` 继续是 board-scoped 入口
+- `POST /api/orgs` 继续是 board-scoped 入口
 - `GET /api/orgs/{orgId}` 继续是 ownership-scoped 入口
 - `PATCH /api/orgs/{orgId}` 同时要求：
   - organization ownership
@@ -208,6 +232,16 @@ Step 7 第一批 update 只冻结以下行为：
 - `defaultChatIssueCreationMode` 必须是非空字符串
 - update 只改变 payload 中显式提供的字段
 - update 成功后必须返回最新 organization detail
+
+Step 7 第一批 create 只冻结以下行为：
+
+- `name` 为空字符串时拒绝
+- `budgetMonthlyCents` 小于 0 时拒绝
+- `brandColor` 允许 `null`
+- `description` 允许 `null`
+- `requireBoardApprovalForNewAgents` 必须是布尔值
+- `defaultChatIssueCreationMode` 必须是非空字符串
+- create 成功后返回最新 organization detail
 
 ### 7.3 最小 activity / audit 语义
 

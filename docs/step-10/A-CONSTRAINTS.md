@@ -1,67 +1,81 @@
 # Step 10 A Constraints
 
-## 当前状态
+## 1. 当前状态
 
 当前文件是草稿版本。
 
-用途是先把治理与系统收口模块拆清楚，不在这一步把所有系统性能力一次冻结到生产级。等业务、执行、协作、资源模块逐步落地后，再把配置、上下文、预算 / 成本 / 活动治理的最终口径收紧。
+用途是先把 `projects / goals / agents` 三条主对象管理线的边界拆清楚，不在这一步提前冻结所有执行面、资源面和治理面的最终细节。等 Step 11 运行 / 工作区、Step 12 聊天 / 存储、Step 13 资源封装继续落地后，再把这些主对象与后续系统的交叉规则逐项收紧。
 
-## 目标
+## 2. 目标
 
-收口以下横切治理能力：
+Step 10 的目标是补齐三类核心控制面主对象，并固定它们与现有组织、任务、审批链路的第一批关系：
 
-- 配置模型
-- proxy / actor context
-- budget / cost / activity 治理
+- project management
+- goal management
+- agent management
 
-这一步的目标是把跨模块规则统一起来，避免继续散落在各业务实现里。
+这一步要解决的问题不是横切治理，而是把主对象本身立起来，让后续 run / workspace / chat / plugin 都有稳定挂靠点。
 
-## 本阶段范围
+## 3. 本阶段范围
 
-- `server/config.py`
-- deployment mode / database / storage / runtime / workspace / resource 配置入口
-- proxy context / actor context 注入与消费
-- budget / cost / activity 归集与治理
+本步只覆盖：
 
-## A 线必须先冻结的内容
+- `projects`
+- `goals`
+- `agents`
+- 它们与 `organizations / issues / approvals / runs` 的第一批对象关系
+- 这些主对象各自的 list / detail / create / update / status 边界
 
-以下内容当前仍是草稿收口方向：
+本步至少要能回答：
 
-- 统一配置模型的最小字段分层
-- proxy / actor context 的最小语义与进入点
-- budget / cost / activity 的统一归集口径
-- 哪些治理规则必须在 route / service / background 中统一生效
+- project 如何挂在 organization 下
+- goal 如何挂在 project 或 organization 范围下
+- agent 如何创建、配置、启停和与组织绑定
+- issue / approval / run 后续要如何引用这些主对象
 
-## B 线实现边界
+## 4. A 线必须先冻结的内容
 
-- 配置必须集中，不允许继续散到各模块自己读 env
-- proxy / actor context 不得混入业务 payload
-- budget / cost / activity 不得在各模块中各自解释口径
-- 先建立统一入口，再补完整统计 / 治理细节
+以下内容必须先在约束和 spec 中冻结，再允许进入实现：
 
-## 验收 demo
+- project / goal / agent 的最小字段清单
+- 三类对象的最小状态语义
+- project / goal / agent 与 organization 的归属边界
+- issue / approval / run 对三类对象的最小引用方式
+- 哪些写能力属于第一批必须落地，哪些延后
 
-- Demo 1：展示配置模型覆盖 database / storage / runtime / workspace
-- Demo 2：展示 proxy / actor context 参与请求或后台任务的一条真实链路
-- Demo 3：展示 budget / cost / activity 的统一归集方式
-- Demo 4：展示 contract / typecheck 结果
+## 5. B 线实现边界
 
-## 待确认项
+- 不允许把 project / goal / agent 混进 `orgs.py` / `issues.py` / `approvals.py` 继续散写
+- 不允许在没有冻结 shared contract 前先拍脑袋发明 payload
+- 不允许把资源封装、runtime orchestration、storage adapter 逻辑提前混入本步
+- 先把主对象 CRUD / 状态 / 关系边界立稳，再接 Step 11+ 的执行和资源主线
 
-- proxy / actor context 在 HTTP 与后台任务中的统一进入方式
-- budget / cost 是否需要先冻结最小聚合模型
-- activity 在治理层与业务层的边界切分
-- 配置模型是一次性收口还是按子模块渐进补齐
+## 6. 验收 demo
 
-## Step 9 完成后再补
+- Demo 1：演示 project / goal 的最小管理流程
+- Demo 2：演示 agent 创建、配置、启停或组织绑定流程
+- Demo 3：展示 project / goal / agent 与 issue 的第一批关系
+- Demo 4：展示 contract / workflow 测试结果
 
-- 统一配置模型的字段级清单
-- proxy / actor context 的测试矩阵
-- budget / cost / activity 的最终归集断言
-- 哪些系统级治理规则必须阻止发布
+## 7. 待确认项
 
-## 当前不冻结
+- goal 是否必须挂在 project 下，还是允许直接 organization-scoped
+- project / goal 的最小状态机是否一步冻结
+- agent 配置字段的第一批范围是否只做最小可运行集合
+- approval / run 在本步是否只保留外键关系，不展开完整 workflow
 
-- observability / recovery / failover 的最终收口
-- compatibility diff 工具输入输出格式
-- 全量生产运维体系
+## 8. 与前后步骤的边界
+
+- 继续消费 Step 7 的 organization 边界
+- 继续消费 Step 8 的 issue 边界
+- 继续消费 Step 9 的 approval 边界
+- 为 Step 11 的 run / workspace 提供主对象挂靠点
+- 为 Step 13 的 skill / plugin / agent resource bindings 提供 agent 主对象基础
+
+## 9. 当前不冻结
+
+- runtime / workspace 最终状态和生命周期
+- chat / attachment / artifact / storage 细节
+- skill / plugin / registry 元数据细节
+- proxy / actor context、budget / cost / activity 的治理收口
+- observability / recovery / compatibility diff

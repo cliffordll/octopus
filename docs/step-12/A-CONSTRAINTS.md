@@ -21,6 +21,7 @@
 - chat attachments
 - artifact / generated file
 - storage adapter 边界
+- chat / artifact 与 run / workspace / issue 的最小连接点
 
 ## A 线必须先冻结的内容
 
@@ -34,6 +35,7 @@
 - chat 与 storage 仍按资源边界分层
 - 先保证最小真实链路，再补大量历史兼容细节
 - artifact 不得绕过集中 storage 层
+- 不在本步提前展开 skill / plugin 装配和系统级治理规则
 
 ## 验收 demo
 
@@ -47,6 +49,13 @@
 - chat message 顺序、分页与角色模型
 - attachment metadata 与实际内容边界
 - artifact 与 run / workspace 的关联最小范围
+
+## 与前后步骤的边界
+
+- 消费 Step 8 的 issue 边界，支撑 convert-to-issue
+- 消费 Step 11 的 run / workspace 边界，挂接 transcript / artifact
+- 为 Step 13 的 agent resource 封装保留资源消费入口
+- 为 Step 14 的 activity / cost 治理提供聊天与产物事件来源
 
 ## 当前不冻结
 
