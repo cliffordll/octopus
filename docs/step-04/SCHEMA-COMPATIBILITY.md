@@ -221,7 +221,13 @@ Step 4 关注点：
 - `issues_company_status_idx`
 - `issues_company_status_board_order_idx`
 - `issues_identifier_idx`
-- `issues_open_automation_execution_uq`
+
+补充说明：
+
+- `issues_open_automation_execution_uq` 属于 automation execution 相关的部分唯一索引
+- 该约束依赖后续 automation execution 流转语义与部分索引表达
+- Step 4 先冻结 `issues_company_status_idx`、`issues_company_status_board_order_idx`、`issues_identifier_idx`
+- `issues_open_automation_execution_uq` 延后到 Step 6/7 真正接入 automation execution 时再补
 
 Step 4 关注点：
 

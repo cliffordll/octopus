@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import inspect
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -22,6 +23,8 @@ from packages.database.schema import (
     IssueComment,
     Organization,
 )
+from server.dependencies.orgs import get_org_service
+from server.routes import orgs as org_routes
 from server.services.orgs import OrgService
 
 
@@ -45,6 +48,22 @@ def test_schema_models_exported() -> None:
     assert IssueComment.__tablename__ == "issue_comments"
     assert IssueApproval.__tablename__ == "issue_approvals"
     assert ActivityLog.__tablename__ == "activity_log"
+
+
+def test_issue_indexes_match_step4_scope() -> None:
+    actual = {index.name for index in Issue.__table__.indexes}
+    assert actual == {
+        "issues_company_status_idx",
+        "issues_company_status_board_order_idx",
+        "issues_identifier_idx",
+    }
+
+
+def test_org_route_does_not_define_database_dependencies() -> None:
+    source = inspect.getsource(org_routes)
+    assert "AsyncSession" not in source
+    assert "session_factory" not in source
+    assert get_org_service.__module__ == "server.dependencies.orgs"
 
 
 @pytest.fixture
