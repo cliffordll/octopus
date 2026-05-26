@@ -6,6 +6,7 @@ from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
 from .issues import Issue
+from .organization_ownership import OrganizationOwnership
 from .organizations import Organization
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "IssueComment",
     "Issue",
     "Organization",
+    "OrganizationOwnership",
 ]
