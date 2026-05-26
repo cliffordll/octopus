@@ -1,6 +1,6 @@
 # Step 7 Organization Management Design Spec
 
-**Author:** B side (server implementation)
+**Author:** implementation owner
 **Date:** 2026-05-26
 **Status:** Approved for implementation
 
@@ -10,13 +10,13 @@ Step 6 stabilized organization read API (list + detail). Step 7 must turn organi
 
 ## 2. Contract Sources (priority order)
 
-1. `docs/step-07/A-CONSTRAINTS.md` — frozen B contract (§3 range, §6.2 fields, §7.4 error codes, §8 layer hard constraints, §12 test assertions)
+1. `docs/step-07/A-CONSTRAINTS.md` — frozen implementation contract (§3 range, §6.2 fields, §7.4 error codes, §8 layer hard constraints, §12 test assertions)
 2. `upstream-reference/rudder/server/src/routes/orgs.ts` line 584-624 (`PATCH /:orgId`) — behavioral semantics reference
 3. `upstream-reference/rudder/server/src/services/orgs.ts` `update()` — transaction boundary reference
 4. `docs/DESIGN.md` §3.3 organization boundary, §7.2.7 actor context boundary, §8 layering
 5. `docs/FEATURE.md` §7 Step 7 — acceptance demos
 
-B may consult source 2 and 3 to resolve semantic ambiguity in source 1, but must not derive new field names, action names, or error semantics independently of A.
+Implementation may consult source 2 and 3 to resolve semantic ambiguity in source 1, but must not derive new field names, action names, or error semantics independently of the frozen constraints.
 
 ## 3. Scope
 

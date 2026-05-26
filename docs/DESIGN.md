@@ -1283,7 +1283,9 @@ docs/
   step-04/
     SCHEMA-COMPATIBILITY.md
   step-07/
-    WORKFLOW-NOTES.md
+    A-CONSTRAINTS.md
+    B-SPEC.md
+    B-PLAN.md
 ```
 
 这些文档的角色分别是：
@@ -1291,14 +1293,17 @@ docs/
 - `DESIGN.md`
   总体设计说明
 - `FEATURE.md`
-  开发顺序、A/B 分工和步骤验收说明
+  开发顺序、步骤边界和阶段验收说明
 - `step-03/A-CONSTRAINTS.md`
   shared contract 层步骤约束
 - `step-04/SCHEMA-COMPATIBILITY.md`
   现有业务表与字段兼容清单
-- `step-07/WORKFLOW-NOTES.md`
-  状态流转、副作用和 workflow 约束说明
-  分阶段实施计划
+- `step-07/A-CONSTRAINTS.md`
+  组织管理步骤约束
+- `step-07/B-SPEC.md`
+  组织管理设计规格
+- `step-07/B-PLAN.md`
+  组织管理实施计划
 
 当前阶段先写 `DESIGN.md` 是合理的，后续文档再逐步补齐。
 
@@ -1730,10 +1735,10 @@ organization 之间天然并行，最合理的横向扩展方式就是：
 
 Octopus 的实施必须分阶段进行。
 
-对于双人并行开发，推荐采用“两条主线、单向依赖”的协作方式：
+推荐采用“约束先收口、实现后推进”的单向依赖方式：
 
-- 一条主线负责契约、schema、共享模型、兼容测试基线
-- 一条主线负责 server 骨架、service 实现、workflow 和 runtime 编排
+- 先收口契约、schema、共享模型和兼容测试基线
+- 再推进 server 骨架、service 实现、workflow 和 runtime 编排
 
 这样拆分的原因是：
 
@@ -1741,14 +1746,14 @@ Octopus 的实施必须分阶段进行。
 - 兼容判断集中，有利于控制契约漂移
 - 依赖方向更清晰，冲突点更少
 
-不建议按“一个人负责一半目录”或“一个人写 server、一个人写 packages 但同时随意改边界”的方式推进，因为那会让契约和实现相互反复拉扯。
+不建议在约束未稳定前一边改实现、一边随意漂移 shared/database 边界，因为那会让契约和实现相互反复拉扯。
 
 在文档流转上，也应保持同样的单向依赖：
 
-- A 先在对应步骤目录内冻结约束文档
-- B 再按步骤约束落实现
-- B 的执行记录和验收材料只能建立在步骤约束已经存在的前提下
-- 如果发现缺口，由 A 回收并更新步骤约束，而不是由 B 直接重写契约
+- 先在对应步骤目录内冻结约束文档
+- 再按步骤约束落实现
+- 执行记录和验收材料只能建立在步骤约束已经存在的前提下
+- 如果发现缺口，先回收并更新步骤约束，再继续实现
 
 ## 阶段 1：契约盘点
 

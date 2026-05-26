@@ -6,8 +6,8 @@ Scope covered: `PATCH /api/orgs/{orgId}` with payload validation, board access g
 
 Authoritative inputs consulted:
 - `docs/step-07/A-CONSTRAINTS.md` §3 (range), §6.2 (frozen field set), §7 (access + write semantics + error codes), §12 (test assertions)
-- `docs/step-07/B-SPEC.md` (B's design spec derived from A-CONSTRAINTS via brainstorming skill)
-- `docs/step-07/B-PLAN.md` (B's implementation plan derived from B-SPEC via writing-plans skill)
+- `docs/step-07/B-SPEC.md` (design spec derived from A-CONSTRAINTS)
+- `docs/step-07/B-PLAN.md` (implementation plan derived from B-SPEC)
 - `docs/DESIGN.md` §3.3, §7.2.7, §8 (architecture principles)
 - `upstream-reference/rudder/server/src/routes/orgs.ts` line 584-624 (PATCH `/:orgId` behavioral reference)
 - `upstream-reference/rudder/server/src/services/orgs.ts` `update()` method (transaction boundary reference)
