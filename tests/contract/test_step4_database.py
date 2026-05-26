@@ -15,7 +15,11 @@ from packages.database.clients import (
 )
 from packages.database.queries.approvals import list_org_approvals
 from packages.database.queries.issues import list_org_issues
-from packages.database.queries.organizations import list_organizations
+from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.organizations import (
+    list_organizations,
+    update_organization,
+)
 from packages.database.schema import (
     ActivityLog,
     Approval,
@@ -176,3 +180,79 @@ async def test_org_service_list_chains_through_query(
     assert summaries[0]["urlKey"] == "acme"
     assert summaries[0]["name"] == "Acme Co"
     assert summaries[0]["status"] == "active"
+
+
+async def test_update_organization_returns_updated_row(session: AsyncSession) -> None:
+    async with async_transaction(session):
+        session.add(
+            Organization(
+                id="org-upd-1",
+                url_key="o-upd-1",
+                name="Old Name",
+                issue_prefix="OUP",
+                description="old desc",
+            )
+        )
+
+    async with async_transaction(session):
+        updated = await update_organization(
+            session,
+            "org-upd-1",
+            {"name": "New Name", "description": None},
+        )
+
+    assert updated is not None
+    assert updated.name == "New Name"
+    assert updated.description is None
+    assert updated.updated_at is not None
+
+
+async def test_update_organization_missing_returns_none(session: AsyncSession) -> None:
+    async with async_transaction(session):
+        result = await update_organization(session, "no-such-org", {"name": "x"})
+    assert result is None
+
+
+async def test_update_organization_empty_fields_returns_current(
+    session: AsyncSession,
+) -> None:
+    async with async_transaction(session):
+        session.add(
+            Organization(
+                id="org-upd-2",
+                url_key="o-upd-2",
+                name="Keep",
+                issue_prefix="OK1",
+            )
+        )
+
+    result = await update_organization(session, "org-upd-2", {})
+    assert result is not None
+    assert result.name == "Keep"
+
+
+async def test_insert_activity_log_persists_row(session: AsyncSession) -> None:
+    async with async_transaction(session):
+        session.add(
+            Organization(id="org-act", url_key="o-act", name="A", issue_prefix="AAA")
+        )
+
+    async with async_transaction(session):
+        row = await insert_activity_log(
+            session,
+            org_id="org-act",
+            actor_type="board",
+            actor_id="user-1",
+            action="organization.updated",
+            entity_type="organization",
+            entity_id="org-act",
+            details={"name": "renamed"},
+        )
+
+    assert row.id is not None
+    assert row.org_id == "org-act"
+    assert row.action == "organization.updated"
+    assert row.entity_type == "organization"
+    assert row.entity_id == "org-act"
+    assert row.details == {"name": "renamed"}
+    assert row.created_at is not None
