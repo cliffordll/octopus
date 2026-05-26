@@ -9,12 +9,13 @@ Step 7 的目标是把 `organization management` 从 Step 5/6 的基础可读能
 - organization 字段、默认值、拒绝语义和最小配置行为可以被测试明确验证
 - Step 8 任务管理和 Step 9 审批管理都以稳定的 organization 对象和 organization 配置为前提
 
-这一步只做五件事：
+这一步只做六件事：
 
 - 固定第一批 organization management 接口范围
 - 固定 organization response / payload 的最小字段边界
 - 固定 organization ownership、board access 与错误语义
 - 固定 organization update 的最小写语义
+- 固定 organization 配置字段更新与最小 activity / audit 记录语义
 - 固定 organization contract / workflow tests 的最小覆盖口径
 
 ## 2. 本步输入
@@ -56,6 +57,7 @@ Step 7 只能基于以下输入推进：
 
 - organization 基础字段更新
 - organization 配置相关字段更新
+- organization update 成功后的最小 activity / audit 记录
 
 第一批允许更新的字段只限：
 
@@ -81,8 +83,11 @@ Step 7 完成后，B 至少要交付：
 - organization route 更新
 - organization update service 入口
 - organization update query 入口
+- organization 配置字段更新链路
+- organization update 成功后的最小 activity / audit 记录位
 - 至少一条 organization update 经过 board / ownership 守卫的真实调用链
 - 至少一组 response / payload assertion tests，明确字段、默认值和拒绝语义
+- 至少一组 organization module demo，能展示 list / detail / update / rejection
 
 ## 5. 7.1 Route Scope 约束
 
@@ -201,8 +206,24 @@ Step 7 第一批 update 只冻结以下行为：
 - `description` 允许 `null`
 - `requireBoardApprovalForNewAgents` 必须是布尔值
 - `defaultChatIssueCreationMode` 必须是非空字符串
+- update 只改变 payload 中显式提供的字段
+- update 成功后必须返回最新 organization detail
 
-### 7.3 错误语义
+### 7.3 最小 activity / audit 语义
+
+Step 7 第一批只冻结最小记录义务，不一次冻结全量 activity payload：
+
+- organization 更新成功后，必须有一条可追踪的 activity / audit 记录位
+- 该记录至少要能关联：
+  - `org_id`
+  - 动作名称
+  - 变更时间
+- 动作名称本步先冻结为一条最小兼容语义：
+  - `organization.updated`
+- 如果当前仓库的 activity service / workflow 尚未成型，B 可以先落最小 record writer 或预留集中调用位
+- 但不得把“后续再补 activity”作为完全不接记录位的理由
+
+### 7.4 错误语义
 
 第一批必须明确：
 
@@ -214,11 +235,12 @@ Step 7 第一批 update 只冻结以下行为：
 - 缺失 board actor：`503`
 - 非 board actor 尝试更新：`403`
 
-### 7.4 B 当前不能做
+### 7.5 B 当前不能做
 
 - 默认把任意 organization owner 都视为可以更新 organization
 - 跳过 validator 直接允许任意 patch 字段
 - 在没有 A 冻结前引入 organization delete / archive / suspend 状态机
+- 把 organization update activity 写成散落在 route 层的临时日志
 
 ## 8. 分层硬约束
 
@@ -230,6 +252,7 @@ Step 7 必须满足以下硬约束：
 - ownership 与 board access 必须在 route / dependency 边界显式接入
 - query 只负责读取与更新，不负责 HTTP 403 / 409 语义
 - shared types / validators 仍是 payload / response shape 唯一来源
+- activity / audit 记录不得直接写在 route 中
 - organization update 阶段不混入 issue / approval / chat / runtime 逻辑
 
 ## 9. B 的实现顺序
@@ -240,12 +263,14 @@ B 在 Step 7 的建议顺序固定为：
 2. `7.2 org service update`
 3. `7.3 org query update`
 4. `7.4 route guard wiring`
-5. `7.5 response / workflow tests`
+5. `7.5 organization activity / audit hook`
+6. `7.6 response / workflow tests`
 
 原因：
 
 - Step 6 已有 org list / detail，可以先在最小增量上补 update
 - payload 和 guard 先定下来，B 不需要猜权限或字段口径
+- activity / audit 记录位必须和真实 update 链路一起落，避免后面补写时改动 update 语义
 - tests 必须和真实 route 一起落，避免再次出现“能力存在但真实入口没接上”
 
 ## 10. 验收标准
@@ -256,6 +281,8 @@ Step 7 验收时必须同时满足：
 - board access 与 ownership guard 都已接入真实入口
 - request payload 与 shared validator 对齐
 - response shape 与 shared contract 对齐
+- organization 配置字段更新已真实可用
+- organization update 成功后的最小 activity / audit 记录位已落地
 - 404 / 403 / 409 / 422 / 503 等基础行为已明确
 - 至少一组 tests 能逐字段断言字段名、默认值和拒绝语义
 
@@ -263,8 +290,9 @@ Step 7 验收时必须同时满足：
 
 - Demo 1：调用 `GET /api/orgs`，展示 board success 与 non-board reject
 - Demo 2：调用 `GET /api/orgs/{orgId}`，展示 owned success 与 foreign / missing / expired reject
-- Demo 3：调用 `PATCH /api/orgs/{orgId}`，展示 update success 与 validator reject
-- Demo 4：展示 response / workflow tests，证明 organization management 不是人工口头说明
+- Demo 3：调用 `PATCH /api/orgs/{orgId}`，展示基础字段与配置字段更新 success
+- Demo 4：展示 organization update 产生的最小 activity / audit 记录
+- Demo 5：展示 response / workflow tests，证明 organization management 不是人工口头说明
 
 ## 12. 测试冻结口径
 
@@ -276,9 +304,12 @@ Step 7 最少必须冻结以下测试断言：
 - organization detail owned request success
 - organization detail missing resource returns `404`
 - organization update owned + board request success
+- organization update can change config fields
 - organization update foreign ownership rejected
 - organization update expired ownership rejected
+- organization update non-board rejected
 - organization update invalid payload returns `422`
+- organization update writes minimal activity / audit record
 - response 字段名继续使用 shared contract 命名
 
 测试目录建议至少包括：
@@ -286,7 +317,7 @@ Step 7 最少必须冻结以下测试断言：
 - `tests/contract/`
 - `tests/workflows/`
 
-但无论放哪里，都必须覆盖上面 10 类断言。
+但无论放哪里，都必须覆盖上面 13 类断言。
 
 ## 13. 本步后的衔接关系
 
