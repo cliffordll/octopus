@@ -262,3 +262,13 @@ A §13 必须冻结的 8 类断言:
 | A §6.2.5 detail shape 允许「最小」,upstream 返回大量 aggregate | 本步骤按 A 允许走最小,aggregate 留后续(已在 §5.3 + §7 记录) |
 | A 全文未提 approval payload redact,upstream 有 redactApprovalPayload | 本步骤暂不实现,在 §5.7 + §8 列为 deferred,有显著风险但本阶段可控 |
 | A 全文未提 issue identifier 解析,upstream 在 routes 顶层有 `router.param("id", normalizeIssueIdentifier)` | A §7.1 明示 Step 6 不做,本步骤遵循 |
+
+## 11. 后置 curl 实测发现
+
+Step 6 PR(#14)合并后,补做了 5 个新接口的真实 curl 实测,发现 lifespan 自 Step 4 起就遗漏了 `Base.metadata.create_all`,导致 `curl /api/orgs/{uuid}` 在空 `octopus.db` 上返 HTTP 500(`no such table: organization_ownership`),而不是预期的 403。
+
+原因:测试套件 fixture 显式调 `create_all`,绕过 lifespan,所以 73 个 test 全过也不暴露这条路径。
+
+修复落在 `fix/lifespan-auto-create-schema` PR:lifespan 在 `database_url` 命中 sqlite 时自动建表,PG 部署不触发(等 alembic 接入)。回归测试 `tests/contract/test_lifespan_schema_bootstrap.py` 使用 sync `TestClient(app)` 触发 lifespan,验证空 sqlite 启动后 DB 路径请求返 403(ownership missing)而不是 500。
+
+教训:测试套件用 fixture 绕过 lifespan 时,真启动路径需要额外 curl 验证。后续 PR 在涉及新 DB 路径或 lifespan 行为时,必须做一次真实 server + curl 实测,不能仅靠 ASGITransport 套件。
