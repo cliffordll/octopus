@@ -125,8 +125,11 @@ async def _seed_approval(
     *,
     approval_type: str = "hire_agent",
     status: str = "pending",
+    payload: dict[str, Any] | None = None,
 ) -> str:
     approval_id = str(uuid.uuid4())
+    if payload is None:
+        payload = {"reason": "demo"}
     async with async_transaction(session):
         session.add(
             Approval(
@@ -134,7 +137,7 @@ async def _seed_approval(
                 org_id=org_id,
                 type=approval_type,
                 status=status,
-                payload={"reason": "demo"},
+                payload=payload,
             )
         )
     return approval_id
@@ -169,12 +172,10 @@ async def test_org_detail_foreign_returns_403(
     assert "another pod" in body["detail"]
 
 
-async def test_org_detail_missing_ownership_returns_403(
-    app: FastAPI,
-) -> None:
+async def test_org_detail_missing_returns_404(app: FastAPI) -> None:
     code, body = await _http_get(app, f"/api/orgs/{uuid.uuid4()}")
-    assert code == 403
-    assert "no ownership record" in body["detail"]
+    assert code == 404
+    assert body["detail"] == "Organization not found"
 
 
 async def test_org_issues_list_owned_empty(app: FastAPI, session: AsyncSession) -> None:
@@ -311,13 +312,24 @@ async def test_approval_detail_owned_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session)
-    approval_id = await _seed_approval(session, org_id)
+    approval_id = await _seed_approval(
+        session,
+        org_id,
+        payload={
+            "reason": "demo",
+            "apiKey": "secret-key",
+            "nested": {"clientSecret": "very-secret", "safe": "value"},
+        },
+    )
     code, body = await _http_get(app, f"/api/approvals/{approval_id}")
     assert code == 200
     assert body["id"] == approval_id
     assert body["orgId"] == org_id
     assert body["type"] == "hire_agent"
     assert "payload" in body
+    assert body["payload"]["apiKey"] == "[REDACTED]"
+    assert body["payload"]["nested"]["clientSecret"] == "[REDACTED]"
+    assert body["payload"]["nested"]["safe"] == "value"
     assert "decisionNote" in body  # detail-only field
 
 
