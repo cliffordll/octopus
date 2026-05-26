@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import inspect
+from collections.abc import AsyncIterator
+from typing import cast
 
 import pytest
+from sqlalchemy import Table
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.database.clients import (
@@ -51,7 +53,7 @@ def test_schema_models_exported() -> None:
 
 
 def test_issue_indexes_match_step4_scope() -> None:
-    actual = {index.name for index in Issue.__table__.indexes}
+    actual = {index.name for index in cast(Table, Issue.__table__).indexes}
     assert actual == {
         "issues_company_status_idx",
         "issues_company_status_board_order_idx",
