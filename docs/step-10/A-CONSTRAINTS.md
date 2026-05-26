@@ -4,55 +4,64 @@
 
 当前文件是草稿版本。
 
-用途是先给出 Step 10 的 hardening 方向，不作为当前阶段的冻结实现约束。等 B 完成前序功能链路后，再基于真实风险点逐步收紧。
+用途是先把治理与系统收口模块拆清楚，不在这一步把所有系统性能力一次冻结到生产级。等业务、执行、协作、资源模块逐步落地后，再把配置、上下文、预算 / 成本 / 活动治理的最终口径收紧。
 
 ## 目标
 
-补齐 failover、安全性、恢复性、兼容 diff 和关键回归验证，让 Octopus 进入可持续迭代的稳定阶段。
+收口以下横切治理能力：
+
+- 配置模型
+- proxy / actor context
+- budget / cost / activity 治理
+
+这一步的目标是把跨模块规则统一起来，避免继续散落在各业务实现里。
 
 ## 本阶段范围
 
-- ownership 错路由防护补强
-- lease / failover 相关保护
-- 关键 workflow 回归测试
-- 兼容 diff 工具或对照脚本
-- 基础可观测性补强
+- `server/config.py`
+- deployment mode / database / storage / runtime / workspace / resource 配置入口
+- proxy context / actor context 注入与消费
+- budget / cost / activity 归集与治理
 
 ## A 线必须先冻结的内容
 
-- 以下内容暂不视为已冻结，只是后续收口方向：
-- 关键回归测试集
-- 兼容 diff 对照范围
-- 风险审计清单
-- 必须阻止上线的高风险不兼容项
+以下内容当前仍是草稿收口方向：
+
+- 统一配置模型的最小字段分层
+- proxy / actor context 的最小语义与进入点
+- budget / cost / activity 的统一归集口径
+- 哪些治理规则必须在 route / service / background 中统一生效
 
 ## B 线实现边界
 
-- 把 hardening 能力落成真正可执行的防护和验证
-- 避免只写成文档约定
+- 配置必须集中，不允许继续散到各模块自己读 env
+- proxy / actor context 不得混入业务 payload
+- budget / cost / activity 不得在各模块中各自解释口径
+- 先建立统一入口，再补完整统计 / 治理细节
 
 ## 验收 demo
 
-- Demo 1：错误路由或错误 pod 请求被拒绝
-- Demo 2：展示 failover 或 lease 失效保护行为
-- Demo 3：展示后台任务不会越权处理非本 pod organization
-- Demo 4：展示关键测试集合和执行结果
+- Demo 1：展示配置模型覆盖 database / storage / runtime / workspace
+- Demo 2：展示 proxy / actor context 参与请求或后台任务的一条真实链路
+- Demo 3：展示 budget / cost / activity 的统一归集方式
+- Demo 4：展示 contract / typecheck 结果
 
 ## 待确认项
 
-- 兼容 diff 工具的输入输出形式
-- 最低可接受的测试覆盖范围
-- 可观测性指标先落日志、指标还是追踪
+- proxy / actor context 在 HTTP 与后台任务中的统一进入方式
+- budget / cost 是否需要先冻结最小聚合模型
+- activity 在治理层与业务层的边界切分
+- 配置模型是一次性收口还是按子模块渐进补齐
 
-## Step 3 完成后再补
+## Step 9 完成后再补
 
-- 哪些链路必须进入 hardening 回归集
-- failover / lease 保护的真实实现边界
-- 兼容 diff 的最小对照面
-- 可观测性和恢复性先落哪些基础能力
+- 统一配置模型的字段级清单
+- proxy / actor context 的测试矩阵
+- budget / cost / activity 的最终归集断言
+- 哪些系统级治理规则必须阻止发布
 
 ## 当前不冻结
 
+- observability / recovery / failover 的最终收口
+- compatibility diff 工具输入输出格式
 - 全量生产运维体系
-- UI 层诊断工具
-- 与 上游参考实现 兼容目标无关的增强功能

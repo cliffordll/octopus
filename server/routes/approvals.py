@@ -36,7 +36,7 @@ async def list_org_approvals_route(
         validated = validate_list_org_approvals_query(raw_query)
     except ValueError as exc:
         raise HTTPException(
-            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
     return await service.list_for_org(orgId, status=validated.get("status"))

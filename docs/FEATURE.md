@@ -416,119 +416,73 @@ curl http://127.0.0.1:8000/api/orgs
 curl http://127.0.0.1:8000/api/issues
 ```
 
-### Step 7. Mutation Workflow
+### Step 7. 组织管理
 
 目标：
 
-- 实现核心控制面 mutation 语义
+- 把 `organizations` 从基础列表 / 详情推进到完整组织管理能力
+- 显性补齐组织更新、组织设置类字段和组织范围规则
 
-优先顺序：
+范围：
 
-1. issue
-2. approval
-3. activity
-4. run 相关基础状态流转
+- organization 列表、详情、更新
+- organization 级配置字段、品牌字段、预算字段
+- organization-scoped 排序、过滤、分页、ownership 语义
 
 验收：
 
+- 组织管理可独立演示
+- 组织字段、默认值、拒绝语义与 上游参考实现 一致
+
+验收 demo：
+
+- Demo 1：演示 organization 列表与详情读取
+- Demo 2：演示 organization 更新与配置字段变更
+- Demo 3：演示 organization ownership 边界和错误语义
+- Demo 4：展示 contract / workflow 测试结果
+
+分工：
+
+- A：主导组织字段、默认值、ownership 语义和兼容断言
+- B：主导 route、service、workflow 和持久化实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/contract -q
+uv run pytest tests/workflows -q
+```
+
+### Step 8. 任务管理
+
+目标：
+
+- 把 `issues / issue_comments` 从首批读取与基础写入推进到完整任务管理面
+- 补齐评论、状态流转、关联对象读取和常见过滤能力
+
+范围：
+
+- issue 列表、详情、创建、更新
+- issue comments
+- issue 状态流转
+- issue 与 project、goal、agent、origin 的关联
+
+验收：
+
+- 任务管理可独立演示
 - 状态流转、事务边界、副作用时机与 上游参考实现 一致
 
 验收 demo：
 
-- Demo 1：演示一个完整 mutation 流程，例如 issue 创建、状态变化、审批或评论等关键步骤
-- Demo 2：展示相关 activity、状态变更记录或其它关键副作用已经按预期落地
-- Demo 3：展示关键错误分支，例如非法状态流转被拒绝，确认错误码与错误语义符合预期
-- Demo 4：展示对应工作流测试结果，证明不是只在手工 happy path 下可用
-- 用户确认点：核心控制面 mutation 是否达标，是否允许进入 runtime orchestration
+- Demo 1：演示 issue 创建、更新和状态流转
+- Demo 2：演示 issue comment 写入与读取
+- Demo 3：演示 issue 与 project / goal / agent 的关联
+- Demo 4：展示 workflow 测试结果
 
 分工：
 
-- A：主导状态机、副作用、错误码和事务边界对照
-- B：主导 issue、approval、activity、run 基础 mutation 实现
-
-建议命令：
-
-```powershell
-uv run pytest tests/workflows -q
-```
-
-接口示例：
-
-- `POST /api/issues`
-- `POST /api/approvals`
-- `POST /api/issues/{issueId}/comments`
-- 具体路径、字段名、响应结构必须逐项对齐 上游参考实现
-
-验收调用示例：
-
-```powershell
-curl -X POST http://127.0.0.1:8000/api/issues -H "Content-Type: application/json" -d '{"organizationId":"org-1","title":"Demo issue"}'
-curl -X POST http://127.0.0.1:8000/api/approvals -H "Content-Type: application/json" -d '{"organizationId":"org-1","issueId":"issue-1"}'
-```
-
-### Step 8. Runtime Orchestration
-
-目标：
-
-- 建立 runtimes 适配和运行编排基础
-
-输出：
-
-- `packages/runtimes/shared/`
-- 各 runtime 包最小 server 适配层
-- run 状态与结果归一化边界
-
-验收：
-
-- server 与 runtime 的职责边界清楚
-- runtime 差异不会污染业务语义层
-
-验收 demo：
-
-- Demo 1：演示 server 如何通过统一 contract 调用某个 runtime，而不是写死某个实现
-- Demo 2：展示 runtime 返回结果如何归一化到 shared result / transcript 边界
-- Demo 3：展示替换或新增 runtime 时，业务 service 不需要跟着改语义层代码的证据
-- Demo 4：展示 runtime 相关测试或伪实现注入方式，确认该层具备扩展性
-- 用户确认点：runtime 编排边界是否稳定，是否允许进入 chat compatibility
-
-分工：
-
-- A：主导 runtime contract、结果归一化和兼容断言
-- B：主导 runtimes 接入和 orchestration 实现
-
-建议命令：
-
-```powershell
-uv run pytest server/tests/test_services -q
-uv run pytest tests/workflows -q
-```
-
-### Step 9. Chat Compatibility
-
-目标：
-
-- 最后处理 chat 兼容实现
-
-原因：
-
-- chat 是兼容风险最高、对象关系最多、状态最复杂的一层
-
-验收：
-
-- conversation、message、attachment、context link、convert-to-issue 等核心能力与 上游参考实现 对齐
-
-验收 demo：
-
-- Demo 1：演示一次最小 chat 会话创建、消息写入和消息流转
-- Demo 2：演示一次关键动作，例如 chat 转 issue、context link 处理或 attachment 关联
-- Demo 3：对照 上游参考实现 展示消息顺序、字段结构和关键状态语义的一致性
-- Demo 4：展示 chat 相关契约测试或工作流测试结果
-- 用户确认点：chat 兼容性是否达标，是否允许进入 hardening
-
-分工：
-
-- A：主导 chat 契约、字段、顺序和状态语义对照
-- B：主导 chat 实现和相关工作流打通
+- A：主导任务状态机、副作用、字段和兼容断言
+- B：主导 route、service、workflow 和持久化实现
 
 建议命令：
 
@@ -537,44 +491,260 @@ uv run pytest tests/workflows -q
 uv run pytest tests/contract -q
 ```
 
-接口示例：
-
-- `GET /api/chats`
-- `POST /api/chats`
-- `POST /api/chats/{chatId}/messages`
-- `POST /api/chats/{chatId}/convert-to-issue`
-
-验收调用示例：
-
-```powershell
-curl -X POST http://127.0.0.1:8000/api/chats -H "Content-Type: application/json" -d '{"organizationId":"org-1","title":"Demo chat"}'
-curl -X POST http://127.0.0.1:8000/api/chats/chat-1/messages -H "Content-Type: application/json" -d '{"content":"hello"}'
-```
-
-### Step 10. Hardening
+### Step 9. 审批管理
 
 目标：
 
-- 补齐 failover、安全性、恢复性和兼容 diff 工具
+- 把 `approvals` 从首批读取与基础写入推进到完整审批管理面
+- 补齐批准、拒绝、payload 处理和审批副作用
+
+范围：
+
+- approval 列表、详情、创建
+- approval 批准 / 拒绝
+- payload 脱敏与 decision note
+- 审批与任务、组织、智能体的关联行为
 
 验收：
 
-- ownership 错路由防护明确
-- 后台任务不会越权处理
-- 关键工作流具备稳定回归验证
+- 审批管理可独立演示
+- 审批拒绝语义、payload 处理和副作用与 上游参考实现 一致
 
 验收 demo：
 
-- Demo 1：演示错误路由或错误 pod 请求被拒绝
-- Demo 2：演示 failover、lease 失效或恢复逻辑相关保护行为
-- Demo 3：展示后台任务不会越权处理非本 pod organization 的证据
-- Demo 4：展示关键测试集合、执行结果和覆盖范围说明
-- 用户确认点：系统是否达到可持续迭代和稳定扩展的基线
+- Demo 1：演示 approval 创建、批准、拒绝
+- Demo 2：演示 payload 处理与 decision note
+- Demo 3：演示审批相关副作用与错误分支
+- Demo 4：展示 workflow 测试结果
 
 分工：
 
-- A：主导兼容 diff、回归测试集和风险审计
-- B：主导 hardening 实现、恢复逻辑和可观测性补强
+- A：主导审批语义、payload 处理和兼容断言
+- B：主导 route、service、workflow 和持久化实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/workflows -q
+uv run pytest tests/contract -q
+```
+
+### Step 10. 项目、目标与智能体管理
+
+目标：
+
+- 补齐 `projects / goals / agents` 三条核心控制面主对象
+- 明确它们与 organization、issue、run 的关系
+
+范围：
+
+- project 列表、详情、创建、更新、状态
+- goal 列表、详情、创建、更新、推进
+- agent 列表、详情、创建、配置、启停和绑定
+
+验收：
+
+- 项目管理、目标管理、智能体管理都可独立演示
+- 字段、状态、对象关系与 上游参考实现 一致
+
+验收 demo：
+
+- Demo 1：演示 project / goal 管理流程
+- Demo 2：演示 agent 创建、配置、绑定流程
+- Demo 3：展示 project / goal / agent 与 issue 的关系
+- Demo 4：展示 contract / workflow 测试结果
+
+分工：
+
+- A：主导 project / goal / agent 契约和对象关系对照
+- B：主导 route、service、workflow 和持久化实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/workflows -q
+uv run pytest tests/contract -q
+```
+
+### Step 11. 运行、心跳运行与工作区
+
+目标：
+
+- 补齐 `heartbeat_runs`、runtime orchestration、workspace lifecycle
+- 明确执行对象如何从控制面请求进入 runtime，再落回数据库和产物 / 活动体系
+
+范围：
+
+- heartbeat run 创建、查询、状态推进
+- runtime orchestration
+- workspace 分配、占用、释放、失败恢复
+- run 与 issue、agent、goal、project 的关联关系
+
+验收：
+
+- 运行、心跳运行、工作区主链路可独立演示
+- runtime 和 workspace 不再只是预留结构，而是完整执行面能力
+
+验收 demo：
+
+- Demo 1：演示 heartbeat run 创建和状态推进
+- Demo 2：演示 runtime 调度和结果归一化
+- Demo 3：演示 workspace 分配、释放和失败恢复
+- Demo 4：展示 workflow 测试结果
+
+分工：
+
+- A：主导 runtime / workspace 边界和兼容断言
+- B：主导 runtime 接入、workspace orchestration 和 workflow 实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/workflows -q
+uv run pytest tests/contract -q
+```
+
+### Step 12. 聊天、附件、产物与对象存储
+
+目标：
+
+- 补齐 chat、attachment、artifact、generated file 与对象存储边界
+- 把 `server/storage/` 从结构预留推进到真实业务能力
+
+范围：
+
+- chats / messages / convert-to-issue / context links
+- chat attachments
+- artifacts / generated files
+- storage adapters
+
+验收：
+
+- 聊天协作链路、附件与对象存储链路可独立演示
+- storage 边界清晰，不把附件或产物逻辑散落到无关层里
+
+验收 demo：
+
+- Demo 1：演示最小 chat 会话、消息写入与 convert-to-issue
+- Demo 2：演示 attachment / artifact 的持久化与读取
+- Demo 3：展示 chat、run、workspace 与 storage 的交叉关系
+- Demo 4：展示 contract / workflow 测试结果
+
+分工：
+
+- A：主导 chat 契约、storage 边界和兼容断言
+- B：主导 chat 实现、storage adapter 和相关 workflow 实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/contract -q
+uv run pytest tests/workflows -q
+```
+
+### Step 13. 技能、插件与智能体资源封装
+
+目标：
+
+- 补齐 `server/resources/skills/bundled/`、`server/resources/plugins/` 与智能体资源绑定
+- 明确 skill / plugin 的 metadata、扫描、注册、启用和绑定规则
+
+范围：
+
+- bundled skills
+- plugins
+- agent resource bindings
+
+验收：
+
+- 技能资源、插件资源、智能体资源封装都可独立演示
+- 不再只停留在目录预留或设计注释
+
+验收 demo：
+
+- Demo 1：演示 skill 扫描与 metadata 装配
+- Demo 2：演示 plugin 扫描、注册与启用
+- Demo 3：演示 agent resource binding 路径
+- Demo 4：展示相关测试结果
+
+分工：
+
+- A：主导 skill / plugin / resource 语义对照
+- B：主导资源扫描、装配和绑定实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/contract -q
+uv run pytest tests/workflows -q
+```
+
+### Step 14. 配置、上下文、预算 / 成本 / 活动治理
+
+目标：
+
+- 将配置、上下文、预算 / 成本 / 活动治理收口
+- 给后续可观测性、恢复和兼容差异比对提供统一入口
+
+范围：
+
+- `server/config.py` 统一配置模型
+- proxy context / actor context 注入与消费
+- budget / cost / activity 归集与治理
+
+验收：
+
+- 配置、上下文、治理形成统一系统边界
+- 横切规则不再散落在各业务模块里
+
+验收 demo：
+
+- Demo 1：演示配置模型覆盖 database / storage / runtime / workspace
+- Demo 2：演示 proxy / actor context 参与请求或后台任务
+- Demo 3：演示 budget / cost / activity 的统一归集方式
+- Demo 4：展示相关测试结果
+
+分工：
+
+- A：主导配置模型、上下文语义、治理规则和兼容断言
+- B：主导配置落地和治理实现
+
+建议命令：
+
+```powershell
+uv run pytest tests/contract -q
+uv run pyright
+```
+
+### Step 15. 可观测性、恢复能力与兼容差异比对
+
+目标：
+
+- 补齐 observability、recovery、failover、compatibility diff
+- 让多 pod、ownership、runtime、workspace、storage 的复杂链路具备稳定回归基础
+
+范围：
+
+- `server/observability/`
+- recovery / failover 逻辑
+- compatibility diff 与回归测试工具
+
+验收：
+
+- wrong-route、wrong-pod、lease 失效、workspace / runtime / storage 故障路径都有验证
+- 兼容差异比对和回归测试可持续支撑后续迭代
+
+验收 demo：
+
+- Demo 1：演示日志、指标、追踪
+- Demo 2：演示 failover、lease 失效和恢复行为
+- Demo 3：演示 compatibility diff 与关键回归测试
+- Demo 4：展示系统是否达到稳定扩展基线
+
+分工：
+
+- A：主导兼容 diff、风险审计和回归口径
+- B：主导观测、恢复逻辑和故障路径实现
 
 建议命令：
 
@@ -582,6 +752,7 @@ curl -X POST http://127.0.0.1:8000/api/chats/chat-1/messages -H "Content-Type: a
 uv run pytest tests/contract -q
 uv run pytest tests/workflows -q
 uv run pytest tests/ownership -q
+uv run pyright
 ```
 
 ## 8. 验收标准
@@ -660,4 +831,5 @@ pyright
 - 再按从易验证到难验证的顺序推进功能实现
 
 Octopus 的正确推进方式不是“先做一版能跑”，而是“先做一版不会把项目带偏的基础”，再逐步替换 上游控制面服务端能力。
+
 
