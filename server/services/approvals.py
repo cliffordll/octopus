@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,9 +55,42 @@ def _to_detail(row: Approval) -> ApprovalDetail:
         requestedByAgentId=row.requested_by_agent_id,
         requestedByUserId=row.requested_by_user_id,
         createdAt=row.created_at.isoformat(),
-        payload=row.payload,
+        payload=_redact_payload(row.payload),
         decisionNote=row.decision_note,
         decidedByUserId=row.decided_by_user_id,
         decidedAt=row.decided_at.isoformat() if row.decided_at else None,
         updatedAt=row.updated_at.isoformat(),
+    )
+
+
+def _redact_payload(payload: dict[str, object]) -> dict[str, object]:
+    return {key: _redact_value(key, value) for key, value in payload.items()}
+
+
+def _redact_value(key: str, value: object) -> object:
+    if _is_sensitive_key(key):
+        return "[REDACTED]"
+    if isinstance(value, Mapping):
+        return {
+            nested_key: _redact_value(nested_key, nested_value)
+            for nested_key, nested_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_value(key, item) for item in value]
+    return value
+
+
+def _is_sensitive_key(key: str) -> bool:
+    normalized = key.replace("-", "").replace("_", "").lower()
+    return any(
+        token in normalized
+        for token in (
+            "secret",
+            "token",
+            "password",
+            "apikey",
+            "accesskey",
+            "privatekey",
+            "credential",
+        )
     )

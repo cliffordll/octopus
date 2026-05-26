@@ -7,8 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from packages.shared.api_paths.organizations import ORG_DETAIL_PATH, ORG_LIST_PATH
 from packages.shared.types.organization import OrganizationDetail, OrganizationSummary
 
-from ..dependencies.orgs import get_org_service
-from ..dependencies.ownership import require_organization_ownership
+from ..dependencies.orgs import get_org_service, get_owned_org_detail
 from ..services.orgs import OrgService
 
 router = APIRouter(tags=["orgs"])
@@ -53,14 +52,6 @@ async def list_orgs(
 
 @router.get(ORG_DETAIL_PATH)
 async def get_org(
-    orgId: str,
-    _: None = Depends(require_organization_ownership),
-    service: OrgService = Depends(get_org_service),
+    org: OrganizationDetail = Depends(get_owned_org_detail),
 ) -> OrganizationDetail:
-    org = await service.get(orgId)
-    if org is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found",
-        )
     return org
