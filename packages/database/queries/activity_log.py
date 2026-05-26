@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,7 @@ async def insert_activity_log(
         agent_id=agent_id,
         run_id=run_id,
         details=dict(details) if details is not None else None,
+        created_at=datetime.now(UTC),
     )
     session.add(row)
     await session.flush()

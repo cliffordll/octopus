@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-Step 8 的目标是把 `issue management` 从 Step 6 的首批读取能力推进到可直接交给 B 连续开发的完整任务管理模块，确保：
+Step 8 的目标是把 `issue management` 从 Step 6 的首批读取能力推进到可直接连续开发的完整任务管理模块，确保：
 
 - issue 的读写边界独立成立，不再混入 organization management 或后续 runtime / workspace 主线
 - issue comment、状态流转、review decision、副作用时机和常见过滤能力可以被测试明确验证
@@ -82,7 +82,7 @@ Step 8 只能基于以下输入推进：
 
 ## 4. 输出要求
 
-Step 8 完成后，B 至少要交付：
+Step 8 完成后，至少要交付：
 
 - issue route 更新
 - issue create / update service 入口
@@ -96,7 +96,7 @@ Step 8 完成后，B 至少要交付：
 
 ## 5. 5.1 Route Scope 约束
 
-### 5.1 A 已冻结的边界
+### 5.1 已冻结的边界
 
 - Step 8 只围绕 `issues`
 - 所有 path 常量必须复用 Step 3 已冻结的 issue 路径常量
@@ -104,7 +104,7 @@ Step 8 完成后，B 至少要交付：
 - `POST /api/issues`、`PATCH /api/issues/{issueId}`、comment 入口、review decision 入口是本步允许新增的 mutation surface
 - 本步不新增 project / goal / agent / run / workspace route
 
-### 5.2 B 必须落的最小文件边界
+### 5.2 实现必须落的最小文件边界
 
 `server/routes/` 下至少继续由：
 
@@ -120,7 +120,7 @@ Step 8 完成后，B 至少要交付：
 
 ## 6. 6.1 Payload / Response 约束
 
-### 6.1 A 已冻结的边界
+### 6.1 已冻结的边界
 
 - issue response shape 继续以 Step 3 / Step 6 已冻结 shared contract 为准
 - 新增 mutation payload 必须先走 shared validator；shared contract 缺口只能在 shared 层增量补齐
@@ -191,7 +191,7 @@ Step 8 必须满足以下硬约束：
 - activity / audit 记录不得直接写在 route 中
 - issue management 不混入 runtime / workspace / heartbeat_run 逻辑
 
-## 9. B 线实现边界
+## 9. 实现边界
 
 - issue workflow 相关实现时，不得：
   - 自定义修改 issue 状态值命名

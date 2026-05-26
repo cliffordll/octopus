@@ -1,6 +1,6 @@
 # Step 8 Issue Management Design Spec
 
-**Author:** A side planning
+**Author:** implementation owner
 **Date:** 2026-05-26
 **Status:** Draft for review
 

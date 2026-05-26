@@ -23,7 +23,7 @@
 | `server/routes/issues.py` | Modify | Expose Step 8 endpoints and query params |
 | `tests/contract/test_step8_issue_management.py` | Create | Contract-level API tests for payloads, status, comments, filtering, associations |
 | `tests/workflows/test_step8_issue_workflow.py` | Create or modify | Workflow/state-transition tests for review decision, reopen, activity timing |
-| `docs/step-08/IMPLEMENTATION-NOTES.md` | Optional | B-side execution notes if needed |
+| `docs/step-08/IMPLEMENTATION-NOTES.md` | Optional | implementation notes if needed |
 
 ## Verification Commands
 
@@ -409,7 +409,7 @@ Expected: all Step 8 tests and existing contract/workflow suites pass.
 
 - [ ] **Step 3: Document any execution notes if needed**
 
-If B needs to capture implementation-specific caveats, add a short note file in `docs/step-08/IMPLEMENTATION-NOTES.md` describing:
+If implementation needs to capture step-specific caveats, add a short note file in `docs/step-08/IMPLEMENTATION-NOTES.md` describing:
 
 - final route shapes
 - final filter parameter names

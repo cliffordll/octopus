@@ -14,7 +14,16 @@ from packages.database.clients import (
     create_session_factory,
 )
 from packages.database.queries.approvals import list_org_approvals
-from packages.database.queries.issues import list_org_issues
+from packages.database.queries.issue_comments import (
+    insert_issue_comment,
+    list_issue_comments,
+)
+from packages.database.queries.issues import (
+    create_issue,
+    get_issue_by_id,
+    list_org_issues,
+    update_issue,
+)
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.organizations import (
     list_organizations,
@@ -153,6 +162,146 @@ async def test_list_org_issues_filters_by_org(session: AsyncSession) -> None:
     assert len(rows) == 1
     assert rows[0].org_id == org_a.id
     assert rows[0].title == "A issue"
+
+
+async def test_create_issue_persists_row(session: AsyncSession) -> None:
+    org = Organization(url_key="issue-org", name="Issue Org", issue_prefix="IOR")
+    async with async_transaction(session):
+        session.add(org)
+
+    async with async_transaction(session):
+        created = await create_issue(
+            session,
+            {
+                "org_id": org.id,
+                "title": "Created issue",
+                "status": "todo",
+                "project_id": "proj-1",
+                "goal_id": "goal-1",
+                "assignee_agent_id": "agent-1",
+                "origin_kind": "manual",
+                "origin_id": "origin-1",
+            },
+        )
+
+    assert created.org_id == org.id
+    assert created.title == "Created issue"
+    assert created.status == "todo"
+    assert created.project_id == "proj-1"
+    assert created.goal_id == "goal-1"
+    assert created.assignee_agent_id == "agent-1"
+
+
+async def test_update_issue_returns_updated_row(session: AsyncSession) -> None:
+    org = Organization(url_key="upd-issue-org", name="Upd Issue Org", issue_prefix="UIO")
+    async with async_transaction(session):
+        session.add(org)
+    async with async_transaction(session):
+        issue = await create_issue(
+            session,
+            {
+                "org_id": org.id,
+                "title": "Old title",
+                "status": "todo",
+                "origin_kind": "manual",
+            },
+        )
+
+    async with async_transaction(session):
+        updated = await update_issue(
+            session,
+            issue.id,
+            {"title": "New title", "status": "in_progress"},
+        )
+
+    assert updated is not None
+    assert updated.title == "New title"
+    assert updated.status == "in_progress"
+    assert updated.updated_at is not None
+
+
+async def test_list_org_issues_supports_first_batch_filters(
+    session: AsyncSession,
+) -> None:
+    org = Organization(url_key="filter-org", name="Filter Org", issue_prefix="FIL")
+    async with async_transaction(session):
+        session.add(org)
+    async with async_transaction(session):
+        await create_issue(
+            session,
+            {
+                "org_id": org.id,
+                "title": "Match me",
+                "status": "todo",
+                "project_id": "proj-1",
+                "goal_id": "goal-1",
+                "assignee_agent_id": "agent-1",
+                "origin_kind": "manual",
+                "origin_id": "origin-1",
+            },
+        )
+        await create_issue(
+            session,
+            {
+                "org_id": org.id,
+                "title": "Skip me",
+                "status": "done",
+                "project_id": "proj-2",
+                "goal_id": "goal-2",
+                "assignee_agent_id": "agent-2",
+                "origin_kind": "automation_execution",
+                "origin_id": "origin-2",
+            },
+        )
+
+    rows = await list_org_issues(
+        session,
+        org.id,
+        status="todo",
+        assignee_agent_id="agent-1",
+        project_id="proj-1",
+        goal_id="goal-1",
+        origin_kind="manual",
+        origin_id="origin-1",
+    )
+
+    assert [row.title for row in rows] == ["Match me"]
+
+
+async def test_insert_and_list_issue_comments(session: AsyncSession) -> None:
+    org = Organization(url_key="comment-org", name="Comment Org", issue_prefix="COM")
+    async with async_transaction(session):
+        session.add(org)
+    async with async_transaction(session):
+        issue = await create_issue(
+            session,
+            {"org_id": org.id, "title": "Commented", "origin_kind": "manual"},
+        )
+    async with async_transaction(session):
+        first = await insert_issue_comment(
+            session,
+            {
+                "org_id": org.id,
+                "issue_id": issue.id,
+                "author_user_id": "user-1",
+                "body": "first",
+            },
+        )
+        second = await insert_issue_comment(
+            session,
+            {
+                "org_id": org.id,
+                "issue_id": issue.id,
+                "author_user_id": "user-2",
+                "body": "second",
+            },
+        )
+
+    rows = await list_issue_comments(session, issue.id)
+
+    assert [row.id for row in rows] == [first.id, second.id]
+    assert [row.body for row in rows] == ["first", "second"]
+    assert rows[0].author_user_id == "user-1"
 
 
 async def test_list_org_approvals_filters_by_org(session: AsyncSession) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from ..constants.issue import IssueOriginKind, IssuePriority, IssueStatus
 
@@ -12,8 +12,12 @@ class IssueListItem(TypedDict):
     title: str
     status: IssueStatus
     priority: IssuePriority
+    projectId: str | None
+    goalId: str | None
     assigneeAgentId: str | None
     assigneeUserId: str | None
+    originKind: IssueOriginKind
+    originId: str | None
     updatedAt: str
 
 
@@ -78,4 +82,18 @@ class UpdateIssuePayload(TypedDict, total=False):
     comment: str
     reopen: bool
     hiddenAt: str | None
-    reviewDecision: dict[str, Any]
+    reviewDecision: "RecordIssueReviewDecisionPayload"
+
+
+IssueReviewDecision = Literal[
+    "approve", "request_changes", "blocked", "needs_followup"
+]
+
+
+class CreateIssueCommentPayload(TypedDict):
+    body: str
+
+
+class RecordIssueReviewDecisionPayload(TypedDict):
+    decision: IssueReviewDecision
+    note: NotRequired[str | None]
