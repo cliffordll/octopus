@@ -7,14 +7,7 @@ from ..services.ownership import OwnershipDecision, OwnershipService
 from .database import get_session
 
 
-async def require_organization_ownership(
-    orgId: str,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> None:
-    settings = request.app.state.settings
-    service = OwnershipService(session, settings.pod_id)
-    decision = await service.check_organization(orgId)
+def _ownership_decision_to_http(decision: OwnershipDecision) -> None:
     match decision:
         case OwnershipDecision.OWNED:
             return
@@ -33,3 +26,22 @@ async def require_organization_ownership(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Organization has no ownership record",
             )
+
+
+async def assert_organization_owned(
+    request: Request,
+    session: AsyncSession,
+    organization_id: str,
+) -> None:
+    settings = request.app.state.settings
+    service = OwnershipService(session, settings.pod_id)
+    decision = await service.check_organization(organization_id)
+    _ownership_decision_to_http(decision)
+
+
+async def require_organization_ownership(
+    orgId: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await assert_organization_owned(request, session, orgId)
