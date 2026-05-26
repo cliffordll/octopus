@@ -3,10 +3,11 @@ from __future__ import annotations
 import inspect
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import pytest
-from sqlalchemy import Table
+from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.database.clients import (
@@ -36,6 +37,7 @@ from packages.database.queries.organizations import (
     list_organizations,
     update_organization,
 )
+from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import (
     ActivityLog,
     Approval,
@@ -96,6 +98,46 @@ def test_org_route_does_not_define_database_dependencies() -> None:
     assert "AsyncSession" not in source
     assert "session_factory" not in source
     assert get_org_service.__module__ == "server.dependencies.orgs"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "alembic-upgrade.db"
+
+    await upgrade_to_head(f"sqlite+aiosqlite:///{db_path}")
+
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    "select name from sqlite_master "
+                    "where type='table' and name in ("
+                    "'organizations',"
+                    "'organization_ownership',"
+                    "'issues',"
+                    "'approvals',"
+                    "'issue_comments',"
+                    "'issue_approvals',"
+                    "'activity_log',"
+                    "'alembic_version'"
+                    ")"
+                )
+            )
+            names = {row[0] for row in result}
+    finally:
+        await engine.dispose()
+
+    assert names == {
+        "organizations",
+        "organization_ownership",
+        "issues",
+        "approvals",
+        "issue_comments",
+        "issue_approvals",
+        "activity_log",
+        "alembic_version",
+    }
 
 
 @pytest.fixture
