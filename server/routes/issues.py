@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.shared.api_paths.issues import (
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DETAIL_PATH,
+    ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ORG_ISSUE_LIST_PATH,
 )
@@ -32,8 +33,8 @@ from ..services.issues import IssueService
 router = APIRouter(tags=["issues"])
 
 
-@router.get("/api/issues")
-async def org_issues_error_entry() -> None:
+@router.get(ISSUE_LIST_MISSING_ORG_PATH)
+async def list_org_issues_missing_org_route() -> None:
     raise HTTPException(
         status_code=http_status.HTTP_400_BAD_REQUEST,
         detail="Missing orgId in path. Use /api/orgs/{orgId}/issues.",
