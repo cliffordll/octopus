@@ -25,5 +25,5 @@ def test_lifespan_auto_creates_schema_on_sqlite(
     with TestClient(fresh_app) as client:
         response = client.get(f"/api/orgs/{uuid.uuid4()}")
 
-    assert response.status_code == 403
-    assert "no ownership record" in response.json()["detail"]
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Organization not found"
