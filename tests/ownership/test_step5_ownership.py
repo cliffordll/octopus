@@ -22,6 +22,7 @@ from packages.database.queries.organization_ownership import (
     list_ownerships_for_pod,
 )
 from packages.database.schema import Base, Organization, OrganizationOwnership
+from server.app import create_app
 from server.dependencies.ownership import require_organization_ownership
 from server.services.ownership import OwnershipDecision, OwnershipService
 
@@ -197,3 +198,33 @@ async def test_guard_expired_returns_409(
     status_code, body = await _http_get(guard_app, f"/probe/{org_id}")
     assert status_code == 409
     assert "expired" in body["detail"]
+
+
+@pytest.fixture
+def production_app(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> FastAPI:
+    app = create_app()
+    app.state.session_factory = session_factory
+    app.state.settings = SimpleNamespace(pod_id=POD_ID)
+    return app
+
+
+async def test_production_org_detail_owned_returns_200(
+    production_app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org_with_ownership(session)
+    status_code, body = await _http_get(production_app, f"/api/orgs/{org_id}")
+    assert status_code == 200
+    assert body["id"] == org_id
+    assert body["urlKey"].startswith("u-")
+    assert body["status"] == "active"
+
+
+async def test_production_org_detail_foreign_returns_403(
+    production_app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org_with_ownership(session, pod_id="other-pod")
+    status_code, body = await _http_get(production_app, f"/api/orgs/{org_id}")
+    assert status_code == 403
+    assert "another pod" in body["detail"]
