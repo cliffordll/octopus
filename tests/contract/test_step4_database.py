@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -13,7 +14,12 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
-from packages.database.queries.approvals import list_org_approvals
+from packages.database.queries import activity_log as activity_log_queries
+from packages.database.queries.approvals import (
+    create_approval,
+    list_org_approvals,
+    update_approval,
+)
 from packages.database.queries.issue_comments import (
     insert_issue_comment,
     list_issue_comments,
@@ -22,6 +28,7 @@ from packages.database.queries.issues import (
     create_issue,
     get_issue_by_id,
     list_org_issues,
+    recover_blocked_linked_issues_for_approval,
     update_issue,
 )
 from packages.database.queries.activity_log import insert_activity_log
@@ -317,6 +324,165 @@ async def test_list_org_approvals_filters_by_org(session: AsyncSession) -> None:
     assert rows[0].status == "pending"
 
 
+async def test_create_approval_persists_row(session: AsyncSession) -> None:
+    org = Organization(url_key="approval-org", name="Approval Org", issue_prefix="APR")
+    async with async_transaction(session):
+        session.add(org)
+
+    async with async_transaction(session):
+        created = await create_approval(
+            session,
+            {
+                "org_id": org.id,
+                "type": "hire_agent",
+                "status": "pending",
+                "requested_by_agent_id": "agent-1",
+                "payload": {"agentId": "agent-1"},
+            },
+        )
+
+    assert created.org_id == org.id
+    assert created.type == "hire_agent"
+    assert created.status == "pending"
+    assert created.requested_by_agent_id == "agent-1"
+    assert created.payload == {"agentId": "agent-1"}
+
+
+async def test_update_approval_sets_decision_fields(session: AsyncSession) -> None:
+    async with async_transaction(session):
+        org = Organization(
+            url_key="approval-upd-org",
+            name="Approval Upd Org",
+            issue_prefix="APU",
+        )
+        session.add(org)
+    async with async_transaction(session):
+        approval = Approval(org_id=org.id, type="hire_agent", payload={})
+        session.add(approval)
+
+    before_updated_at = approval.updated_at
+
+    async with async_transaction(session):
+        updated = await update_approval(
+            session,
+            approval.id,
+            {
+                "status": "approved",
+                "decision_note": "looks good",
+                "decided_by_user_id": "user-1",
+            },
+        )
+
+    assert updated is not None
+    assert updated.status == "approved"
+    assert updated.decision_note == "looks good"
+    assert updated.decided_by_user_id == "user-1"
+    assert updated.decided_at is not None
+    assert updated.updated_at is not None
+    assert updated.updated_at != before_updated_at
+
+
+async def test_list_org_approvals_filters_by_status(session: AsyncSession) -> None:
+    async with async_transaction(session):
+        org = Organization(
+            url_key="approval-filter-org",
+            name="Approval Filter Org",
+            issue_prefix="APF",
+        )
+        session.add(org)
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Approval(
+                    org_id=org.id,
+                    type="hire_agent",
+                    status="pending",
+                    payload={},
+                ),
+                Approval(
+                    org_id=org.id,
+                    type="hire_agent",
+                    status="approved",
+                    payload={},
+                ),
+            ]
+        )
+
+    rows = await list_org_approvals(session, org.id, status="approved")
+
+    assert [row.status for row in rows] == ["approved"]
+
+
+async def test_recover_blocked_linked_issues_for_approval_updates_target_statuses(
+    session: AsyncSession,
+) -> None:
+    async with async_transaction(session):
+        org = Organization(
+            url_key="approval-link-org",
+            name="Approval Link Org",
+            issue_prefix="APL",
+        )
+        session.add(org)
+    async with async_transaction(session):
+        issue_with_assignee = Issue(
+            org_id=org.id,
+            title="Blocked with assignee",
+            status="blocked",
+            assignee_agent_id="agent-1",
+            origin_kind="manual",
+        )
+        issue_without_assignee = Issue(
+            org_id=org.id,
+            title="Blocked without assignee",
+            status="blocked",
+            origin_kind="manual",
+        )
+        issue_not_blocked = Issue(
+            org_id=org.id,
+            title="Already todo",
+            status="todo",
+            origin_kind="manual",
+        )
+        approval = Approval(org_id=org.id, type="hire_agent", payload={})
+        session.add_all(
+            [issue_with_assignee, issue_without_assignee, issue_not_blocked, approval]
+        )
+
+    async with async_transaction(session):
+        session.add_all(
+            [
+                IssueApproval(
+                    org_id=org.id,
+                    issue_id=issue_with_assignee.id,
+                    approval_id=approval.id,
+                ),
+                IssueApproval(
+                    org_id=org.id,
+                    issue_id=issue_without_assignee.id,
+                    approval_id=approval.id,
+                ),
+                IssueApproval(
+                    org_id=org.id,
+                    issue_id=issue_not_blocked.id,
+                    approval_id=approval.id,
+                ),
+            ]
+        )
+
+    async with async_transaction(session):
+        recovered = await recover_blocked_linked_issues_for_approval(
+            session, approval.id
+        )
+
+    assert {
+        row.id: row.status
+        for row in recovered
+    } == {
+        issue_with_assignee.id: "in_progress",
+        issue_without_assignee.id: "todo",
+    }
+
+
 async def test_org_service_list_chains_through_query(
     session: AsyncSession,
 ) -> None:
@@ -405,3 +571,44 @@ async def test_insert_activity_log_persists_row(session: AsyncSession) -> None:
     assert row.entity_id == "org-act"
     assert row.details == {"name": "renamed"}
     assert row.created_at is not None
+
+
+async def test_insert_activity_log_monotonically_increments_created_at(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixed_now = datetime(2026, 5, 26, 12, 0, 0, tzinfo=UTC)
+
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            assert tz is UTC
+            return fixed_now
+
+    monkeypatch.setattr(activity_log_queries, "datetime", FrozenDateTime)
+
+    async with async_transaction(session):
+        session.add(
+            Organization(id="org-act-2", url_key="o-act-2", name="B", issue_prefix="BBB")
+        )
+
+    async with async_transaction(session):
+        first = await insert_activity_log(
+            session,
+            org_id="org-act-2",
+            actor_type="board",
+            actor_id="user-1",
+            action="approval.created",
+            entity_type="approval",
+            entity_id="approval-1",
+        )
+        second = await insert_activity_log(
+            session,
+            org_id="org-act-2",
+            actor_type="board",
+            actor_id="user-1",
+            action="approval.approved",
+            entity_type="approval",
+            entity_id="approval-1",
+        )
+
+    assert second.created_at > first.created_at

@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schema import Issue
+from ..schema import Issue, IssueApproval
 
 
 async def create_issue(session: AsyncSession, fields: Mapping[str, Any]) -> Issue:
@@ -66,3 +66,23 @@ async def update_issue(
         update(Issue).where(Issue.id == issue_id).values(**values).returning(Issue)
     )
     return result.scalar_one_or_none()
+
+
+async def recover_blocked_linked_issues_for_approval(
+    session: AsyncSession,
+    approval_id: str,
+) -> Sequence[Issue]:
+    result = await session.execute(
+        select(Issue)
+        .join(IssueApproval, IssueApproval.issue_id == Issue.id)
+        .where(IssueApproval.approval_id == approval_id, Issue.status == "blocked")
+        .order_by(Issue.created_at)
+    )
+    rows = result.scalars().all()
+    now = datetime.now(UTC)
+    for row in rows:
+        has_assignee = row.assignee_agent_id is not None or row.assignee_user_id is not None
+        row.status = "in_progress" if has_assignee else "todo"
+        row.updated_at = now
+    await session.flush()
+    return rows
