@@ -154,15 +154,117 @@ async def test_org_detail_owned_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http(app, "GET", f"/api/orgs/{org_id}")
+    code, body = await _http(app, "GET", f"/api/orgs/{org_id}", actor_type="board")
     assert code == 200
     assert body["id"] == org_id
     assert "urlKey" in body
     assert "issuePrefix" in body
 
 
+async def test_org_create_board_returns_200(
+    app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    code, body = await _http(
+        app,
+        "POST",
+        "/api/orgs",
+        actor_type="board",
+        json={"name": "New Org", "description": "seeded", "budgetMonthlyCents": 1234},
+    )
+    assert code == 200
+    assert body["name"] == "New Org"
+    assert body["description"] == "seeded"
+    assert body["budgetMonthlyCents"] == 1234
+    assert body["status"] == "active"
+    assert body["issueCounter"] == 0
+    assert body["spentMonthlyCents"] == 0
+    assert body["issuePrefix"]
+    assert body["urlKey"]
+
+    async with session_factory() as verify:
+        row = await verify.get(Organization, body["id"])
+    assert row is not None
+    assert row.name == "New Org"
+
+
+async def test_org_create_missing_actor_returns_503(app: FastAPI) -> None:
+    code, body = await _http(app, "POST", "/api/orgs", json={"name": "New Org"})
+    assert code == 503
+    assert "Actor context" in body["detail"]
+
+
+async def test_org_create_non_board_returns_403(app: FastAPI) -> None:
+    code, body = await _http(
+        app,
+        "POST",
+        "/api/orgs",
+        actor_type="agent",
+        json={"name": "New Org"},
+    )
+    assert code == 403
+    assert "Board access required" in body["detail"]
+
+
+async def test_org_create_invalid_payload_returns_422(app: FastAPI) -> None:
+    code, body = await _http(
+        app,
+        "POST",
+        "/api/orgs",
+        actor_type="board",
+        json={"name": "   "},
+    )
+    assert code == 422
+    assert "name" in body["detail"]
+
+
+async def test_org_create_writes_activity_record(
+    app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    code, body = await _http(
+        app,
+        "POST",
+        "/api/orgs",
+        actor_type="board",
+        json={"name": "Activity Org"},
+    )
+    assert code == 200
+
+    async with session_factory() as verify:
+        result = await verify.execute(
+            select(ActivityLog).where(ActivityLog.org_id == body["id"])
+        )
+        rows = result.scalars().all()
+    assert len(rows) == 1
+    record = rows[0]
+    assert record.action == "organization.created"
+    assert record.entity_type == "organization"
+    assert record.entity_id == body["id"]
+    assert record.details == {"name": "Activity Org"}
+    assert record.actor_type == "board"
+
+
+async def test_org_detail_missing_actor_returns_503(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    code, body = await _http(app, "GET", f"/api/orgs/{org_id}")
+    assert code == 503
+    assert "Actor context" in body["detail"]
+
+
+async def test_org_detail_non_board_returns_403(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    code, body = await _http(app, "GET", f"/api/orgs/{org_id}", actor_type="agent")
+    assert code == 403
+    assert "Board access required" in body["detail"]
+
+
 async def test_org_detail_missing_returns_404(app: FastAPI) -> None:
-    code, body = await _http(app, "GET", f"/api/orgs/{uuid.uuid4()}")
+    code, body = await _http(app, "GET", f"/api/orgs/{uuid.uuid4()}", actor_type="board")
     assert code == 404
     assert body["detail"] == "Organization not found"
 
@@ -220,7 +322,7 @@ async def test_org_update_partial_does_not_touch_other_fields(
     assert after["brandColor"] == before["brandColor"]
 
 
-async def test_org_update_foreign_returns_403(
+async def test_org_update_foreign_board_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session, pod_id="other-pod")
@@ -231,11 +333,11 @@ async def test_org_update_foreign_returns_403(
         actor_type="board",
         json={"name": "X"},
     )
-    assert code == 403
-    assert "another pod" in body["detail"]
+    assert code == 200
+    assert body["name"] == "X"
 
 
-async def test_org_update_expired_returns_409(
+async def test_org_update_expired_board_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
     expires = datetime.now(UTC) - timedelta(hours=1)
@@ -247,8 +349,8 @@ async def test_org_update_expired_returns_409(
         actor_type="board",
         json={"name": "X"},
     )
-    assert code == 409
-    assert "expired" in body["detail"]
+    assert code == 200
+    assert body["name"] == "X"
 
 
 async def test_org_update_non_board_returns_403(
@@ -302,7 +404,7 @@ async def test_org_update_missing_org_returns_404(app: FastAPI) -> None:
     assert body["detail"] == "Organization not found"
 
 
-async def test_org_update_missing_ownership_returns_403(
+async def test_org_update_missing_ownership_board_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session, owned=False)
@@ -313,8 +415,8 @@ async def test_org_update_missing_ownership_returns_403(
         actor_type="board",
         json={"name": "X"},
     )
-    assert code == 403
-    assert "no ownership record" in body["detail"]
+    assert code == 200
+    assert body["name"] == "X"
 
 
 async def test_org_update_writes_activity_record(

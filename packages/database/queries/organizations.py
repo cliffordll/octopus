@@ -26,6 +26,35 @@ async def get_organization_by_id(
     return result.scalar_one_or_none()
 
 
+async def create_organization(
+    session: AsyncSession,
+    *,
+    id: str,
+    url_key: str,
+    name: str,
+    description: str | None = None,
+    issue_prefix: str,
+    budget_monthly_cents: int = 0,
+    default_chat_issue_creation_mode: str = "manual_approval",
+    brand_color: str | None = None,
+    require_board_approval_for_new_agents: bool = True,
+) -> Organization:
+    row = Organization(
+        id=id,
+        url_key=url_key,
+        name=name,
+        description=description,
+        issue_prefix=issue_prefix,
+        budget_monthly_cents=budget_monthly_cents,
+        default_chat_issue_creation_mode=default_chat_issue_creation_mode,
+        brand_color=brand_color,
+        require_board_approval_for_new_agents=require_board_approval_for_new_agents,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
 async def update_organization(
     session: AsyncSession,
     organization_id: str,

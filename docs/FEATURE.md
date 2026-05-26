@@ -419,7 +419,7 @@ curl http://127.0.0.1:8000/api/issues
 
 - organization 列表、详情、创建、更新
 - organization 级配置字段、品牌字段、预算字段
-- organization-scoped 排序、过滤、分页、ownership 语义
+- organization-scoped 排序、过滤、分页和 board access 语义
 
 验收：
 
@@ -430,12 +430,12 @@ curl http://127.0.0.1:8000/api/issues
 
 - Demo 1：演示 organization 列表与详情读取
 - Demo 2：演示 organization 创建与配置字段初始化
-- Demo 3：演示 organization ownership 边界和错误语义
+- Demo 3：演示 organization board access 边界和错误语义
 - Demo 4：演示 organization 更新与 contract / workflow 测试结果
 
 分工：
 
-- A：主导组织字段、默认值、ownership 语义和兼容断言
+- A：主导组织字段、默认值、board access 语义和兼容断言
 - B：主导 route、service、workflow 和持久化实现
 
 建议命令：

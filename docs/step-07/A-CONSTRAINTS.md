@@ -6,7 +6,7 @@ Step 7 的目标是把 `organization management` 从 Step 5/6 的基础可读能
 
 - organization 的读写边界独立成立，不再继续混在 issue / approval 主线里
 - organization 的第一批创建与更新能力都落在独立资源边界内
-- 组织更新能力继续建立在 Step 5 ownership 和 Step 6 read contract 之上
+- 组织创建、详情和更新能力继续建立在 Step 6 read contract 和 board access 之上
 - organization 字段、默认值、拒绝语义和最小配置行为可以被测试明确验证
 - Step 8 任务管理和 Step 9 审批管理都以稳定的 organization 对象和 organization 配置为前提
 
@@ -14,7 +14,7 @@ Step 7 的目标是把 `organization management` 从 Step 5/6 的基础可读能
 
 - 固定第一批 organization management 接口范围
 - 固定 organization response / payload 的最小字段边界
-- 固定 organization ownership、board access 与错误语义
+- 固定 organization board access 与错误语义
 - 固定 organization create 的最小写语义
 - 固定 organization update 的最小写语义
 - 固定 organization 配置字段更新与最小 activity / audit 记录语义
@@ -31,8 +31,6 @@ Step 7 只能基于以下输入推进：
 - [docs/step-04/A-CONSTRAINTS.md](D:/coding/octopus/docs/step-04/A-CONSTRAINTS.md)
 - [docs/step-04/SCHEMA-COMPATIBILITY.md](D:/coding/octopus/docs/step-04/SCHEMA-COMPATIBILITY.md)
 - [docs/step-04/DATABASE-MAPPING.md](D:/coding/octopus/docs/step-04/DATABASE-MAPPING.md)
-- [docs/step-05/A-CONSTRAINTS.md](D:/coding/octopus/docs/step-05/A-CONSTRAINTS.md)
-- [docs/step-05/OWNERSHIP.md](D:/coding/octopus/docs/step-05/OWNERSHIP.md)
 - [docs/step-06/A-CONSTRAINTS.md](D:/coding/octopus/docs/step-06/A-CONSTRAINTS.md)
 - [docs/step-06/READ-API.md](D:/coding/octopus/docs/step-06/READ-API.md)
 
@@ -40,7 +38,7 @@ Step 7 只能基于以下输入推进：
 
 - `7.1 routes` 直接以 Step 3 已冻结的 organization path 常量为准
 - `7.2 response / payload` 直接以 Step 3 organization shared types / validators 为准
-- `7.3 ownership` 继续直接消费 Step 5 已落地的 ownership service / dependency
+- `7.3 access` 直接消费现有 board actor guard
 - `7.4 reads` 直接继承 Step 6 已落地的 organization list / detail 行为
 - `7.5 writes` 不能绕过 Step 4 database query / session 边界自行发明新链路
 
@@ -53,7 +51,7 @@ Step 7 只能基于以下输入推进：
 - `GET /api/orgs/{orgId}`
 - `PATCH /api/orgs/{orgId}` 或等价 update 入口
 - organization shared payload / response 的继续消费
-- organization ownership / board access / update rejection 语义
+- organization board access / update rejection 语义
 - 对应 contract / workflow / integration-style assertions
 
 本步允许覆盖的第一批写能力只限：
@@ -74,7 +72,6 @@ Step 7 只能基于以下输入推进：
 
 本步不做：
 
-- organization create
 - organization delete / archive / suspend 全量生命周期
 - organization workspace_config 全量编辑
 - organization 统计 / dashboard / 报表类接口
@@ -89,8 +86,10 @@ Step 7 完成后，B 至少要交付：
 - organization update service 入口
 - organization update query 入口
 - organization 配置字段更新链路
+- organization create 成功后的最小 activity / audit 记录位
 - organization update 成功后的最小 activity / audit 记录位
-- 至少一条 organization update 经过 board / ownership 守卫的真实调用链
+- 至少一条 organization detail 经过 board 守卫的真实调用链
+- 至少一条 organization update 经过 board 守卫的真实调用链
 - 至少一条 organization create 经过 board 守卫的真实调用链
 - 至少一组 response / payload assertion tests，明确字段、默认值和拒绝语义
 - 至少一组 organization module demo，能展示 list / detail / create / update / rejection
@@ -198,7 +197,7 @@ Step 7 完成后，B 至少要交付：
 - create 成功返回最新 organization detail
 - update 成功返回最新 organization detail
 - 资源不存在时返回 `404`
-- foreign / missing / expired ownership 继续沿用 Step 5 拒绝语义
+- detail / create / update 都必须先经过 board access 语义
 
 ### 6.4 B 当前不能做
 
@@ -213,10 +212,8 @@ Step 7 完成后，B 至少要交付：
 
 - `GET /api/orgs` 继续是 board-scoped 入口
 - `POST /api/orgs` 继续是 board-scoped 入口
-- `GET /api/orgs/{orgId}` 继续是 ownership-scoped 入口
-- `PATCH /api/orgs/{orgId}` 同时要求：
-  - organization ownership
-  - board-level actor access
+- `GET /api/orgs/{orgId}` 继续是 board-scoped 入口
+- `PATCH /api/orgs/{orgId}` 继续是 board-scoped 入口
 
 ### 7.2 第一批 update 语义
 
@@ -247,12 +244,14 @@ Step 7 第一批 create 只冻结以下行为：
 
 Step 7 第一批只冻结最小记录义务，不一次冻结全量 activity payload：
 
+- organization 创建成功后，必须有一条可追踪的 activity / audit 记录位
 - organization 更新成功后，必须有一条可追踪的 activity / audit 记录位
 - 该记录至少要能关联：
   - `org_id`
   - 动作名称
   - 变更时间
-- 动作名称本步先冻结为一条最小兼容语义：
+- 动作名称本步先冻结为两条最小兼容语义：
+  - `organization.created`
   - `organization.updated`
 - 如果当前仓库的 activity service / workflow 尚未成型，B 可以先落最小 record writer 或预留集中调用位
 - 但不得把“后续再补 activity”作为完全不接记录位的理由
@@ -263,11 +262,8 @@ Step 7 第一批只冻结最小记录义务，不一次冻结全量 activity pay
 
 - validator 失败：`422`
 - 资源不存在：`404`
-- foreign ownership：`403`
-- missing ownership：`403`
-- expired ownership：`409`
 - 缺失 board actor：`503`
-- 非 board actor 尝试更新：`403`
+- 非 board actor 尝试 detail / create / update：`403`
 
 ### 7.5 B 当前不能做
 
@@ -283,7 +279,7 @@ Step 7 必须满足以下硬约束：
 - `server/routes` 不直接查询数据库
 - `server/services` 不直接创建 session
 - `packages/database/queries` 不承载 HTTP response shape
-- ownership 与 board access 必须在 route / dependency 边界显式接入
+- board access 必须在 route / dependency 边界显式接入
 - query 只负责读取与更新，不负责 HTTP 403 / 409 语义
 - shared types / validators 仍是 payload / response shape 唯一来源
 - activity / audit 记录不得直接写在 route 中
@@ -311,21 +307,22 @@ B 在 Step 7 的建议顺序固定为：
 
 Step 7 验收时必须同时满足：
 
+- organization create route 已落地
 - organization update route 已落地
-- board access 与 ownership guard 都已接入真实入口
+- board access guard 已接入真实入口
 - request payload 与 shared validator 对齐
 - response shape 与 shared contract 对齐
 - organization 配置字段更新已真实可用
-- organization update 成功后的最小 activity / audit 记录位已落地
-- 404 / 403 / 409 / 422 / 503 等基础行为已明确
+- organization create / update 成功后的最小 activity / audit 记录位已落地
+- 404 / 403 / 422 / 503 等基础行为已明确
 - 至少一组 tests 能逐字段断言字段名、默认值和拒绝语义
 
 ## 11. 验收 Demo
 
 - Demo 1：调用 `GET /api/orgs`，展示 board success 与 non-board reject
-- Demo 2：调用 `GET /api/orgs/{orgId}`，展示 owned success 与 foreign / missing / expired reject
-- Demo 3：调用 `PATCH /api/orgs/{orgId}`，展示基础字段与配置字段更新 success
-- Demo 4：展示 organization update 产生的最小 activity / audit 记录
+- Demo 2：调用 `POST /api/orgs`，展示 create success 与 payload reject
+- Demo 3：调用 `GET /api/orgs/{orgId}` 和 `PATCH /api/orgs/{orgId}`，展示 board-scoped detail / update success
+- Demo 4：展示 organization create / update 产生的最小 activity / audit 记录
 - Demo 5：展示 response / workflow tests，证明 organization management 不是人工口头说明
 
 ## 12. 测试冻结口径
@@ -335,12 +332,16 @@ Step 7 最少必须冻结以下测试断言：
 - organization list board request success
 - organization list missing actor returns `503`
 - organization list non-board request rejected with `403`
-- organization detail owned request success
+- organization create board request success
+- organization create invalid payload returns `422`
+- organization create writes minimal activity / audit record
+- organization detail board request success
+- organization detail missing actor returns `503`
+- organization detail non-board rejected
 - organization detail missing resource returns `404`
-- organization update owned + board request success
+- organization update board request success
 - organization update can change config fields
-- organization update foreign ownership rejected
-- organization update expired ownership rejected
+- organization update on org without ownership still succeeds for board
 - organization update non-board rejected
 - organization update invalid payload returns `422`
 - organization update writes minimal activity / audit record
@@ -357,7 +358,7 @@ Step 7 最少必须冻结以下测试断言：
 
 Step 7 完成后：
 
-- Step 8 的任务管理会继续复用 organization ownership、board access 和 organization 配置字段
+- Step 8 的任务管理会继续复用 organization 对象、board access 和 organization 配置字段
 - Step 9 的审批管理会继续复用 organization 对象和 organization-scoped 拒绝语义
 - Step 10 之后的 project / goal / agent / run 模块都会依赖 Step 7 已经稳定的 organization 管理边界
 
