@@ -52,12 +52,22 @@ def test_schema_models_exported() -> None:
     assert ActivityLog.__tablename__ == "activity_log"
 
 
-def test_issue_indexes_match_step4_scope() -> None:
+def test_issue_indexes_match_upstream() -> None:
     actual = {index.name for index in cast(Table, Issue.__table__).indexes}
     assert actual == {
         "issues_company_status_idx",
         "issues_company_status_board_order_idx",
+        "issues_company_assignee_status_idx",
+        "issues_company_assignee_user_status_idx",
+        "issues_company_reviewer_agent_status_idx",
+        "issues_company_reviewer_user_status_idx",
+        "issues_company_parent_idx",
+        "issues_company_project_idx",
+        "issues_company_origin_idx",
+        "issues_company_project_workspace_idx",
+        "issues_company_execution_workspace_idx",
         "issues_identifier_idx",
+        "issues_open_automation_execution_uq",
     }
 
 
@@ -127,8 +137,8 @@ async def test_list_organizations_returns_seeded(session: AsyncSession) -> None:
 
 
 async def test_list_org_issues_filters_by_org(session: AsyncSession) -> None:
-    org_a = Organization(url_key="a", name="A")
-    org_b = Organization(url_key="b", name="B")
+    org_a = Organization(url_key="a", name="A", issue_prefix="AAA")
+    org_b = Organization(url_key="b", name="B", issue_prefix="BBB")
     async with async_transaction(session):
         session.add_all([org_a, org_b])
     issue_a = Issue(org_id=org_a.id, title="A issue")

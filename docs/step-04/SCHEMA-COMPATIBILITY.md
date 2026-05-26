@@ -47,6 +47,12 @@
 - 新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
 - Step 4 只优先盘点支撑 org / issue / approval 最小闭环的表
 
+## 4.0.1 同步说明
+
+本文档第一版交付时未列尽每张表的 upstream 索引集合,也未给出字段级 PG 类型规则。Schema 实现按完整 upstream 对照补齐后,在 §4.2 / §4.3 增加类型与行为规则,并把各表「关键索引与约束」列表对齐到 upstream 全集。
+
+执行记录见 `docs/step-04/SCHEMA-UPSTREAM-ALIGN.md`。
+
 ## 4.1 第一批共享默认值与状态来源
 
 共享默认值来源：
@@ -64,6 +70,33 @@
 - `ISSUE_PRIORITIES = ["critical", "high", "medium", "low"]`
 - `ISSUE_ORIGIN_KINDS = ["manual", "automation_execution"]`
 - `APPROVAL_STATUSES = ["pending", "revision_requested", "approved", "rejected", "cancelled"]`
+
+## 4.2 PG 类型映射规则
+
+为消除字段级类型歧义,字段类型按以下规则映射到 PostgreSQL,字段层不再单独标注:
+
+- 所有 UUID 列(`id`、`org_id`、`*_agent_id`、`*_run_id`、`*_workspace_id`、`issue_id`、`approval_id`、`goal_id` 等)使用 PG `uuid` 类型,默认 `defaultRandom()`
+- 所有用户标识 ID 列(`*_user_id`、`actor_id`)以及通用字符串内容(`name`、`url_key`、`description`、`status`、`title`、`body`、`action`、`type`、`identifier`、`origin_kind`、`origin_id` 等)使用 PG `text` 类型,**不带长度限制**
+- 所有计数与数值列(`*_counter`、`*_cents`、`board_order`、`request_depth`、`issue_number` 等)使用 PG `integer`
+- 所有布尔列使用 PG `boolean`
+- 所有时间列使用 PG `timestamp(withTimezone: true)`
+- 所有 JSON 列(`workspace_config`、`payload`、`*_overrides`、`*_settings`、`details`)使用 PG `jsonb`,不使用 `json`
+
+Python 端(SQLAlchemy)实现细节:
+
+- UUID 列在 Python 端用 `String(36)` 存 UUID 字符串,跨 SQLite/PG 稳定(详见 `docs/step-04/DATABASE-MAPPING.md` §5.2)
+- text 列在 Python 端用 `Text()`,不带长度上限,与 PG `text` 等价
+- jsonb 列在 Python 端用 `JSON().with_variant(JSONB(), "postgresql")`,SQLite 测试用通用 JSON,PG 部署用 jsonb
+- 整数、布尔、时间列直接 SQLAlchemy 原生类型(`Integer`、`Boolean`、`DateTime(timezone=True)`)
+
+## 4.3 updated_at 行为约定
+
+`updated_at` 列在所有表中:
+
+- 数据库 default `now()`(由 `server_default=func.now()` 表达)
+- **不**配置 `onupdate` 自动刷新
+- 由应用层(service 或 mutation workflow)在更新行时显式设置新时间戳
+- 与上游 Drizzle 行为一致(upstream 没有 ORM 级 onupdate)
 
 ## 5. 第一批核心表
 
@@ -115,8 +148,8 @@
 
 关键约束：
 
-- `organizations_issue_prefix_idx`
-- `organizations_url_key_idx`
+- `organizations_issue_prefix_idx`(**unique**, on `issue_prefix`)
+- `organizations_url_key_idx`(**unique**, on `url_key`)
 
 Step 4 关注点：
 
@@ -218,16 +251,19 @@ Step 4 关注点：
 
 关键索引与约束：
 
-- `issues_company_status_idx`
-- `issues_company_status_board_order_idx`
-- `issues_identifier_idx`
-
-补充说明：
-
-- `issues_open_automation_execution_uq` 属于 automation execution 相关的部分唯一索引
-- 该约束依赖后续 automation execution 流转语义与部分索引表达
-- Step 4 先冻结 `issues_company_status_idx`、`issues_company_status_board_order_idx`、`issues_identifier_idx`
-- `issues_open_automation_execution_uq` 延后到 Step 6/7 真正接入 automation execution 时再补
+- `issues_company_status_idx`(普通, on `org_id`, `status`)
+- `issues_company_status_board_order_idx`(普通, on `org_id`, `status`, `board_order`)
+- `issues_company_assignee_status_idx`(普通, on `org_id`, `assignee_agent_id`, `status`)
+- `issues_company_assignee_user_status_idx`(普通, on `org_id`, `assignee_user_id`, `status`)
+- `issues_company_reviewer_agent_status_idx`(普通, on `org_id`, `reviewer_agent_id`, `status`)
+- `issues_company_reviewer_user_status_idx`(普通, on `org_id`, `reviewer_user_id`, `status`)
+- `issues_company_parent_idx`(普通, on `org_id`, `parent_id`)
+- `issues_company_project_idx`(普通, on `org_id`, `project_id`)
+- `issues_company_origin_idx`(普通, on `org_id`, `origin_kind`, `origin_id`)
+- `issues_company_project_workspace_idx`(普通, on `org_id`, `project_workspace_id`)
+- `issues_company_execution_workspace_idx`(普通, on `org_id`, `execution_workspace_id`)
+- `issues_identifier_idx`(**unique**, on `identifier`)
+- `issues_open_automation_execution_uq`(**unique 部分索引**, on `org_id`, `origin_kind`, `origin_id`, WHERE `origin_kind = 'automation_execution' and origin_id is not null and hidden_at is null and execution_run_id is not null and status in ('backlog', 'todo', 'in_progress', 'in_review', 'blocked')`)
 
 Step 4 关注点：
 
@@ -275,7 +311,7 @@ Step 4 关注点：
 
 关键索引与约束：
 
-- `approvals_company_status_type_idx`
+- `approvals_company_status_type_idx`(普通, on `org_id`, `status`, `type`)
 
 Step 4 关注点：
 
@@ -313,6 +349,13 @@ Step 4 关注点：
 - `created_at` 非空，默认 now
 - `updated_at` 非空，默认 now
 
+关键索引与约束：
+
+- `issue_comments_issue_idx`(普通, on `issue_id`)
+- `issue_comments_company_idx`(普通, on `org_id`)
+- `issue_comments_company_issue_created_at_idx`(普通, on `org_id`, `issue_id`, `created_at`)
+- `issue_comments_company_author_issue_created_at_idx`(普通, on `org_id`, `author_user_id`, `issue_id`, `created_at`)
+
 Step 4 关注点：
 
 - comment 与 issue 的 organization 一致性
@@ -344,7 +387,13 @@ Step 4 关注点：
 
 关键约束：
 
-- 复合主键：`issue_approvals_pk`
+- 复合主键：`issue_approvals_pk`(`issue_id`, `approval_id`)
+- `issue_approvals_issue_idx`(普通, on `issue_id`)
+- `issue_approvals_approval_idx`(普通, on `approval_id`)
+- `issue_approvals_company_idx`(普通, on `org_id`)
+- 外键级联:`issue_id → issues.id` **ON DELETE CASCADE**
+- 外键级联:`approval_id → approvals.id` **ON DELETE CASCADE**
+- 外键:`linked_by_agent_id → agents.id` ON DELETE SET NULL(`agents` 表不在 Step 4 第一批,FK 暂不在 Python schema 加约束)
 
 Step 4 关注点：
 
@@ -384,6 +433,12 @@ Step 4 关注点：
 - `run_id` 可空
 - `details` 可空
 - `created_at` 非空，默认 now
+
+关键索引与约束：
+
+- `activity_log_company_created_idx`(普通, on `org_id`, `created_at`)
+- `activity_log_run_id_idx`(普通, on `run_id`)
+- `activity_log_entity_type_id_idx`(普通, on `entity_type`, `entity_id`)
 
 Step 4 关注点：
 
