@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type PropsWithChildren } from "react";
-import { NavLink, useParams } from "react-router-dom";
+import { Link, Navigate, NavLink, useParams } from "react-router-dom";
+import { agentsApi } from "../api/agents";
 import { organizationsApi } from "../api/organizations";
+import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 export function OrganizationPage() {
@@ -33,11 +35,11 @@ export function OrganizationPage() {
   }
   if (organization.error) return <ErrorNotice error={organization.error} />;
   return (
-    <OrgWorkspace orgId={orgId}>
+    <div className="org-content organization-settings">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Organization</p>
-          <h1>{organization.data?.name ?? "载入中..."}</h1>
+          <p className="eyebrow">Organization Settings</p>
+          <h1>组织设置</h1>
         </div>
       </header>
       <form className="panel form narrow" onSubmit={submit}>
@@ -52,6 +54,49 @@ export function OrganizationPage() {
         {update.error && <ErrorNotice error={update.error} />}
         <button type="submit">保存组织</button>
       </form>
+    </div>
+  );
+}
+
+export function OrganizationIndexPage() {
+  const { orgId = "" } = useParams();
+  return <Navigate replace to={`/orgs/${orgId}/structure`} />;
+}
+
+export function OrganizationStructurePage() {
+  const { orgId = "" } = useParams();
+  const agents = useQuery({
+    queryKey: ["agents", orgId],
+    queryFn: () => agentsApi.list(orgId),
+  });
+  const agentList = Array.isArray(agents.data) ? agents.data : [];
+  const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
+
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <header className="page-header">
+        <div><p className="eyebrow">Organization</p><h1>组织架构</h1></div>
+      </header>
+      {agents.error && <ErrorNotice error={agents.error} />}
+      {agents.isSuccess && agentList.length === 0 ? (
+        <section className="panel organization-empty-state">
+          <p className="muted">暂无智能体。创建首个智能体以建立组织架构。</p>
+          <Link className="button" to={`/orgs/${orgId}/agents/new`}>新建智能体</Link>
+        </section>
+      ) : (
+        <section className="organization-structure">
+          {agentList.map((agent) => (
+            <article className="panel organization-member" key={agent.id}>
+              <div className="organization-member-copy">
+                <strong>{agent.name}</strong>
+                <span>{agent.title ?? agent.role}</span>
+              </div>
+              <p>{agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}</p>
+              <Badge>{agent.status}</Badge>
+            </article>
+          ))}
+        </section>
+      )}
     </OrgWorkspace>
   );
 }
@@ -62,9 +107,9 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
       <p className="org-sidebar-label">Organization</p>
       <h2>管理</h2>
       <nav className="local-nav" aria-label="组织导航">
+        <NavLink to={`/orgs/${orgId}/structure`}>组织架构</NavLink>
         <NavLink to={`/orgs/${orgId}/projects`}>项目</NavLink>
-        <NavLink to={`/orgs/${orgId}/approvals`}>审批</NavLink>
-        <NavLink end to={`/orgs/${orgId}`}>设置</NavLink>
+        <NavLink to={`/orgs/${orgId}/heartbeat-runs`}>心跳</NavLink>
       </nav>
     </aside>
   );

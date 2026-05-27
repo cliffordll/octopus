@@ -244,6 +244,114 @@ h1, h2, p {
   padding: 32px 36px 42px;
 }
 
+.organization-settings {
+  margin: 0 auto;
+}
+
+.organization-structure {
+  display: grid;
+  gap: 12px;
+}
+
+.organization-member {
+  align-items: center;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+}
+
+.organization-member-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.organization-member-copy span,
+.organization-member p {
+  color: #8792a6;
+  font-size: 13px;
+  margin: 0;
+}
+
+.organization-empty-state {
+  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.heartbeat-filter {
+  display: block;
+  margin-bottom: 18px;
+  max-width: 260px;
+}
+
+.heartbeat-filter select {
+  display: block;
+  margin-top: 7px;
+  width: 100%;
+}
+
+.heartbeat-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(270px, 360px) minmax(320px, 1fr);
+}
+
+.heartbeat-runs,
+.heartbeat-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.heartbeat-run {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  color: #e8edf5;
+  display: flex;
+  justify-content: space-between;
+  padding: 11px;
+  text-align: left;
+  width: 100%;
+}
+
+.heartbeat-run.selected {
+  border-color: #3886e8;
+}
+
+.heartbeat-run span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.heartbeat-run small {
+  color: #8792a6;
+}
+
+.heartbeat-events {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.heartbeat-event {
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px;
+}
+
+.heartbeat-event span {
+  color: #8792a6;
+  font-size: 13px;
+}
+
 .page-header {
   align-items: end;
   display: flex;
@@ -721,6 +829,9 @@ pre {
   }
   .org-content {
     padding: 22px 16px;
+  }
+  .heartbeat-layout, .organization-member {
+    grid-template-columns: 1fr;
   }
   .context-nav {
     flex-direction: row;

@@ -1,5 +1,5 @@
 import { jsonRequest, request } from "./client";
-import type { HeartbeatRun } from "./types";
+import type { HeartbeatRun, HeartbeatRunEvent } from "./types";
 
 export const heartbeatApi = {
   invoke: (agentId: string): Promise<HeartbeatRun> =>
@@ -15,4 +15,10 @@ export const heartbeatApi = {
       { method: "GET" },
     );
   },
+  get: (runId: string): Promise<HeartbeatRun> =>
+    request<HeartbeatRun>(`/api/heartbeat-runs/${encodeURIComponent(runId)}`, { method: "GET" }),
+  listEvents: (runId: string): Promise<HeartbeatRunEvent[]> =>
+    request<HeartbeatRunEvent[]>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/events`, {
+      method: "GET",
+    }),
 };

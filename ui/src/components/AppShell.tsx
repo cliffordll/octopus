@@ -4,7 +4,9 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 
 function organizationTarget(pathname: string, orgId: string) {
-  const section = pathname.match(/^\/orgs\/[^/]+\/(chats|issues|agents|projects|approvals)/)?.[1];
+  const section = pathname.match(
+    /^\/orgs\/[^/]+\/(chats|issues|agents|projects|approvals|structure|heartbeat-runs|settings)/,
+  )?.[1];
   return `/orgs/${orgId}/${section ?? "issues"}`;
 }
 
@@ -12,6 +14,7 @@ export function AppShell() {
   const location = useLocation();
   const [organizationMenuOpen, setOrganizationMenuOpen] = useState(false);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
+  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|settings)/.test(location.pathname);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],
@@ -35,26 +38,30 @@ export function AppShell() {
                 <span aria-hidden="true" className="nav-icon">M</span>
                 <span>消息</span>
               </NavLink>
-              <NavLink to={`/orgs/${selectedOrganizationId}/issues`}>
-                <span aria-hidden="true" className="nav-icon">T</span>
-                <span>任务</span>
-              </NavLink>
               <NavLink to={`/orgs/${selectedOrganizationId}/agents`}>
                 <span aria-hidden="true" className="nav-icon">A</span>
                 <span>智能体</span>
+              </NavLink>
+              <NavLink to={`/orgs/${selectedOrganizationId}/issues`}>
+                <span aria-hidden="true" className="nav-icon">T</span>
+                <span>任务</span>
               </NavLink>
             </>
           ) : (
             <>
               <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">M</span>消息</span>
-              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">T</span>任务</span>
               <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">A</span>智能体</span>
+              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">T</span>任务</span>
             </>
           )}
-          <NavLink to="/organizations">
-            <span aria-hidden="true" className="nav-icon">O</span>
-            <span>组织</span>
-          </NavLink>
+          {selectedOrganizationId ? (
+            <NavLink className={isOrganizationArea ? "active" : undefined} to={`/orgs/${selectedOrganizationId}/structure`}>
+              <span aria-hidden="true" className="nav-icon">O</span>
+              <span>组织</span>
+            </NavLink>
+          ) : (
+            <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">O</span>组织</span>
+          )}
         </nav>
         <div className="organization-switcher">
           <button
@@ -86,6 +93,11 @@ export function AppShell() {
                   {organization.name}
                 </Link>
               ))}
+              {selectedOrganizationId && (
+                <NavLink onClick={() => setOrganizationMenuOpen(false)} to={`/orgs/${selectedOrganizationId}/settings`}>
+                  组织设置
+                </NavLink>
+              )}
               <NavLink onClick={() => setOrganizationMenuOpen(false)} to="/organizations">
                 管理组织
               </NavLink>

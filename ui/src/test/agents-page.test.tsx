@@ -35,19 +35,29 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(screen.getByRole("navigation", { name: "智能体详情导航" })).toBeInTheDocument();
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
   const primaryNavigation = within(screen.getByRole("navigation", { name: "主导航" }));
+  expect(primaryNavigation.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+    "/orgs/org-1/chats",
+    "/orgs/org-1/agents",
+    "/orgs/org-1/issues",
+    "/orgs/org-1/structure",
+  ]);
   expect(primaryNavigation.getByRole("link", { name: "消息" })).toHaveAttribute("href", "/orgs/org-1/chats");
   expect(primaryNavigation.getByRole("link", { name: "任务" })).toHaveAttribute("href", "/orgs/org-1/issues");
   expect(primaryNavigation.getByRole("link", { name: "智能体" })).toHaveAttribute("href", "/orgs/org-1/agents");
-  expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/organizations");
+  expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/orgs/org-1/structure");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(
     within(screen.getByRole("navigation", { name: "智能体导航" })).getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
   await userEvent.click(screen.getByRole("button", { name: "切换组织" }));
+  const organizationMenu = within(screen.getByRole("navigation", { name: "组织切换菜单" }));
+  expect(organizationMenu.getByRole("link", { name: "组织设置" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/settings",
+  );
+  expect(organizationMenu.getByRole("link", { name: "管理组织" })).toHaveAttribute("href", "/organizations");
   expect(
-    within(screen.getByRole("navigation", { name: "组织切换菜单" })).getByRole("link", {
-      name: /设计团队/,
-    }),
+    organizationMenu.getByRole("link", { name: /设计团队/ }),
   ).toHaveAttribute("href", "/orgs/org-2/agents");
 
   await userEvent.click(
