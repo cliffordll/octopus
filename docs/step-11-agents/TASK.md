@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统
 
-状态：开发中（11A-11B 已完成；11C-11D 待开发）
+状态：开发中（11A-11C 已完成；11D 待开发）
 
 ## 调整原因
 
@@ -58,6 +58,15 @@
 - 定义统一 runtime adapter contract，并实现一个具备上游证据且本地可验证的实际 adapter 路径。
 - 接入 agent wakeup、heartbeat run 建立、状态迁移、执行结果和失败语义。
 - 记录该闭环必须产生的活动与最小执行上下文，使 run 不是仅保存配置的伪实现。
+
+实施记录：
+
+- Shared contract 已实现 heartbeat invocation source、wakeup/run status、wakeup payload 校验以及 wakeup、invoke、run/event 查询 API path。
+- Database 已实现 `heartbeat_runs`、`heartbeat_run_events` schema/query 及 `20260527_000005_heartbeat_runs.py` migration，并将运行结果关联至既有 wakeup request 与 runtime state。
+- Runtime 已建立统一 adapter contract 与 `process` adapter，支持真实命令调用、stdout/stderr 捕获、超时和退出错误归一化。
+- Server 已实现手动 wakeup/invoke、organization-scoped run 查询和 run event 查询；一次调用会推进 queued/running/final 状态并更新 agent/runtime state。
+- Activity 遵循手动调用边界记录 `heartbeat.invoked`；内部 wakeup 的业务活动仍由各自触发流程负责，避免扩大副作用语义。
+- 本阶段执行采用可验证的即时 process 执行路径；队列调度、并发领取、取消/恢复、多 adapter 与完整 workspace 仍分别归 Step 13-15 扩展。
 
 ### 11D: 基线验收
 

@@ -10,7 +10,7 @@ import uuid
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import Table, text
+from sqlalchemy import BigInteger, Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
@@ -73,6 +73,38 @@ def test_agent_contract_modules_define_management_boundary() -> None:
         validators.validate_create_agent({"role": "invalid"})
     assert validators.validate_reset_agent_session({"taskKey": "issue-1"}) == {
         "taskKey": "issue-1"
+    }
+
+
+def test_heartbeat_contract_modules_define_execution_boundary() -> None:
+    paths = importlib.import_module("packages.shared.api_paths.heartbeat")
+    constants = importlib.import_module("packages.shared.constants.heartbeat")
+    validators = importlib.import_module("packages.shared.validators.heartbeat")
+
+    assert paths.AGENT_WAKEUP_PATH == "/api/agents/{id}/wakeup"
+    assert paths.AGENT_HEARTBEAT_INVOKE_PATH == "/api/agents/{id}/heartbeat/invoke"
+    assert paths.ORG_HEARTBEAT_RUNS_PATH == "/api/orgs/{orgId}/heartbeat-runs"
+    assert paths.HEARTBEAT_RUN_PATH == "/api/heartbeat-runs/{runId}"
+    assert paths.HEARTBEAT_RUN_EVENTS_PATH == "/api/heartbeat-runs/{runId}/events"
+    assert constants.HEARTBEAT_INVOCATION_SOURCES == (
+        "timer",
+        "assignment",
+        "review",
+        "on_demand",
+        "automation",
+    )
+    assert constants.HEARTBEAT_RUN_STATUSES == (
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "timed_out",
+    )
+    assert validators.validate_wake_agent({"reason": "run now"}) == {
+        "source": "on_demand",
+        "reason": "run now",
+        "forceFreshSession": False,
     }
 
 
@@ -146,6 +178,34 @@ async def test_upgrade_to_head_creates_agent_state_tables(tmp_path: Path) -> Non
         "agent_task_sessions",
         "agent_wakeup_requests",
     }
+
+
+def test_heartbeat_tables_match_step11c_boundary() -> None:
+    schema = importlib.import_module("packages.database.schema")
+    assert schema.HeartbeatRun.__tablename__ == "heartbeat_runs"
+    assert schema.HeartbeatRunEvent.__tablename__ == "heartbeat_run_events"
+    assert isinstance(schema.HeartbeatRunEvent.__table__.c.id.type, BigInteger)
+    assert {"heartbeat_runs", "heartbeat_run_events"}.issubset(
+        {table.name for table in Base.metadata.sorted_tables}
+    )
+
+
+async def test_upgrade_to_head_creates_heartbeat_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "step11c-upgrade.db"
+    await upgrade_to_head(f"sqlite+aiosqlite:///{db_path}")
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    "select name from sqlite_master where type='table' and name in "
+                    "('heartbeat_runs', 'heartbeat_run_events')"
+                )
+            )
+            names = {row[0] for row in result}
+    finally:
+        await engine.dispose()
+    assert names == {"heartbeat_runs", "heartbeat_run_events"}
 
 
 @pytest.fixture
@@ -481,6 +541,64 @@ async def test_agent_runtime_state_sessions_and_reset_routes(
     assert reset["clearedTaskSessions"] == 1
     assert reset["sessionId"] is None
     assert reset["stateJson"] == {"resume": True}
+
+
+async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="heartbeat")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Executor",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('adapter-ok')"],
+            },
+        },
+    )
+
+    wake_code, run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/wakeup",
+        json={"reason": "contract-run"},
+    )
+    assert wake_code == 202
+    assert run["status"] == "succeeded"
+    assert run["invocationSource"] == "on_demand"
+    assert run["resultJson"]["stdout"].strip() == "adapter-ok"
+
+    list_code, runs = await _request(app, "GET", f"/api/orgs/{org_id}/heartbeat-runs")
+    assert list_code == 200
+    assert runs[0]["id"] == run["id"]
+
+    detail_code, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
+    assert detail_code == 200
+    assert detail["status"] == "succeeded"
+
+    events_code, events = await _request(
+        app, "GET", f"/api/heartbeat-runs/{run['id']}/events"
+    )
+    assert events_code == 200
+    assert [event["eventType"] for event in events] == [
+        "lifecycle",
+        "adapter.invoke",
+        "log",
+        "lifecycle",
+    ]
+
+    state_code, state = await _request(
+        app, "GET", f"/api/agents/{created['id']}/runtime-state"
+    )
+    assert state_code == 200
+    assert state["lastRunId"] == run["id"]
+    assert state["lastRunStatus"] == "succeeded"
 
 
 async def test_agent_cannot_list_other_organization(

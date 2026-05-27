@@ -171,3 +171,68 @@ async def test_agent_config_revision_and_runtime_session_reset_write_activity(
         "agent.updated",
         "agent.runtime_session_reset",
     ]
+
+
+async def test_wakeup_executes_process_runtime_and_records_failed_run(
+    session: AsyncSession,
+) -> None:
+    from packages.database.schema import (
+        AgentWakeupRequest,
+        HeartbeatRun,
+        HeartbeatRunEvent,
+    )
+    from server.services.agents import AgentService
+    from server.services.heartbeat import HeartbeatService
+
+    org = await _seed_org(session)
+    agent_service = AgentService(session)
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        agent = await agent_service.create_agent(
+            org.id,
+            {"name": "Broken Adapter", "agentRuntimeConfig": {}},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "reason": "validate failure"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        assert run is not None
+        await heartbeat.record_invoked_activity(
+            run, actor_type="board", actor_id="local-board"
+        )
+
+    assert run is not None
+    assert run["status"] == "failed"
+    assert "command" in (run["error"] or "").lower()
+
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    persisted_run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    events = (
+        (
+            await session.execute(
+                select(HeartbeatRunEvent).order_by(HeartbeatRunEvent.seq)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    activities = (
+        (await session.execute(select(ActivityLog).order_by(ActivityLog.created_at)))
+        .scalars()
+        .all()
+    )
+    assert wakeup.status == "failed"
+    assert persisted_run.status == "failed"
+    assert [event.event_type for event in events] == [
+        "lifecycle",
+        "adapter.invoke",
+        "error",
+    ]
+    assert [activity.action for activity in activities] == [
+        "agent.created",
+        "heartbeat.invoked",
+    ]

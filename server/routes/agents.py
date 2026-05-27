@@ -19,6 +19,13 @@ from packages.shared.api_paths.agents import (
     ORG_AGENT_CONFIGURATIONS_PATH,
     ORG_AGENT_LIST_PATH,
 )
+from packages.shared.api_paths.heartbeat import (
+    AGENT_HEARTBEAT_INVOKE_PATH,
+    AGENT_WAKEUP_PATH,
+    HEARTBEAT_RUN_EVENTS_PATH,
+    HEARTBEAT_RUN_PATH,
+    ORG_HEARTBEAT_RUNS_PATH,
+)
 from packages.shared.types.agent import (
     Agent,
     AgentConfiguration,
@@ -28,11 +35,13 @@ from packages.shared.types.agent import (
     AgentTaskSession,
     ResetAgentSessionResult,
 )
+from packages.shared.types.heartbeat import HeartbeatRun, HeartbeatRunEvent
 from packages.shared.validators.agent import (
     validate_create_agent,
     validate_reset_agent_session,
     validate_update_agent,
 )
+from packages.shared.validators.heartbeat import validate_wake_agent
 
 from ..dependencies.access import (
     assert_organization_access,
@@ -41,7 +50,9 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.agents import get_agent_service
+from ..dependencies.heartbeat import get_heartbeat_service
 from ..services.agents import AgentConflictError, AgentService
+from ..services.heartbeat import HeartbeatService
 
 router = APIRouter(tags=["agents"])
 
@@ -324,3 +335,100 @@ async def reset_agent_runtime_session_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return result
+
+
+async def _invoke_agent(
+    id: str,
+    request: Request,
+    body: dict[str, Any],
+    *,
+    service: AgentService,
+    heartbeat: HeartbeatService,
+) -> HeartbeatRun | dict[str, str]:
+    await _get_agent_or_404(id, request=request, service=service)
+    actor = require_actor_identity(request)
+    if actor.actor_type == "agent" and actor.actor_id != id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent can only invoke itself",
+        )
+    try:
+        payload = validate_wake_agent(body)
+        run = await heartbeat.wakeup(
+            id, payload, actor_type=actor.actor_type, actor_id=actor.actor_id
+        )
+    except AgentConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if run is None:
+        return {"status": "skipped"}
+    await heartbeat.record_invoked_activity(
+        run, actor_type=actor.actor_type, actor_id=actor.actor_id
+    )
+    return run
+
+
+@router.post(AGENT_WAKEUP_PATH, status_code=status.HTTP_202_ACCEPTED)
+async def wake_agent_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    service: AgentService = Depends(get_agent_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> HeartbeatRun | dict[str, str]:
+    return await _invoke_agent(id, request, body, service=service, heartbeat=heartbeat)
+
+
+@router.post(AGENT_HEARTBEAT_INVOKE_PATH, status_code=status.HTTP_202_ACCEPTED)
+async def invoke_agent_heartbeat_route(
+    id: str,
+    request: Request,
+    service: AgentService = Depends(get_agent_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> HeartbeatRun | dict[str, str]:
+    return await _invoke_agent(id, request, {}, service=service, heartbeat=heartbeat)
+
+
+@router.get(ORG_HEARTBEAT_RUNS_PATH)
+async def list_heartbeat_runs_route(
+    orgId: str,
+    agentId: str | None = None,
+    _: None = Depends(require_organization_access),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> list[HeartbeatRun]:
+    return await heartbeat.list_for_org(orgId, agentId)
+
+
+@router.get(HEARTBEAT_RUN_PATH)
+async def get_heartbeat_run_route(
+    runId: str,
+    request: Request,
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> HeartbeatRun:
+    run = await heartbeat.get(runId)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
+        )
+    assert_organization_access(request, run["orgId"])
+    return run
+
+
+@router.get(HEARTBEAT_RUN_EVENTS_PATH)
+async def list_heartbeat_run_events_route(
+    runId: str,
+    request: Request,
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> list[HeartbeatRunEvent]:
+    run = await heartbeat.get(runId)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
+        )
+    assert_organization_access(request, run["orgId"])
+    return await heartbeat.list_events(runId)

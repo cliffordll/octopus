@@ -27,3 +27,6 @@ __all__ = [
     "get_agent_service",
     "get_project_service",
 ]
+from .heartbeat import get_heartbeat_service
+
+__all__ = ["get_heartbeat_service"]
