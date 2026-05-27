@@ -33,6 +33,7 @@
 - `tests/` 以兼容测试、工作流测试、scope 与并发测试为主
 - `docs/` 只保留与架构、兼容性、迁移计划相关的文档
 - `docs/` 下的规划类文档保留在根目录；步骤文档使用 `docs/step-NN-<scope>/` 目录，`<scope>` 为简短英文功能后缀，例如 `docs/step-06-orgs/`、`docs/step-13-runs/`
+- Step 开发分支统一使用 `step-<number>-<scope>` 命名，`<scope>` 为当前分支交付的简短英文后缀，例如 `step-10-projects`、`step-12-ui-cli`；不再添加 `feat/`、`contracts-` 等重复前缀
 - 步骤目录及职责以 `docs/FEATURE.md` 的映射表为准；每个步骤只承载一个主要交付对象
 - 已完成步骤必须在 `TASK.md` 中保留可追溯的实施记录，包括范围、修改位置、关键行为、验收证据和已知边界
 - 待开发步骤以 `TASK.md` 作为入口；进入开发后可按复杂度在同一目录拆分 `SPEC.md`、`PLAN.md`、`NOTES.md` 等执行文档
