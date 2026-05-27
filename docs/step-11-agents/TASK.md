@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统
 
-状态：待开发
+状态：开发中（11A 已完成；11B-11D 待开发）
 
 ## 调整原因
 
@@ -30,6 +30,14 @@
 - 落地 agent contract、schema/query、migration、organization scope 与管理 API。
 - 实现创建、读取、更新、暂停、恢复、终止等已证实的生命周期行为。
 - 实现 manager/reporting 关系、workspace key 或同类已证实约束时，仅按上游行为落地，不引入 ownership 或 pod。
+
+实施记录：
+
+- Shared contract 已实现 Agent status、role、runtime type、pause reason、request/response type、validator 与管理 API path。
+- Database 已实现 `agents` schema/query 及 `20260527_000003_agents.py` migration，保留 organization、status、reports-to 和 workspace-key 索引边界。
+- Server 已实现 organization-scoped Agent 创建/列表/详情/更新，以及暂停、恢复、终止生命周期 API；详情响应保留 `chainOfCommand` 与 `access` 结构。
+- Service 已实现短名和 workspace key 派生、同 organization manager 校验、reporting cycle 拒绝、terminated 列表过滤与 activity 输出。
+- Tests 已覆盖 contract、migration、管理路由、跨 organization scope、manager 校验、生命周期 activity 与 reporting cycle。
 
 ### 11B: 配置治理与运行状态
 
