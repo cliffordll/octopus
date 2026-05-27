@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent, type PropsWithChildren } from "react";
+import { NavLink, useParams } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -33,13 +33,12 @@ export function OrganizationPage() {
   }
   if (organization.error) return <ErrorNotice error={organization.error} />;
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>
           <h1>{organization.data?.name ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       <form className="panel form narrow" onSubmit={submit}>
         <label>
@@ -53,19 +52,29 @@ export function OrganizationPage() {
         {update.error && <ErrorNotice error={update.error} />}
         <button type="submit">保存组织</button>
       </form>
-    </>
+    </OrgWorkspace>
   );
 }
 
 export function OrgNavigation({ orgId }: { orgId: string }) {
   return (
-    <nav className="local-nav" aria-label="组织导航">
-      <Link to={`/orgs/${orgId}/issues`}>Issues</Link>
-      <Link to={`/orgs/${orgId}/approvals`}>Approvals</Link>
-      <Link to={`/orgs/${orgId}/projects`}>Projects</Link>
-      <Link to={`/orgs/${orgId}/agents`}>Agents</Link>
-      <Link to={`/orgs/${orgId}/chats`}>Chats</Link>
-      <Link to={`/orgs/${orgId}`}>设置</Link>
-    </nav>
+    <aside className="org-sidebar">
+      <p className="org-sidebar-label">Organization</p>
+      <h2>管理</h2>
+      <nav className="local-nav" aria-label="组织导航">
+        <NavLink to={`/orgs/${orgId}/projects`}>项目</NavLink>
+        <NavLink to={`/orgs/${orgId}/approvals`}>审批</NavLink>
+        <NavLink end to={`/orgs/${orgId}`}>设置</NavLink>
+      </nav>
+    </aside>
+  );
+}
+
+export function OrgWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+  return (
+    <div className="org-workspace">
+      <OrgNavigation orgId={orgId} />
+      <div className="org-content">{children}</div>
+    </div>
   );
 }

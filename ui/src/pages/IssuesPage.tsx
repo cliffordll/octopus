@@ -4,8 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { issuesApi } from "../api/issues";
 import type { IssueStatus } from "../api/types";
 import { Badge } from "../components/Badge";
+import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
 
 const STATUSES: Array<IssueStatus | ""> = [
   "",
@@ -39,13 +39,12 @@ export function IssuesPage() {
     if (title.trim()) create.mutate({ title: title.trim() });
   }
   return (
-    <>
+    <IssuesWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Issues</p>
           <h1>工作列表</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       <div className="toolbar">
         <label>
@@ -79,6 +78,6 @@ export function IssuesPage() {
           </article>
         ))}
       </section>
-    </>
+    </IssuesWorkspace>
   );
 }

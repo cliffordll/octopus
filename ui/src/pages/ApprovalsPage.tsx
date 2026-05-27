@@ -5,7 +5,7 @@ import { approvalsApi } from "../api/approvals";
 import type { ApprovalStatus, ApprovalType } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
+import { OrgWorkspace } from "./OrganizationPage";
 
 const TYPES: ApprovalType[] = [
   "hire_agent",
@@ -42,10 +42,9 @@ export function ApprovalsPage() {
     }
   }
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Approvals</p><h1>审批队列</h1></div>
-        <OrgNavigation orgId={orgId} />
       </header>
       <div className="grid-two">
         <section className="panel">
@@ -86,6 +85,6 @@ export function ApprovalsPage() {
           <button type="submit">提交审批</button>
         </form>
       </div>
-    </>
+    </OrgWorkspace>
   );
 }

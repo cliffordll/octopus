@@ -5,7 +5,7 @@ import { projectsApi } from "../api/projects";
 import type { ProjectStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
+import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
 
@@ -31,10 +31,9 @@ export function ProjectsPage() {
     if (name.trim()) create.mutate();
   }
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Projects</p><h1>项目</h1></div>
-        <OrgNavigation orgId={orgId} />
       </header>
       <div className="grid-two">
         <section className="panel">
@@ -65,6 +64,6 @@ export function ProjectsPage() {
           <button type="submit">新建 Project</button>
         </form>
       </div>
-    </>
+    </OrgWorkspace>
   );
 }

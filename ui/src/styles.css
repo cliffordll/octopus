@@ -1,6 +1,6 @@
 :root {
   color: #e5e7eb;
-  background: #0b0e13;
+  background: #090b10;
   font-family: "Segoe UI", Arial, sans-serif;
   line-height: 1.45;
   color-scheme: dark;
@@ -28,21 +28,37 @@ h1, h2, p {
 }
 
 .shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 204px minmax(0, 1fr);
 }
 
 .sidebar {
-  padding: 28px 20px;
-  border-right: 1px solid #202633;
-  background: #080b10;
+  padding: 18px 12px;
+  border-right: 1px solid #1d2430;
+  background: #07090e;
+  position: relative;
 }
 
 .product {
-  letter-spacing: 0.22em;
-  color: #73b6ff;
+  color: #edf2fa;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 16px 8px 0;
+}
+
+.product-mark {
+  align-items: center;
+  background: #2366b4;
+  border-radius: 9px;
+  color: #f5f8ff;
+  display: flex;
+  font-size: 18px;
   font-weight: 700;
+  height: 36px;
+  justify-content: center;
+  margin: 4px 8px 0;
+  width: 36px;
 }
 
 .product-subtitle, .muted {
@@ -50,24 +66,182 @@ h1, h2, p {
 }
 
 .product-subtitle {
-  margin: 5px 0 38px;
+  margin: 3px 8px 30px;
   font-size: 13px;
 }
 
+.global-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .global-nav a {
-  display: block;
-  border-radius: 7px;
-  padding: 10px 12px;
+  align-items: center;
+  border-radius: 8px;
+  color: #aab2c2;
+  display: flex;
+  gap: 10px;
+  padding: 9px 10px;
+}
+
+.global-nav .nav-disabled {
+  align-items: center;
+  color: #556175;
+  display: flex;
+  gap: 10px;
+  padding: 9px 10px;
 }
 
 .global-nav a.active {
-  background: #162338;
-  color: #77b5ff;
+  background: #151b26;
+  color: #f2f5fb;
+}
+
+.nav-icon {
+  align-items: center;
+  background: #151b25;
+  border-radius: 5px;
+  color: #8ebbf1;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.organization-switcher {
+  bottom: 22px;
+  left: 20px;
+  padding-top: 16px;
+  position: absolute;
+  right: 20px;
+}
+
+.organization-trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #1d2430;
+  border-radius: 10px;
+  color: #e6ebf3;
+  display: flex;
+  gap: 10px;
+  padding: 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.organization-trigger:hover {
+  background: #111722;
+}
+
+.organization-avatar {
+  align-items: center;
+  background: #253246;
+  border-radius: 50%;
+  color: #b7d6fa;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.organization-trigger-label {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-trigger-label small {
+  color: #68748a;
+  display: block;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.organization-menu {
+  background: #111722;
+  border: 1px solid #273142;
+  border-radius: 10px;
+  bottom: 58px;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 36%);
+  left: 0;
+  padding: 8px;
+  position: absolute;
+  width: 232px;
+}
+
+.organization-menu p {
+  color: #6f7b90;
+  font-size: 11px;
+  letter-spacing: .08em;
+  margin: 4px 8px 8px;
+  text-transform: uppercase;
+}
+
+.organization-menu a {
+  align-items: center;
+  border-radius: 7px;
+  color: #aeb7c7;
+  display: flex;
+  gap: 9px;
+  padding: 8px;
+}
+
+.organization-menu a.selected, .organization-menu a:hover {
+  background: #192231;
+  color: #f1f4fa;
 }
 
 .workspace {
-  padding: 34px 42px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-global {
   max-width: 1240px;
+  overflow: auto;
+  padding: 34px 42px;
+}
+
+.org-workspace {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.org-sidebar {
+  background: #0c1017;
+  border-right: 1px solid #1d2430;
+  padding: 26px 14px;
+}
+
+.org-sidebar-label {
+  color: #647086;
+  font-size: 11px;
+  letter-spacing: .12em;
+  margin: 0 10px 6px;
+  text-transform: uppercase;
+}
+
+.org-sidebar h2 {
+  color: #e8edf5;
+  font-size: 17px;
+  font-weight: 500;
+  margin: 0 10px 26px;
+}
+
+.org-content {
+  max-width: 1120px;
+  min-width: 0;
+  overflow: auto;
+  padding: 32px 36px 42px;
 }
 
 .page-header {
@@ -92,11 +266,53 @@ h1, h2, p {
 
 .local-nav {
   display: flex;
-  gap: 18px;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .local-nav a {
-  color: #aab2c2;
+  border-radius: 7px;
+  color: #97a1b2;
+  padding: 9px 11px;
+}
+
+.local-nav a.active {
+  background: #171e2b;
+  color: #eff3f9;
+}
+
+.context-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.context-nav a {
+  align-items: center;
+  border-radius: 7px;
+  color: #9da8ba;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 9px 10px;
+}
+
+.context-nav a.active, .context-nav a:hover {
+  background: #171e2b;
+  color: #eff3f9;
+}
+
+.context-nav a span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-empty {
+  color: #68748a;
+  font-size: 13px;
+  margin: 10px;
 }
 
 .grid-two {
@@ -106,10 +322,10 @@ h1, h2, p {
 }
 
 .panel {
-  background: #111620;
-  border: 1px solid #202938;
-  border-radius: 10px;
-  padding: 20px;
+  background: #10151e;
+  border: 1px solid #1e2633;
+  border-radius: 12px;
+  padding: 22px;
 }
 
 .panel h2 {
@@ -298,17 +514,55 @@ pre {
 @media (max-width: 820px) {
   .shell {
     display: block;
+    height: auto;
   }
   .sidebar {
     border-bottom: 1px solid #202633;
     border-right: 0;
     padding: 18px;
   }
+  .product-mark, .product, .product-subtitle {
+    display: inline-flex;
+    margin: 0 10px 12px 0;
+    vertical-align: middle;
+  }
+  .organization-switcher {
+    display: inline-block;
+    margin: 0 0 12px;
+    padding: 0;
+    position: relative;
+  }
   .product-subtitle {
     margin-bottom: 12px;
   }
   .workspace {
+    overflow: visible;
+  }
+  .workspace-global {
     padding: 22px 16px;
+  }
+  .org-workspace {
+    display: block;
+    height: auto;
+  }
+  .org-sidebar {
+    border-bottom: 1px solid #202633;
+    border-right: 0;
+    padding: 16px;
+  }
+  .org-sidebar-label, .org-sidebar h2 {
+    display: none;
+  }
+  .local-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .org-content {
+    padding: 22px 16px;
+  }
+  .context-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
   .grid-two, .toolbar {
     display: flex;

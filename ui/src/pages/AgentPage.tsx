@@ -3,8 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { Badge } from "../components/Badge";
+import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
 
 export function AgentPage() {
   const { orgId = "", agentId = "" } = useParams();
@@ -24,13 +24,12 @@ export function AgentPage() {
   });
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
-    <>
+    <AgentsWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回 Agents</Link>
           <h1>{agent.data?.name ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       {agent.data && (
         <div className="grid-two detail-grid">
@@ -61,6 +60,6 @@ export function AgentPage() {
           </section>
         </div>
       )}
-    </>
+    </AgentsWorkspace>
   );
 }

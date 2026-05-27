@@ -7,6 +7,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("creates a chat with a selected agent without showing organization management", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer" }]);
+    }
+    if (path === "/api/orgs" && init?.method === "GET") {
+      return respond([{ id: "org-1", urlKey: "core", name: "核心团队", status: "active" }]);
+    }
+    return respond({ id: "chat-2", title: "部署讨论", status: "active" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats");
+  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "消息导航" })).toBeInTheDocument();
+
+  await userEvent.type(screen.getByLabelText("标题"), "部署讨论");
+  await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.click(screen.getByRole("button", { name: "新建对话" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/chats",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ title: "部署讨论", preferredAgentId: "agent-1" }),
+    }),
+  );
+});
+
 it("creates a chat and sends messages to its selected agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
