@@ -16,7 +16,22 @@ from packages.database.queries.agents import (
     list_org_agents,
     update_agent,
 )
-from packages.database.schema import Agent as AgentRow
+from packages.database.queries.agent_state import (
+    create_config_revision,
+    create_runtime_state,
+    delete_task_sessions,
+    get_config_revision,
+    get_runtime_state,
+    list_config_revisions,
+    list_task_sessions,
+    update_runtime_state,
+)
+from packages.database.schema import (
+    Agent as AgentRow,
+    AgentConfigRevision as AgentConfigRevisionRow,
+    AgentRuntimeState as AgentRuntimeStateRow,
+    AgentTaskSession as AgentTaskSessionRow,
+)
 from packages.shared.constants.agent import (
     AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX,
     DEFAULT_AGENT_RUNTIME_TYPE,
@@ -31,12 +46,35 @@ from packages.shared.types.agent import (
     Agent,
     AgentAccessState,
     AgentChainOfCommandEntry,
+    AgentConfigRevision,
+    AgentConfiguration,
     AgentDetail,
+    AgentRuntimeState,
+    AgentTaskSession,
     CreateAgentPayload,
+    ResetAgentSessionPayload,
+    ResetAgentSessionResult,
     UpdateAgentPayload,
 )
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
+_SENSITIVE_KEY_PATTERN = re.compile(
+    r"(api[-_]?key|access[-_]?token|auth(?:_?token)?|authorization|bearer|secret|passwd|password|credential|jwt|private[-_]?key|cookie|connectionstring)",
+    re.IGNORECASE,
+)
+_REDACTED = "***REDACTED***"
+_CONFIG_REVISION_FIELDS: tuple[str, ...] = (
+    "name",
+    "role",
+    "title",
+    "reportsTo",
+    "capabilities",
+    "agentRuntimeType",
+    "agentRuntimeConfig",
+    "runtimeConfig",
+    "budgetMonthlyCents",
+    "metadata",
+)
 
 
 class AgentConflictError(ValueError):
@@ -72,6 +110,29 @@ def _normalized_permissions(value: object, role: str) -> dict[str, bool]:
     if isinstance(value, dict) and isinstance(value.get("canCreateAgents"), bool):
         return {"canCreateAgents": bool(value["canCreateAgents"])}
     return {"canCreateAgents": role == "ceo"}
+
+
+def _sanitize_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _REDACTED
+            if _SENSITIVE_KEY_PATTERN.search(key)
+            else _sanitize_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_value(item) for item in value]
+    return value
+
+
+def _contains_redacted(value: Any) -> bool:
+    if value == _REDACTED:
+        return True
+    if isinstance(value, dict):
+        return any(_contains_redacted(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_redacted(item) for item in value)
+    return False
 
 
 class AgentService:
@@ -156,6 +217,8 @@ class AgentService:
         *,
         actor_type: str,
         actor_id: str,
+        revision_source: str = "patch",
+        rolled_back_from_revision_id: str | None = None,
     ) -> Agent | None:
         existing = await get_agent_by_id(self._session, agent_id)
         if existing is None:
@@ -214,9 +277,31 @@ class AgentService:
         values = {
             field_map[key]: value for key, value in patch.items() if key in field_map
         }
+        before_config = self._config_snapshot(existing)
         row = await update_agent(self._session, agent_id, values)
         if row is None:
             return None
+        after_config = self._config_snapshot(row)
+        changed_keys = [
+            key
+            for key in _CONFIG_REVISION_FIELDS
+            if before_config[key] != after_config[key]
+        ]
+        if changed_keys:
+            await create_config_revision(
+                self._session,
+                {
+                    "org_id": row.org_id,
+                    "agent_id": row.id,
+                    "created_by_agent_id": actor_id if actor_type == "agent" else None,
+                    "created_by_user_id": actor_id if actor_type != "agent" else None,
+                    "source": revision_source,
+                    "rolled_back_from_revision_id": rolled_back_from_revision_id,
+                    "changed_keys": changed_keys,
+                    "before_config": _sanitize_value(before_config),
+                    "after_config": _sanitize_value(after_config),
+                },
+            )
         if patch:
             await insert_activity_log(
                 self._session,
@@ -229,6 +314,147 @@ class AgentService:
                 details=patch,
             )
         return self._to_agent(row)
+
+    async def get_configuration(self, agent_id: str) -> AgentConfiguration | None:
+        row = await get_agent_by_id(self._session, agent_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "name": row.name,
+            "role": cast(AgentRole, row.role),
+            "title": row.title,
+            "status": cast(AgentStatus, row.status),
+            "reportsTo": row.reports_to,
+            "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
+            "agentRuntimeConfig": cast(
+                dict[str, Any], _sanitize_value(row.agent_runtime_config)
+            ),
+            "runtimeConfig": cast(dict[str, Any], _sanitize_value(row.runtime_config)),
+            "permissions": cast(
+                Any, _normalized_permissions(row.permissions, row.role)
+            ),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    async def list_configurations_for_org(
+        self, org_id: str
+    ) -> list[AgentConfiguration]:
+        rows = await list_org_agents(self._session, org_id)
+        configurations: list[AgentConfiguration] = []
+        for row in rows:
+            if row.status == "terminated":
+                continue
+            configuration = await self.get_configuration(row.id)
+            if configuration is not None:
+                configurations.append(configuration)
+        return configurations
+
+    async def list_config_revisions(self, agent_id: str) -> list[AgentConfigRevision]:
+        rows = await list_config_revisions(self._session, agent_id)
+        return [self._to_config_revision(row) for row in rows]
+
+    async def get_config_revision(
+        self, agent_id: str, revision_id: str
+    ) -> AgentConfigRevision | None:
+        row = await get_config_revision(self._session, agent_id, revision_id)
+        return self._to_config_revision(row) if row is not None else None
+
+    async def rollback_config_revision(
+        self,
+        agent_id: str,
+        revision_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> Agent | None:
+        revision = await get_config_revision(self._session, agent_id, revision_id)
+        if revision is None:
+            return None
+        if _contains_redacted(revision.after_config):
+            raise ValueError(
+                "Cannot roll back a revision that contains redacted secret values"
+            )
+        snapshot = revision.after_config
+        payload = cast(
+            UpdateAgentPayload,
+            {key: snapshot[key] for key in _CONFIG_REVISION_FIELDS if key in snapshot},
+        )
+        updated = await self.update_agent(
+            agent_id,
+            payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            revision_source="rollback",
+            rolled_back_from_revision_id=revision.id,
+        )
+        if updated is not None:
+            await insert_activity_log(
+                self._session,
+                org_id=updated["orgId"],
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action="agent.config_rolled_back",
+                entity_type="agent",
+                entity_id=agent_id,
+                details={"revisionId": revision_id},
+            )
+        return updated
+
+    async def get_runtime_state(self, agent_id: str) -> AgentRuntimeState | None:
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None:
+            return None
+        state = await self._ensure_runtime_state(agent)
+        sessions = await list_task_sessions(self._session, agent_id)
+        latest = sessions[0] if sessions else None
+        return self._to_runtime_state(state, latest)
+
+    async def list_task_sessions(self, agent_id: str) -> list[AgentTaskSession]:
+        rows = await list_task_sessions(self._session, agent_id)
+        return [self._to_task_session(row) for row in rows]
+
+    async def reset_runtime_session(
+        self,
+        agent_id: str,
+        payload: ResetAgentSessionPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ResetAgentSessionResult | None:
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None:
+            return None
+        state = await self._ensure_runtime_state(agent)
+        task_key = payload.get("taskKey")
+        cleared = await delete_task_sessions(
+            self._session,
+            org_id=agent.org_id,
+            agent_id=agent.id,
+            task_key=task_key,
+            agent_runtime_type=agent.agent_runtime_type if task_key else None,
+        )
+        values: dict[str, Any] = {"session_id": None, "last_error": None}
+        if not task_key:
+            values["state_json"] = {}
+        updated = await update_runtime_state(self._session, state.agent_id, values)
+        if updated is None:
+            return None
+        await insert_activity_log(
+            self._session,
+            org_id=agent.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.runtime_session_reset",
+            entity_type="agent",
+            entity_id=agent.id,
+            details={"taskKey": task_key},
+        )
+        return {
+            **self._to_runtime_state(updated, None),
+            "clearedTaskSessions": cleared,
+        }
 
     async def pause_agent(
         self, agent_id: str, *, actor_type: str, actor_id: str
@@ -378,6 +604,99 @@ class AgentService:
             ),
             "lastHeartbeatAt": _iso(row.last_heartbeat_at),
             "metadata": row.metadata_json,
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    def _config_snapshot(self, row: AgentRow) -> dict[str, Any]:
+        return {
+            "name": row.name,
+            "role": row.role,
+            "title": row.title,
+            "reportsTo": row.reports_to,
+            "capabilities": row.capabilities,
+            "agentRuntimeType": row.agent_runtime_type,
+            "agentRuntimeConfig": row.agent_runtime_config,
+            "runtimeConfig": row.runtime_config,
+            "budgetMonthlyCents": row.budget_monthly_cents,
+            "metadata": row.metadata_json,
+        }
+
+    def _to_config_revision(self, row: AgentConfigRevisionRow) -> AgentConfigRevision:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "agentId": row.agent_id,
+            "createdByAgentId": row.created_by_agent_id,
+            "createdByUserId": row.created_by_user_id,
+            "source": row.source,
+            "rolledBackFromRevisionId": row.rolled_back_from_revision_id,
+            "changedKeys": row.changed_keys,
+            "beforeConfig": cast(dict[str, Any], _sanitize_value(row.before_config)),
+            "afterConfig": cast(dict[str, Any], _sanitize_value(row.after_config)),
+            "createdAt": row.created_at.isoformat(),
+        }
+
+    async def _ensure_runtime_state(self, agent: AgentRow) -> AgentRuntimeStateRow:
+        existing = await get_runtime_state(self._session, agent.id)
+        if existing is not None:
+            return existing
+        return await create_runtime_state(
+            self._session,
+            {
+                "agent_id": agent.id,
+                "org_id": agent.org_id,
+                "agent_runtime_type": agent.agent_runtime_type,
+                "state_json": {},
+            },
+        )
+
+    def _to_runtime_state(
+        self, row: AgentRuntimeStateRow, latest_session: AgentTaskSessionRow | None
+    ) -> AgentRuntimeState:
+        return {
+            "agentId": row.agent_id,
+            "orgId": row.org_id,
+            "agentRuntimeType": row.agent_runtime_type,
+            "sessionId": row.session_id,
+            "stateJson": row.state_json,
+            "lastRunId": row.last_run_id,
+            "lastRunStatus": row.last_run_status,
+            "totalInputTokens": row.total_input_tokens,
+            "totalOutputTokens": row.total_output_tokens,
+            "totalCachedInputTokens": row.total_cached_input_tokens,
+            "totalCostCents": row.total_cost_cents,
+            "lastError": row.last_error,
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+            "sessionDisplayId": (
+                latest_session.session_display_id
+                if latest_session is not None
+                else row.session_id
+            ),
+            "sessionParamsJson": (
+                cast(
+                    dict[str, Any] | None,
+                    _sanitize_value(latest_session.session_params_json),
+                )
+                if latest_session is not None
+                else None
+            ),
+        }
+
+    def _to_task_session(self, row: AgentTaskSessionRow) -> AgentTaskSession:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "agentId": row.agent_id,
+            "agentRuntimeType": row.agent_runtime_type,
+            "taskKey": row.task_key,
+            "sessionParamsJson": cast(
+                dict[str, Any] | None, _sanitize_value(row.session_params_json)
+            ),
+            "sessionDisplayId": row.session_display_id,
+            "lastRunId": row.last_run_id,
+            "lastError": row.last_error,
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }

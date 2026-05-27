@@ -11,7 +11,11 @@ from ..constants.agent import (
     DEFAULT_AGENT_ROLE,
     DEFAULT_AGENT_RUNTIME_TYPE,
 )
-from ..types.agent import CreateAgentPayload, UpdateAgentPayload
+from ..types.agent import (
+    CreateAgentPayload,
+    ResetAgentSessionPayload,
+    UpdateAgentPayload,
+)
 
 _CREATE_FIELDS = {
     "name",
@@ -119,3 +123,14 @@ def validate_update_agent(payload: Mapping[str, Any]) -> UpdateAgentPayload:
     ):
         raise ValueError("'replaceAgentRuntimeConfig' must be a boolean")
     return cast(UpdateAgentPayload, dict(payload))
+
+
+def validate_reset_agent_session(
+    payload: Mapping[str, Any],
+) -> ResetAgentSessionPayload:
+    _reject_unknown_fields(payload, {"taskKey"})
+    _nullable_string(payload, "taskKey")
+    result = dict(payload)
+    if isinstance(result.get("taskKey"), str):
+        result["taskKey"] = result["taskKey"].strip() or None
+    return cast(ResetAgentSessionPayload, result)

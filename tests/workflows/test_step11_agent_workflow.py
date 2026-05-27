@@ -101,3 +101,73 @@ async def test_agent_lifecycle_writes_activity_and_prevents_reporting_cycle(
         "agent.resumed",
         "agent.terminated",
     ]
+
+
+async def test_agent_config_revision_and_runtime_session_reset_write_activity(
+    session: AsyncSession,
+) -> None:
+    from packages.database.schema import AgentRuntimeState, AgentTaskSession
+    from server.services.agents import AgentService
+
+    org = await _seed_org(session)
+    org_id = org.id
+    service = AgentService(session)
+    async with async_transaction(session):
+        agent = await service.create_agent(
+            org_id, {"name": "Configured"}, actor_type="board", actor_id="local-board"
+        )
+        await service.update_agent(
+            agent["id"],
+            {"runtimeConfig": {"heartbeat": "enabled"}},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        session.add(
+            AgentRuntimeState(
+                agent_id=agent["id"],
+                org_id=org_id,
+                agent_runtime_type="process",
+                session_id="session-1",
+                state_json={"resume": True},
+            )
+        )
+        session.add(
+            AgentTaskSession(
+                org_id=org_id,
+                agent_id=agent["id"],
+                agent_runtime_type="process",
+                task_key="issue-1",
+                session_display_id="session-1",
+            )
+        )
+
+    revisions = await service.list_config_revisions(agent["id"])
+    assert revisions[0]["changedKeys"] == ["runtimeConfig"]
+    await session.rollback()
+
+    async with async_transaction(session):
+        reset = await service.reset_runtime_session(
+            agent["id"],
+            {"taskKey": "issue-1"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+    assert reset is not None
+    assert reset["clearedTaskSessions"] == 1
+
+    rows = (
+        (
+            await session.execute(
+                select(ActivityLog)
+                .where(ActivityLog.org_id == org_id)
+                .order_by(ActivityLog.created_at, ActivityLog.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [row.action for row in rows] == [
+        "agent.created",
+        "agent.updated",
+        "agent.runtime_session_reset",
+    ]

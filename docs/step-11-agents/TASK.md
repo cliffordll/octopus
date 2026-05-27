@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统
 
-状态：开发中（11A 已完成；11B-11D 待开发）
+状态：开发中（11A-11B 已完成；11C-11D 待开发）
 
 ## 调整原因
 
@@ -44,6 +44,14 @@
 - 落地 runtime 配置表示、校验、敏感字段处理及 configuration revision 边界。
 - 落地运行所需的 runtime state、task session、wakeup request 等已证实持久化对象。
 - 纳入权限、hire 或 API key 行为时，必须先核实其是否属于本步骤首个可运行路径或上游 Agent 管理的强制契约。
+
+实施记录：
+
+- Database 已实现 `agent_config_revisions`、`agent_runtime_state`、`agent_task_sessions` 与 `agent_wakeup_requests` schema/query 及 `20260527_000004_agent_state.py` migration。
+- Agent 配置型更新已写入脱敏 revision snapshot，并支持配置列表/详情、revision 列表/详情与无敏感占位快照 rollback。
+- Runtime state 与 task session 已实现只读查询和 session reset；reset 支持按 task key 清理并记录 `agent.runtime_session_reset` activity。
+- `agent_wakeup_requests` 本步骤只建立持久化边界，实际 wakeup 创建和状态推进归入 11C 执行闭环。
+- Hire、permissions 独立管理和 API key 尚不属于当前首个运行路径的前置实现，保持延后核对，不在本步骤凭空扩展权限流程。
 
 ### 11C: 首个可运行闭环
 
