@@ -42,6 +42,22 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
     get_parser.set_defaults(handler=get_agent)
+    configuration_parser = actions.add_parser("configuration")
+    configuration_parser.add_argument("agent_id")
+    configuration_parser.set_defaults(handler=get_configuration)
+    revisions_parser = actions.add_parser("config-revisions")
+    revisions_parser.add_argument("agent_id")
+    revisions_parser.set_defaults(handler=list_config_revisions)
+    revision_parser = actions.add_parser("config-revision")
+    revision_parser.add_argument("agent_id")
+    revision_parser.add_argument("revision_id")
+    revision_parser.set_defaults(handler=get_config_revision)
+    runtime_state_parser = actions.add_parser("runtime-state")
+    runtime_state_parser.add_argument("agent_id")
+    runtime_state_parser.set_defaults(handler=get_runtime_state)
+    task_sessions_parser = actions.add_parser("task-sessions")
+    task_sessions_parser.add_argument("agent_id")
+    task_sessions_parser.set_defaults(handler=list_task_sessions)
     create_parser = actions.add_parser("create")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--name", required=True)
@@ -79,6 +95,29 @@ def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def get_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}")
+
+
+def get_configuration(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/configuration")
+
+
+def list_config_revisions(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/config-revisions")
+
+
+def get_config_revision(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET",
+        f"/api/agents/{args.agent_id}/config-revisions/{args.revision_id}",
+    )
+
+
+def get_runtime_state(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/runtime-state")
+
+
+def list_task_sessions(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/task-sessions")
 
 
 def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:

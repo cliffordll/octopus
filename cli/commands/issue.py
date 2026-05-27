@@ -52,7 +52,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     comment_list.add_argument("issue_id")
     comment_list.set_defaults(handler=list_comments)
 
-    comment_add = actions.add_parser("comment-add", help="Add an issue comment")
+    comment_add = actions.add_parser(
+        "comment", aliases=["comment-add"], help="Add an issue comment"
+    )
     comment_add.add_argument("issue_id")
     comment_add.add_argument("--body", required=True)
     comment_add.set_defaults(handler=add_comment)

@@ -19,6 +19,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     events_parser = actions.add_parser("events")
     events_parser.add_argument("run_id")
     events_parser.set_defaults(handler=list_events)
+    run_parser = actions.add_parser("run")
+    run_parser.add_argument("--agent-id", required=True)
+    run_parser.set_defaults(handler=run_heartbeat)
 
 
 def list_runs(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -34,3 +37,9 @@ def get_run(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def list_events(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/heartbeat-runs/{args.run_id}/events")
+
+
+def run_heartbeat(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST", f"/api/agents/{args.agent_id}/heartbeat/invoke", json={}
+    )
