@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import uuid
 from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.organizations import (
+    create_organization,
     get_organization_by_id,
     list_organizations,
     update_organization,
@@ -45,6 +47,42 @@ class OrgService:
         row = await get_organization_by_id(self._session, org_id)
         if row is None:
             return None
+        return _to_detail(row)
+
+    async def create(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> OrganizationDetail:
+        org_id = str(uuid.uuid4())
+        row = await create_organization(
+            self._session,
+            id=org_id,
+            url_key=f"org-{org_id[:8]}",
+            name=str(payload["name"]).strip(),
+            description=cast(str | None, payload.get("description")),
+            issue_prefix=org_id[:6].upper(),
+            budget_monthly_cents=cast(int, payload.get("budgetMonthlyCents", 0)),
+            default_chat_issue_creation_mode=cast(
+                str, payload.get("defaultChatIssueCreationMode", "manual_approval")
+            ),
+            brand_color=cast(str | None, payload.get("brandColor")),
+            require_board_approval_for_new_agents=cast(
+                bool, payload.get("requireBoardApprovalForNewAgents", True)
+            ),
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=row.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="organization.created",
+            entity_type="organization",
+            entity_id=row.id,
+            details=dict(payload),
+        )
         return _to_detail(row)
 
     async def update(

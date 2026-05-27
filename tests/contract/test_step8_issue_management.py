@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import StaticPool
+
+from packages.database.clients import async_transaction
+from packages.database.schema import (
+    ActivityLog,
+    Base,
+    Issue,
+    IssueComment,
+    Organization,
+)
+from server.app import app as fastapi_app
+
+
+@pytest.fixture
+async def engine() -> AsyncIterator[AsyncEngine]:
+    eng = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        yield eng
+    finally:
+        await eng.dispose()
+
+
+@pytest.fixture
+async def session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest.fixture
+async def session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    async with session_factory() as s:
+        yield s
+
+
+@pytest.fixture
+def app(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[FastAPI]:
+    original_settings = fastapi_app.state.settings
+    fastapi_app.state.session_factory = session_factory
+    fastapi_app.state.settings = replace(original_settings, local_trusted=True)
+    try:
+        yield fastapi_app
+    finally:
+        fastapi_app.state.settings = original_settings
+
+
+async def _seed_org(
+    session: AsyncSession,
+) -> str:
+    org_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Organization(
+                id=org_id,
+                url_key=f"u-{org_id[:8]}",
+                name="Step8 Org",
+                issue_prefix=org_id[:6],
+            )
+        )
+    return org_id
+
+
+async def _seed_issue(
+    session: AsyncSession,
+    org_id: str,
+    *,
+    title: str = "Seeded issue",
+    status: str = "todo",
+    project_id: str | None = None,
+    goal_id: str | None = None,
+    assignee_agent_id: str | None = None,
+    origin_kind: str = "manual",
+    origin_id: str | None = None,
+) -> str:
+    issue_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title=title,
+                status=status,
+                project_id=project_id,
+                goal_id=goal_id,
+                assignee_agent_id=assignee_agent_id,
+                origin_kind=origin_kind,
+                origin_id=origin_id,
+            )
+        )
+    return issue_id
+
+
+async def _request(
+    app: FastAPI,
+    method: str,
+    path: str,
+    *,
+    json: dict[str, Any] | None = None,
+) -> tuple[int, Any]:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.request(method, path, json=json)
+    try:
+        body: Any = response.json()
+    except ValueError:
+        body = response.text
+    return response.status_code, body
+
+
+async def test_create_issue_route_returns_200_and_persists(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Created from route", "status": "todo", "originKind": "manual"},
+    )
+
+    assert code == 200
+    assert body["orgId"] == org_id
+    assert body["title"] == "Created from route"
+    assert body["status"] == "todo"
+
+    async with session_factory() as verify:
+        result = await verify.execute(select(Issue).where(Issue.org_id == org_id))
+        rows = result.scalars().all()
+    assert len(rows) == 1
+
+
+async def test_update_issue_route_returns_200_and_updates(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, title="Before", status="todo")
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"title": "After", "status": "in_progress"},
+    )
+
+    assert code == 200
+    assert body["id"] == issue_id
+    assert body["title"] == "After"
+    assert body["status"] == "in_progress"
+
+
+async def test_issue_comment_routes_create_and_list(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id)
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "First route comment"},
+    )
+    assert create_code == 200
+    assert create_body["body"] == "First route comment"
+
+    list_code, list_body = await _request(
+        app, "GET", f"/api/issues/{issue_id}/comments"
+    )
+    assert list_code == 200
+    assert len(list_body) == 1
+    assert list_body[0]["body"] == "First route comment"
+
+    async with session_factory() as verify:
+        result = await verify.execute(
+            select(IssueComment).where(IssueComment.issue_id == issue_id)
+        )
+        rows = result.scalars().all()
+    assert len(rows) == 1
+
+
+async def test_review_decision_route_applies_status_mapping(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, status="in_review")
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/review-decision",
+        json={"decision": "approve"},
+    )
+
+    assert code == 200
+    assert body["id"] == issue_id
+    assert body["status"] == "done"
+
+
+async def test_org_issue_list_supports_step8_filters(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    await _seed_issue(
+        session,
+        org_id,
+        title="Match route filter",
+        status="todo",
+        project_id="proj-1",
+        goal_id="goal-1",
+        assignee_agent_id="agent-1",
+        origin_kind="manual",
+        origin_id="origin-1",
+    )
+    await _seed_issue(
+        session,
+        org_id,
+        title="Skip route filter",
+        status="done",
+        project_id="proj-2",
+        goal_id="goal-2",
+        assignee_agent_id="agent-2",
+        origin_kind="automation_execution",
+        origin_id="origin-2",
+    )
+
+    code, body = await _request(
+        app,
+        "GET",
+        "/api/orgs/"
+        f"{org_id}/issues?status=todo&assigneeAgentId=agent-1&projectId=proj-1"
+        "&goalId=goal-1&originKind=manual&originId=origin-1",
+    )
+
+    assert code == 200
+    assert len(body) == 1
+    assert body[0]["title"] == "Match route filter"
+    assert body[0]["projectId"] == "proj-1"
+    assert body[0]["goalId"] == "goal-1"
+    assert body[0]["originKind"] == "manual"
+    assert body[0]["originId"] == "origin-1"
+
+
+async def test_issue_detail_returns_association_fields_and_nulls(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    associated_issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Associated detail",
+        project_id="proj-9",
+        goal_id="goal-9",
+        assignee_agent_id="agent-9",
+        origin_kind="manual",
+        origin_id="origin-9",
+    )
+    plain_issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Plain detail",
+        project_id=None,
+        goal_id=None,
+        assignee_agent_id=None,
+        origin_kind="manual",
+        origin_id=None,
+    )
+
+    associated_code, associated_body = await _request(
+        app, "GET", f"/api/issues/{associated_issue_id}"
+    )
+    assert associated_code == 200
+    assert associated_body["projectId"] == "proj-9"
+    assert associated_body["goalId"] == "goal-9"
+    assert associated_body["assigneeAgentId"] == "agent-9"
+    assert associated_body["originKind"] == "manual"
+    assert associated_body["originId"] == "origin-9"
+
+    plain_code, plain_body = await _request(app, "GET", f"/api/issues/{plain_issue_id}")
+    assert plain_code == 200
+    assert plain_body["projectId"] is None
+    assert plain_body["goalId"] is None
+    assert plain_body["assigneeAgentId"] is None
+    assert plain_body["originId"] is None
+
+
+async def test_update_issue_route_rejects_unknown_field(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id)
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"workspaceConfig": {}},
+    )
+
+    assert code == 422
+    assert "Unsupported field" in body["detail"]
+
+
+async def test_review_decision_route_writes_activity(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, status="in_review")
+
+    code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/review-decision",
+        json={"decision": "needs_followup"},
+    )
+    assert code == 200
+
+    async with session_factory() as verify:
+        result = await verify.execute(
+            select(ActivityLog)
+            .where(ActivityLog.org_id == org_id)
+            .order_by(ActivityLog.created_at, ActivityLog.id)
+        )
+        rows = result.scalars().all()
+    assert [row.action for row in rows] == [
+        "issue.review_decision_recorded",
+        "issue.human_intervention_required",
+    ]

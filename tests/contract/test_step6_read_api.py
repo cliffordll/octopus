@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -16,6 +14,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
+from starlette.responses import Response
 
 from packages.database.clients import async_transaction
 from packages.database.schema import (
@@ -23,11 +22,22 @@ from packages.database.schema import (
     Base,
     Issue,
     Organization,
-    OrganizationOwnership,
 )
 from server.app import app as fastapi_app
 
-POD_ID = "test-pod"
+
+@fastapi_app.middleware("http")
+async def _inject_test_actor(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    actor_type = request.headers.get("x-test-actor-type")
+    if actor_type:
+        request.state.actor = {
+            "type": actor_type,
+            "id": request.headers.get("x-test-actor-id", "test-actor"),
+            "orgId": request.headers.get("x-test-org-id"),
+        }
+    return await call_next(request)
 
 
 @pytest.fixture
@@ -63,20 +73,13 @@ async def session(
 @pytest.fixture
 def app(session_factory: async_sessionmaker[AsyncSession]) -> FastAPI:
     fastapi_app.state.session_factory = session_factory
-    fastapi_app.state.settings = SimpleNamespace(pod_id=POD_ID)
     return fastapi_app
 
 
 async def _seed_org(
     session: AsyncSession,
-    *,
-    owned: bool = True,
-    pod_id: str = POD_ID,
-    expires_at: datetime | None = None,
 ) -> str:
     org_id = str(uuid.uuid4())
-    if expires_at is None:
-        expires_at = datetime.now(UTC) + timedelta(hours=1)
     async with async_transaction(session):
         session.add(
             Organization(
@@ -86,14 +89,6 @@ async def _seed_org(
                 issue_prefix=org_id[:6],
             )
         )
-        if owned:
-            session.add(
-                OrganizationOwnership(
-                    organization_id=org_id,
-                    pod_id=pod_id,
-                    expires_at=expires_at,
-                )
-            )
     return org_id
 
 
@@ -143,18 +138,21 @@ async def _seed_approval(
     return approval_id
 
 
-async def _http_get(app: FastAPI, path: str) -> tuple[int, Any]:
+async def _http_get(
+    app: FastAPI, path: str, *, actor_type: str | None = None
+) -> tuple[int, Any]:
+    headers: dict[str, str] = {}
+    if actor_type is not None:
+        headers["x-test-actor-type"] = actor_type
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get(path)
+        response = await client.get(path, headers=headers)
     return response.status_code, response.json()
 
 
-async def test_org_detail_owned_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}")
+    code, body = await _http_get(app, f"/api/orgs/{org_id}", actor_type="board")
     assert code == 200
     assert body["id"] == org_id
     assert body["status"] == "active"
@@ -163,34 +161,41 @@ async def test_org_detail_owned_returns_200(
     assert "createdAt" in body
 
 
-async def test_org_detail_foreign_returns_403(
+async def test_org_detail_missing_actor_returns_503(
     app: FastAPI, session: AsyncSession
 ) -> None:
-    org_id = await _seed_org(session, pod_id="other-pod")
+    org_id = await _seed_org(session)
     code, body = await _http_get(app, f"/api/orgs/{org_id}")
+    assert code == 503
+    assert "Actor context" in body["detail"]
+
+
+async def test_org_detail_non_board_returns_403(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    code, body = await _http_get(app, f"/api/orgs/{org_id}", actor_type="agent")
     assert code == 403
-    assert "another pod" in body["detail"]
+    assert "Board access required" in body["detail"]
 
 
 async def test_org_detail_missing_returns_404(app: FastAPI) -> None:
-    code, body = await _http_get(app, f"/api/orgs/{uuid.uuid4()}")
+    code, body = await _http_get(app, f"/api/orgs/{uuid.uuid4()}", actor_type="board")
     assert code == 404
     assert body["detail"] == "Organization not found"
 
 
-async def test_org_issues_list_owned_empty(app: FastAPI, session: AsyncSession) -> None:
+async def test_org_issues_list_empty(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues")
+    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues", actor_type="board")
     assert code == 200
     assert body == []
 
 
-async def test_org_issues_list_owned_seeded(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_issues_list_seeded(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     issue_id = await _seed_issue(session, org_id, title="Hello", status="todo")
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues")
+    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues", actor_type="board")
     assert code == 200
     assert len(body) == 1
     assert body[0]["id"] == issue_id
@@ -199,19 +204,13 @@ async def test_org_issues_list_owned_seeded(
     assert body[0]["status"] == "todo"
 
 
-async def test_org_issues_list_foreign_returns_403(
-    app: FastAPI, session: AsyncSession
-) -> None:
-    org_id = await _seed_org(session, pod_id="other-pod")
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues")
-    assert code == 403
-
-
 async def test_org_issues_list_invalid_status_returns_422(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/issues?status=invalid")
+    code, body = await _http_get(
+        app, f"/api/orgs/{org_id}/issues?status=invalid", actor_type="board"
+    )
     assert code == 422
     assert "status" in body["detail"]
 
@@ -226,28 +225,30 @@ async def test_org_issues_list_filters_by_status_and_assignee(
     )
     await _seed_issue(session, org_id, title="A done", status="done")
     code, body = await _http_get(
-        app, f"/api/orgs/{org_id}/issues?status=todo&assigneeAgentId={agent_a}"
+        app,
+        f"/api/orgs/{org_id}/issues?status=todo&assigneeAgentId={agent_a}",
+        actor_type="board",
     )
     assert code == 200
     assert len(body) == 1
     assert body[0]["title"] == "A todo"
 
 
-async def test_org_approvals_list_owned_empty(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_approvals_list_empty(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/approvals")
+    code, body = await _http_get(
+        app, f"/api/orgs/{org_id}/approvals", actor_type="board"
+    )
     assert code == 200
     assert body == []
 
 
-async def test_org_approvals_list_owned_seeded(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_approvals_list_seeded(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     approval_id = await _seed_approval(session, org_id)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/approvals")
+    code, body = await _http_get(
+        app, f"/api/orgs/{org_id}/approvals", actor_type="board"
+    )
     assert code == 200
     assert len(body) == 1
     assert body[0]["id"] == approval_id
@@ -260,7 +261,9 @@ async def test_org_approvals_list_invalid_status_returns_422(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session)
-    code, body = await _http_get(app, f"/api/orgs/{org_id}/approvals?status=draft")
+    code, body = await _http_get(
+        app, f"/api/orgs/{org_id}/approvals?status=draft", actor_type="board"
+    )
     assert code == 422
     assert "status" in body["detail"]
 
@@ -273,27 +276,16 @@ async def test_issue_detail_missing_returns_404(
     assert body["detail"] == "Issue not found"
 
 
-async def test_issue_detail_owned_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_issue_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     issue_id = await _seed_issue(session, org_id, title="Detail")
-    code, body = await _http_get(app, f"/api/issues/{issue_id}")
+    code, body = await _http_get(app, f"/api/issues/{issue_id}", actor_type="board")
     assert code == 200
     assert body["id"] == issue_id
     assert body["orgId"] == org_id
     assert body["title"] == "Detail"
     assert "createdAt" in body
     assert "description" in body  # detail-only field
-
-
-async def test_issue_detail_foreign_org_returns_403(
-    app: FastAPI, session: AsyncSession
-) -> None:
-    org_id = await _seed_org(session, pod_id="other-pod")
-    issue_id = await _seed_issue(session, org_id, title="Foreign")
-    code, body = await _http_get(app, f"/api/issues/{issue_id}")
-    assert code == 403
 
 
 async def test_issues_error_entry_returns_400(app: FastAPI) -> None:
@@ -308,9 +300,7 @@ async def test_approval_detail_missing_returns_404(app: FastAPI) -> None:
     assert body["detail"] == "Approval not found"
 
 
-async def test_approval_detail_owned_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_approval_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     approval_id = await _seed_approval(
         session,
@@ -321,7 +311,9 @@ async def test_approval_detail_owned_returns_200(
             "nested": {"clientSecret": "very-secret", "safe": "value"},
         },
     )
-    code, body = await _http_get(app, f"/api/approvals/{approval_id}")
+    code, body = await _http_get(
+        app, f"/api/approvals/{approval_id}", actor_type="board"
+    )
     assert code == 200
     assert body["id"] == approval_id
     assert body["orgId"] == org_id
@@ -331,12 +323,3 @@ async def test_approval_detail_owned_returns_200(
     assert body["payload"]["nested"]["clientSecret"] == "[REDACTED]"
     assert body["payload"]["nested"]["safe"] == "value"
     assert "decisionNote" in body  # detail-only field
-
-
-async def test_approval_detail_foreign_org_returns_403(
-    app: FastAPI, session: AsyncSession
-) -> None:
-    org_id = await _seed_org(session, pod_id="other-pod")
-    approval_id = await _seed_approval(session, org_id)
-    code, body = await _http_get(app, f"/api/approvals/{approval_id}")
-    assert code == 403
