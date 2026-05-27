@@ -12,6 +12,8 @@ class Settings:
     database_url: str
     auto_migrate: bool
     local_trusted: bool
+    heartbeat_scheduler_enabled: bool
+    heartbeat_scheduler_interval_seconds: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -25,6 +27,15 @@ class Settings:
             ),
             auto_migrate=_env_bool("OCTOPUS_AUTO_MIGRATE", False),
             local_trusted=_env_bool("OCTOPUS_LOCAL_TRUSTED", False),
+            heartbeat_scheduler_enabled=_env_bool(
+                "OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED", True
+            ),
+            heartbeat_scheduler_interval_seconds=max(
+                0.1,
+                float(
+                    os.environ.get("OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS", "5")
+                ),
+            ),
         )
 
 
