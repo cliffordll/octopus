@@ -20,6 +20,19 @@ from packages.database.schema import Base, Organization
 from server.app import create_app
 
 
+def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
+    dependencies = importlib.import_module("server.dependencies")
+    assert {
+        "get_session",
+        "get_org_service",
+        "get_issue_service",
+        "get_approval_service",
+        "get_project_service",
+        "get_agent_service",
+        "get_heartbeat_service",
+    }.issubset(set(dependencies.__all__))
+
+
 def test_agent_contract_modules_define_management_boundary() -> None:
     modules = (
         "packages.shared.api_paths.agents",
@@ -599,6 +612,66 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state_code == 200
     assert state["lastRunId"] == run["id"]
     assert state["lastRunStatus"] == "succeeded"
+
+
+async def test_agent_execution_acceptance_flow_starts_with_org_creation(
+    app: FastAPI,
+) -> None:
+    import sys
+
+    org_code, org = await _request(app, "POST", "/api/orgs", json={"name": "Run Demo"})
+    assert org_code == 200
+    create_code, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org['id']}/agents",
+        json={
+            "name": "Acceptance Runner",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('step-11-ok')"],
+            },
+        },
+    )
+    assert create_code == 201
+
+    invoke_code, run = await _request(
+        app, "POST", f"/api/agents/{agent['id']}/heartbeat/invoke"
+    )
+    assert invoke_code == 202
+    assert run["status"] == "succeeded"
+
+    detail_code, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
+    assert detail_code == 200
+    assert detail["resultJson"]["stdout"].strip() == "step-11-ok"
+
+    state_code, runtime_state = await _request(
+        app, "GET", f"/api/agents/{agent['id']}/runtime-state"
+    )
+    assert state_code == 200
+    assert runtime_state["lastRunId"] == run["id"]
+
+
+async def test_agent_actor_cannot_invoke_another_agent(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-invoke-scope")
+    _, caller = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"name": "Caller"}
+    )
+    _, target = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"name": "Target"}
+    )
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/agents/{target['id']}/wakeup",
+        json={},
+        headers={"x-test-agent-id": caller["id"], "x-test-org-id": org_id},
+    )
+    assert code == 403
+    assert body["detail"] == "Agent can only invoke itself"
 
 
 async def test_agent_cannot_list_other_organization(
