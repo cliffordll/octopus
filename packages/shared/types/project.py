@@ -35,11 +35,18 @@ class ProjectResourceAttachment(TypedDict):
     updatedAt: str
 
 
+class ProjectGoalRef(TypedDict):
+    id: str
+    title: str
+
+
 class ProjectDetail(TypedDict):
     id: str
     orgId: str
     urlKey: str
     goalId: str | None
+    goalIds: list[str]
+    goals: list[ProjectGoalRef]
     name: str
     description: str | None
     status: ProjectStatus
@@ -77,6 +84,8 @@ class CreateProjectInlineResourceInput(TypedDict):
 
 
 class ProjectMutationFields(TypedDict, total=False):
+    goalId: str | None
+    goalIds: list[str]
     description: str | None
     status: ProjectStatus
     leadAgentId: str | None
