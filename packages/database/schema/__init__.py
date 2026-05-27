@@ -9,6 +9,7 @@ from .agent_state import (
     AgentTaskSession,
     AgentWakeupRequest,
 )
+from .heartbeat import HeartbeatRun, HeartbeatRunEvent
 from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
@@ -26,6 +27,8 @@ __all__ = [
     "AgentRuntimeState",
     "AgentTaskSession",
     "AgentWakeupRequest",
+    "HeartbeatRun",
+    "HeartbeatRunEvent",
     "Approval",
     "IssueApproval",
     "IssueComment",
