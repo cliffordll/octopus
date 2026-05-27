@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统
 
-状态：开发中（11A-11C 已完成；11D 待开发）
+状态：已完成并通过基线验收
 
 ## 调整原因
 
@@ -73,6 +73,110 @@
 - 建立 contract、workflow、scope 与 runtime integration tests。
 - 提供从 organization、agent 创建到触发一次执行并查询结果的本地验收 demo。
 - 对照上游记录本步骤已实现和延后的 endpoint、表与副作用清单。
+
+实施记录：
+
+- Contract tests 已覆盖 agent/heartbeat path、枚举、validator、数据库模型、migration、配置脱敏与 process runtime 的 HTTP 执行读取路径。
+- Workflow tests 已覆盖生命周期 activity、配置 revision/session reset activity，以及失败的 process run 对 wakeup、run、event 与 activity 的持久化影响。
+- Scope tests 已覆盖跨 organization agent 列表拒绝，以及 agent 不能调用同 organization 内的其他 agent。
+- Acceptance flow 已覆盖通过 HTTP 创建 organization、创建 process agent、触发一次 heartbeat、读取 run 结果与 runtime state。
+- 验收审查同时修复了新增 heartbeat dependency 覆盖已有 dependency 导出的回归，保留既有 service 导出边界。
+
+## 已实现兼容清单
+
+### API
+
+| Method / path | 本步骤行为 |
+| --- | --- |
+| `GET /api/orgs/{orgId}/agents` | organization 内 agent 列表 |
+| `POST /api/orgs/{orgId}/agents` | 创建 agent |
+| `GET /api/agents/{id}`、`PATCH /api/agents/{id}` | 详情与配置更新 |
+| `POST /api/agents/{id}/pause`、`resume`、`terminate` | 生命周期操作 |
+| `GET /api/orgs/{orgId}/agent-configurations` | organization 配置列表 |
+| `GET /api/agents/{id}/configuration` | 脱敏配置读取 |
+| `GET /api/agents/{id}/config-revisions`、`/{revisionId}` | 配置 revision 查询 |
+| `POST /api/agents/{id}/config-revisions/{revisionId}/rollback` | 无敏感占位的配置回滚 |
+| `GET /api/agents/{id}/runtime-state` | 运行状态查询 |
+| `GET /api/agents/{id}/task-sessions` | task session 查询 |
+| `POST /api/agents/{id}/runtime-state/reset-session` | task session 清理 |
+| `POST /api/agents/{id}/wakeup`、`heartbeat/invoke` | 手动执行触发 |
+| `GET /api/orgs/{orgId}/heartbeat-runs` | run 列表 |
+| `GET /api/heartbeat-runs/{runId}`、`/events` | run 结果与事件读取 |
+
+### Tables
+
+| Table | 本步骤用途 |
+| --- | --- |
+| `agents` | Agent 主对象和生命周期状态 |
+| `agent_config_revisions` | 配置变更快照 |
+| `agent_runtime_state` | 最近运行结果与 runtime 状态 |
+| `agent_task_sessions` | task/session 状态边界 |
+| `agent_wakeup_requests` | wakeup 持久化和状态结果 |
+| `heartbeat_runs` | 执行实例、结果和失败状态 |
+| `heartbeat_run_events` | 运行事件与输出记录 |
+
+### Activity
+
+| Action | 产生条件 |
+| --- | --- |
+| `agent.created`、`agent.updated` | Agent 创建或配置更新 |
+| `agent.paused`、`agent.resumed`、`agent.terminated` | 生命周期动作 |
+| `agent.config_rolled_back` | 配置 revision 回滚 |
+| `agent.runtime_session_reset` | runtime session 清理 |
+| `heartbeat.invoked` | 手动 wakeup/invoke 入口触发执行 |
+
+## 延后能力
+
+- Run 定时触发、队列领取、并发合并、取消、重试和中断恢复归 Step 13。
+- `process` 以外的 runtime adapter、session/environment/usage 深化归 Step 14。
+- 完整 workspace 建立、复用、runtime service 与执行产物归 Step 15。
+- 完整 cost、budget 与扩展 activity 治理归 Step 16。
+- API key、真实用户认证与完整权限行为归对应后续接入步骤。
+
+## 本地验收流程
+
+启动使用本地开发 actor 的服务：
+
+```powershell
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+uv run alembic upgrade head
+uv run server
+```
+
+在另一个 PowerShell 终端执行 organization、agent、heartbeat run 的完整路径：
+
+```powershell
+$base = "http://127.0.0.1:8000"
+$python = (Get-Command python).Source
+
+$org = curl.exe -s -X POST "$base/api/orgs" `
+  -H "Content-Type: application/json" `
+  -d '{"name":"Agent Run Demo"}' | ConvertFrom-Json
+
+$agentBody = @{
+  name = "Executor"
+  role = "engineer"
+  agentRuntimeType = "process"
+  agentRuntimeConfig = @{
+    command = $python
+    args = @("-c", "print('step-11-ok')")
+  }
+} | ConvertTo-Json -Depth 4 -Compress
+
+$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" `
+  -H "Content-Type: application/json" `
+  -d $agentBody | ConvertFrom-Json
+
+$run = curl.exe -s -X POST "$base/api/agents/$($agent.id)/heartbeat/invoke" `
+  -H "Content-Type: application/json" `
+  -d '{}' | ConvertFrom-Json
+
+curl.exe -s "$base/api/heartbeat-runs/$($run.id)"
+curl.exe -s "$base/api/heartbeat-runs/$($run.id)/events"
+curl.exe -s "$base/api/agents/$($agent.id)/runtime-state"
+```
+
+预期结果：`$run.status` 为 `succeeded`，run detail 的 `resultJson.stdout` 包含 `step-11-ok`，runtime state 的 `lastRunId` 与 `$run.id` 相同。
 
 ## 后续步骤边界
 
