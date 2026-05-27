@@ -1,0 +1,44 @@
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function parseError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") {
+      return body.detail;
+    }
+  } catch {
+    // Fall through to the HTTP status when a non-JSON error is returned.
+  }
+  return `Request failed (${response.status})`;
+}
+
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(path, { ...options, headers });
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseError(response));
+  }
+  return (await response.json()) as T;
+}
+
+export function jsonRequest<T>(
+  path: string,
+  method: "POST" | "PATCH",
+  body: unknown,
+): Promise<T> {
+  return request<T>(path, { method, body: JSON.stringify(body) });
+}

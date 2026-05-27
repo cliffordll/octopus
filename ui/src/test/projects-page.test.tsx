@@ -1,0 +1,35 @@
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, expect, it, vi } from "vitest";
+import { renderApp, respond } from "./render-app";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+it("lists and creates projects for an organization", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
+      return respond([
+        { id: "project-1", orgId: "org-1", name: "控制台", status: "planned", urlKey: "console" },
+      ]);
+    }
+    return respond({ id: "project-2", orgId: "org-1", name: "发布流程", status: "backlog" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects");
+  expect(await screen.findByRole("link", { name: "控制台" })).toBeInTheDocument();
+
+  await userEvent.type(screen.getByLabelText("Project 名称"), "发布流程");
+  await userEvent.selectOptions(screen.getByLabelText("Project 状态"), "planned");
+  await userEvent.click(screen.getByRole("button", { name: "新建 Project" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/projects",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ name: "发布流程", status: "planned" }),
+    }),
+  );
+});
