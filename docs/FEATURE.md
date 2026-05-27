@@ -56,20 +56,20 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 8 | Comment 与 Review 流程 | `docs/step-08-review/` |
 | 9 | Approval 管理 | `docs/step-09-approvals/` |
 | 10 | Project 管理 | `docs/step-10-projects/` |
-| 11 | Goal 管理 | `docs/step-11-goals/` |
-| 12 | Agent 与 Runtime 配置 | `docs/step-12-agents/` |
-| 13 | Wakeup 与 Heartbeat Run | `docs/step-13-runs/` |
-| 14 | Runtime Adapter 执行 | `docs/step-14-runtime/` |
+| 11 | Agent 执行子系统与交互闭环 | `docs/step-11-agents/` |
+| 12 | Goal 管理 | `docs/step-12-goals/` |
+| 13 | Run 调度与恢复 | `docs/step-13-runs/` |
+| 14 | 其他 Runtime Adapter 扩展 | `docs/step-14-runtime/` |
 | 15 | Workspace 与执行产物 | `docs/step-15-workspace/` |
 | 16 | Cost、Budget 与 Activity | `docs/step-16-governance/` |
-| 17 | Chat / Messenger | `docs/step-17-chat/` |
+| 17 | Chat / Messenger 扩展 | `docs/step-17-chat/` |
 | 18 | Attachment / Storage | `docs/step-18-storage/` |
 | 19 | Auth / Actor / Access | `docs/step-19-access/` |
 | 20 | Recovery / Observability / Compatibility | `docs/step-20-hardening/` |
 
 主依赖链为：
 
-`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> goals -> agents -> runs -> runtime -> workspace -> governance -> chat -> storage -> access -> hardening`
+`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> governance -> chat-expansion -> storage -> access -> hardening`
 
 ## 5. Step 计划
 
@@ -154,43 +154,44 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：project contract、持久化与 API。
 - 验收：project 可独立维护并供后续 goal 关联。
 
-### Step 11: Goal 管理
+### Step 11: Agent 执行子系统与交互闭环
 
-目录：`docs/step-11-goals/`
+目录：`docs/step-11-agents/`
 
-- 目标：实现 goal 的创建、查询、更新及 project/organization 关联。
-- 交付：goal contract、服务逻辑与工作流测试。
-- 验收：goal 的关联关系和状态字段与上游一致。
+- 目标：实现可被创建、配置、实际触发并通过消息交互的首个 agent 服务端闭环，同时为 Goal 的 `ownerAgentId` 提供合法依赖对象。
+- 已完成交付：agent contract、持久化与管理 API、配置变更边界、wakeup/heartbeat run 基线、统一 runtime adapter contract，以及 `process` 与 `codex_local` 可执行路径。
+- 已完成交付：仅覆盖 agent 执行触发和响应保存的 conversation/message 最小链路；经上游核对，chat assistant invocation 不持久化为 heartbeat run。
+- 验收：agent 可在 organization scope 内由消息触发 `codex_local` 实际执行并查询持久化回复；独立 wakeup/heartbeat run 结果保持可查询；Goal 可安全引用已存在 agent。
 
-### Step 12: Agent 与 Runtime 配置
+### Step 12: Goal 管理
 
-目录：`docs/step-12-agents/`
+目录：`docs/step-12-goals/`
 
-- 目标：实现 agent 及其 runtime 配置的数据与 API 边界。
-- 交付：agent 配置模型、选择规则和敏感配置处理边界。
-- 验收：agent 能以兼容配置被后续 run 调用，不提前实现执行流程。
+- 目标：实现 goal 的创建、查询、更新、层级与 project/organization/owner agent 关联。
+- 交付：goal contract、持久化、服务逻辑、project goal 聚合关系与工作流测试。
+- 验收：goal 的关联关系、层级约束、状态字段和当前已具备依赖的删除阻塞行为与上游一致；治理和独立 automation 依赖随对应步骤补齐。
 
-### Step 13: Wakeup 与 Heartbeat Run
+### Step 13: Run 调度与恢复
 
 目录：`docs/step-13-runs/`
 
-- 目标：实现上游 server 的唤醒触发与 heartbeat run 生命周期。
-- 交付：run 创建、调度触发、状态迁移和运行记录查询。
-- 验收：触发、抢占防护、完成/失败记录符合上游流程。
+- 目标：在 Step 11 可运行基线上补齐上游 server 的调度、并发保护、取消与恢复语义。
+- 交付：周期/队列触发、run claim 与幂等处理、取消/失败恢复及增强运行记录查询。
+- 验收：重复触发、竞争领取、中断恢复和取消流程符合上游行为，且不改变 Step 11 已建立的 run contract。
 
-### Step 14: Runtime Adapter 执行
+### Step 14: 其他 Runtime Adapter 扩展
 
 目录：`docs/step-14-runtime/`
 
-- 目标：以统一 adapter contract 调用实际 runtime。
-- 交付：adapter 接口、首个实现、输入输出和失败语义。
-- 验收：run 可经 adapter 执行，runtime 差异不泄漏到业务服务。
+- 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，扩展其余经确认需要支持的 runtime 种类和兼容能力。
+- 交付：除 `codex_local` 以外的新增 adapter 实现、session/environment/usage 深化及不同 runtime 的错误归一化。
+- 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务。
 
 ### Step 15: Workspace 与执行产物
 
 目录：`docs/step-15-workspace/`
 
-- 目标：实现 run 所需 workspace 建立、使用和产物记录能力。
+- 目标：在 Step 11 最小执行上下文基础上，实现完整 workspace 建立、复用、清理和产物记录能力。
 - 交付：workspace 生命周期与产物引用。
 - 验收：执行上下文和产物可追踪，失败处理不留下不一致业务状态。
 
@@ -198,17 +199,17 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-16-governance/`
 
-- 目标：实现执行成本、预算限制及关键活动记录的治理闭环。
+- 目标：在 Step 11 运行基线产生的必要记录基础上，实现完整成本、预算限制及关键活动治理闭环。
 - 交付：cost 记录、budget 校验、activity 扩展和查询。
 - 验收：run 消耗可归集，预算限制与 activity 副作用可测试。
 
-### Step 17: Chat / Messenger
+### Step 17: Chat / Messenger 扩展
 
 目录：`docs/step-17-chat/`
 
-- 目标：实现上游范围内的会话、消息和与业务对象的联动。
-- 交付：conversation/message contract、API 与 service。
-- 验收：消息链路保持 organization scope 和兼容 payload。
+- 目标：在 Step 11F 已建立 agent 对话触发基线后，补齐上游范围内剩余会话、消息和与业务对象的联动能力。
+- 交付：不属于 agent 执行最小链路的 conversation/message contract、API、service 与副作用。
+- 验收：完整纳入范围的消息链路保持 organization scope 和兼容 payload，且不改变 Step 11F 已建立的调用闭环。
 
 ### Step 18: Attachment / Storage
 

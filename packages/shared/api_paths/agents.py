@@ -1,0 +1,15 @@
+from __future__ import annotations
+
+ORG_AGENT_LIST_PATH = "/api/orgs/{orgId}/agents"
+ORG_AGENT_CONFIGURATIONS_PATH = "/api/orgs/{orgId}/agent-configurations"
+AGENT_DETAIL_PATH = "/api/agents/{id}"
+AGENT_PAUSE_PATH = "/api/agents/{id}/pause"
+AGENT_RESUME_PATH = "/api/agents/{id}/resume"
+AGENT_TERMINATE_PATH = "/api/agents/{id}/terminate"
+AGENT_CONFIGURATION_PATH = "/api/agents/{id}/configuration"
+AGENT_CONFIG_REVISIONS_PATH = "/api/agents/{id}/config-revisions"
+AGENT_CONFIG_REVISION_PATH = "/api/agents/{id}/config-revisions/{revisionId}"
+AGENT_CONFIG_ROLLBACK_PATH = "/api/agents/{id}/config-revisions/{revisionId}/rollback"
+AGENT_RUNTIME_STATE_PATH = "/api/agents/{id}/runtime-state"
+AGENT_TASK_SESSIONS_PATH = "/api/agents/{id}/task-sessions"
+AGENT_RESET_SESSION_PATH = "/api/agents/{id}/runtime-state/reset-session"
