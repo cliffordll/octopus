@@ -48,6 +48,10 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     validators = importlib.import_module("packages.shared.validators.agent")
 
     assert paths.ORG_AGENT_LIST_PATH == "/api/orgs/{orgId}/agents"
+    assert (
+        paths.ORG_AGENT_NAME_SUGGESTION_PATH
+        == "/api/orgs/{orgId}/agents/name-suggestion"
+    )
     assert paths.AGENT_DETAIL_PATH == "/api/agents/{id}"
     assert paths.AGENT_PAUSE_PATH == "/api/agents/{id}/pause"
     assert paths.AGENT_CONFIGURATION_PATH == "/api/agents/{id}/configuration"
@@ -342,6 +346,31 @@ async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/agents")
     assert list_code == 200
     assert listed == []
+
+
+async def test_agent_creation_without_name_uses_personal_name_suggestion(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-names")
+
+    suggestion_code, suggestion = await _request(
+        app, "GET", f"/api/orgs/{org_id}/agents/name-suggestion"
+    )
+    assert suggestion_code == 200
+    assert suggestion["name"] not in {"Agent", "Agent 2"}
+
+    first_code, first = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"role": "ceo"}
+    )
+    second_code, second = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"role": "engineer"}
+    )
+    assert first_code == 201
+    assert second_code == 201
+    assert first["name"] not in {"Agent", "Agent 2"}
+    assert second["name"] not in {"Agent", "Agent 2"}
+    assert first["name"] != second["name"]
 
 
 async def test_agent_manager_must_belong_to_same_organization(

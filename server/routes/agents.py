@@ -18,6 +18,7 @@ from packages.shared.api_paths.agents import (
     AGENT_TERMINATE_PATH,
     ORG_AGENT_CONFIGURATIONS_PATH,
     ORG_AGENT_LIST_PATH,
+    ORG_AGENT_NAME_SUGGESTION_PATH,
 )
 from packages.shared.api_paths.heartbeat import (
     AGENT_HEARTBEAT_INVOKE_PATH,
@@ -96,6 +97,15 @@ async def create_agent_route(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+
+
+@router.get(ORG_AGENT_NAME_SUGGESTION_PATH)
+async def suggest_agent_name_route(
+    orgId: str,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> dict[str, str]:
+    return {"name": await service.suggest_name(orgId)}
 
 
 @router.get(AGENT_DETAIL_PATH)

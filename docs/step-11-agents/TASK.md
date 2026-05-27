@@ -35,9 +35,9 @@
 
 - Shared contract 已实现 Agent status、role、runtime type、pause reason、request/response type、validator 与管理 API path。
 - Database 已实现 `agents` schema/query 及 `20260527_000003_agents.py` migration，保留 organization、status、reports-to 和 workspace-key 索引边界。
-- Server 已实现 organization-scoped Agent 创建/列表/详情/更新，以及暂停、恢复、终止生命周期 API；详情响应保留 `chainOfCommand` 与 `access` 结构。
-- Service 已实现短名和 workspace key 派生、同 organization manager 校验、reporting cycle 拒绝、terminated 列表过滤与 activity 输出。
-- Tests 已覆盖 contract、migration、管理路由、跨 organization scope、manager 校验、生命周期 activity 与 reporting cycle。
+- Server 已实现 organization-scoped Agent 创建/列表/详情/更新、个人名称建议，以及暂停、恢复、终止生命周期 API；详情响应保留 `chainOfCommand` 与 `access` 结构。
+- Service 已实现省略 `name` 时从兼容个人名称池自动选取未占用名称、短名和 workspace key 派生、同 organization manager 校验、reporting cycle 拒绝、terminated 列表过滤与 activity 输出。
+- Tests 已覆盖 contract、migration、管理路由、缺省名称分配/名称建议、跨 organization scope、manager 校验、生命周期 activity 与 reporting cycle。
 
 ### 11B: 配置治理与运行状态
 
@@ -118,7 +118,8 @@
 | Method / path | 本步骤行为 |
 | --- | --- |
 | `GET /api/orgs/{orgId}/agents` | organization 内 agent 列表 |
-| `POST /api/orgs/{orgId}/agents` | 创建 agent |
+| `POST /api/orgs/{orgId}/agents` | 创建 agent；省略 `name` 时由 server 分配个人名称 |
+| `GET /api/orgs/{orgId}/agents/name-suggestion` | 获取当前 organization 可用的个人名称建议 |
 | `GET /api/agents/{id}`、`PATCH /api/agents/{id}` | 详情与配置更新 |
 | `POST /api/agents/{id}/pause`、`resume`、`terminate` | 生命周期操作 |
 | `GET /api/orgs/{orgId}/agent-configurations` | organization 配置列表 |
