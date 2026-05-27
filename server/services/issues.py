@@ -1,20 +1,79 @@
 from __future__ import annotations
 
-from typing import cast
+from collections.abc import Mapping
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.issue_comments import (
+    insert_issue_comment,
+    list_issue_comments,
+)
 from packages.database.queries.issues import (
+    create_issue,
     get_issue_by_id,
     list_org_issues,
+    update_issue,
 )
-from packages.database.schema import Issue
+from packages.database.schema import Issue, IssueComment
 from packages.shared.constants.issue import (
     IssueOriginKind,
     IssuePriority,
     IssueStatus,
 )
-from packages.shared.types.issue import IssueDetail, IssueListItem
+from packages.shared.constants.issue import (
+    DEFAULT_ISSUE_ORIGIN_KIND,
+    DEFAULT_ISSUE_PRIORITY,
+    DEFAULT_ISSUE_STATUS,
+)
+from packages.shared.types.issue import (
+    CreateIssueCommentPayload,
+    CreateIssuePayload,
+    IssueDetail,
+    IssueListItem,
+    UpdateIssuePayload,
+)
+
+_REVIEWABLE_STATUSES = {"in_review", "blocked"}
+_REOPENABLE_STATUSES = {"done", "cancelled"}
+_REVIEW_DECISION_STATUS_MAP = {
+    "approve": "done",
+    "request_changes": "in_progress",
+    "blocked": "blocked",
+}
+
+ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
+    "title": "title",
+    "description": "description",
+    "status": "status",
+    "priority": "priority",
+    "projectId": "project_id",
+    "goalId": "goal_id",
+    "parentId": "parent_id",
+    "assigneeAgentId": "assignee_agent_id",
+    "assigneeUserId": "assignee_user_id",
+    "reviewerAgentId": "reviewer_agent_id",
+    "reviewerUserId": "reviewer_user_id",
+    "originKind": "origin_kind",
+    "originId": "origin_id",
+    "requestDepth": "request_depth",
+}
+
+ISSUE_UPDATE_TO_COLUMN: dict[str, str] = {
+    "title": "title",
+    "description": "description",
+    "status": "status",
+    "priority": "priority",
+    "projectId": "project_id",
+    "goalId": "goal_id",
+    "parentId": "parent_id",
+    "assigneeAgentId": "assignee_agent_id",
+    "assigneeUserId": "assignee_user_id",
+    "reviewerAgentId": "reviewer_agent_id",
+    "reviewerUserId": "reviewer_user_id",
+    "hiddenAt": "hidden_at",
+}
 
 
 class IssueService:
@@ -27,12 +86,20 @@ class IssueService:
         *,
         status: str | None = None,
         assignee_agent_id: str | None = None,
+        project_id: str | None = None,
+        goal_id: str | None = None,
+        origin_kind: str | None = None,
+        origin_id: str | None = None,
     ) -> list[IssueListItem]:
         rows = await list_org_issues(
             self._session,
             org_id,
             status=status,
             assignee_agent_id=assignee_agent_id,
+            project_id=project_id,
+            goal_id=goal_id,
+            origin_kind=origin_kind,
+            origin_id=origin_id,
         )
         return [_to_list_item(row) for row in rows]
 
@@ -41,6 +108,144 @@ class IssueService:
         if row is None:
             return None
         return _to_detail(row)
+
+    async def list_comments(self, issue_id: str) -> list[IssueComment]:
+        rows = await list_issue_comments(self._session, issue_id)
+        return list(rows)
+
+    async def create_issue(
+        self,
+        org_id: str,
+        payload: CreateIssuePayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> IssueDetail:
+        values = {
+            ISSUE_CREATE_TO_COLUMN[key]: value
+            for key, value in payload.items()
+            if key in ISSUE_CREATE_TO_COLUMN
+        }
+        values["org_id"] = org_id
+        values.setdefault("status", DEFAULT_ISSUE_STATUS)
+        values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
+        values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        row = await create_issue(self._session, values)
+        await insert_activity_log(
+            self._session,
+            org_id=org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.created",
+            entity_type="issue",
+            entity_id=row.id,
+            details=dict(payload),
+        )
+        return _to_detail(row)
+
+    async def update_issue(
+        self,
+        issue_id: str,
+        payload: UpdateIssuePayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> IssueDetail | None:
+        current = await get_issue_by_id(self._session, issue_id)
+        if current is None:
+            return None
+
+        values = {
+            ISSUE_UPDATE_TO_COLUMN[key]: value
+            for key, value in payload.items()
+            if key in ISSUE_UPDATE_TO_COLUMN
+        }
+
+        workflow_actions: list[tuple[str, Mapping[str, Any] | None]] = []
+        review_decision = payload.get("reviewDecision")
+        if review_decision is not None:
+            if current.status not in _REVIEWABLE_STATUSES:
+                raise ValueError(
+                    "review decision is only allowed when issue status is in_review or blocked"
+                )
+            decision = review_decision["decision"]
+            workflow_actions.append(
+                ("issue.review_decision_recorded", dict(review_decision))
+            )
+            mapped_status = _REVIEW_DECISION_STATUS_MAP.get(decision)
+            if mapped_status is not None:
+                values["status"] = mapped_status
+            elif decision == "needs_followup":
+                workflow_actions.append(
+                    ("issue.human_intervention_required", dict(review_decision))
+                )
+
+        if payload.get("reopen") and "status" not in values:
+            if current.status in _REOPENABLE_STATUSES:
+                values["status"] = "todo"
+
+        row = await update_issue(self._session, issue_id, values)
+        if row is None:
+            return None
+
+        if values and review_decision is None:
+            await insert_activity_log(
+                self._session,
+                org_id=row.org_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=row.id,
+                details=dict(payload),
+            )
+        for action, details in workflow_actions:
+            await insert_activity_log(
+                self._session,
+                org_id=row.org_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action=action,
+                entity_type="issue",
+                entity_id=row.id,
+                details=dict(details) if details is not None else None,
+            )
+        return _to_detail(row)
+
+    async def add_comment(
+        self,
+        issue_id: str,
+        payload: CreateIssueCommentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> IssueComment:
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            raise ValueError("Issue not found")
+
+        values: dict[str, Any] = {
+            "org_id": issue.org_id,
+            "issue_id": issue_id,
+            "body": payload["body"],
+        }
+        if actor_type == "agent":
+            values["author_agent_id"] = actor_id
+        else:
+            values["author_user_id"] = actor_id
+
+        comment = await insert_issue_comment(self._session, values)
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.comment_added",
+            entity_type="issue",
+            entity_id=issue_id,
+            details=dict(payload),
+        )
+        return comment
 
 
 def _to_list_item(row: Issue) -> IssueListItem:
@@ -51,8 +256,12 @@ def _to_list_item(row: Issue) -> IssueListItem:
         title=row.title,
         status=cast(IssueStatus, row.status),
         priority=cast(IssuePriority, row.priority),
+        projectId=row.project_id,
+        goalId=row.goal_id,
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        originKind=cast(IssueOriginKind, row.origin_kind),
+        originId=row.origin_id,
         updatedAt=row.updated_at.isoformat(),
     )
 

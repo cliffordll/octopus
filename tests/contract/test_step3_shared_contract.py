@@ -9,7 +9,11 @@ from packages.shared.api_paths.approvals import (
     ORG_APPROVAL_LIST_PATH,
 )
 from packages.shared.api_paths.issues import (
+    ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_DETAIL_PATH,
+    ISSUE_COMMENT_LIST_PATH,
+    ISSUE_REVIEW_DECISION_PATH,
+    ORG_ISSUE_LIST_MISSING_ORG_PATH,
     ORG_ISSUE_LIST_PATH,
 )
 from packages.shared.api_paths.organizations import (
@@ -39,8 +43,10 @@ from packages.shared.validators.approval import (
     validate_resolve_approval,
 )
 from packages.shared.validators.issue import (
+    validate_create_issue_comment,
     validate_create_issue,
     validate_list_org_issues_query,
+    validate_record_issue_review_decision,
     validate_update_issue,
 )
 from packages.shared.validators.organization import (
@@ -55,8 +61,12 @@ def test_org_paths_values() -> None:
 
 
 def test_issue_paths_values() -> None:
+    assert ISSUE_LIST_MISSING_ORG_PATH == "/api/issues"
+    assert ORG_ISSUE_LIST_MISSING_ORG_PATH == "/api/orgs/issues"
     assert ORG_ISSUE_LIST_PATH == "/api/orgs/{orgId}/issues"
     assert ISSUE_DETAIL_PATH == "/api/issues/{id}"
+    assert ISSUE_COMMENT_LIST_PATH == "/api/issues/{id}/comments"
+    assert ISSUE_REVIEW_DECISION_PATH == "/api/issues/{id}/review-decision"
 
 
 def test_approval_paths_values() -> None:
@@ -165,6 +175,11 @@ def test_validate_create_issue_invalid_priority_raises() -> None:
         validate_create_issue({"title": "X", "priority": "urgent"})
 
 
+def test_validate_create_issue_unknown_field_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported field"):
+        validate_create_issue({"title": "X", "workspaceConfig": {}})
+
+
 def test_validate_list_org_issues_query_happy() -> None:
     query = validate_list_org_issues_query({"status": "todo", "assigneeAgentId": "a1"})
     assert query.get("status") == "todo"
@@ -179,6 +194,41 @@ def test_validate_list_org_issues_query_invalid_status_raises() -> None:
 def test_validate_update_issue_blank_comment_raises() -> None:
     with pytest.raises(ValueError, match="comment"):
         validate_update_issue({"comment": "   "})
+
+
+def test_validate_update_issue_unknown_field_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported field"):
+        validate_update_issue({"foo": "bar"})
+
+
+def test_validate_create_issue_comment_happy() -> None:
+    payload = validate_create_issue_comment({"body": "Looks good"})
+    assert payload["body"] == "Looks good"
+
+
+def test_validate_create_issue_comment_blank_body_raises() -> None:
+    with pytest.raises(ValueError, match="body"):
+        validate_create_issue_comment({"body": "   "})
+
+
+def test_validate_create_issue_comment_unknown_field_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported field"):
+        validate_create_issue_comment({"body": "ok", "author": "x"})
+
+
+def test_validate_record_issue_review_decision_happy() -> None:
+    payload = validate_record_issue_review_decision({"decision": "approve"})
+    assert payload["decision"] == "approve"
+
+
+def test_validate_record_issue_review_decision_invalid_decision_raises() -> None:
+    with pytest.raises(ValueError, match="decision"):
+        validate_record_issue_review_decision({"decision": "ship_it"})
+
+
+def test_validate_record_issue_review_decision_unknown_field_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported field"):
+        validate_record_issue_review_decision({"decision": "approve", "status": "done"})
 
 
 def test_validate_create_approval_happy() -> None:

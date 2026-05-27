@@ -9,8 +9,10 @@ from ..constants.issue import (
     ISSUE_STATUSES,
 )
 from ..types.issue import (
+    CreateIssueCommentPayload,
     CreateIssuePayload,
     ListOrgIssuesQuery,
+    RecordIssueReviewDecisionPayload,
     UpdateIssuePayload,
 )
 
@@ -24,6 +26,51 @@ _NULLABLE_REF_FIELDS = (
     "reviewerAgentId",
     "reviewerUserId",
 )
+
+_CREATE_ISSUE_FIELDS = {
+    "title",
+    "description",
+    "status",
+    "priority",
+    "projectId",
+    "goalId",
+    "parentId",
+    "assigneeAgentId",
+    "assigneeUserId",
+    "reviewerAgentId",
+    "reviewerUserId",
+    "originKind",
+    "originId",
+    "requestDepth",
+}
+
+_UPDATE_ISSUE_FIELDS = {
+    "title",
+    "description",
+    "status",
+    "priority",
+    "projectId",
+    "goalId",
+    "parentId",
+    "assigneeAgentId",
+    "assigneeUserId",
+    "reviewerAgentId",
+    "reviewerUserId",
+    "comment",
+    "reopen",
+    "hiddenAt",
+    "reviewDecision",
+}
+
+_REVIEW_DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
+
+
+def _reject_unknown_fields(
+    payload: Mapping[str, Any], *, allowed_fields: set[str]
+) -> None:
+    for field in payload:
+        if field not in allowed_fields:
+            raise ValueError(f"Unsupported field: '{field}'")
 
 
 def _check_nullable_ref_fields(payload: Mapping[str, Any]) -> None:
@@ -63,6 +110,7 @@ def validate_list_org_issues_query(
 
 
 def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
+    _reject_unknown_fields(payload, allowed_fields=_CREATE_ISSUE_FIELDS)
     title = payload.get("title")
     if not isinstance(title, str) or not title.strip():
         raise ValueError("'title' is required and must be a non-empty string")
@@ -89,6 +137,7 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
 
 
 def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
+    _reject_unknown_fields(payload, allowed_fields=_UPDATE_ISSUE_FIELDS)
     if "title" in payload:
         title = payload["title"]
         if not isinstance(title, str) or not title.strip():
@@ -115,7 +164,34 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
         if hidden is not None and not isinstance(hidden, str):
             raise ValueError("'hiddenAt' must be a string or null")
 
-    if "reviewDecision" in payload and not isinstance(payload["reviewDecision"], dict):
-        raise ValueError("'reviewDecision' must be an object")
+    if "reviewDecision" in payload:
+        decision = payload["reviewDecision"]
+        if not isinstance(decision, Mapping):
+            raise ValueError("'reviewDecision' must be an object")
+        validate_record_issue_review_decision(decision)
 
     return cast(UpdateIssuePayload, payload)
+
+
+def validate_create_issue_comment(
+    payload: Mapping[str, Any],
+) -> CreateIssueCommentPayload:
+    _reject_unknown_fields(payload, allowed_fields={"body"})
+    body = payload.get("body")
+    if not isinstance(body, str) or not body.strip():
+        raise ValueError("'body' is required and must be a non-empty string")
+    return cast(CreateIssueCommentPayload, payload)
+
+
+def validate_record_issue_review_decision(
+    payload: Mapping[str, Any],
+) -> RecordIssueReviewDecisionPayload:
+    _reject_unknown_fields(payload, allowed_fields={"decision", "note"})
+    decision = payload.get("decision")
+    if decision not in _REVIEW_DECISIONS:
+        raise ValueError(f"'decision' must be one of {list(_REVIEW_DECISIONS)}")
+    if "note" in payload:
+        note = payload["note"]
+        if note is not None and not isinstance(note, str):
+            raise ValueError("'note' must be a string or null")
+    return cast(RecordIssueReviewDecisionPayload, payload)

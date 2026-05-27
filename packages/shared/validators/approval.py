@@ -7,8 +7,46 @@ from ..constants.approval import APPROVAL_STATUSES, APPROVAL_TYPES
 from ..types.approval import (
     CreateApprovalPayload,
     ListOrgApprovalsQuery,
+    RequestApprovalRevisionPayload,
     ResolveApprovalPayload,
+    ResubmitApprovalPayload,
 )
+
+_CREATE_APPROVAL_FIELDS = {
+    "type",
+    "payload",
+    "requestedByAgentId",
+    "issueIds",
+}
+
+_RESOLVE_APPROVAL_FIELDS = {
+    "decisionNote",
+    "decidedByUserId",
+    "payload",
+}
+
+_RESUBMIT_APPROVAL_FIELDS = {
+    "payload",
+    "issueIds",
+}
+
+
+def _reject_unknown_fields(
+    payload: Mapping[str, Any], *, allowed_fields: set[str]
+) -> None:
+    for field in payload:
+        if field not in allowed_fields:
+            raise ValueError(f"Unsupported field: '{field}'")
+
+
+def _validate_issue_ids(payload: Mapping[str, Any]) -> None:
+    if "issueIds" not in payload:
+        return
+    issue_ids = payload["issueIds"]
+    if not isinstance(issue_ids, list) or not all(
+        isinstance(item, str) for item in issue_ids
+    ):
+        raise ValueError("'issueIds' must be a list of strings")
 
 
 def validate_list_org_approvals_query(
@@ -20,6 +58,7 @@ def validate_list_org_approvals_query(
 
 
 def validate_create_approval(payload: Mapping[str, Any]) -> CreateApprovalPayload:
+    _reject_unknown_fields(payload, allowed_fields=_CREATE_APPROVAL_FIELDS)
     approval_type = payload.get("type")
     if approval_type not in APPROVAL_TYPES:
         raise ValueError(
@@ -34,17 +73,13 @@ def validate_create_approval(payload: Mapping[str, Any]) -> CreateApprovalPayloa
         if agent_id is not None and not isinstance(agent_id, str):
             raise ValueError("'requestedByAgentId' must be a string or null")
 
-    if "issueIds" in payload:
-        issue_ids = payload["issueIds"]
-        if not isinstance(issue_ids, list) or not all(
-            isinstance(item, str) for item in issue_ids
-        ):
-            raise ValueError("'issueIds' must be a list of strings")
+    _validate_issue_ids(payload)
 
     return cast(CreateApprovalPayload, payload)
 
 
 def validate_resolve_approval(payload: Mapping[str, Any]) -> ResolveApprovalPayload:
+    _reject_unknown_fields(payload, allowed_fields=_RESOLVE_APPROVAL_FIELDS)
     if "decisionNote" in payload:
         note = payload["decisionNote"]
         if not isinstance(note, str):
@@ -59,3 +94,19 @@ def validate_resolve_approval(payload: Mapping[str, Any]) -> ResolveApprovalPayl
         raise ValueError("'payload' must be an object")
 
     return cast(ResolveApprovalPayload, payload)
+
+
+def validate_request_approval_revision(
+    payload: Mapping[str, Any],
+) -> RequestApprovalRevisionPayload:
+    _reject_unknown_fields(payload, allowed_fields=_RESOLVE_APPROVAL_FIELDS)
+    validate_resolve_approval(payload)
+    return cast(RequestApprovalRevisionPayload, payload)
+
+
+def validate_resubmit_approval(payload: Mapping[str, Any]) -> ResubmitApprovalPayload:
+    _reject_unknown_fields(payload, allowed_fields=_RESUBMIT_APPROVAL_FIELDS)
+    if "payload" in payload and not isinstance(payload["payload"], dict):
+        raise ValueError("'payload' must be an object")
+    _validate_issue_ids(payload)
+    return cast(ResubmitApprovalPayload, payload)

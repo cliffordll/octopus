@@ -38,3 +38,14 @@ class ResolveApprovalPayload(TypedDict, total=False):
     decisionNote: str
     decidedByUserId: str
     payload: dict[str, Any]
+
+
+class RequestApprovalRevisionPayload(TypedDict, total=False):
+    decisionNote: str
+    decidedByUserId: str
+    payload: dict[str, Any]
+
+
+class ResubmitApprovalPayload(TypedDict, total=False):
+    payload: dict[str, Any]
+    issueIds: list[str]
