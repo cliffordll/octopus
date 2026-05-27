@@ -80,7 +80,7 @@ uv run alembic current
 
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "0"
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
+uv run server
 ```
 
 如需以启动流程验收自动迁移，可删除测试用空库后使用新的文件名执行：
@@ -88,7 +88,7 @@ uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
 ```powershell
 $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus-auto-demo.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
+uv run server
 ```
 
 当前 HTTP 正向资源写入仍受运行时开发 actor 未接入影响，见 Step 5。

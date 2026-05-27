@@ -144,7 +144,8 @@ class ApprovalService:
         )
         for issue in recovered_issues:
             has_assignee = (
-                issue.assignee_agent_id is not None or issue.assignee_user_id is not None
+                issue.assignee_agent_id is not None
+                or issue.assignee_user_id is not None
             )
             if not has_assignee:
                 continue
@@ -205,8 +206,13 @@ class ApprovalService:
         current = await get_approval_by_id(self._session, approval_id)
         if current is None:
             return None
-        if current.requested_by_agent_id is not None and actor_id != current.requested_by_agent_id:
-            raise PermissionError("Only the requesting agent can resubmit this approval")
+        if (
+            current.requested_by_agent_id is not None
+            and actor_id != current.requested_by_agent_id
+        ):
+            raise PermissionError(
+                "Only the requesting agent can resubmit this approval"
+            )
 
         values: dict[str, Any] = {
             "status": "pending",

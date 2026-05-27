@@ -34,6 +34,7 @@ from packages.shared.validators.approval import (
 )
 from server.app import app as fastapi_app
 
+
 @fastapi_app.middleware("http")
 async def _inject_test_actor(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]

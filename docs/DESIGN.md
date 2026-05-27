@@ -265,6 +265,8 @@ octopus/
 - run、wakeup、恢复和后台执行
 - 调用 database、shared contract 与 runtime adapter
 
+启动边界保持拆分：`server/__init__.py` 只提供 `uv run server` 命令包装并读取绑定配置，`server/app.py` 保留 FastAPI 应用工厂与底层 ASGI `app` 对象，供测试和部署加载。
+
 ## 6.2 `packages/database/`
 
 数据库包负责：

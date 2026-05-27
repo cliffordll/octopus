@@ -241,7 +241,9 @@ async def test_create_issue_persists_row(session: AsyncSession) -> None:
 
 
 async def test_update_issue_returns_updated_row(session: AsyncSession) -> None:
-    org = Organization(url_key="upd-issue-org", name="Upd Issue Org", issue_prefix="UIO")
+    org = Organization(
+        url_key="upd-issue-org", name="Upd Issue Org", issue_prefix="UIO"
+    )
     async with async_transaction(session):
         session.add(org)
     async with async_transaction(session):
@@ -366,7 +368,9 @@ async def test_issue_comments_monotonically_increment_created_at(
     monkeypatch.setattr(issue_comment_queries, "datetime", FrozenDateTime)
 
     async with async_transaction(session):
-        org = Organization(url_key="ordered-comment-org", name="Comments", issue_prefix="OCM")
+        org = Organization(
+            url_key="ordered-comment-org", name="Comments", issue_prefix="OCM"
+        )
         session.add(org)
     async with async_transaction(session):
         issue = await create_issue(
@@ -546,10 +550,7 @@ async def test_recover_blocked_linked_issues_for_approval_updates_target_statuse
             session, approval.id
         )
 
-    assert {
-        row.id: row.status
-        for row in recovered
-    } == {
+    assert {row.id: row.status for row in recovered} == {
         issue_with_assignee.id: "in_progress",
         issue_without_assignee.id: "todo",
     }
@@ -660,7 +661,9 @@ async def test_insert_activity_log_monotonically_increments_created_at(
 
     async with async_transaction(session):
         session.add(
-            Organization(id="org-act-2", url_key="o-act-2", name="B", issue_prefix="BBB")
+            Organization(
+                id="org-act-2", url_key="o-act-2", name="B", issue_prefix="BBB"
+            )
         )
 
     async with async_transaction(session):

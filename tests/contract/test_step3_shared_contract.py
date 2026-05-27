@@ -228,9 +228,7 @@ def test_validate_record_issue_review_decision_invalid_decision_raises() -> None
 
 def test_validate_record_issue_review_decision_unknown_field_raises() -> None:
     with pytest.raises(ValueError, match="Unsupported field"):
-        validate_record_issue_review_decision(
-            {"decision": "approve", "status": "done"}
-        )
+        validate_record_issue_review_decision({"decision": "approve", "status": "done"})
 
 
 def test_validate_create_approval_happy() -> None:

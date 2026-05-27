@@ -10,9 +10,8 @@ async def actor_context_middleware(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     settings = request.app.state.settings
-    if (
-        not hasattr(request.state, "actor")
-        and getattr(settings, "local_trusted", False)
+    if not hasattr(request.state, "actor") and getattr(
+        settings, "local_trusted", False
     ):
         request.state.actor = {
             "type": "board",

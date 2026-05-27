@@ -16,6 +16,7 @@
 
 | 文件 | 职责 |
 | --- | --- |
+| `server/__init__.py` | `uv run server` 命令入口，读取绑定配置并启动 ASGI 服务 |
 | `server/app.py` | `create_app()` 与 `app` 入口，加载配置并注册 routes |
 | `server/config.py` | `Settings` 与环境变量读取，包括 host、port、日志、数据库 URL 和自动迁移开关 |
 | `server/lifespan.py` | 启动时执行可选迁移并初始化 engine/session factory，关闭时释放 engine |
@@ -37,7 +38,8 @@
 
 ## 关键行为
 
-- `server.app:app` 可作为 `uvicorn` 入口。
+- `uv run server` 通过 `server:main` 启动服务，并加载 `OCTOPUS_HOST`、`OCTOPUS_PORT` 和 `OCTOPUS_LOG_LEVEL` 配置。
+- `server.app:app` 保留为底层 ASGI 应用入口。
 - lifespan 只管理启动资源和释放流程，业务逻辑不放入应用入口。
 - `/api/orgs` 使用已选定的资源路径，不增加独立产品接口。
 - board-scoped 请求没有 actor context 时返回 `503`，非 board actor 返回 `403`；这避免在认证能力尚未接入时伪造成功访问。
@@ -62,7 +64,7 @@ PowerShell 使用 `curl.exe`，避免 `curl` 被解析为 PowerShell 别名。
 ```powershell
 $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
+uv run server
 ```
 
 在另一个 PowerShell 窗口调用 board-scoped 入口：

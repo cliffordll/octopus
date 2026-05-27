@@ -59,7 +59,9 @@ def upgrade() -> None:
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
     )
-    op.create_index("organizations_url_key_idx", "organizations", ["url_key"], unique=True)
+    op.create_index(
+        "organizations_url_key_idx", "organizations", ["url_key"], unique=True
+    )
     op.create_index(
         "organizations_issue_prefix_idx", "organizations", ["issue_prefix"], unique=True
     )
@@ -310,9 +312,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.PrimaryKeyConstraint(
-            "issue_id", "approval_id", name="issue_approvals_pk"
-        ),
+        sa.PrimaryKeyConstraint("issue_id", "approval_id", name="issue_approvals_pk"),
     )
     op.create_index("issue_approvals_issue_idx", "issue_approvals", ["issue_id"])
     op.create_index("issue_approvals_approval_idx", "issue_approvals", ["approval_id"])

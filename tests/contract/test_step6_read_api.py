@@ -150,9 +150,7 @@ async def _http_get(
     return response.status_code, response.json()
 
 
-async def test_org_detail_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     code, body = await _http_get(app, f"/api/orgs/{org_id}", actor_type="board")
     assert code == 200
@@ -194,9 +192,7 @@ async def test_org_issues_list_empty(app: FastAPI, session: AsyncSession) -> Non
     assert body == []
 
 
-async def test_org_issues_list_seeded(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_issues_list_seeded(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     issue_id = await _seed_issue(session, org_id, title="Hello", status="todo")
     code, body = await _http_get(app, f"/api/orgs/{org_id}/issues", actor_type="board")
@@ -238,9 +234,7 @@ async def test_org_issues_list_filters_by_status_and_assignee(
     assert body[0]["title"] == "A todo"
 
 
-async def test_org_approvals_list_empty(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_approvals_list_empty(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     code, body = await _http_get(
         app, f"/api/orgs/{org_id}/approvals", actor_type="board"
@@ -249,9 +243,7 @@ async def test_org_approvals_list_empty(
     assert body == []
 
 
-async def test_org_approvals_list_seeded(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_approvals_list_seeded(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     approval_id = await _seed_approval(session, org_id)
     code, body = await _http_get(
@@ -284,9 +276,7 @@ async def test_issue_detail_missing_returns_404(
     assert body["detail"] == "Issue not found"
 
 
-async def test_issue_detail_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_issue_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     issue_id = await _seed_issue(session, org_id, title="Detail")
     code, body = await _http_get(app, f"/api/issues/{issue_id}", actor_type="board")
@@ -310,9 +300,7 @@ async def test_approval_detail_missing_returns_404(app: FastAPI) -> None:
     assert body["detail"] == "Approval not found"
 
 
-async def test_approval_detail_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_approval_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     approval_id = await _seed_approval(
         session,

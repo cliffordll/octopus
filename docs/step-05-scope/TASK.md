@@ -74,7 +74,7 @@
 $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus-demo.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
-uv run uvicorn server.app:app --host 127.0.0.1 --port 8000
+uv run server
 ```
 
 上述配置下，请求以本地开发 board actor `local-board` 执行，可直接创建 organization：

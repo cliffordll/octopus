@@ -18,8 +18,15 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from packages.database.clients import async_transaction
-from packages.database.schema import ActivityLog, Base, Issue, IssueComment, Organization
+from packages.database.schema import (
+    ActivityLog,
+    Base,
+    Issue,
+    IssueComment,
+    Organization,
+)
 from server.app import app as fastapi_app
+
 
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
@@ -186,7 +193,9 @@ async def test_issue_comment_routes_create_and_list(
     assert create_code == 200
     assert create_body["body"] == "First route comment"
 
-    list_code, list_body = await _request(app, "GET", f"/api/issues/{issue_id}/comments")
+    list_code, list_body = await _request(
+        app, "GET", f"/api/issues/{issue_id}/comments"
+    )
     assert list_code == 200
     assert len(list_body) == 1
     assert list_body[0]["body"] == "First route comment"

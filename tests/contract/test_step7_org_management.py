@@ -25,6 +25,7 @@ from packages.database.schema import (
 )
 from server.app import app as fastapi_app
 
+
 @fastapi_app.middleware("http")
 async def _inject_test_actor(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -130,9 +131,7 @@ async def test_org_list_non_board_returns_403(app: FastAPI) -> None:
     assert "Board access required" in body["detail"]
 
 
-async def test_org_detail_returns_200(
-    app: FastAPI, session: AsyncSession
-) -> None:
+async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
     org_id = await _seed_org(session)
     code, body = await _http(app, "GET", f"/api/orgs/{org_id}", actor_type="board")
     assert code == 200
@@ -244,7 +243,9 @@ async def test_org_detail_non_board_returns_403(
 
 
 async def test_org_detail_missing_returns_404(app: FastAPI) -> None:
-    code, body = await _http(app, "GET", f"/api/orgs/{uuid.uuid4()}", actor_type="board")
+    code, body = await _http(
+        app, "GET", f"/api/orgs/{uuid.uuid4()}", actor_type="board"
+    )
     assert code == 404
     assert body["detail"] == "Organization not found"
 

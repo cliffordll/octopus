@@ -81,7 +81,9 @@ async def recover_blocked_linked_issues_for_approval(
     rows = result.scalars().all()
     now = datetime.now(UTC)
     for row in rows:
-        has_assignee = row.assignee_agent_id is not None or row.assignee_user_id is not None
+        has_assignee = (
+            row.assignee_agent_id is not None or row.assignee_user_id is not None
+        )
         row.status = "in_progress" if has_assignee else "todo"
         row.updated_at = now
     await session.flush()

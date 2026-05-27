@@ -21,6 +21,7 @@ uv run alembic revision -m "describe change"
 
 - 默认：手动执行 `alembic upgrade head`
 - 可选：设置 `OCTOPUS_AUTO_MIGRATE=1` 后，由 `server/lifespan.py` 在启动时调用 runner 自动升级
+- 服务启动命令为 `uv run server`；绑定地址、端口和日志等级继续通过 `OCTOPUS_HOST`、`OCTOPUS_PORT` 与 `OCTOPUS_LOG_LEVEL` 配置
 
 `OCTOPUS_AUTO_MIGRATE` 的设置方式：
 
@@ -33,7 +34,7 @@ PowerShell 示例：
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
-uv run uvicorn server.app:app --reload
+uv run server
 ```
 
 macOS / Linux shell 示例：
@@ -41,13 +42,13 @@ macOS / Linux shell 示例：
 ```bash
 export OCTOPUS_AUTO_MIGRATE=1
 export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///./octopus.db"
-uv run uvicorn server.app:app --reload
+uv run server
 ```
 
 单次命令临时设置示例：
 
 ```powershell
-$env:OCTOPUS_AUTO_MIGRATE = "1"; uv run uvicorn server.app:app
+$env:OCTOPUS_AUTO_MIGRATE = "1"; uv run server
 ```
 
 如果不设置，或值不是 `1/true/yes/on`，则默认视为关闭，启动前需要手动执行：

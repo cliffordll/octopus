@@ -85,9 +85,7 @@ class UpdateIssuePayload(TypedDict, total=False):
     reviewDecision: "RecordIssueReviewDecisionPayload"
 
 
-IssueReviewDecision = Literal[
-    "approve", "request_changes", "blocked", "needs_followup"
-]
+IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_followup"]
 
 
 class CreateIssueCommentPayload(TypedDict):
