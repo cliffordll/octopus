@@ -11,6 +11,7 @@ from .access import (
 from .database import get_session
 from .issues import get_issue_service
 from .orgs import get_org_service
+from .projects import get_project_service
 
 __all__ = [
     "get_session",
@@ -22,4 +23,5 @@ __all__ = [
     "get_org_service",
     "get_issue_service",
     "get_approval_service",
+    "get_project_service",
 ]

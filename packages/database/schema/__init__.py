@@ -7,6 +7,8 @@ from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
 from .issues import Issue
 from .organizations import Organization
+from .projects import Project
+from .resources import OrganizationResource, ProjectResourceAttachment
 
 __all__ = [
     "Base",
@@ -17,4 +19,7 @@ __all__ = [
     "IssueComment",
     "Issue",
     "Organization",
+    "Project",
+    "OrganizationResource",
+    "ProjectResourceAttachment",
 ]
