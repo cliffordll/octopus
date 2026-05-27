@@ -4,8 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import type { AgentRole, AgentRuntimeType } from "../api/types";
 import { Badge } from "../components/Badge";
+import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
 
 const ROLES: AgentRole[] = ["ceo", "engineer", "qa", "pm", "designer", "devops", "researcher", "general"];
 const RUNTIMES: AgentRuntimeType[] = ["process", "codex_local"];
@@ -37,10 +37,9 @@ export function AgentsPage() {
     if (name.trim()) create.mutate();
   }
   return (
-    <>
+    <AgentsWorkspace orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Agents</p><h1>代理</h1></div>
-        <OrgNavigation orgId={orgId} />
       </header>
       <div className="grid-two">
         <section className="panel">
@@ -82,6 +81,6 @@ export function AgentsPage() {
           </button>
         </form>
       </div>
-    </>
+    </AgentsWorkspace>
   );
 }

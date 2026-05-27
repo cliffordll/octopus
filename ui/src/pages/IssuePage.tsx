@@ -4,8 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { issuesApi } from "../api/issues";
 import type { IssueReviewDecision } from "../api/types";
 import { Badge } from "../components/Badge";
+import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
 
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
@@ -33,13 +33,12 @@ export function IssuePage() {
   }
   if (issue.error) return <ErrorNotice error={issue.error} />;
   return (
-    <>
+    <IssuesWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/issues`}>返回 Issues</Link>
           <h1>{issue.data?.title ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       {issue.data && (
         <div className="grid-two detail-grid">
@@ -75,6 +74,6 @@ export function IssuePage() {
           </section>
         </div>
       )}
-    </>
+    </IssuesWorkspace>
   );
 }

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -33,7 +33,11 @@ it("filters and creates issues for an organization", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues");
-  expect(await screen.findByRole("link", { name: /实现登录流程/ })).toBeInTheDocument();
+  expect(
+    await within(screen.getByRole("navigation", { name: "任务导航" })).findByRole("link", {
+      name: /实现登录流程/,
+    }),
+  ).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
 
   await userEvent.selectOptions(screen.getByLabelText("状态筛选"), "in_review");
   expect(fetchMock).toHaveBeenCalledWith(

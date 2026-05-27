@@ -5,7 +5,7 @@ import { projectsApi } from "../api/projects";
 import type { ProjectResourceRole, ProjectStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
+import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
 const ROLES: ProjectResourceRole[] = [
@@ -62,13 +62,12 @@ export function ProjectPage() {
   }
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
           <h1>{project.data?.name ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       {project.data && (
         <div className="grid-two detail-grid">
@@ -122,6 +121,6 @@ export function ProjectPage() {
           </section>
         </div>
       )}
-    </>
+    </OrgWorkspace>
   );
 }
