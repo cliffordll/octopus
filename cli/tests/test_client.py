@@ -20,7 +20,9 @@ def test_client_reports_api_detail() -> None:
     client = ApiClient(
         "http://example.test",
         transport=httpx.MockTransport(
-            lambda request: httpx.Response(403, json={"detail": "Board access required"})
+            lambda request: httpx.Response(
+                403, json={"detail": "Board access required"}
+            )
         ),
     )
 

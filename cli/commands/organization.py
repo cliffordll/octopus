@@ -7,7 +7,9 @@ from ..client import ApiClient
 
 
 def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = subparsers.add_parser("organization", aliases=["org"], help="Manage organizations")
+    parser = subparsers.add_parser(
+        "organization", aliases=["org"], help="Manage organizations"
+    )
     actions = parser.add_subparsers(dest="organization_action", required=True)
 
     list_parser = actions.add_parser("list", help="List organizations")

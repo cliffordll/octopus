@@ -33,8 +33,14 @@ def test_issue_comment_and_review_post_payloads() -> None:
         return httpx.Response(200, json={"id": "issue-1", "title": "Review"})
 
     client = ApiClient(transport=httpx.MockTransport(handler))
-    assert main(["issue", "comment-add", "issue-1", "--body", "Ship it"], client=client) == 0
-    assert main(["issue", "review", "issue-1", "--decision", "approve"], client=client) == 0
+    assert (
+        main(["issue", "comment-add", "issue-1", "--body", "Ship it"], client=client)
+        == 0
+    )
+    assert (
+        main(["issue", "review", "issue-1", "--decision", "approve"], client=client)
+        == 0
+    )
     assert requests[0].url.path == "/api/issues/issue-1/comments"
     assert requests[0].read() == b'{"body":"Ship it"}'
     assert requests[1].url.path == "/api/issues/issue-1/review-decision"
