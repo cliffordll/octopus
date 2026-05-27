@@ -56,8 +56,8 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 8 | Comment 与 Review 流程 | `docs/step-08-review/` |
 | 9 | Approval 管理 | `docs/step-09-approvals/` |
 | 10 | Project 管理 | `docs/step-10-projects/` |
-| 11 | Goal 管理 | `docs/step-11-goals/` |
-| 12 | Agent 与 Runtime 配置 | `docs/step-12-agents/` |
+| 11 | Agent 与 Runtime 配置 | `docs/step-11-agents/` |
+| 12 | Goal 管理 | `docs/step-12-goals/` |
 | 13 | Wakeup 与 Heartbeat Run | `docs/step-13-runs/` |
 | 14 | Runtime Adapter 执行 | `docs/step-14-runtime/` |
 | 15 | Workspace 与执行产物 | `docs/step-15-workspace/` |
@@ -69,7 +69,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 主依赖链为：
 
-`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> goals -> agents -> runs -> runtime -> workspace -> governance -> chat -> storage -> access -> hardening`
+`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agents -> goals -> runs -> runtime -> workspace -> governance -> chat -> storage -> access -> hardening`
 
 ## 5. Step 计划
 
@@ -154,21 +154,21 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：project contract、持久化与 API。
 - 验收：project 可独立维护并供后续 goal 关联。
 
-### Step 11: Goal 管理
+### Step 11: Agent 与 Runtime 配置
 
-目录：`docs/step-11-goals/`
+目录：`docs/step-11-agents/`
 
-- 目标：实现 goal 的创建、查询、更新及 project/organization 关联。
-- 交付：goal contract、服务逻辑与工作流测试。
-- 验收：goal 的关联关系和状态字段与上游一致。
+- 目标：实现 agent 及其 runtime 配置的数据与 API 边界，为 Goal 的 `ownerAgentId` 与后续 run 调用提供合法依赖对象。
+- 交付：agent contract、持久化与管理 API，兼容 runtime 配置表示、校验和敏感字段处理边界。
+- 验收：agent 能以兼容配置被 Goal 和后续 run 引用，且不提前实现运行流程。
 
-### Step 12: Agent 与 Runtime 配置
+### Step 12: Goal 管理
 
-目录：`docs/step-12-agents/`
+目录：`docs/step-12-goals/`
 
-- 目标：实现 agent 及其 runtime 配置的数据与 API 边界。
-- 交付：agent 配置模型、选择规则和敏感配置处理边界。
-- 验收：agent 能以兼容配置被后续 run 调用，不提前实现执行流程。
+- 目标：实现 goal 的创建、查询、更新、层级与 project/organization/owner agent 关联。
+- 交付：goal contract、持久化、服务逻辑、project goal 聚合关系与工作流测试。
+- 验收：goal 的关联关系、层级约束、状态字段和当前已具备依赖的删除阻塞行为与上游一致；治理和独立 automation 依赖随对应步骤补齐。
 
 ### Step 13: Wakeup 与 Heartbeat Run
 

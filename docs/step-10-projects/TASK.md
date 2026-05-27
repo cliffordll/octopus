@@ -38,12 +38,12 @@ Rudder 上游与当前 Python 仓库均使用 `organization` / `org_id` 和 `/ap
 | --- | --- | --- |
 | `id` | UUID primary key | 实现 |
 | `org_id` / `orgId` | 必填 organization scope | 实现 |
-| `goal_id` / `goalId` | nullable，已标记为 legacy，首个 `goalIds` 的兼容列 | 数据列保留；关系行为归入 Step 11 |
+| `goal_id` / `goalId` | nullable，已标记为 legacy，首个 `goalIds` 的兼容列 | 数据列保留；关系行为归入 Step 12 |
 | `name` | 必填；service 确保组织内派生 shortname 唯一 | 实现 |
 | `urlKey` | 由 `name` 与 `id` 派生的响应字段 | 实现 |
 | `description` | nullable text | 实现 |
 | `status` | 必填，默认 `backlog` | 实现 |
-| `lead_agent_id` / `leadAgentId` | nullable agent 外键 | 数据列保留；Agent 行为归入 Step 12 |
+| `lead_agent_id` / `leadAgentId` | nullable agent 外键 | 数据列保留；Agent 行为归入 Step 11 |
 | `target_date` / `targetDate` | nullable date | 实现 |
 | `color` | nullable；创建时未提供则由 palette 自动选择 | 实现 |
 | `pause_reason` / `pauseReason` | nullable `manual` / `budget` / `system` | 字段已确认；暂停触发流程不在本步自创 |
@@ -82,14 +82,14 @@ Rudder 的 Project route 不提供 workspace mutation endpoint；但 Project ser
 
 ## 阶段切分决策
 
-Rudder 的 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`codebase`、`workspaces` 与 `primaryWorkspace`。当前开发计划将 Goal 放在 Step 11、Workspace 放在 Step 15，且尚未为 organization resource / project resource attachment 指定独立步骤。Step 10 若只实现基础 CRUD，将不能完整匹配上游 Project response。
+Rudder 的 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`codebase`、`workspaces` 与 `primaryWorkspace`。当前开发计划将 Goal 放在 Step 12、Workspace 放在 Step 15，且尚未为 organization resource / project resource attachment 指定独立步骤。Step 10 若只实现基础 CRUD，将不能完整匹配上游 Project response。
 
 推荐采用分阶段兼容方案：
 
 - Step 10 实现 project 主表、状态/基础字段、组织作用域、核心 CRUD、`urlKey` lookup、activity 和已存在 issue `projectId` 的主对象边界。
 - Step 10 同时纳入 resource attachment contract 与 API，因为该能力由 Rudder 的 Project route 直接暴露，且 `resources` 是 Project response 的正式字段。
 - Step 10 在 contract 文档和测试中明确标记 goal/workspace 聚合字段尚未启用，不用本地替代结构伪装完整上游 response。
-- Step 11 接入 `goalId` / `goalIds` / `goals` 关系行为。
+- Step 12 接入 `goalId` / `goalIds` / `goals` 关系行为。
 - Step 15 接入 `codebase`、`workspaces`、`primaryWorkspace`、execution workspace policy 的执行行为。
 
 若要求 Step 10 首次交付即完整匹配 Rudder 的 Project response，则必须把 Goal 关联和 Workspace 响应装载前移到 Step 10，并同步重写 `docs/FEATURE.md` 的阶段安排。代码开发前需确认采用哪一种方案。
@@ -104,7 +104,7 @@ Rudder 的 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`co
 - project resource attachment 的 shared contract、持久化关系和 HTTP 行为。
 - project 相关 activity 与 organization access/scope 校验。
 - issue 已存在 `projectId` 关系在 project 对象落地后的有效性约束；仅在上游要求时实现写入校验或详情扩展。
-- 为 Step 11 Goal 管理提供 project 主键和 organization 关系边界，不在本步骤实现 goal 行为。
+- 为 Step 12 Goal 管理提供 project 主键和 organization 关系边界，不在本步骤实现 goal 行为。
 
 ## 不包含
 
@@ -168,7 +168,7 @@ Rudder 的 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`co
 ### Task 5: 关系边界与后续阶段接口
 
 - 对照上游确认 project 与 issue 的关联约束，并补相应 tests；如果上游只允许 nullable ID 读取，则不得额外增加写入前置条件。
-- 记录 Step 11 可复用的 project organization 关系和 response 标识，但不新增 goal endpoint 或 goal 状态逻辑。
+- 记录 Step 12 可复用的 project organization 关系和 response 标识，但不新增 goal endpoint 或 goal 状态逻辑。
 - 更新本文件的实现位置、已完成行为、验收证据和未纳入事项。
 
 完成条件：Project 能独立使用，且不会把 Goal 或 Runtime 的业务提前混入 Step 10。
