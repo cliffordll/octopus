@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .approvals import get_approval_service
+from .agents import get_agent_service
 from .access import (
     ActorIdentity,
     assert_organization_access,
@@ -23,5 +24,6 @@ __all__ = [
     "get_org_service",
     "get_issue_service",
     "get_approval_service",
+    "get_agent_service",
     "get_project_service",
 ]
