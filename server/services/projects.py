@@ -8,6 +8,7 @@ from typing import Any, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.goals import list_project_goals, replace_project_goals
 from packages.database.queries.projects import (
     create_project,
     delete_project,
@@ -44,6 +45,7 @@ from packages.shared.types.project import (
     CreateProjectInlineResourceInput,
     OrganizationResource as OrganizationResourceData,
     ProjectDetail,
+    ProjectGoalRef,
     ProjectResourceAttachment as ProjectResourceAttachmentData,
     ProjectResourceAttachmentInput,
     UpdateProjectPayload,
@@ -94,6 +96,16 @@ def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _resolve_goal_ids(
+    payload: CreateProjectPayload | UpdateProjectPayload,
+) -> list[str] | None:
+    if "goalIds" in payload:
+        return list(payload["goalIds"])
+    if "goalId" in payload:
+        return [payload["goalId"]] if payload["goalId"] is not None else []
+    return None
+
+
 class ProjectService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -131,6 +143,7 @@ class ProjectService:
         actor_type: str,
         actor_id: str,
     ) -> ProjectDetail:
+        goal_ids = _resolve_goal_ids(payload)
         values = {
             PROJECT_CREATE_TO_COLUMN[key]: value
             for key, value in payload.items()
@@ -138,6 +151,8 @@ class ProjectService:
         }
         values["org_id"] = org_id
         values["name"] = await self._unique_name(org_id, str(payload["name"]).strip())
+        if goal_ids is not None:
+            values["goal_id"] = goal_ids[0] if goal_ids else None
         values.setdefault("status", DEFAULT_PROJECT_STATUS)
         if "target_date" in values:
             values["target_date"] = _parse_date(values["target_date"])
@@ -151,6 +166,8 @@ class ProjectService:
                 PROJECT_COLORS[len(existing) % len(PROJECT_COLORS)],
             )
         project = await create_project(self._session, values)
+        if goal_ids is not None:
+            await replace_project_goals(self._session, project.id, org_id, goal_ids)
         await self._replace_resources(
             project,
             payload.get("resourceAttachments", []),
@@ -179,6 +196,7 @@ class ProjectService:
         existing = await get_project_by_id(self._session, project_id)
         if existing is None:
             return None
+        goal_ids = _resolve_goal_ids(payload)
         values = {
             PROJECT_UPDATE_TO_COLUMN[key]: value
             for key, value in payload.items()
@@ -192,9 +210,13 @@ class ProjectService:
             values["target_date"] = _parse_date(values["target_date"])
         if "archived_at" in values:
             values["archived_at"] = _parse_datetime(values["archived_at"])
+        if goal_ids is not None:
+            values["goal_id"] = goal_ids[0] if goal_ids else None
         row = await update_project(self._session, project_id, values)
         if row is None:
             return None
+        if goal_ids is not None:
+            await replace_project_goals(self._session, row.id, row.org_id, goal_ids)
         if "resourceAttachments" in payload or "newResources" in payload:
             attachment_inputs = payload.get("resourceAttachments")
             if attachment_inputs is None:
@@ -470,11 +492,17 @@ class ProjectService:
         }
 
     async def _to_detail(self, row: Project) -> ProjectDetail:
+        goal_rows = await list_project_goals(self._session, row.id)
+        goal_refs: list[ProjectGoalRef] = [
+            {"id": goal.id, "title": goal.title} for goal in goal_rows
+        ]
         return {
             "id": row.id,
             "orgId": row.org_id,
             "urlKey": _derive_project_url_key(row.name, row.id),
             "goalId": row.goal_id,
+            "goalIds": [goal["id"] for goal in goal_refs],
+            "goals": goal_refs,
             "name": row.name,
             "description": row.description,
             "status": cast(ProjectStatus, row.status),

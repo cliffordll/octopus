@@ -167,9 +167,9 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-12-goals/`
 
-- 目标：实现 goal 的创建、查询、更新、层级与 project/organization/owner agent 关联。
-- 交付：goal contract、持久化、服务逻辑、project goal 聚合关系与工作流测试。
-- 验收：goal 的关联关系、层级约束、状态字段和当前已具备依赖的删除阻塞行为与上游一致；治理和独立 automation 依赖随对应步骤补齐。
+- 目标：实现 goal 的创建、查询、更新、层级与 organization/project/owner agent/issue 关联，不在组织创建时伪造未证实的默认 Goal 副作用。
+- 交付：goal contract、持久化、服务逻辑、project `goalIds`/`goals` 聚合、issue 默认 organization Goal fallback 与工作流测试。
+- 验收：goal 的关联关系、层级约束、状态字段、issue fallback 及当前已具备依赖的删除阻塞行为与上游一致；governance 和独立 automation 依赖随对应步骤补齐。
 
 ### Step 13: Run 调度与恢复
 
