@@ -135,6 +135,23 @@ it("only offers chat-capable agents for a new conversation", async () => {
   expect(screen.queryByRole("option", { name: "Runner (engineer)" })).not.toBeInTheDocument();
 });
 
+it("preselects the agent provided by an agent detail chat entry", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local" }]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats?agentId=agent-1");
+  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
+});
+
 it("keeps a link to the conversation when the first reply request fails", async () => {
   let conversationCreated = false;
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

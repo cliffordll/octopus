@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { ApiError } from "../api/client";
@@ -9,6 +9,8 @@ import { ErrorNotice } from "../components/ErrorNotice";
 
 export function ChatsPage() {
   const { orgId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const requestedAgentId = searchParams.get("agentId") ?? "";
   const [agentId, setAgentId] = useState("");
   const [body, setBody] = useState("");
   const [createdChatId, setCreatedChatId] = useState<string | null>(null);
@@ -19,6 +21,11 @@ export function ChatsPage() {
   const chatAgentList = agentList.filter(
     (agent) => agent.agentRuntimeType === "codex_local" && agent.status !== "terminated",
   );
+  useEffect(() => {
+    if (requestedAgentId && chatAgentList.some((agent) => agent.id === requestedAgentId)) {
+      setAgentId(requestedAgentId);
+    }
+  }, [chatAgentList, requestedAgentId]);
   const create = useMutation({
     mutationFn: async () => {
       const chat = await chatsApi.create(orgId, {

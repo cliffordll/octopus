@@ -91,6 +91,7 @@ export interface CreateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  assigneeAgentId?: string | null;
 }
 
 export interface UpdateIssuePayload {
