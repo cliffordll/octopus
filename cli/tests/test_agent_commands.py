@@ -111,11 +111,34 @@ def test_agent_bootstrap_ceo_rejects_organization_with_existing_agents() -> None
     assert len(requests) == 1
 
 
-def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
-    paths: list[str] = []
+def test_agent_supported_read_commands_use_existing_routes() -> None:
+    requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        paths.append(str(request.url))
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["agent", "configuration", "agent-1"], client=client) == 0
+    assert main(["agent", "config-revisions", "agent-1"], client=client) == 0
+    assert main(["agent", "config-revision", "agent-1", "rev-1"], client=client) == 0
+    assert main(["agent", "runtime-state", "agent-1"], client=client) == 0
+    assert main(["agent", "task-sessions", "agent-1"], client=client) == 0
+
+    assert [request.url.path for request in requests] == [
+        "/api/agents/agent-1/configuration",
+        "/api/agents/agent-1/config-revisions",
+        "/api/agents/agent-1/config-revisions/rev-1",
+        "/api/agents/agent-1/runtime-state",
+        "/api/agents/agent-1/task-sessions",
+    ]
+
+
+def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
         return httpx.Response(200, json=[])
 
     client = ApiClient(transport=httpx.MockTransport(handler))
@@ -127,5 +150,9 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
         == 0
     )
     assert main(["heartbeat", "events", "run-1"], client=client) == 0
-    assert "/api/orgs/org-1/heartbeat-runs?agentId=agent-1" in paths[0]
-    assert paths[1].endswith("/api/heartbeat-runs/run-1/events")
+    assert main(["heartbeat", "run", "--agent-id", "agent-1"], client=client) == 0
+    assert "/api/orgs/org-1/heartbeat-runs?agentId=agent-1" in str(requests[0].url)
+    assert requests[1].url.path == "/api/heartbeat-runs/run-1/events"
+    assert requests[2].method == "POST"
+    assert requests[2].url.path == "/api/agents/agent-1/heartbeat/invoke"
+    assert requests[2].read() == b"{}"
