@@ -23,6 +23,8 @@ from ..types.project import (
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _PROJECT_FIELDS = {
     "name",
+    "goalId",
+    "goalIds",
     "description",
     "status",
     "leadAgentId",
@@ -145,6 +147,20 @@ def _validate_project_fields(
         raise ValueError("'name' must be a non-empty string when provided")
     for field in ("description", "leadAgentId", "targetDate", "archivedAt"):
         _nullable_string(payload, field)
+    if "goalId" in payload and payload["goalId"] is not None:
+        try:
+            uuid.UUID(str(payload["goalId"]))
+        except ValueError as exc:
+            raise ValueError("'goalId' must be a UUID or null") from exc
+    if "goalIds" in payload:
+        goal_ids = payload["goalIds"]
+        if not isinstance(goal_ids, list):
+            raise ValueError("'goalIds' must be an array")
+        for goal_id in goal_ids:
+            try:
+                uuid.UUID(str(goal_id))
+            except ValueError as exc:
+                raise ValueError("'goalIds' entries must be UUIDs") from exc
     if "status" in payload and payload["status"] not in PROJECT_STATUSES:
         raise ValueError(f"'status' must be one of {list(PROJECT_STATUSES)}")
     if "color" in payload and payload["color"] is not None:
