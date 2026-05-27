@@ -14,6 +14,7 @@ from .issues import get_issue_service
 from .orgs import get_org_service
 from .projects import get_project_service
 from .heartbeat import get_heartbeat_service
+from .chats import get_chat_service
 
 __all__ = [
     "get_session",
@@ -28,4 +29,5 @@ __all__ = [
     "get_agent_service",
     "get_project_service",
     "get_heartbeat_service",
+    "get_chat_service",
 ]
