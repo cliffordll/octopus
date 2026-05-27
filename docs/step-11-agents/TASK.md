@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统与交互闭环
 
-状态：11A-11D 已完成并通过基线验收；11E-11F 待开发
+状态：11A-11E 已完成并通过基线验收；11F 待开发
 
 ## 调整原因
 
@@ -88,10 +88,13 @@
 - 实现 adapter 配置校验、认证/环境读取边界、命令调用、输出/错误/result event 映射，以及已有 heartbeat run/runtime state 链路接入。
 - 保留 `process` 路径用于既有验收和通用执行测试；`codex_local` 成为本步骤验证智能体真实启动的目标路径。
 
-待验收：
+实施记录：
 
-- Contract tests 覆盖 `codex_local` runtime id、配置和结果映射边界。
-- Integration tests 覆盖一次真实或受控的 Codex adapter 调用能够生成可查询 run/event/runtime state。
+- Runtime 已新增 `codex_local` adapter 注册与执行实现，按兼容命令边界调用 `codex exec --json --disable plugins`，支持 `command`、`cwd`、`model`、`modelReasoningEffort`、`search`、`dangerouslyBypassApprovalsAndSandbox`、`extraArgs`、`promptTemplate`、`env` 与 `timeoutSec` 基线配置。
+- Adapter 已解析 Codex JSONL 的 `thread.started`、agent message 与 `turn.completed` usage，并将响应摘要、session id 和 token usage 返回至统一 run contract。
+- Heartbeat 执行链路已将 `sessionIdAfter` 与 `usageJson` 持久化到 run，并同步更新 runtime state 的当前 session 和累计 token 字段。
+- Contract integration test 通过受控 Codex 执行输出验证 CLI 参数、stdin prompt、run 读取与 runtime state 更新，不要求本地测试环境存在真实账号凭据。
+- 真实对话消息作为 prompt 的来源归 11F；完整 session 续接、workspace 上下文和跨 runtime 增强仍按后续能力边界补齐。
 
 ### 11F: Agent 对话闭环
 
@@ -150,7 +153,7 @@
 ## 延后能力
 
 - Run 定时触发、队列领取、并发合并、取消、重试和中断恢复归 Step 13。
-- `codex_local` adapter 与最小对话触发链路归本步骤 11E/11F，尚未实现。
+- 最小对话触发链路归本步骤 11F，尚未实现。
 - `process`、`codex_local` 以外的 runtime adapter 及跨 runtime 的 session/environment/usage 深化归 Step 14。
 - 完整 workspace 建立、复用、runtime service 与执行产物归 Step 15。
 - 完整 cost、budget 与扩展 activity 治理归 Step 16。
@@ -203,7 +206,7 @@ curl.exe -s "$base/api/agents/$($agent.id)/runtime-state"
 
 ## 后续步骤边界
 
-- Step 11E 实现 `codex_local` runtime adapter，使 Agent 能通过已建立的 run contract 真正启动 Codex。
+- Step 11E 已实现 `codex_local` runtime adapter，使 Agent 能通过已建立的 run contract 启动 Codex 并保存基线执行结果。
 - Step 11F 实现触发 Agent 执行、记录回复并关联 run 的最小消息闭环；完整 Chat / Messenger 扩展仍归 Step 17。
 - Step 12 实现 Goal CRUD、层级与 `ownerAgentId` 同 organization 引用校验。
 - Step 13 在本步骤 run 基线上扩展调度、并发领取、取消、中断恢复和幂等语义。

@@ -21,6 +21,8 @@ class RuntimeExecutionResult:
     signal: str | None = None
     timed_out: bool = False
     error_message: str | None = None
+    usage_json: dict[str, Any] | None = None
+    session_id_after: str | None = None
     result_json: dict[str, Any] | None = None
 
 

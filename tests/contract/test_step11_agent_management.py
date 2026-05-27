@@ -614,6 +614,98 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state["lastRunStatus"] == "succeeded"
 
 
+async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_usage(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            captured["stdin"] = payload
+            return (
+                (
+                    '{"type":"thread.started","thread_id":"thread-11e"}\n'
+                    '{"type":"item.completed","item":{"type":"agent_message",'
+                    '"text":"codex completed"}}\n'
+                    '{"type":"turn.completed","usage":{"input_tokens":12,'
+                    '"cached_input_tokens":3,"output_tokens":5}}\n'
+                ).encode(),
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured["args"] = args
+        captured["cwd"] = kwargs.get("cwd")
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    org_id = await _seed_org(session_factory, key="codex-runtime")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Codex Executor",
+            "agentRuntimeType": "codex_local",
+            "agentRuntimeConfig": {
+                "command": "codex-test",
+                "cwd": "workspace",
+                "model": "gpt-5",
+                "search": True,
+                "dangerouslyBypassApprovalsAndSandbox": True,
+                "promptTemplate": "Complete the assigned task.",
+            },
+        },
+    )
+
+    wake_code, run = await _request(
+        app, "POST", f"/api/agents/{created['id']}/heartbeat/invoke"
+    )
+    assert wake_code == 202
+    assert run["status"] == "succeeded"
+    assert captured["args"] == (
+        "codex-test",
+        "--search",
+        "exec",
+        "--json",
+        "--disable",
+        "plugins",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--model",
+        "gpt-5",
+        "-c",
+        "skills.bundled.enabled=false",
+        "-",
+    )
+    assert captured["stdin"] == b"Complete the assigned task."
+    assert run["sessionIdAfter"] == "thread-11e"
+    assert run["usageJson"] == {
+        "inputTokens": 12,
+        "cachedInputTokens": 3,
+        "outputTokens": 5,
+    }
+    assert run["resultJson"]["summary"] == "codex completed"
+
+    _, state = await _request(app, "GET", f"/api/agents/{created['id']}/runtime-state")
+    assert state["sessionId"] == "thread-11e"
+    assert state["agentRuntimeType"] == "codex_local"
+
+
 async def test_agent_execution_acceptance_flow_starts_with_org_creation(
     app: FastAPI,
 ) -> None:
