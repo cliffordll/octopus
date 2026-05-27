@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
+import { issuesApi } from "../api/issues";
 import type { AgentRole, AgentRuntimeType, UpdateAgentPayload } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
@@ -32,7 +33,10 @@ export function AgentPage() {
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
   const [configurationError, setConfigurationError] = useState<string | null>(null);
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
   const organizationAgents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const runtimeState = useQuery({
@@ -76,6 +80,18 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
     },
   });
+  const assignTask = useMutation({
+    mutationFn: () => issuesApi.create(orgId, {
+      title: taskTitle.trim(),
+      assigneeAgentId: agentId,
+    }),
+    onSuccess: (issue) => {
+      setTaskDialogOpen(false);
+      setTaskTitle("");
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      navigate(`/orgs/${orgId}/issues/${issue.id}`);
+    },
+  });
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
@@ -96,15 +112,39 @@ export function AgentPage() {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
   }
+  function submitTask(event: FormEvent) {
+    event.preventDefault();
+    if (taskTitle.trim()) assignTask.mutate();
+  }
+  const canChat = agent.data?.agentRuntimeType === "codex_local" && agent.data.status !== "terminated";
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
-      <header className="page-header">
+      <header className="page-header agent-page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
-          <h1>{agent.data?.name ?? "载入中..."}</h1>
+          <div className="agent-title-row">
+            <h1>{agent.data?.name ?? "载入中..."}</h1>
+            {agent.data && <Badge>{agent.data.status}</Badge>}
+          </div>
         </div>
+        {agent.data && (
+          <div className="agent-header-actions">
+            <button className="secondary" onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
+            {canChat ? (
+              <Link className="button secondary" to={`/orgs/${orgId}/chats?agentId=${encodeURIComponent(agentId)}`}>聊天</Link>
+            ) : (
+              <button className="secondary" disabled type="button">聊天</button>
+            )}
+            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
+            <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
+            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
+          </div>
+        )}
       </header>
+      {action.error && <ErrorNotice error={action.error} />}
+      {invoke.error && <ErrorNotice error={invoke.error} />}
       {agent.data && (
         <>
           <nav aria-label="智能体详情导航" className="detail-tabs">
@@ -122,14 +162,6 @@ export function AgentPage() {
               <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
               <div><dt>最近 Heartbeat</dt><dd>{agent.data.lastHeartbeatAt ?? "暂无"}</dd></div>
             </dl>
-            <div className="actions">
-              <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
-              <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
-              <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
-            </div>
-            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>触发 Heartbeat</button>
-            {action.error && <ErrorNotice error={action.error} />}
-            {invoke.error && <ErrorNotice error={invoke.error} />}
           </section>
           <section className="panel">
             <h2>Runtime 状态</h2>
@@ -191,6 +223,34 @@ export function AgentPage() {
             </div>
           </section>}
         </>
+      )}
+      {taskDialogOpen && agent.data && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setTaskDialogOpen(false);
+          }}
+          role="presentation"
+        >
+          <section aria-labelledby="assign-task-title" aria-modal="true" className="panel task-modal" role="dialog">
+            <div className="task-modal-header">
+              <h2 id="assign-task-title">分配任务</h2>
+              <button aria-label="关闭" className="secondary" onClick={() => setTaskDialogOpen(false)} type="button">关闭</button>
+            </div>
+            <p className="muted">负责人：{agent.data.name}</p>
+            <form className="form" onSubmit={submitTask}>
+              <label>
+                任务标题
+                <input autoFocus value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} required />
+              </label>
+              {assignTask.error && <ErrorNotice error={assignTask.error} />}
+              <div className="task-modal-actions">
+                <button className="secondary" onClick={() => setTaskDialogOpen(false)} type="button">取消</button>
+                <button disabled={assignTask.isPending} type="submit">创建任务</button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
     </AgentsWorkspace>
   );
