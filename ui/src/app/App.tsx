@@ -32,6 +32,7 @@ export function App() {
         <Route path="orgs/:orgId/approvals/:approvalId" element={<ApprovalPage />} />
         <Route path="orgs/:orgId/projects" element={<ProjectsPage />} />
         <Route path="orgs/:orgId/projects/:projectId" element={<ProjectPage />} />
+        <Route path="orgs/:orgId/projects/:projectId/:tab" element={<ProjectPage />} />
         <Route path="orgs/:orgId/agents" element={<AgentsPage />} />
         <Route path="orgs/:orgId/agents/new" element={<NewAgentPage />} />
         <Route path="orgs/:orgId/agents/:agentId" element={<AgentPage />} />

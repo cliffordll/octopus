@@ -230,7 +230,7 @@ h1, h2, p {
   text-transform: uppercase;
 }
 
-.org-sidebar h2 {
+.org-sidebar > h2 {
   color: #e8edf5;
   font-size: 17px;
   font-weight: 500;
@@ -394,7 +394,22 @@ h1, h2, p {
 .local-nav {
   display: flex;
   flex-direction: column;
+  gap: 24px;
+}
+
+.local-nav-section {
+  display: flex;
+  flex-direction: column;
   gap: 3px;
+}
+
+.local-nav-section h2 {
+  color: #647086;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  margin: 0 11px 7px;
+  text-transform: uppercase;
 }
 
 .local-nav a {
@@ -403,9 +418,35 @@ h1, h2, p {
   padding: 9px 11px;
 }
 
+.local-nav .local-nav-primary {
+  color: #b6c0d0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.local-project-list {
+  border-left: 1px solid #222c3a;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 7px 0 0 11px;
+  padding-left: 8px;
+}
+
+.local-nav .local-nav-project {
+  color: #778397;
+  font-size: 13px;
+  padding: 7px 9px;
+}
+
 .local-nav a.active {
   background: #171e2b;
   color: #eff3f9;
+}
+
+.local-nav .local-nav-project.active {
+  background: #141c28;
+  color: #d6e3f6;
 }
 
 .context-nav {
@@ -738,6 +779,10 @@ pre {
   max-width: 720px;
 }
 
+.project-configuration, .project-resources, .project-issues {
+  max-width: 760px;
+}
+
 .agent-empty-state {
   max-width: 720px;
   min-height: 180px;
@@ -929,12 +974,27 @@ pre {
     border-right: 0;
     padding: 16px;
   }
-  .org-sidebar-label, .org-sidebar h2 {
+  .org-sidebar-label, .org-sidebar > h2 {
     display: none;
   }
   .local-nav {
+    gap: 18px;
+  }
+  .local-nav-section {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+  .local-nav-section h2 {
+    flex-basis: 100%;
+  }
+  .local-project-list {
+    border-left: 0;
+    border-top: 1px solid #222c3a;
+    flex-basis: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin: 6px 0 0;
+    padding: 8px 0 0;
   }
   .org-content {
     padding: 22px 16px;
