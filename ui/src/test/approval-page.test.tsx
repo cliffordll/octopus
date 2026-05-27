@@ -22,7 +22,10 @@ it("shows an approval and submits a board decision", async () => {
     decidedAt: null,
     updatedAt: "",
   };
-  const fetchMock = vi.fn().mockReturnValue(respond(approval));
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    return respond(approval);
+  });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/approvals/approval-1");

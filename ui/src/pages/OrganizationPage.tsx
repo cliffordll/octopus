@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent, type PropsWithChildren } from "rea
 import { Link, Navigate, NavLink, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { organizationsApi } from "../api/organizations";
+import { projectsApi } from "../api/projects";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -102,14 +103,31 @@ export function OrganizationStructurePage() {
 }
 
 export function OrgNavigation({ orgId }: { orgId: string }) {
+  const projects = useQuery({
+    queryKey: ["projects", orgId],
+    queryFn: () => projectsApi.list(orgId),
+  });
+  const projectList = Array.isArray(projects.data) ? projects.data : [];
   return (
     <aside className="org-sidebar">
       <p className="org-sidebar-label">Organization</p>
-      <h2>管理</h2>
       <nav className="local-nav" aria-label="组织导航">
-        <NavLink to={`/orgs/${orgId}/structure`}>组织架构</NavLink>
-        <NavLink to={`/orgs/${orgId}/projects`}>项目</NavLink>
-        <NavLink to={`/orgs/${orgId}/heartbeat-runs`}>心跳</NavLink>
+        <section className="local-nav-section">
+          <h2>组织</h2>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>组织架构</NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>心跳</NavLink>
+        </section>
+        <section className="local-nav-section">
+          <h2>项目</h2>
+          <NavLink className="local-nav-primary" end to={`/orgs/${orgId}/projects`}>全部项目</NavLink>
+          {projects.error && <ErrorNotice error={projects.error} />}
+          <div className="local-project-list">
+            {projectList.map((project) => (
+              <NavLink className="local-nav-project" key={project.id} to={`/orgs/${orgId}/projects/${project.id}`}>{project.name}</NavLink>
+            ))}
+            {projects.isSuccess && projectList.length === 0 && <p className="context-empty">暂无项目</p>}
+          </div>
+        </section>
       </nav>
     </aside>
   );
