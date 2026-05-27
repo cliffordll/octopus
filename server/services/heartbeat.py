@@ -217,6 +217,8 @@ class HeartbeatService:
                     ),
                     "exit_code": result.exit_code,
                     "signal": result.signal,
+                    "usage_json": result.usage_json,
+                    "session_id_after": result.session_id_after,
                     "result_json": result.result_json,
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,
@@ -293,6 +295,12 @@ class HeartbeatService:
                     "state_json": {},
                     "last_run_id": run.id,
                     "last_run_status": run.status,
+                    "session_id": run.session_id_after,
+                    "total_input_tokens": self._usage_count(run, "inputTokens"),
+                    "total_output_tokens": self._usage_count(run, "outputTokens"),
+                    "total_cached_input_tokens": self._usage_count(
+                        run, "cachedInputTokens"
+                    ),
                     "last_error": run.error,
                 },
             )
@@ -304,9 +312,20 @@ class HeartbeatService:
                 "agent_runtime_type": agent.agent_runtime_type,
                 "last_run_id": run.id,
                 "last_run_status": run.status,
+                "session_id": run.session_id_after or state.session_id,
+                "total_input_tokens": state.total_input_tokens
+                + self._usage_count(run, "inputTokens"),
+                "total_output_tokens": state.total_output_tokens
+                + self._usage_count(run, "outputTokens"),
+                "total_cached_input_tokens": state.total_cached_input_tokens
+                + self._usage_count(run, "cachedInputTokens"),
                 "last_error": run.error,
             },
         )
+
+    def _usage_count(self, run: HeartbeatRunRow, key: str) -> int:
+        value = (run.usage_json or {}).get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
     async def _append_event(
         self,
