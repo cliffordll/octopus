@@ -142,7 +142,9 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "agent-1" }, 201))
       .mockReturnValueOnce(jsonResponse({ id: "agent-1", status: "paused" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }, 202))
-      .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]));
+      .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }))
+      .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]));
     vi.stubGlobal("fetch", fetchMock);
 
     await agentsApi.create("org-1", {
@@ -154,6 +156,8 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.pause("agent-1");
     await heartbeatApi.invoke("agent-1");
     await heartbeatApi.list("org-1", "agent-1");
+    await heartbeatApi.get("run-1");
+    await heartbeatApi.listEvents("run-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -168,6 +172,16 @@ describe("agent and heartbeat APIs", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
       "/api/orgs/org-1/heartbeat-runs?agentId=agent-1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/heartbeat-runs/run-1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/heartbeat-runs/run-1/events",
       expect.objectContaining({ method: "GET" }),
     );
   });

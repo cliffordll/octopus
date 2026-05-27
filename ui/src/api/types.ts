@@ -265,11 +265,11 @@ export interface Agent {
   runtimeConfig?: Record<string, unknown>;
   budgetMonthlyCents: number;
   lastHeartbeatAt: string | null;
+  reportsTo?: string | null;
 }
 
 export interface AgentDetail extends Agent {
   capabilities?: string | null;
-  reportsTo?: string | null;
 }
 
 export interface CreateAgentPayload {
@@ -310,6 +310,20 @@ export interface HeartbeatRun {
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;
   createdAt?: string;
+}
+
+export interface HeartbeatRunEvent {
+  id: number;
+  orgId?: string;
+  runId: string;
+  agentId: string;
+  seq: number;
+  eventType: string;
+  stream?: string | null;
+  level?: string | null;
+  message: string | null;
+  payload?: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 export interface ChatConversation {

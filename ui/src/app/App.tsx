@@ -8,9 +8,10 @@ import { NewAgentPage } from "../pages/NewAgentPage";
 import { ChatPage } from "../pages/ChatPage";
 import { ChatsPage } from "../pages/ChatsPage";
 import { HomePage } from "../pages/HomePage";
+import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
-import { OrganizationPage } from "../pages/OrganizationPage";
+import { OrganizationIndexPage, OrganizationPage, OrganizationStructurePage } from "../pages/OrganizationPage";
 import { OrganizationsPage } from "../pages/OrganizationsPage";
 import { ProjectPage } from "../pages/ProjectPage";
 import { ProjectsPage } from "../pages/ProjectsPage";
@@ -21,7 +22,10 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
         <Route path="organizations" element={<OrganizationsPage />} />
-        <Route path="orgs/:orgId" element={<OrganizationPage />} />
+        <Route path="orgs/:orgId" element={<OrganizationIndexPage />} />
+        <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />
+        <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
+        <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
         <Route path="orgs/:orgId/issues" element={<IssuesPage />} />
         <Route path="orgs/:orgId/issues/:issueId" element={<IssuePage />} />
         <Route path="orgs/:orgId/approvals" element={<ApprovalsPage />} />

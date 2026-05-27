@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -20,6 +20,18 @@ it("lists and creates projects for an organization", async () => {
 
   renderApp("/orgs/org-1/projects");
   expect(await screen.findByRole("link", { name: "控制台" })).toBeInTheDocument();
+  const organizationNavigation = screen.getByRole("navigation", { name: "组织导航" });
+  expect(within(organizationNavigation).getByRole("link", { name: "组织架构" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/structure",
+  );
+  expect(within(organizationNavigation).getByRole("link", { name: "项目" })).toBeInTheDocument();
+  expect(within(organizationNavigation).getByRole("link", { name: "心跳" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/heartbeat-runs",
+  );
+  expect(within(organizationNavigation).queryByRole("link", { name: "审批" })).not.toBeInTheDocument();
+  expect(within(organizationNavigation).queryByRole("link", { name: "设置" })).not.toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("Project 名称"), "发布流程");
   await userEvent.selectOptions(screen.getByLabelText("Project 状态"), "planned");
