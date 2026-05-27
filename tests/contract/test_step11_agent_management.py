@@ -37,6 +37,13 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     assert paths.ORG_AGENT_LIST_PATH == "/api/orgs/{orgId}/agents"
     assert paths.AGENT_DETAIL_PATH == "/api/agents/{id}"
     assert paths.AGENT_PAUSE_PATH == "/api/agents/{id}/pause"
+    assert paths.AGENT_CONFIGURATION_PATH == "/api/agents/{id}/configuration"
+    assert (
+        paths.ORG_AGENT_CONFIGURATIONS_PATH == "/api/orgs/{orgId}/agent-configurations"
+    )
+    assert paths.AGENT_CONFIG_REVISIONS_PATH == "/api/agents/{id}/config-revisions"
+    assert paths.AGENT_RUNTIME_STATE_PATH == "/api/agents/{id}/runtime-state"
+    assert paths.AGENT_TASK_SESSIONS_PATH == "/api/agents/{id}/task-sessions"
     assert constants.AGENT_STATUSES == (
         "active",
         "paused",
@@ -64,6 +71,9 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     assert payload["agentRuntimeConfig"] == {}
     with pytest.raises(ValueError, match="role"):
         validators.validate_create_agent({"role": "invalid"})
+    assert validators.validate_reset_agent_session({"taskKey": "issue-1"}) == {
+        "taskKey": "issue-1"
+    }
 
 
 def test_agent_schema_matches_step11a_boundary() -> None:
@@ -97,6 +107,45 @@ async def test_upgrade_to_head_creates_agents_table(tmp_path: Path) -> None:
         await engine.dispose()
 
     assert names == {"agents"}
+
+
+def test_agent_state_tables_match_step11b_boundary() -> None:
+    schema = importlib.import_module("packages.database.schema")
+    expected = {
+        "agent_config_revisions",
+        "agent_runtime_state",
+        "agent_task_sessions",
+        "agent_wakeup_requests",
+    }
+    assert expected.issubset({table.name for table in Base.metadata.sorted_tables})
+    assert schema.AgentConfigRevision.__tablename__ == "agent_config_revisions"
+    assert schema.AgentRuntimeState.__tablename__ == "agent_runtime_state"
+    assert schema.AgentTaskSession.__tablename__ == "agent_task_sessions"
+    assert schema.AgentWakeupRequest.__tablename__ == "agent_wakeup_requests"
+
+
+async def test_upgrade_to_head_creates_agent_state_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "step11b-upgrade.db"
+    await upgrade_to_head(f"sqlite+aiosqlite:///{db_path}")
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    "select name from sqlite_master where type='table' and name in "
+                    "('agent_config_revisions', 'agent_runtime_state', "
+                    "'agent_task_sessions', 'agent_wakeup_requests')"
+                )
+            )
+            names = {row[0] for row in result}
+    finally:
+        await engine.dispose()
+    assert names == {
+        "agent_config_revisions",
+        "agent_runtime_state",
+        "agent_task_sessions",
+        "agent_wakeup_requests",
+    }
 
 
 @pytest.fixture
@@ -280,6 +329,158 @@ async def test_agent_update_merges_runtime_configuration_unless_replace_requeste
     )
     assert code == 200
     assert replaced["agentRuntimeConfig"] == {"model": "only"}
+
+
+async def test_agent_configuration_revision_redacts_and_rolls_back(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="revision")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "Configured", "agentRuntimeConfig": {"model": "initial"}},
+    )
+    patch_code, _ = await _request(
+        app,
+        "PATCH",
+        f"/api/agents/{created['id']}",
+        json={"agentRuntimeConfig": {"model": "next", "apiKey": "secret-value"}},
+    )
+    assert patch_code == 200
+
+    config_code, config = await _request(
+        app, "GET", f"/api/agents/{created['id']}/configuration"
+    )
+    assert config_code == 200
+    assert config["agentRuntimeConfig"]["apiKey"] == "***REDACTED***"
+    org_config_code, org_configs = await _request(
+        app, "GET", f"/api/orgs/{org_id}/agent-configurations"
+    )
+    assert org_config_code == 200
+    assert org_configs[0]["agentRuntimeConfig"]["apiKey"] == "***REDACTED***"
+
+    revisions_code, revisions = await _request(
+        app, "GET", f"/api/agents/{created['id']}/config-revisions"
+    )
+    assert revisions_code == 200
+    assert revisions[0]["changedKeys"] == ["agentRuntimeConfig"]
+    assert (
+        revisions[0]["afterConfig"]["agentRuntimeConfig"]["apiKey"] == "***REDACTED***"
+    )
+    revision_code, revision = await _request(
+        app,
+        "GET",
+        f"/api/agents/{created['id']}/config-revisions/{revisions[0]['id']}",
+    )
+    assert revision_code == 200
+    assert revision["id"] == revisions[0]["id"]
+
+    _, _ = await _request(
+        app,
+        "PATCH",
+        f"/api/agents/{created['id']}",
+        json={
+            "agentRuntimeConfig": {"model": "latest"},
+            "replaceAgentRuntimeConfig": True,
+        },
+    )
+    rollback_code, rolled_back = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/config-revisions/{revisions[0]['id']}/rollback",
+    )
+    assert rollback_code == 422
+    assert "redacted" in rolled_back["detail"].lower()
+
+    _, first_safe = await _request(
+        app,
+        "PATCH",
+        f"/api/agents/{created['id']}",
+        json={"runtimeConfig": {"heartbeat": "enabled"}},
+    )
+    assert first_safe["runtimeConfig"] == {"heartbeat": "enabled"}
+    _, safe_revisions = await _request(
+        app, "GET", f"/api/agents/{created['id']}/config-revisions"
+    )
+    safe_revision = next(
+        revision
+        for revision in safe_revisions
+        if revision["changedKeys"] == ["runtimeConfig"]
+    )
+    _, _ = await _request(
+        app,
+        "PATCH",
+        f"/api/agents/{created['id']}",
+        json={"runtimeConfig": {"heartbeat": "off"}},
+    )
+    rollback_code, rolled_back = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/config-revisions/{safe_revision['id']}/rollback",
+    )
+    assert rollback_code == 200
+    assert rolled_back["runtimeConfig"] == {"heartbeat": "enabled"}
+
+
+async def test_agent_runtime_state_sessions_and_reset_routes(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import AgentRuntimeState, AgentTaskSession
+
+    org_id = await _seed_org(session_factory, key="sessions")
+    _, created = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"name": "Runtime"}
+    )
+    async with session_factory() as session:
+        session.add(
+            AgentRuntimeState(
+                agent_id=created["id"],
+                org_id=org_id,
+                agent_runtime_type="process",
+                session_id="legacy-session",
+                state_json={"resume": True},
+            )
+        )
+        session.add(
+            AgentTaskSession(
+                org_id=org_id,
+                agent_id=created["id"],
+                agent_runtime_type="process",
+                task_key="issue-1",
+                session_params_json={"password": "secret", "safe": "visible"},
+                session_display_id="session-display",
+            )
+        )
+        await session.commit()
+
+    state_code, state = await _request(
+        app, "GET", f"/api/agents/{created['id']}/runtime-state"
+    )
+    assert state_code == 200
+    assert state["sessionDisplayId"] == "session-display"
+
+    sessions_code, sessions = await _request(
+        app, "GET", f"/api/agents/{created['id']}/task-sessions"
+    )
+    assert sessions_code == 200
+    assert sessions[0]["sessionParamsJson"] == {
+        "password": "***REDACTED***",
+        "safe": "visible",
+    }
+
+    reset_code, reset = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/runtime-state/reset-session",
+        json={"taskKey": "issue-1"},
+    )
+    assert reset_code == 200
+    assert reset["clearedTaskSessions"] == 1
+    assert reset["sessionId"] is None
+    assert reset["stateJson"] == {"resume": True}
 
 
 async def test_agent_cannot_list_other_organization(

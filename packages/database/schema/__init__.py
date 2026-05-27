@@ -3,6 +3,12 @@ from __future__ import annotations
 from ._base import Base, new_uuid
 from .activity_log import ActivityLog
 from .agents import Agent
+from .agent_state import (
+    AgentConfigRevision,
+    AgentRuntimeState,
+    AgentTaskSession,
+    AgentWakeupRequest,
+)
 from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
@@ -16,6 +22,10 @@ __all__ = [
     "new_uuid",
     "ActivityLog",
     "Agent",
+    "AgentConfigRevision",
+    "AgentRuntimeState",
+    "AgentTaskSession",
+    "AgentWakeupRequest",
     "Approval",
     "IssueApproval",
     "IssueComment",
