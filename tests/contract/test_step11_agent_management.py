@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -279,6 +280,12 @@ async def _request(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.request(method, path, json=json, headers=headers)
     return response.status_code, response.json()
+
+
+async def _wait_for_dispatch(app: FastAPI) -> None:
+    tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
+    if tasks:
+        await asyncio.gather(*tasks)
 
 
 async def _seed_org(session_factory: async_sessionmaker, *, key: str) -> str:
@@ -612,9 +619,9 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
         json={"reason": "contract-run"},
     )
     assert wake_code == 202
-    assert run["status"] == "succeeded"
+    assert run["status"] == "queued"
     assert run["invocationSource"] == "on_demand"
-    assert run["resultJson"]["stdout"].strip() == "adapter-ok"
+    await _wait_for_dispatch(app)
 
     list_code, runs = await _request(app, "GET", f"/api/orgs/{org_id}/heartbeat-runs")
     assert list_code == 200
@@ -623,6 +630,7 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     detail_code, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
     assert detail_code == 200
     assert detail["status"] == "succeeded"
+    assert detail["resultJson"]["stdout"].strip() == "adapter-ok"
 
     events_code, events = await _request(
         app, "GET", f"/api/heartbeat-runs/{run['id']}/events"
@@ -706,6 +714,9 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         app, "POST", f"/api/agents/{created['id']}/heartbeat/invoke"
     )
     assert wake_code == 202
+    assert run["status"] == "queued"
+    await _wait_for_dispatch(app)
+    _, run = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
     assert run["status"] == "succeeded"
     assert captured["args"] == (
         "codex-test",
@@ -760,7 +771,8 @@ async def test_agent_execution_acceptance_flow_starts_with_org_creation(
         app, "POST", f"/api/agents/{agent['id']}/heartbeat/invoke"
     )
     assert invoke_code == 202
-    assert run["status"] == "succeeded"
+    assert run["status"] == "queued"
+    await _wait_for_dispatch(app)
 
     detail_code, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
     assert detail_code == 200

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -13,6 +14,7 @@ class RuntimeExecutionContext:
     agent_name: str
     config: dict[str, Any]
     on_log: Callable[[str, str], Awaitable[None]]
+    cancel_event: asyncio.Event | None = None
 
 
 @dataclass(frozen=True)
