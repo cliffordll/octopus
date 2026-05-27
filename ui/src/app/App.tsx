@@ -2,6 +2,10 @@ import { Route, Routes } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
 import { ApprovalPage } from "../pages/ApprovalPage";
 import { ApprovalsPage } from "../pages/ApprovalsPage";
+import { AgentPage } from "../pages/AgentPage";
+import { AgentsPage } from "../pages/AgentsPage";
+import { ChatPage } from "../pages/ChatPage";
+import { ChatsPage } from "../pages/ChatsPage";
 import { HomePage } from "../pages/HomePage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
@@ -23,6 +27,10 @@ export function App() {
         <Route path="orgs/:orgId/approvals/:approvalId" element={<ApprovalPage />} />
         <Route path="orgs/:orgId/projects" element={<ProjectsPage />} />
         <Route path="orgs/:orgId/projects/:projectId" element={<ProjectPage />} />
+        <Route path="orgs/:orgId/agents" element={<AgentsPage />} />
+        <Route path="orgs/:orgId/agents/:agentId" element={<AgentPage />} />
+        <Route path="orgs/:orgId/chats" element={<ChatsPage />} />
+        <Route path="orgs/:orgId/chats/:chatId" element={<ChatPage />} />
       </Route>
     </Routes>
   );

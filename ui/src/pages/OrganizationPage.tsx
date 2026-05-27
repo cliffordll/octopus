@@ -63,6 +63,8 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
       <Link to={`/orgs/${orgId}/issues`}>Issues</Link>
       <Link to={`/orgs/${orgId}/approvals`}>Approvals</Link>
       <Link to={`/orgs/${orgId}/projects`}>Projects</Link>
+      <Link to={`/orgs/${orgId}/agents`}>Agents</Link>
+      <Link to={`/orgs/${orgId}/chats`}>Chats</Link>
       <Link to={`/orgs/${orgId}`}>设置</Link>
     </nav>
   );

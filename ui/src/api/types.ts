@@ -219,3 +219,86 @@ export interface UpdateProjectResourceAttachmentPayload {
   note?: string | null;
   sortOrder?: number;
 }
+
+export type AgentStatus =
+  | "active"
+  | "paused"
+  | "idle"
+  | "running"
+  | "error"
+  | "pending_approval"
+  | "terminated";
+export type AgentRole =
+  | "ceo"
+  | "cto"
+  | "cmo"
+  | "cfo"
+  | "engineer"
+  | "designer"
+  | "pm"
+  | "qa"
+  | "devops"
+  | "researcher"
+  | "general";
+export type AgentRuntimeType =
+  | "process"
+  | "http"
+  | "claude_local"
+  | "codex_local"
+  | "gemini_local"
+  | "opencode_local"
+  | "pi_local"
+  | "cursor"
+  | "openclaw_gateway"
+  | "hermes_local";
+
+export interface Agent {
+  id: string;
+  orgId: string;
+  name: string;
+  urlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfig: Record<string, unknown>;
+  budgetMonthlyCents: number;
+  lastHeartbeatAt: string | null;
+}
+
+export interface AgentDetail extends Agent {
+  capabilities?: string | null;
+  reportsTo?: string | null;
+}
+
+export interface CreateAgentPayload {
+  name: string;
+  role: AgentRole;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfig: Record<string, unknown>;
+}
+
+export interface HeartbeatRun {
+  id: string;
+  orgId: string;
+  agentId: string;
+  invocationSource: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
+  error?: string | null;
+  createdAt?: string;
+}
+
+export interface ChatConversation {
+  id: string;
+  orgId: string;
+  title: string;
+  status: "active" | "resolved" | "archived";
+  preferredAgentId?: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  body: string;
+  status: "streaming" | "completed" | "stopped" | "failed" | "interrupted";
+}
