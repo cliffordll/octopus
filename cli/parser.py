@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from .client import DEFAULT_API_BASE
-from .commands import approval, issue, organization
+from .commands import approval, issue, organization, project
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,4 +16,5 @@ def build_parser() -> argparse.ArgumentParser:
     organization.configure(resources)
     issue.configure(resources)
     approval.configure(resources)
+    project.configure(resources)
     return parser

@@ -62,6 +62,7 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
     <nav className="local-nav" aria-label="组织导航">
       <Link to={`/orgs/${orgId}/issues`}>Issues</Link>
       <Link to={`/orgs/${orgId}/approvals`}>Approvals</Link>
+      <Link to={`/orgs/${orgId}/projects`}>Projects</Link>
       <Link to={`/orgs/${orgId}`}>设置</Link>
     </nav>
   );

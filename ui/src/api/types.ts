@@ -141,3 +141,81 @@ export interface ResubmitApprovalPayload {
   payload?: Record<string, unknown>;
   issueIds?: string[];
 }
+
+export type ProjectStatus = "backlog" | "planned" | "in_progress" | "completed" | "cancelled";
+export type ProjectResourceRole =
+  | "working_set"
+  | "reference"
+  | "tracking"
+  | "deliverable"
+  | "background";
+
+export interface OrganizationResource {
+  id: string;
+  orgId: string;
+  name: string;
+  kind: "file" | "directory" | "url" | "connector_object";
+  locator: string;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectResourceAttachment {
+  id: string;
+  orgId: string;
+  projectId: string;
+  resourceId: string;
+  role: ProjectResourceRole;
+  note: string | null;
+  sortOrder: number;
+  resource: OrganizationResource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectDetail {
+  id: string;
+  orgId: string;
+  urlKey: string;
+  goalId: string | null;
+  name: string;
+  description: string | null;
+  status: ProjectStatus;
+  leadAgentId: string | null;
+  targetDate: string | null;
+  color: string | null;
+  pauseReason: "manual" | "budget" | "system" | null;
+  pausedAt: string | null;
+  executionWorkspacePolicy: Record<string, unknown> | null;
+  resources: ProjectResourceAttachment[];
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectPayload {
+  name: string;
+  description?: string | null;
+  status?: ProjectStatus;
+}
+
+export interface UpdateProjectPayload {
+  name?: string;
+  description?: string | null;
+  status?: ProjectStatus;
+}
+
+export interface ProjectResourceAttachmentInput {
+  resourceId: string;
+  role?: ProjectResourceRole;
+  note?: string | null;
+  sortOrder?: number;
+}
+
+export interface UpdateProjectResourceAttachmentPayload {
+  role?: ProjectResourceRole;
+  note?: string | null;
+  sortOrder?: number;
+}
