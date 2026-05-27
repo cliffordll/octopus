@@ -31,7 +31,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
     create_parser = actions.add_parser("create", help="Create an approval")
     create_parser.add_argument("--org-id", required=True)
-    create_parser.add_argument("--type", dest="approval_type", required=True, choices=TYPES)
+    create_parser.add_argument(
+        "--type", dest="approval_type", required=True, choices=TYPES
+    )
     create_parser.add_argument("--payload", required=True)
     create_parser.set_defaults(handler=create_approval)
 
@@ -77,7 +79,9 @@ def create_approval(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def _decision(args: argparse.Namespace, client: ApiClient, action: str) -> Any:
     payload = {"decisionNote": args.note} if args.note else {}
-    return client.request("POST", f"/api/approvals/{args.approval_id}/{action}", json=payload)
+    return client.request(
+        "POST", f"/api/approvals/{args.approval_id}/{action}", json=payload
+    )
 
 
 def approve(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -94,4 +98,6 @@ def request_revision(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def resubmit(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {"payload": _json_object(args.payload)} if args.payload else {}
-    return client.request("POST", f"/api/approvals/{args.approval_id}/resubmit", json=payload)
+    return client.request(
+        "POST", f"/api/approvals/{args.approval_id}/resubmit", json=payload
+    )

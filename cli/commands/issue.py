@@ -5,7 +5,15 @@ from typing import Any
 
 from ..client import ApiClient
 
-STATUSES = ("backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled")
+STATUSES = (
+    "backlog",
+    "todo",
+    "in_progress",
+    "in_review",
+    "done",
+    "blocked",
+    "cancelled",
+)
 PRIORITIES = ("critical", "high", "medium", "low")
 DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
 
@@ -116,4 +124,6 @@ def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, str] = {"decision": args.decision}
     if args.note is not None:
         payload["note"] = args.note
-    return client.request("POST", f"/api/issues/{args.issue_id}/review-decision", json=payload)
+    return client.request(
+        "POST", f"/api/issues/{args.issue_id}/review-decision", json=payload
+    )
