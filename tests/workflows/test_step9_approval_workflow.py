@@ -105,6 +105,41 @@ async def test_create_approval_writes_activity(session: AsyncSession) -> None:
     assert rows[0].entity_id == created["id"]
 
 
+async def test_create_approval_rejects_issue_from_another_organization(
+    session: AsyncSession,
+) -> None:
+    org = await _seed_org(session)
+    other_org = Organization(
+        url_key="other-approval-workflow-org",
+        name="Other Approval Workflow Org",
+        issue_prefix="OAW",
+    )
+    async with async_transaction(session):
+        session.add(other_org)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=other_org.id,
+            title="Foreign issue",
+            status="todo",
+            origin_kind="manual",
+        )
+        session.add(issue)
+
+    service = ApprovalService(session)
+    with pytest.raises(ValueError, match="same organization"):
+        async with async_transaction(session):
+            await service.create_approval(
+                org.id,
+                {
+                    "type": "hire_agent",
+                    "payload": {},
+                    "issueIds": [issue.id],
+                },
+                actor_type="board",
+                actor_id="user-1",
+            )
+
+
 async def test_approve_approval_writes_activity(session: AsyncSession) -> None:
     org = await _seed_org(session)
     approval = await _seed_approval(session, org.id)

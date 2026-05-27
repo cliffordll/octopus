@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -27,7 +25,6 @@ from packages.database.schema import (
     Issue,
     IssueApproval,
     Organization,
-    OrganizationOwnership,
 )
 from packages.shared.validators.approval import (
     validate_create_approval,
@@ -36,9 +33,6 @@ from packages.shared.validators.approval import (
     validate_resubmit_approval,
 )
 from server.app import app as fastapi_app
-
-POD_ID = "test-pod"
-
 
 @fastapi_app.middleware("http")
 async def _inject_test_actor(
@@ -49,6 +43,7 @@ async def _inject_test_actor(
         request.state.actor = {
             "type": actor_type,
             "id": request.headers.get("x-test-actor-id", "test-actor"),
+            "orgId": request.headers.get("x-test-org-id"),
         }
     return await call_next(request)
 
@@ -86,20 +81,13 @@ async def session(
 @pytest.fixture
 def app(session_factory: async_sessionmaker[AsyncSession]) -> FastAPI:
     fastapi_app.state.session_factory = session_factory
-    fastapi_app.state.settings = SimpleNamespace(pod_id=POD_ID)
     return fastapi_app
 
 
 async def _seed_org(
     session: AsyncSession,
-    *,
-    owned: bool = True,
-    pod_id: str = POD_ID,
-    expires_at: datetime | None = None,
 ) -> str:
     org_id = str(uuid.uuid4())
-    if expires_at is None:
-        expires_at = datetime.now(UTC) + timedelta(hours=1)
     async with async_transaction(session):
         session.add(
             Organization(
@@ -109,14 +97,6 @@ async def _seed_org(
                 issue_prefix=org_id[:6],
             )
         )
-        if owned:
-            session.add(
-                OrganizationOwnership(
-                    organization_id=org_id,
-                    pod_id=pod_id,
-                    expires_at=expires_at,
-                )
-            )
     return org_id
 
 
@@ -180,6 +160,7 @@ async def _request(
     *,
     actor_type: str | None = None,
     actor_id: str | None = None,
+    actor_org_id: str | None = None,
     json: dict[str, Any] | None = None,
 ) -> tuple[int, Any]:
     headers: dict[str, str] = {}
@@ -187,6 +168,8 @@ async def _request(
         headers["x-test-actor-type"] = actor_type
     if actor_id is not None:
         headers["x-test-actor-id"] = actor_id
+    if actor_org_id is not None:
+        headers["x-test-org-id"] = actor_org_id
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.request(method, path, json=json, headers=headers)
@@ -369,6 +352,7 @@ async def test_resubmit_route_returns_200_for_requesting_agent(
         f"/api/approvals/{approval_id}/resubmit",
         actor_type="agent",
         actor_id="agent-7",
+        actor_org_id=org_id,
         json={"payload": {"accessToken": "new-token"}},
     )
 
@@ -413,10 +397,10 @@ async def test_approve_route_missing_actor_context_returns_503(
     assert "Actor context is not configured" in body["detail"]
 
 
-async def test_create_approval_route_foreign_ownership_returns_403(
+async def test_create_approval_route_for_organization_returns_200(
     app: FastAPI, session: AsyncSession
 ) -> None:
-    org_id = await _seed_org(session, pod_id="other-pod")
+    org_id = await _seed_org(session)
 
     code, body = await _request(
         app,
@@ -427,8 +411,8 @@ async def test_create_approval_route_foreign_ownership_returns_403(
         json={"type": "hire_agent", "payload": {}},
     )
 
-    assert code == 403
-    assert "another pod" in body["detail"]
+    assert code == 200
+    assert body["orgId"] == org_id
 
 
 async def test_approve_approval_route_writes_activity_names(

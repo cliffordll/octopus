@@ -13,7 +13,10 @@ from packages.database.queries.approvals import (
     update_approval,
 )
 from packages.database.queries.activity_log import insert_activity_log
-from packages.database.queries.issues import recover_blocked_linked_issues_for_approval
+from packages.database.queries.issues import (
+    get_issue_by_id,
+    recover_blocked_linked_issues_for_approval,
+)
 from packages.database.schema import Approval
 from packages.shared.constants.approval import (
     ApprovalStatus,
@@ -63,6 +66,16 @@ class ApprovalService:
         actor_type: str,
         actor_id: str,
     ) -> ApprovalDetail:
+        issue_ids = list(dict.fromkeys(payload.get("issueIds", [])))
+        for issue_id in issue_ids:
+            issue = await get_issue_by_id(self._session, issue_id)
+            if issue is None:
+                raise ValueError("One or more issues not found")
+            if issue.org_id != org_id:
+                raise ValueError(
+                    "Issue and approval must belong to the same organization"
+                )
+
         values = {
             APPROVAL_CREATE_TO_COLUMN[key]: value
             for key, value in payload.items()
@@ -75,7 +88,6 @@ class ApprovalService:
         else:
             values["requested_by_user_id"] = actor_id
         row = await create_approval(self._session, values)
-        issue_ids = payload.get("issueIds", [])
         if issue_ids:
             await link_issues_to_approval(
                 self._session,

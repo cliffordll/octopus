@@ -15,9 +15,9 @@
 - 保持 上游参考实现 现有数据库业务表结构不变
 - 保持 上游参考实现 现有 API 路径、请求结构、响应结构不变
 - 保持 上游参考实现 枚举值、状态值、错误码语义和关键副作用时机不变
-- 支持多 pod 共享同一个数据库
-- 每个 pod 只处理自己独占的一组 organization
-- organization ownership、pod 编排、外层代理路由由其它系统负责，本项目只做适配与校验
+- 保留上游 `server` 已有的 run、runtime、workspace、恢复和运行记录等执行语义
+- organization 是业务作用域；请求、后台任务和执行流程不得跨组织读写
+- 不将上游不存在的新业务前置条件或基础设施架构引入兼容实现
 - 在兼容重写过程中，架构设计必须优先考虑长期可扩展性，不能以临时拼接方式换取短期推进
 - 每次功能开发完毕后，必须先由用户确认结果；只有在用户下达明确 `commit` 指令后，才能执行提交
 
@@ -30,10 +30,13 @@
 - `packages/runtimes/` 负责各 runtime 的适配实现和共享 runtime contract
 - `packages/runtimes/` 的 Python 目录名使用下划线，例如 `claude_local/`；但对外兼容的 runtime id、配置值和持久化语义保持横杠命名，例如 `claude-local`
 - `server/resources/skills/bundled/` 这类资源目录不是 Python 包；其中具体 skill 目录名和 skill id 继续保持上游横杠命名，例如 `conversation-to-skill`
-- `tests/` 以兼容测试、工作流测试、ownership 测试为主
+- `tests/` 以兼容测试、工作流测试、scope 与并发测试为主
 - `docs/` 只保留与架构、兼容性、迁移计划相关的文档
-- `docs/` 下的规划类文档保留在根目录；步骤文档统一按 `docs/step-01/` 到 `docs/step-10/` 归档
-- `docs/step-01/` 只放 Step 1 执行记录，`docs/step-02/` 只放 Step 2 执行记录，`docs/step-03/` 到 `docs/step-10/` 分别放对应步骤的共享契约、A 约束文档和补充文档
+- `docs/` 下的规划类文档保留在根目录；步骤文档使用 `docs/step-NN-<scope>/` 目录，`<scope>` 为简短英文功能后缀，例如 `docs/step-06-orgs/`、`docs/step-13-runs/`
+- 步骤目录及职责以 `docs/FEATURE.md` 的映射表为准；每个步骤只承载一个主要交付对象
+- 已完成步骤必须在 `TASK.md` 中保留可追溯的实施记录，包括范围、修改位置、关键行为、验收证据和已知边界
+- 待开发步骤以 `TASK.md` 作为入口；进入开发后可按复杂度在同一目录拆分 `SPEC.md`、`PLAN.md`、`NOTES.md` 等执行文档
+- 已实施步骤的任务记录随新的步骤职责归档，不保留无职责含义的纯编号目录或重复表达同一内容的旧文档
 
 ## 编码规范
 
@@ -48,9 +51,9 @@
 - 命名优先贴近 上游参考实现 领域对象，例如 `organizations`、`issues`、`approvals`、`heartbeat_runs`、`chat_conversations`
 - 不发明新的产品概念替代 上游参考实现 既有对象；如果只是语言迁移，应复用既有领域边界
 - `server/routes/` 只处理路由注册、参数解析、validator 调用、context 注入和响应组装，不承载复杂业务流程
-- `server/services/` 承载 上游参考实现 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用编排和 ownership 校验
-- `server/background/` 中的任务必须按 organization 归属分区执行，先筛 owned organizations，再处理 issue、chat、run、budget 等对象
-- `packages/database/schema/` 只做 上游参考实现 现有表的 Python 映射；新增表只允许基础设施表，例如 ownership lease、idempotency、outbox
+- `server/services/` 承载 上游参考实现 控制面语义，包括状态流转、事务边界、activity 副作用、runtime 调用、workspace 流程和执行一致性校验
+- `server/background/` 中的任务必须显式携带 organization scope，再处理 issue、chat、run、budget 等对象
+- `packages/database/schema/` 优先只做 上游参考实现 现有表的 Python 映射；确需增加的 Python 基础设施表必须单独论证且不得改变业务契约，例如 idempotency 或 outbox
 - `packages/database/queries/` 或等价持久化层只负责查询与写入细节，不定义审批、issue、chat、run 的业务语义
 - `packages/shared/` 统一承载 API path、枚举、请求响应模型和 validator，避免这些契约散落到 route、service 或测试里
 - `packages/runtimes/` 按 runtime 分目录实现适配，保留 shared contract，不把所有 runtime 差异揉进一个大模块
@@ -63,8 +66,8 @@
 - 优先写契约兼容测试，而不是只写脱离场景的零散单测
 - 重点验证 API shape、字段 nullability、枚举字符串、错误码和默认行为是否与 上游参考实现 一致
 - 工作流测试至少覆盖 issue、approval、run、budget、chat 等关键控制面流程
-- ownership 测试必须覆盖正确 pod 成功、错误 pod 拒绝、lease 失效拒绝
-- 代理入口与直连入口必须复用同一套业务实现，并验证结果一致
+- scope 测试必须覆盖跨 organization 读写拒绝、actor 边界和新建 organization 的可用流程
+- 执行面测试必须覆盖上游已纳入范围的 run claim、checkout、runtime、workspace、失败恢复和重复副作用防护
 - 任何代码修改默认都必须把“符合仓库标准”视为实现完成条件的一部分，不接受“先改通功能，后补规范”式交付
 - 默认交付标准是同时满足：功能正确、分层实现符合仓库规范、对应测试补齐、四步验证一次全绿
 - 如果四步验证暴露的是仓库级配置或工具链问题，也视为当前改动的一部分，必须在同一轮内直接修掉
@@ -84,44 +87,27 @@
 - 所有提交、文档、注释、计划说明和后续协作文案都必须模拟真实开发者产出，禁止出现任何 AI 辅助、自动生成、模型参与、工具代写等痕迹
 - commit message、文档内容、代码注释、PR 文案和说明文字都必须保持正常人工开发风格，不得加入 AI 署名或来源说明
 
-## 双人协作规范
+## 协作与文档规范
 
-- 双人开发默认按“契约与基础边界”和“服务端实现与运行骨架”两条线分工
-- 契约与基础边界负责人优先定义 shared contract、database 边界、兼容测试基线和 上游参考实现 对照结论
-- 服务端实现负责人基于既定边界落 `server/`、workflow 和 runtime orchestration
-- 服务端实现负责人默认只消费契约文档和契约边界，不主改契约文档、不反向定义契约
-- 如果实现过程中发现契约缺口、契约歧义或契约与 上游参考实现 不一致，应先提交证据给契约负责人，由契约负责人收口文档后再继续实现
-- `packages/shared/`、`packages/database/schema/`、兼容测试基线这类契约源文件，同一阶段只允许一人主改
-- `server/` 中消费契约的一侧应跟随契约边界演进，不反向发明新字段、新接口名、新状态语义
-- 阶段验收必须同时包含契约验证结果和功能 demo，不能只演示“功能跑通”
-- 如果两人分工发生冲突，以 上游参考实现 兼容性、边界稳定性和减少返工为优先判断原则
+- `docs/FEATURE.md` 定义实施顺序和每个步骤的主要交付对象，步骤文档不得自行扩展职责边界
+- 已完成步骤的 `TASK.md` 必须足以解释该步实际实现；待开发步骤可以在执行期按任务复杂度拆分附属文档，但不得重复 `FEATURE.md` 或 `DESIGN.md` 的整体职责
+- 实现过程中发现契约缺口、歧义或与 上游参考实现 不一致时，先以证据修正文档和契约边界，再继续代码实现
+- `packages/shared/`、`packages/database/schema/` 和兼容测试基线属于契约源；对这些文件的修改必须同步对照依据与测试
+- 步骤重排时，先更新 `docs/FEATURE.md` 的映射，再将已有文档迁移到职责匹配的带后缀目录
+- 阶段验收必须同时覆盖契约验证和功能流程，不能只验证服务可运行
 
-## 文档流转规范
-
-- A 和 B 并行开发时，先由 A 在对应 `docs/step-xx/` 下产出约束文档，再由 B 按约束执行开发
-- 从 Step 3 开始，每个步骤目录优先保留 `A-CONSTRAINTS.md` 作为 B 的直接输入；B 不得跳过该文档自行定义边界
-- B 的执行记录、验收记录或补充说明只能建立在 A 已冻结的步骤约束之上，不得反向覆盖 A 的约束结论
-- 若 B 发现 A 的步骤约束缺口、歧义或与现有实现不符，先补证据并回传 A，由 A 更新步骤约束后再继续实现
-- `SCHEMA-COMPATIBILITY.md`、`WORKFLOW-NOTES.md` 这类专项盘点文档，必须明确归属到服务它们的步骤，不允许悬空存在；若某一步只有一份约束文档，则优先收敛到 `A-CONSTRAINTS.md`
-
-## 双人合并规范
+## 合并规范
 
 - `main` 只接收已经完成阶段验收并得到用户确认的内容
-- 契约负责人和实现负责人分别在各自功能分支开发，不直接并行向 `main` 堆叠未验收代码
-- 同一阶段的推荐顺序是：先合契约分支，再合实现分支
-- 契约分支合入 `main` 后，实现分支必须先同步最新 `main`，再继续实现或发起合并
-- 若分支只由个人本地使用，优先 `rebase main`；若分支已被多人共享，再使用 merge
-- 契约源文件冲突由契约负责人基于 上游参考实现 对照结果裁定
-- 服务实现冲突由实现负责人处理，但不得突破既定契约边界
-- 如果冲突涉及 API shape、schema、状态值、副作用语义，先停下来对照 上游参考实现，不允许边猜边合
-- 每次准备合并前，先检查文档、shared/database 边界、server 实现和测试结果是否一致
+- 如果冲突涉及 API shape、schema、状态值或副作用语义，先对照 上游参考实现，不允许凭推断合并
+- 每次准备合并前，检查文档、shared/database 边界、server 实现和测试结果是否一致
 - 合并到 `main` 之前，仍然必须先由用户确认结果，并收到明确的 `commit` 或等价指令
 
 ## 非目标
 
-- 不在本项目内实现 pod 创建、销毁、扩缩容
-- 不在本项目内实现 organization 分配系统
-- 不在本项目内实现完整 auth / 鉴权体系
+- 不实现与当前服务端兼容目标无关的客户端、打包或外围工具能力
+- 不发明上游不存在的 organization 执行前置条件、业务表或状态机
+- 不在未完成上游对照前重建或删改认证、授权与 actor 语义
 - 不为了“更 Pythonic”而重构 上游参考实现 的产品模型或业务表
 - 不保留与旧项目、旧技术栈、旧协作方式相关的历史说明
 

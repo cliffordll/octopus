@@ -65,32 +65,6 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "organization_ownership",
-        sa.Column(
-            "organization_id",
-            sa.String(length=36),
-            sa.ForeignKey("organizations.id"),
-            primary_key=True,
-            nullable=False,
-        ),
-        sa.Column("pod_id", sa.String(length=128), nullable=False),
-        sa.Column("lease_version", sa.Integer(), nullable=False),
-        sa.Column(
-            "acquired_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("CURRENT_TIMESTAMP"),
-        ),
-        sa.Column(
-            "last_heartbeat_at",
-            sa.DateTime(timezone=True),
-            nullable=False,
-            server_default=sa.text("CURRENT_TIMESTAMP"),
-        ),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-    )
-
-    op.create_table(
         "issues",
         sa.Column("id", sa.String(length=36), primary_key=True, nullable=False),
         sa.Column(
@@ -384,8 +358,6 @@ def downgrade() -> None:
     op.drop_index("issues_company_status_board_order_idx", table_name="issues")
     op.drop_index("issues_company_status_idx", table_name="issues")
     op.drop_table("issues")
-
-    op.drop_table("organization_ownership")
 
     op.drop_index("organizations_issue_prefix_idx", table_name="organizations")
     op.drop_index("organizations_url_key_idx", table_name="organizations")

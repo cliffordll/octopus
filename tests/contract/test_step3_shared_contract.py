@@ -13,6 +13,7 @@ from packages.shared.api_paths.issues import (
     ISSUE_DETAIL_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_REVIEW_DECISION_PATH,
+    ORG_ISSUE_LIST_MISSING_ORG_PATH,
     ORG_ISSUE_LIST_PATH,
 )
 from packages.shared.api_paths.organizations import (
@@ -61,6 +62,7 @@ def test_org_paths_values() -> None:
 
 def test_issue_paths_values() -> None:
     assert ISSUE_LIST_MISSING_ORG_PATH == "/api/issues"
+    assert ORG_ISSUE_LIST_MISSING_ORG_PATH == "/api/orgs/issues"
     assert ORG_ISSUE_LIST_PATH == "/api/orgs/{orgId}/issues"
     assert ISSUE_DETAIL_PATH == "/api/issues/{id}"
     assert ISSUE_COMMENT_LIST_PATH == "/api/issues/{id}/comments"

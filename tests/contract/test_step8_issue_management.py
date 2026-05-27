@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -21,9 +20,6 @@ from sqlalchemy.pool import StaticPool
 from packages.database.clients import async_transaction
 from packages.database.schema import ActivityLog, Base, Issue, IssueComment, Organization
 from server.app import app as fastapi_app
-
-POD_ID = "test-pod"
-
 
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
@@ -56,22 +52,20 @@ async def session(
 
 
 @pytest.fixture
-def app(session_factory: async_sessionmaker[AsyncSession]) -> FastAPI:
+def app(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[FastAPI]:
+    original_settings = fastapi_app.state.settings
     fastapi_app.state.session_factory = session_factory
-    fastapi_app.state.settings = SimpleNamespace(pod_id=POD_ID)
-    return fastapi_app
+    fastapi_app.state.settings = replace(original_settings, local_trusted=True)
+    try:
+        yield fastapi_app
+    finally:
+        fastapi_app.state.settings = original_settings
 
 
 async def _seed_org(
     session: AsyncSession,
-    *,
-    owned: bool = True,
-    pod_id: str = POD_ID,
-    expires_at: datetime | None = None,
 ) -> str:
     org_id = str(uuid.uuid4())
-    if expires_at is None:
-        expires_at = datetime.now(UTC) + timedelta(hours=1)
     async with async_transaction(session):
         session.add(
             Organization(
@@ -81,16 +75,6 @@ async def _seed_org(
                 issue_prefix=org_id[:6],
             )
         )
-        if owned:
-            from packages.database.schema import OrganizationOwnership
-
-            session.add(
-                OrganizationOwnership(
-                    organization_id=org_id,
-                    pod_id=pod_id,
-                    expires_at=expires_at,
-                )
-            )
     return org_id
 
 

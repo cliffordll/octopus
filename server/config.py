@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import socket
 from dataclasses import dataclass
 
 
@@ -11,8 +10,8 @@ class Settings:
     port: int
     log_level: str
     database_url: str
-    pod_id: str
     auto_migrate: bool
+    local_trusted: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -24,8 +23,8 @@ class Settings:
                 "OCTOPUS_DATABASE_URL",
                 "sqlite+aiosqlite:///./octopus.db",
             ),
-            pod_id=os.environ.get("OCTOPUS_POD_ID", socket.gethostname()),
             auto_migrate=_env_bool("OCTOPUS_AUTO_MIGRATE", False),
+            local_trusted=_env_bool("OCTOPUS_LOCAL_TRUSTED", False),
         )
 
 

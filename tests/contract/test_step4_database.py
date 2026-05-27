@@ -16,6 +16,7 @@ from packages.database.clients import (
     create_session_factory,
 )
 from packages.database.queries import activity_log as activity_log_queries
+from packages.database.queries import issue_comments as issue_comment_queries
 from packages.database.queries.approvals import (
     create_approval,
     list_org_approvals,
@@ -27,7 +28,6 @@ from packages.database.queries.issue_comments import (
 )
 from packages.database.queries.issues import (
     create_issue,
-    get_issue_by_id,
     list_org_issues,
     recover_blocked_linked_issues_for_approval,
     update_issue,
@@ -63,6 +63,7 @@ def test_metadata_contains_first_batch_tables() -> None:
     }
     actual = {table.name for table in Base.metadata.sorted_tables}
     assert expected.issubset(actual)
+    assert "organization_ownership" not in actual
 
 
 def test_schema_models_exported() -> None:
@@ -114,7 +115,6 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
                     "select name from sqlite_master "
                     "where type='table' and name in ("
                     "'organizations',"
-                    "'organization_ownership',"
                     "'issues',"
                     "'approvals',"
                     "'issue_comments',"
@@ -130,7 +130,6 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
 
     assert names == {
         "organizations",
-        "organization_ownership",
         "issues",
         "approvals",
         "issue_comments",
@@ -351,6 +350,37 @@ async def test_insert_and_list_issue_comments(session: AsyncSession) -> None:
     assert [row.id for row in rows] == [first.id, second.id]
     assert [row.body for row in rows] == ["first", "second"]
     assert rows[0].author_user_id == "user-1"
+
+
+async def test_issue_comments_monotonically_increment_created_at(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixed_now = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
+
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            assert tz is UTC
+            return fixed_now
+
+    monkeypatch.setattr(issue_comment_queries, "datetime", FrozenDateTime)
+
+    async with async_transaction(session):
+        org = Organization(url_key="ordered-comment-org", name="Comments", issue_prefix="OCM")
+        session.add(org)
+    async with async_transaction(session):
+        issue = await create_issue(
+            session, {"org_id": org.id, "title": "Ordered", "origin_kind": "manual"}
+        )
+    async with async_transaction(session):
+        first = await insert_issue_comment(
+            session, {"org_id": org.id, "issue_id": issue.id, "body": "first"}
+        )
+        second = await insert_issue_comment(
+            session, {"org_id": org.id, "issue_id": issue.id, "body": "second"}
+        )
+
+    assert second.created_at > first.created_at
 
 
 async def test_list_org_approvals_filters_by_org(session: AsyncSession) -> None:

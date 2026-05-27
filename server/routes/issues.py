@@ -4,7 +4,6 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi import status as http_status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.api_paths.issues import (
     ISSUE_COMMENT_LIST_PATH,
@@ -22,12 +21,12 @@ from packages.shared.validators.issue import (
     validate_update_issue,
 )
 
-from ..dependencies.database import get_session
-from ..dependencies.issues import get_issue_service
-from ..dependencies.ownership import (
-    assert_organization_owned,
-    require_organization_ownership,
+from ..dependencies.access import (
+    assert_organization_access,
+    require_actor_identity,
+    require_organization_access,
 )
+from ..dependencies.issues import get_issue_service
 from ..services.issues import IssueService
 
 router = APIRouter(tags=["issues"])
@@ -44,7 +43,7 @@ async def list_org_issues_missing_org_route() -> None:
 @router.get(ORG_ISSUE_LIST_PATH)
 async def list_org_issues_route(
     orgId: str,
-    _: None = Depends(require_organization_ownership),
+    _: None = Depends(require_organization_access),
     service: IssueService = Depends(get_issue_service),
     status: str | None = Query(default=None),
     assigneeAgentId: str | None = Query(default=None),
@@ -86,8 +85,9 @@ async def list_org_issues_route(
 
 @router.post(ORG_ISSUE_LIST_PATH)
 async def create_issue_route(
+    request: Request,
     orgId: str,
-    _: None = Depends(require_organization_ownership),
+    _: None = Depends(require_organization_access),
     service: IssueService = Depends(get_issue_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
@@ -98,11 +98,12 @@ async def create_issue_route(
             status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+    actor = require_actor_identity(request)
     return await service.create_issue(
         orgId,
         payload,
-        actor_type="board",
-        actor_id="board",
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
     )
 
 
@@ -110,7 +111,6 @@ async def create_issue_route(
 async def get_issue_route(
     id: str,
     request: Request,
-    session: AsyncSession = Depends(get_session),
     service: IssueService = Depends(get_issue_service),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
@@ -119,7 +119,7 @@ async def get_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await assert_organization_owned(request, session, detail["orgId"])
+    assert_organization_access(request, detail["orgId"])
     return detail
 
 
@@ -127,7 +127,6 @@ async def get_issue_route(
 async def update_issue_route(
     id: str,
     request: Request,
-    session: AsyncSession = Depends(get_session),
     service: IssueService = Depends(get_issue_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
@@ -137,7 +136,7 @@ async def update_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await assert_organization_owned(request, session, detail["orgId"])
+    assert_organization_access(request, detail["orgId"])
     try:
         payload = validate_update_issue(body)
     except ValueError as exc:
@@ -146,11 +145,12 @@ async def update_issue_route(
             detail=str(exc),
         ) from exc
     try:
+        actor = require_actor_identity(request)
         updated = await service.update_issue(
             id,
             payload,
-            actor_type="board",
-            actor_id="board",
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -169,7 +169,6 @@ async def update_issue_route(
 async def list_issue_comments_route(
     id: str,
     request: Request,
-    session: AsyncSession = Depends(get_session),
     service: IssueService = Depends(get_issue_service),
 ) -> list[dict[str, Any]]:
     detail = await service.get_by_id(id)
@@ -178,7 +177,7 @@ async def list_issue_comments_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await assert_organization_owned(request, session, detail["orgId"])
+    assert_organization_access(request, detail["orgId"])
     comments = await service.list_comments(id)
     return [
         {
@@ -198,7 +197,6 @@ async def list_issue_comments_route(
 async def create_issue_comment_route(
     id: str,
     request: Request,
-    session: AsyncSession = Depends(get_session),
     service: IssueService = Depends(get_issue_service),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
@@ -208,7 +206,7 @@ async def create_issue_comment_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await assert_organization_owned(request, session, detail["orgId"])
+    assert_organization_access(request, detail["orgId"])
     try:
         payload = validate_create_issue_comment(body)
     except ValueError as exc:
@@ -216,11 +214,12 @@ async def create_issue_comment_route(
             status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+    actor = require_actor_identity(request)
     comment = await service.add_comment(
         id,
         payload,
-        actor_type="board",
-        actor_id="board",
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
     )
     return {
         "id": comment.id,
@@ -237,7 +236,6 @@ async def create_issue_comment_route(
 async def record_issue_review_decision_route(
     id: str,
     request: Request,
-    session: AsyncSession = Depends(get_session),
     service: IssueService = Depends(get_issue_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
@@ -247,7 +245,7 @@ async def record_issue_review_decision_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await assert_organization_owned(request, session, detail["orgId"])
+    assert_organization_access(request, detail["orgId"])
     try:
         payload = validate_record_issue_review_decision(body)
     except ValueError as exc:
@@ -256,11 +254,12 @@ async def record_issue_review_decision_route(
             detail=str(exc),
         ) from exc
     try:
+        actor = require_actor_identity(request)
         updated = await service.update_issue(
             id,
             {"reviewDecision": payload},
-            actor_type="board",
-            actor_id="board",
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
         )
     except ValueError as exc:
         raise HTTPException(
