@@ -4,6 +4,7 @@ import { ApprovalPage } from "../pages/ApprovalPage";
 import { ApprovalsPage } from "../pages/ApprovalsPage";
 import { AgentPage } from "../pages/AgentPage";
 import { AgentsPage } from "../pages/AgentsPage";
+import { NewAgentPage } from "../pages/NewAgentPage";
 import { ChatPage } from "../pages/ChatPage";
 import { ChatsPage } from "../pages/ChatsPage";
 import { HomePage } from "../pages/HomePage";
@@ -28,7 +29,9 @@ export function App() {
         <Route path="orgs/:orgId/projects" element={<ProjectsPage />} />
         <Route path="orgs/:orgId/projects/:projectId" element={<ProjectPage />} />
         <Route path="orgs/:orgId/agents" element={<AgentsPage />} />
+        <Route path="orgs/:orgId/agents/new" element={<NewAgentPage />} />
         <Route path="orgs/:orgId/agents/:agentId" element={<AgentPage />} />
+        <Route path="orgs/:orgId/agents/:agentId/:tab" element={<AgentPage />} />
         <Route path="orgs/:orgId/chats" element={<ChatsPage />} />
         <Route path="orgs/:orgId/chats/:chatId" element={<ChatPage />} />
       </Route>

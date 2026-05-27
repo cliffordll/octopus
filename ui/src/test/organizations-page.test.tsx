@@ -45,5 +45,5 @@ it("lists and creates organizations", async () => {
       body: JSON.stringify({ name: "设计团队" }),
     }),
   );
-  expect(await screen.findByText("首个 Agent 将作为 CEO 创建")).toBeInTheDocument();
+  expect(await screen.findByText("首个智能体将作为 CEO 创建")).toBeInTheDocument();
 });

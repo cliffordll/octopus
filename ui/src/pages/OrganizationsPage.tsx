@@ -18,7 +18,7 @@ export function OrganizationsPage() {
     onSuccess: (organization) => {
       setName("");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
-      navigate(`/orgs/${organization.id}/agents`);
+      navigate(`/orgs/${organization.id}/agents/new`);
     },
   });
   function submit(event: FormEvent) {

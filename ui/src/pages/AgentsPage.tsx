@@ -1,86 +1,42 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
-import type { AgentRole, AgentRuntimeType } from "../api/types";
-import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
-const ROLES: AgentRole[] = ["ceo", "engineer", "qa", "pm", "designer", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = ["process", "codex_local"];
+type EmptyAgentTab = "dashboard" | "configuration" | "runs";
 
 export function AgentsPage() {
   const { orgId = "" } = useParams();
-  const [name, setName] = useState("");
-  const [role, setRole] = useState<AgentRole>("engineer");
-  const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
-  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<EmptyAgentTab>("dashboard");
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
-  const isFirstAgent = agents.isSuccess && agents.data.length === 0;
-  const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
-  const create = useMutation({
-    mutationFn: () =>
-      agentsApi.create(orgId, {
-        name: name.trim(),
-        role: effectiveRole,
-        agentRuntimeType: runtime,
-        agentRuntimeConfig: {},
-      }),
-    onSuccess: () => {
-      setName("");
-      void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
-    },
-  });
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (name.trim()) create.mutate();
+  const agentList = Array.isArray(agents.data) ? agents.data : [];
+
+  if (agentList.length > 0) {
+    return <Navigate replace to={`/orgs/${orgId}/agents/${agentList[0].id}/dashboard`} />;
   }
+
   return (
     <AgentsWorkspace orgId={orgId}>
       <header className="page-header">
-        <div><p className="eyebrow">Agents</p><h1>代理</h1></div>
+        <div><p className="eyebrow">Agents</p><h1>智能体</h1></div>
+        <Link className="button" to={`/orgs/${orgId}/agents/new`}>新建智能体</Link>
       </header>
-      <div className="grid-two">
-        <section className="panel">
-          <h2>现有 Agent</h2>
-          {agents.error && <ErrorNotice error={agents.error} />}
-          <div className="list">
-            {agents.data?.map((agent) => (
-              <article className="row" key={agent.id}>
-                <Link to={`/orgs/${orgId}/agents/${agent.id}`}>{agent.name}</Link>
-                <Badge>{agent.role}</Badge>
-                <Badge>{agent.status}</Badge>
-              </article>
-            ))}
-          </div>
-        </section>
-        <form className="panel form" onSubmit={submit}>
-          <h2>{isFirstAgent ? "创建 CEO" : "创建 Agent"}</h2>
-          {isFirstAgent && <p className="muted">首个 Agent 将作为 CEO 创建</p>}
-          <label>Agent 名称<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-          <label>
-            角色
-            <select
-              disabled={isFirstAgent}
-              value={effectiveRole}
-              onChange={(event) => setRole(event.target.value as AgentRole)}
-            >
-              {ROLES.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label>
-            Runtime
-            <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
-              {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          {create.error && <ErrorNotice error={create.error} />}
-          <button disabled={!agents.isSuccess || create.isPending} type="submit">
-            {isFirstAgent ? "创建 CEO" : "新建 Agent"}
-          </button>
-        </form>
-      </div>
+      <nav aria-label="智能体详情导航" className="detail-tabs">
+        <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => setActiveTab("dashboard")} type="button">概览</button>
+        <button className={activeTab === "configuration" ? "active" : ""} onClick={() => setActiveTab("configuration")} type="button">配置</button>
+        <button className={activeTab === "runs" ? "active" : ""} onClick={() => setActiveTab("runs")} type="button">运行</button>
+      </nav>
+      {agents.error && <ErrorNotice error={agents.error} />}
+      <section className="panel agent-empty-state">
+        <h2>
+          {activeTab === "dashboard" && "概览"}
+          {activeTab === "configuration" && "配置"}
+          {activeTab === "runs" && "运行"}
+        </h2>
+        <p className="muted">暂无智能体。创建智能体后可查看和管理此内容。</p>
+      </section>
     </AgentsWorkspace>
   );
 }
