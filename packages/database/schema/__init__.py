@@ -10,6 +10,7 @@ from .agent_state import (
     AgentWakeupRequest,
 )
 from .heartbeat import HeartbeatRun, HeartbeatRunEvent
+from .chats import ChatConversation, ChatMessage
 from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
@@ -29,6 +30,8 @@ __all__ = [
     "AgentWakeupRequest",
     "HeartbeatRun",
     "HeartbeatRunEvent",
+    "ChatConversation",
+    "ChatMessage",
     "Approval",
     "IssueApproval",
     "IssueComment",

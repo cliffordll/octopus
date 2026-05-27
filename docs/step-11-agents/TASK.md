@@ -1,6 +1,6 @@
 # Step 11: Agent 执行子系统与交互闭环
 
-状态：11A-11E 已完成并通过基线验收；11F 待开发
+状态：11A-11F 已完成并通过基线验收
 
 ## 调整原因
 
@@ -99,13 +99,17 @@
 ### 11F: Agent 对话闭环
 
 - 仅实现能够支撑 Agent 交互执行的最小 conversation/message contract、持久化、API 与 service 行为。
-- 打通用户或 board 消息创建、关联 agent、触发 `codex_local` run、保存响应及查询消息与 run 关联的闭环。
+- 打通用户或 board 消息创建、关联 agent、直接调用 `codex_local` runtime、保存响应及查询消息的闭环。
 - 不以本阶段实现宣称完整 Chat / Messenger 已交付；未被该调用链需要的会话能力和消息副作用继续归 Step 17。
 
-待验收：
+实施记录：
 
-- Workflow tests 覆盖 organization 内发送消息、触发 Codex Agent、持久化回复和读取关联 run。
-- Scope tests 覆盖消息触发不得跨 organization 或绕过当前已确认 actor 边界。
+- 上游核对确认 chat assistant 使用内部 `chat-*` invocation id 直接调用所选 Agent runtime，并不为对话回复建立持久化 `heartbeat_runs` 关系；本步骤按该边界修正了早期规划中的 run 关联假设。
+- Shared contract 已实现 conversation/message 核心 path、枚举、payload type 与最小 validator。
+- Database 已实现 `chat_conversations`、`chat_messages` schema/query 及 `20260527_000006_chats.py` migration，仅纳入 Agent 对话闭环依赖的上游核心表。
+- Server 已实现 organization 内对话创建/列表/详情、消息读取及非流式消息回复入口；对话通过 `preferredAgentId` 选择 Agent runtime，并持久化 user/assistant message 与 `replyingAgentId`。
+- Contract tests 已覆盖 schema/migration、payload/path 以及由 `codex_local` 执行输出产生并读取持久化 assistant reply 的 HTTP 链路。
+- Context link、attachment、流式转录、消息编辑/重生成、完整副作用和 Messenger 聚合仍归 Step 17/18，不在本步骤扩展。
 
 ## 已实现兼容清单
 
@@ -127,6 +131,9 @@
 | `POST /api/agents/{id}/wakeup`、`heartbeat/invoke` | 手动执行触发 |
 | `GET /api/orgs/{orgId}/heartbeat-runs` | run 列表 |
 | `GET /api/heartbeat-runs/{runId}`、`/events` | run 结果与事件读取 |
+| `GET`、`POST /api/orgs/{orgId}/chats` | 对话列表与创建 |
+| `GET /api/chats/{id}` | 对话详情 |
+| `GET`、`POST /api/chats/{id}/messages` | 消息读取与 Agent 回复触发 |
 
 ### Tables
 
@@ -139,6 +146,8 @@
 | `agent_wakeup_requests` | wakeup 持久化和状态结果 |
 | `heartbeat_runs` | 执行实例、结果和失败状态 |
 | `heartbeat_run_events` | 运行事件与输出记录 |
+| `chat_conversations` | Agent 对话主体与首选回复 Agent |
+| `chat_messages` | user/assistant 消息与回复 Agent 记录 |
 
 ### Activity
 
@@ -149,11 +158,11 @@
 | `agent.config_rolled_back` | 配置 revision 回滚 |
 | `agent.runtime_session_reset` | runtime session 清理 |
 | `heartbeat.invoked` | 手动 wakeup/invoke 入口触发执行 |
+| `chat.created` | 创建 Agent 对话 |
 
 ## 延后能力
 
 - Run 定时触发、队列领取、并发合并、取消、重试和中断恢复归 Step 13。
-- 最小对话触发链路归本步骤 11F，尚未实现。
 - `process`、`codex_local` 以外的 runtime adapter 及跨 runtime 的 session/environment/usage 深化归 Step 14。
 - 完整 workspace 建立、复用、runtime service 与执行产物归 Step 15。
 - 完整 cost、budget 与扩展 activity 治理归 Step 16。
@@ -204,10 +213,42 @@ curl.exe -s "$base/api/agents/$($agent.id)/runtime-state"
 
 预期结果：`$run.status` 为 `succeeded`，run detail 的 `resultJson.stdout` 包含 `step-11-ok`，runtime state 的 `lastRunId` 与 `$run.id` 相同。
 
+通过本地 Codex CLI 验收最小对话闭环：
+
+```powershell
+$codexBody = @{
+  name = "Chat Codex"
+  role = "engineer"
+  agentRuntimeType = "codex_local"
+  agentRuntimeConfig = @{ command = "codex" }
+} | ConvertTo-Json -Depth 4 -Compress
+
+$codexAgent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" `
+  -H "Content-Type: application/json" `
+  -d $codexBody | ConvertFrom-Json
+
+$chatBody = @{
+  title = "Codex Demo"
+  preferredAgentId = $codexAgent.id
+} | ConvertTo-Json -Compress
+
+$chat = curl.exe -s -X POST "$base/api/orgs/$($org.id)/chats" `
+  -H "Content-Type: application/json" `
+  -d $chatBody | ConvertFrom-Json
+
+curl.exe -s -X POST "$base/api/chats/$($chat.id)/messages" `
+  -H "Content-Type: application/json" `
+  -d '{"body":"Reply with one short readiness confirmation."}'
+
+curl.exe -s "$base/api/chats/$($chat.id)/messages"
+```
+
+预期结果：发送消息请求返回一条 user message 和一条 assistant message，后续读取请求可以查询到相同持久化消息；该链路不会生成 `heartbeat_run`。
+
 ## 后续步骤边界
 
 - Step 11E 已实现 `codex_local` runtime adapter，使 Agent 能通过已建立的 run contract 启动 Codex 并保存基线执行结果。
-- Step 11F 实现触发 Agent 执行、记录回复并关联 run 的最小消息闭环；完整 Chat / Messenger 扩展仍归 Step 17。
+- Step 11F 已实现直接触发 Agent runtime 并记录回复的最小消息闭环；完整 Chat / Messenger 扩展仍归 Step 17。
 - Step 12 实现 Goal CRUD、层级与 `ownerAgentId` 同 organization 引用校验。
 - Step 13 在本步骤 run 基线上扩展调度、并发领取、取消、中断恢复和幂等语义。
 - Step 14 扩展 `codex_local` 以外的更多 runtime adapter 类型及跨 runtime 的 session/environment/usage 兼容行为。
@@ -219,5 +260,5 @@ curl.exe -s "$base/api/agents/$($agent.id)/runtime-state"
 
 - Tests 验证 agent 管理、organization scope、配置变更和上游枚举边界。
 - Tests 验证一次 wakeup/heartbeat run 能调用实际 adapter，并持久化兼容状态与结果。
-- Tests 验证 `codex_local` 可经最小 conversation/message 链路触发，并保存响应与 run 关联。
+- Tests 验证 `codex_local` 可经最小 conversation/message 链路触发并保存响应；chat invocation 不伪造 heartbeat run 关联。
 - Step 12 可以使用本步骤已实现 agent 对 `Goal.ownerAgentId` 做同 organization 引用校验。

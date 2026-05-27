@@ -4,7 +4,7 @@
 
 ## 依赖边界
 
-Step 11F 仅提前实现触发 Agent 执行、保存响应并关联 run 所需的最小 conversation/message 链路。本步骤负责剩余的完整 Chat / Messenger 服务端兼容范围，不重复定义或替换该执行入口。
+Step 11F 仅提前实现触发 Agent runtime 并保存响应所需的最小 conversation/message 链路。上游 chat assistant invocation 不持久化为 heartbeat run。本步骤负责剩余的完整 Chat / Messenger 服务端兼容范围，不重复定义或替换该执行入口。
 
 ## 任务
 

@@ -155,7 +155,7 @@ Route 层解析并验证 HTTP 请求；Service 层实现上游业务语义；Dat
 
 这一流程属于 server 内部的业务执行链路，而不是外围基础设施管理。
 
-实施边界上，Agent 阶段不能只停留于 CRUD 和配置存储：它必须建立 wakeup/run/adapter 闭环，并以 `codex_local` 与最小 conversation/message 链路证明 agent 可以被真实交互触发。最小消息链路仅承担触发执行、保存响应和关联 run，不代替完整 chat / messenger 子系统；更完整的调度恢复、其他 adapter 类型、workspace 生命周期和成本治理仍按后续阶段扩展。
+实施边界上，Agent 阶段不能只停留于 CRUD 和配置存储：它必须建立 wakeup/run/adapter 闭环，并以 `codex_local` 与最小 conversation/message 链路证明 agent 可以被真实交互触发。经上游核对，chat assistant 通过内部 invocation id 直接调用 runtime，不将对话回复伪装为持久化 heartbeat run；最小消息链路仅承担触发执行和保存响应，不代替完整 chat / messenger 子系统。更完整的调度恢复、其他 adapter 类型、workspace 生命周期和成本治理仍按后续阶段扩展。
 
 ## 5.3 Runtime adapter
 
