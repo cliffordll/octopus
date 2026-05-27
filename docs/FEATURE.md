@@ -159,7 +159,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 目录：`docs/step-11-agents/`
 
 - 目标：实现可被创建、配置、实际触发并通过消息交互的首个 agent 服务端闭环，同时为 Goal 的 `ownerAgentId` 提供合法依赖对象。
-- 已完成交付：agent contract、持久化与管理 API、配置变更边界、wakeup/heartbeat run 基线、统一 runtime adapter contract，以及 `process` 与 `codex_local` 可执行路径。
+- 已完成交付：agent contract、持久化与管理 API（含缺省个人名称分配和名称建议入口）、配置变更边界、wakeup/heartbeat run 基线、统一 runtime adapter contract，以及 `process` 与 `codex_local` 可执行路径。
 - 已完成交付：仅覆盖 agent 执行触发和响应保存的 conversation/message 最小链路；经上游核对，chat assistant invocation 不持久化为 heartbeat run。
 - 验收：agent 可在 organization scope 内由消息触发 `codex_local` 实际执行并查询持久化回复；独立 wakeup/heartbeat run 结果保持可查询；Goal 可安全引用已存在 agent。
 
