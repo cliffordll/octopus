@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
@@ -11,6 +12,11 @@ export function ChatPage() {
   const [body, setBody] = useState("");
   const queryClient = useQueryClient();
   const chat = useQuery({ queryKey: ["chat", chatId], queryFn: () => chatsApi.get(chatId) });
+  const chatAgent = useQuery({
+    queryKey: ["agent", chat.data?.preferredAgentId ?? ""],
+    queryFn: () => agentsApi.get(chat.data!.preferredAgentId!),
+    enabled: Boolean(chat.data?.preferredAgentId),
+  });
   const messages = useQuery({ queryKey: ["chat-messages", chatId], queryFn: () => chatsApi.listMessages(chatId) });
   const send = useMutation({
     mutationFn: () => chatsApi.addMessage(chatId, { body: body.trim() }),
@@ -34,7 +40,10 @@ export function ChatPage() {
       </header>
       {chat.data && (
         <section className="panel chat-panel">
-          <div className="meta-line"><Badge>{chat.data.status}</Badge></div>
+          <div className="meta-line">
+            <Badge>{chat.data.status}</Badge>
+            <Badge>{chat.data.preferredAgentId ? chatAgent.data?.name ?? "载入智能体..." : "未选择智能体"}</Badge>
+          </div>
           <div className="chat-messages">
             {messages.data?.map((message) => (
               <article className={`chat-message ${message.role}`} key={message.id}>
@@ -44,10 +53,12 @@ export function ChatPage() {
             ))}
           </div>
           {messages.error && <ErrorNotice error={messages.error} />}
-          <form className="form" onSubmit={submit}>
+          <form className="form chat-composer" onSubmit={submit}>
             <label>消息<textarea value={body} onChange={(event) => setBody(event.target.value)} required /></label>
             {send.error && <ErrorNotice error={send.error} />}
-            <button type="submit">发送</button>
+            <div className="chat-compose-actions">
+              <button type="submit">发送</button>
+            </div>
           </form>
         </section>
       )}

@@ -262,6 +262,7 @@ export interface Agent {
   status: AgentStatus;
   agentRuntimeType: AgentRuntimeType;
   agentRuntimeConfig: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
   budgetMonthlyCents: number;
   lastHeartbeatAt: string | null;
 }
@@ -276,6 +277,29 @@ export interface CreateAgentPayload {
   role: AgentRole;
   agentRuntimeType: AgentRuntimeType;
   agentRuntimeConfig: Record<string, unknown>;
+}
+
+export interface UpdateAgentPayload {
+  name?: string;
+  title?: string | null;
+  role?: AgentRole;
+  reportsTo?: string | null;
+  capabilities?: string | null;
+  agentRuntimeType?: AgentRuntimeType;
+  agentRuntimeConfig?: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
+  budgetMonthlyCents?: number;
+}
+
+export interface AgentRuntimeState {
+  agentId: string;
+  agentRuntimeType: string;
+  sessionDisplayId: string | null;
+  lastRunStatus: string | null;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostCents: number;
+  lastError: string | null;
 }
 
 export interface HeartbeatRun {
