@@ -50,6 +50,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
           <section className="context-nav-section">
             <h3>消息</h3>
             <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>+ 新建对话</NavLink>
+            <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>审批管理</NavLink>
           </section>
           <section className="context-nav-section">
             <h3>对话</h3>
