@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import hashlib
+from pathlib import Path
 import re
 from collections.abc import Sequence
 from typing import Any, cast
@@ -66,6 +67,10 @@ from packages.shared.types.agent import (
 )
 from packages.runtimes import get_runtime_adapter
 
+from .agent_instructions import (
+    materialize_default_instructions_for_new_agent,
+    normalize_instructions_paths,
+)
 from .agent_names import pick_unique_agent_name
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -113,6 +118,36 @@ def _workspace_key(agent_id: str, name: str) -> str:
     return f"{_derive_url_key(name)}--{short_id}"
 
 
+def _agent_home_root(row: AgentRow) -> Path:
+    workspace_key = _derive_url_key(row.workspace_key, row.id)
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "workspaces"
+        / f"org_{row.org_id}"
+        / "agents"
+        / workspace_key
+    ).resolve()
+
+
+def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
+    workspace_key = _derive_url_key(
+        cast(str | None, values.get("workspace_key")), cast(str, values["id"])
+    )
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "workspaces"
+        / f"org_{values['org_id']}"
+        / "agents"
+        / workspace_key
+    ).resolve()
+
+
+def _agent_skills_root(row: AgentRow) -> Path:
+    return _agent_home_root(row) / "skills"
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -146,6 +181,54 @@ def _contains_redacted(value: Any) -> bool:
     return False
 
 
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _draft_skill_markdown(payload: dict[str, Any]) -> str:
+    markdown = payload.get("markdown")
+    if isinstance(markdown, str) and markdown.strip():
+        return markdown
+    lines = [
+        "---",
+        f"name: {payload['name']}",
+    ]
+    description = payload.get("description")
+    if isinstance(description, str) and description.strip():
+        lines.append(f"description: {description.strip()}")
+    lines.extend(
+        [
+            "---",
+            "",
+            f"# {payload['name']}",
+            "",
+            description.strip()
+            if isinstance(description, str) and description.strip()
+            else "Describe what this skill does.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _skill_description_from_markdown(markdown: str) -> str | None:
+    lines = markdown.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        value = line.strip()
+        if value == "---":
+            return None
+        if value.lower().startswith("description:"):
+            description = value.split(":", 1)[1].strip().strip("\"'")
+            return description or None
+    return None
+
+
 def _apply_desired_skills_to_entries(
     snapshot: dict[str, Any], desired_skills: list[str]
 ) -> None:
@@ -162,6 +245,32 @@ def _apply_desired_skills_to_entries(
         entry["desired"] = is_desired
         if is_desired and entry.get("state") == "available":
             entry["state"] = "configured"
+
+
+def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+    return {
+        **row.agent_runtime_config,
+        "_octopus": {
+            "orgId": row.org_id,
+            "agentId": row.id,
+            "agentSkillsRootPath": str(_agent_skills_root(row)),
+        },
+    }
+
+
+def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
+    if runtime_type != "opencode_local":
+        return
+    model = config.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError(
+            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+        )
+    provider, separator, model_name = model.strip().partition("/")
+    if not separator or not provider.strip() or not model_name.strip():
+        raise ValueError(
+            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+        )
 
 
 class AgentService:
@@ -217,6 +326,11 @@ class AgentService:
         name = self._deduplicate_name(candidate_name, existing)
         agent_id = str(uuid.uuid4())
         role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
+        agent_runtime_type = payload.get("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
+        agent_runtime_config = normalize_instructions_paths(
+            dict(payload.get("agentRuntimeConfig", {}))
+        )
+        _validate_runtime_config(agent_runtime_type, agent_runtime_config)
         values: dict[str, Any] = {
             "id": agent_id,
             "org_id": org_id,
@@ -229,10 +343,8 @@ class AgentService:
             "status": DEFAULT_AGENT_STATUS,
             "reports_to": payload.get("reportsTo"),
             "capabilities": payload.get("capabilities"),
-            "agent_runtime_type": payload.get(
-                "agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE
-            ),
-            "agent_runtime_config": dict(payload.get("agentRuntimeConfig", {})),
+            "agent_runtime_type": agent_runtime_type,
+            "agent_runtime_config": agent_runtime_config,
             "runtime_config": dict(payload.get("runtimeConfig", {})),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
@@ -240,6 +352,17 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        next_runtime_config = materialize_default_instructions_for_new_agent(
+            row, _agent_home_root_from_values(values)
+        )
+        if next_runtime_config is not None:
+            updated = await update_agent(
+                self._session,
+                row.id,
+                {"agent_runtime_config": next_runtime_config},
+            )
+            if updated is not None:
+                row = updated
         desired_skills = list(payload.get("desiredSkills", []))
         if desired_skills:
             desired_skills = await replace_enabled_skill_keys(
@@ -312,6 +435,18 @@ class AgentService:
                 **existing.agent_runtime_config,
                 **cast(dict[str, Any], patch["agentRuntimeConfig"]),
             }
+        if "agentRuntimeConfig" in patch:
+            patch["agentRuntimeConfig"] = normalize_instructions_paths(
+                cast(dict[str, Any], patch["agentRuntimeConfig"])
+            )
+        next_runtime_type = cast(
+            str, patch.get("agentRuntimeType", existing.agent_runtime_type)
+        )
+        next_runtime_config = cast(
+            dict[str, Any],
+            patch.get("agentRuntimeConfig", existing.agent_runtime_config),
+        )
+        _validate_runtime_config(next_runtime_type, next_runtime_config)
         field_map = {
             "name": "name",
             "role": "role",
@@ -386,7 +521,7 @@ class AgentService:
             return None
         desired_skills = await list_enabled_skill_keys(self._session, row.id)
         snapshot = await get_runtime_adapter(row.agent_runtime_type).list_skills(
-            row.agent_runtime_config
+            _runtime_config_with_context(row), desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         _apply_desired_skills_to_entries(snapshot, desired_skills)
@@ -420,7 +555,7 @@ class AgentService:
             details={"desiredSkills": desired_skills},
         )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            existing.agent_runtime_config, desired_skills
+            _runtime_config_with_context(existing), desired_skills
         )
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
@@ -443,7 +578,7 @@ class AgentService:
             skill_keys=skills,
         )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            existing.agent_runtime_config, desired_skills
+            _runtime_config_with_context(existing), desired_skills
         )
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         await insert_activity_log(
@@ -477,25 +612,38 @@ class AgentService:
         if existing is None:
             return None
         slug = _derive_url_key(payload.get("slug") or payload["name"])
+        skills_root = _agent_skills_root(existing)
+        skill_dir = (skills_root / slug).resolve()
+        if not _is_relative_to(skill_dir, skills_root.resolve()):
+            raise ValueError("Invalid agent skill slug")
+        skill_file = skill_dir / "SKILL.md"
+        if skill_file.is_file():
+            raise AgentConflictError(f"Agent skill already exists: {slug}")
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        markdown = _draft_skill_markdown(payload)
+        skill_file.write_text(markdown, encoding="utf-8")
+        description = _skill_description_from_markdown(markdown) or payload.get(
+            "description"
+        )
         entry = {
             "key": slug,
-            "selectionKey": f"private:{slug}",
-            "runtimeName": payload["name"],
-            "description": payload.get("description"),
+            "selectionKey": f"agent:{slug}",
+            "runtimeName": slug,
+            "description": description,
             "desired": False,
             "configurable": True,
             "alwaysEnabled": False,
-            "managed": True,
-            "state": "available",
+            "managed": False,
+            "state": "external",
             "sourceClass": "agent_home",
-            "origin": "organization_managed",
-            "originLabel": "Agent private skill",
+            "origin": "user_installed",
+            "originLabel": "Agent skill",
             "locationLabel": "AGENT_HOME/skills",
             "readOnly": False,
-            "sourcePath": None,
+            "sourcePath": str(skill_dir),
             "targetPath": None,
-            "workspaceEditPath": None,
-            "detail": payload.get("markdown"),
+            "workspaceEditPath": str(skill_file),
+            "detail": "Installed, not enabled. Future runs will not load it until enabled.",
         }
         await insert_activity_log(
             self._session,

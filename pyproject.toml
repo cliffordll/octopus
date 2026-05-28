@@ -48,8 +48,17 @@ pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
 venv = ".venv"
-exclude = ["upstream-reference", "**/__pycache__", ".venv", ".uv-cache*"]
+exclude = [
+    "upstream-reference",
+    "server/skills",
+    "**/__pycache__",
+    ".venv",
+    ".uv-cache*",
+]
 reportUnknownVariableType = "none"
 reportUnknownMemberType = "none"
 reportUnknownArgumentType = "none"
 reportUnknownParameterType = "none"
+
+[tool.ruff]
+extend-exclude = ["server/skills"]

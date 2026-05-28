@@ -688,7 +688,7 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         return FakeCodexProcess()
 
     monkeypatch.setattr(
-        "packages.runtimes.codex_local.asyncio.create_subprocess_exec",
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
 
@@ -739,6 +739,8 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         "inputTokens": 12,
         "cachedInputTokens": 3,
         "outputTokens": 5,
+        "billingType": "subscription",
+        "biller": "chatgpt",
     }
     assert run["resultJson"]["summary"] == "codex completed"
 

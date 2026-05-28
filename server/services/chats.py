@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import get_agent_by_id
+from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.chats import (
     create_conversation,
     create_message,
@@ -143,6 +144,13 @@ class ChatService:
         except ValueError as exc:
             raise ChatAvailabilityError(str(exc)) from exc
         config = {**agent.agent_runtime_config, "promptTemplate": payload["body"]}
+        runtime_context = config.get("_octopus")
+        if not isinstance(runtime_context, dict):
+            runtime_context = {}
+        config["_octopus"] = {
+            **runtime_context,
+            "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
+        }
         result = await adapter.execute(
             RuntimeExecutionContext(
                 run_id=f"chat-{conversation.id}-{uuid.uuid4()}",

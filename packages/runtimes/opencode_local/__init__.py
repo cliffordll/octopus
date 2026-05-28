@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin, skill_snapshot_from_root
+from ..common import RuntimeCapabilityMixin
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
     RuntimeExecutionResult,
 )
 from .environment import test_environment as test_opencode_environment
+from .models import list_models as list_opencode_models
 from .runner import execute as execute_opencode
+from .skills import skill_snapshot
 
 
 class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
@@ -18,7 +20,6 @@ class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     agent_configuration_doc = (
         "Configure cwd, model, variant, env and OpenCode CLI options."
     )
-    _models = [{"id": "opencode/default", "label": "OpenCode Default"}]
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         return await execute_opencode(context)
@@ -28,16 +29,21 @@ class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     ) -> RuntimeEnvironmentTestResult:
         return await test_opencode_environment(config)
 
-    async def list_models(self) -> list[dict[str, str]]:
-        return self._models
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
+        return await list_opencode_models(config)
 
     def _skill_snapshot(
-        self, config: dict[str, Any], desired_skills: list[str]
+        self,
+        config: dict[str, Any],
+        desired_skills: list[str],
+        *,
+        materialize: bool,
     ) -> dict[str, Any]:
-        return skill_snapshot_from_root(
+        return skill_snapshot(
             runtime_type=self.type,
             config=config,
             desired_skills=desired_skills,
-            mode="ephemeral",
-            location_label="Claude-compatible skills home",
+            materialize=materialize,
         )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin, skill_snapshot_from_root
+from ..common import RuntimeCapabilityMixin
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -10,6 +10,7 @@ from ..types import (
 )
 from .environment import test_environment as test_claude_environment
 from .runner import execute as execute_claude
+from .skills import skill_snapshot
 
 
 class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
@@ -29,16 +30,21 @@ class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     ) -> RuntimeEnvironmentTestResult:
         return await test_claude_environment(config)
 
-    async def list_models(self) -> list[dict[str, str]]:
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
         return self._models
 
     def _skill_snapshot(
-        self, config: dict[str, Any], desired_skills: list[str]
+        self,
+        config: dict[str, Any],
+        desired_skills: list[str],
+        *,
+        materialize: bool,
     ) -> dict[str, Any]:
-        return skill_snapshot_from_root(
+        return skill_snapshot(
             runtime_type=self.type,
             config=config,
             desired_skills=desired_skills,
-            mode="ephemeral",
-            location_label="~/.claude/skills",
+            materialize=materialize,
         )
