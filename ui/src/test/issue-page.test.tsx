@@ -68,7 +68,7 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "批准 Review" }));
+  await userEvent.click(screen.getByRole("button", { name: "Approve Review" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/review-decision",
     expect.objectContaining({ method: "POST" }),

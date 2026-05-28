@@ -4,13 +4,13 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
+import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = ["process", "codex_local"];
+const RUNTIMES: AgentRuntimeType[] = ["process", "http", "codex_local", "claude_local", "opencode_local"];
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -18,6 +18,13 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function formatRunTime(value?: string | null): string {
@@ -36,6 +43,113 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
+}
+
+type InstructionDoc = {
+  content: string;
+  key: string;
+  name: string;
+  path: string;
+  source: string;
+};
+
+function stringConfig(config: Record<string, unknown>, key: string): string {
+  const value = config[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function managedInstructionFiles(config: Record<string, unknown>): InstructionDoc[] {
+  const files = config.managedInstructionFiles;
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .map((item, index) => {
+      const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `instruction-${index + 1}.md`;
+      const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : name;
+      const content = typeof item.content === "string" ? item.content : "";
+      return { content, key: `managed:${path}:${index}`, name, path, source: "managedInstructionFiles" };
+    });
+}
+
+function buildInstructionDocs(agent: AgentDetail): InstructionDoc[] {
+  const config = agent.agentRuntimeConfig ?? {};
+  const docs: InstructionDoc[] = [];
+  const promptTemplate = stringConfig(config, "promptTemplate") || agent.capabilities || "";
+  const instructionsFilePath = stringConfig(config, "instructionsFilePath");
+  if (instructionsFilePath || promptTemplate) {
+    docs.push({
+      content: promptTemplate,
+      key: "soul",
+      name: "SOUL.md",
+      path: instructionsFilePath || "SOUL.md",
+      source: instructionsFilePath ? "instructionsFilePath" : "promptTemplate",
+    });
+  }
+  const agentsMdPath = stringConfig(config, "agentsMdPath");
+  if (agentsMdPath) {
+    docs.push({
+      content: "",
+      key: "agents-md",
+      name: "AGENTS.md",
+      path: agentsMdPath,
+      source: "agentsMdPath",
+    });
+  }
+  docs.push(...managedInstructionFiles(config));
+  return docs;
+}
+
+function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
+  for (const key of keys) {
+    const value = entry[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+  }
+  return fallback;
+}
+
+function skillListField(entry: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = entry[key];
+    if (Array.isArray(value)) {
+      const items = value.map((item) => String(item)).filter(Boolean);
+      if (items.length > 0) return items.join(", ");
+    }
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "-";
+}
+
+function skillEntryName(entry: Record<string, unknown>): string {
+  return skillField(entry, ["runtimeName", "name", "key", "selectionKey"], "skill");
+}
+
+function skillActionName(entry: Record<string, unknown>): string {
+  return skillField(entry, ["key", "name", "selectionKey", "runtimeName"], "skill");
+}
+
+function skillEntryKey(entry: Record<string, unknown>, index: number): string {
+  return String(entry.key ?? entry.selectionKey ?? entry.runtimeName ?? entry.name ?? index);
+}
+
+function parseSkillNameFromYaml(value: string): string {
+  const match = value.match(/^\s*name\s*:\s*["']?([^"'\r\n#]+)["']?/m);
+  return match?.[1]?.trim() ?? "";
+}
+
+function skillEnabled(entry: Record<string, unknown>, desiredSkills: string[]): boolean {
+  const value = entry.enabled;
+  if (typeof value === "boolean") return value;
+  const names = [entry.key, entry.name, entry.runtimeName, entry.selectionKey]
+    .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
+    .filter(Boolean);
+  const desired = desiredSkills.map((item) => item.toLowerCase());
+  return names.some((name) => desired.includes(name));
+}
+
+function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
+  const source = skillField(entry, ["source", "scope", "kind"], "runtime").toLowerCase();
+  return source === "builtin" || source === "external" || source === "runtime" ? "外部技能" : "组织技能";
 }
 
 function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
@@ -93,7 +207,7 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
 
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
-  const activeTab = ["dashboard", "configuration", "runs"].includes(tab) ? tab : "dashboard";
+  const activeTab = ["dashboard", "profile", "configuration", "skills", "runs"].includes(tab) ? tab : "dashboard";
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<AgentRole>("general");
@@ -103,10 +217,19 @@ export function AgentPage() {
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("0");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
+  const [desiredSkills, setDesiredSkills] = useState("");
+  const [skillsToEnable, setSkillsToEnable] = useState("");
+  const [installSkillDraft, setInstallSkillDraft] = useState("");
+  const [skillDialogOpen, setSkillDialogOpen] = useState(false);
+  const [selectedSkillKey, setSelectedSkillKey] = useState("");
+  const [adapterTestChecks, setAdapterTestChecks] = useState<Array<{ label?: string; id?: string; status?: string; message?: string }>>([]);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
+  const [showInstructionForm, setShowInstructionForm] = useState(false);
+  const [newInstructionName, setNewInstructionName] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
@@ -115,10 +238,45 @@ export function AgentPage() {
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
   });
+  const configuration = useQuery({
+    queryKey: ["agent-configuration", agentId],
+    queryFn: () => agentsApi.configuration(agentId),
+    enabled: activeTab === "configuration",
+  });
   const configRevisions = useQuery({
     queryKey: ["agent-config-revisions", agentId],
     queryFn: () => agentsApi.configRevisions(agentId),
     enabled: activeTab === "configuration",
+  });
+  const taskSessions = useQuery({
+    queryKey: ["agent-task-sessions", agentId],
+    queryFn: () => agentsApi.taskSessions(agentId),
+    enabled: activeTab === "configuration" || activeTab === "runs",
+  });
+  const adapterModels = useQuery({
+    queryKey: ["adapter-models", orgId, runtime],
+    queryFn: () => agentsApi.adapterModels(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const adapterMetadata = useQuery({
+    queryKey: ["adapter-metadata", orgId, runtime],
+    queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const adapterQuotaWindows = useQuery({
+    queryKey: ["adapter-quota-windows", orgId, runtime],
+    queryFn: () => agentsApi.adapterQuotaWindows(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const skills = useQuery({
+    queryKey: ["agent-skills", agentId],
+    queryFn: () => agentsApi.skills(agentId),
+    enabled: activeTab === "configuration" || activeTab === "skills",
+  });
+  const skillsAnalytics = useQuery({
+    queryKey: ["agent-skills-analytics", agentId],
+    queryFn: () => agentsApi.skillsAnalytics(agentId),
+    enabled: activeTab === "skills",
   });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -135,6 +293,7 @@ export function AgentPage() {
     setBudgetMonthlyCents(String(agent.data.budgetMonthlyCents ?? 0));
     setAgentRuntimeConfig(JSON.stringify(agent.data.agentRuntimeConfig ?? {}, null, 2));
     setRuntimeConfig(JSON.stringify(agent.data.runtimeConfig ?? {}, null, 2));
+    setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
   const action = useMutation({
     mutationFn: (operation: "pause" | "resume" | "terminate") => agentsApi[operation](agentId),
@@ -157,6 +316,13 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
     },
   });
+  const wakeup = useMutation({
+    mutationFn: () => heartbeatApi.wakeup(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
+    },
+  });
   const rollbackRevision = useMutation({
     mutationFn: (revisionId: string) => agentsApi.rollbackConfigRevision(agentId, revisionId),
     onSuccess: () => {
@@ -165,8 +331,39 @@ export function AgentPage() {
     },
   });
   const resetSession = useMutation({
-    mutationFn: () => agentsApi.resetSession(agentId, { forceFreshSession: true }),
+    mutationFn: () => agentsApi.resetSession(agentId, {}),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
+  });
+  const testAdapterEnvironment = useMutation({
+    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, readJsonObject(agentRuntimeConfig, "Agent runtime config")),
+    onSuccess: (result) => setAdapterTestChecks(result.checks),
+    onError: () => setAdapterTestChecks([]),
+  });
+  const syncSkills = useMutation({
+    mutationFn: (nextDesiredSkills?: string[]) => agentsApi.syncSkills(agentId, nextDesiredSkills ?? parseCsv(desiredSkills)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+    },
+  });
+  const enableSkills = useMutation({
+    mutationFn: (names?: string[]) => agentsApi.enableSkills(agentId, names ?? parseCsv(skillsToEnable)),
+    onSuccess: () => {
+      setSkillsToEnable("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+    },
+  });
+  const createPrivateSkill = useMutation({
+    mutationFn: () => agentsApi.createPrivateSkill(agentId, {
+      name: parseSkillNameFromYaml(installSkillDraft),
+      markdown: installSkillDraft.trim() || null,
+    }),
+    onSuccess: () => {
+      setInstallSkillDraft("");
+      setSkillDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+    },
   });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
@@ -191,6 +388,7 @@ export function AgentPage() {
         role,
         reportsTo: reportsTo || null,
         capabilities: capabilities.trim() || null,
+        desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: readJsonObject(agentRuntimeConfig, "Agent runtime config"),
         runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
@@ -212,6 +410,70 @@ export function AgentPage() {
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
+  const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
+  const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
+  const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
+  const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
+  const selectedSkill = skillEntries.find((entry, index) => skillEntryKey(entry, index) === selectedSkillKey) ?? null;
+  const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
+  const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
+  const instructionDocs = agent.data ? buildInstructionDocs(agent.data) : [];
+  const selectedInstruction = instructionDocs.find((doc) => doc.key === selectedInstructionKey) ?? instructionDocs[0];
+  function defaultInstructionName() {
+    const names = new Set(instructionDocs.map((doc) => doc.name.toLowerCase()));
+    if (!names.has("NEW.md".toLowerCase())) return "NEW.md";
+    let index = 2;
+    while (names.has(`NEW-${index}.md`.toLowerCase())) index += 1;
+    return `NEW-${index}.md`;
+  }
+  function openInstructionForm() {
+    setNewInstructionName(defaultInstructionName());
+    setShowInstructionForm(true);
+  }
+  function closeInstructionForm() {
+    setShowInstructionForm(false);
+    setNewInstructionName("");
+  }
+  function appendInstruction(event: FormEvent) {
+    event.preventDefault();
+    if (!agent.data || !newInstructionName.trim()) return;
+    const existingFiles = managedInstructionFiles(agent.data.agentRuntimeConfig).map((doc) => ({
+      content: doc.content,
+      name: doc.name,
+      path: doc.path,
+    }));
+    save.mutate({
+      agentRuntimeConfig: {
+        ...agent.data.agentRuntimeConfig,
+        managedInstructionFiles: [
+          ...existingFiles,
+          {
+            content: "",
+            name: newInstructionName.trim(),
+            path: newInstructionName.trim(),
+          },
+        ],
+      },
+    });
+    closeInstructionForm();
+  }
+  function enableSkill(name: string) {
+    if (!name.trim()) return;
+    enableSkills.mutate([name.trim()]);
+  }
+  function disableSkill(name: string) {
+    if (!name.trim()) return;
+    const target = name.trim().toLowerCase();
+    const nextDesired = desiredSkillRows.filter((item) => item.toLowerCase() !== target);
+    syncSkills.mutate(nextDesired);
+  }
+  function forkSkill(entry: Record<string, unknown>) {
+    const name = `${skillEntryName(entry)}-fork`;
+    const markdown = String(entry.markdown ?? entry.prompt ?? entry.content ?? "");
+    agentsApi.createPrivateSkill(agentId, { name, markdown: markdown || null }).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+    });
+  }
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
@@ -244,17 +506,21 @@ export function AgentPage() {
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
             <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
         )}
       </header>
       {action.error && <ErrorNotice error={action.error} />}
       {invoke.error && <ErrorNotice error={invoke.error} />}
+      {wakeup.error && <ErrorNotice error={wakeup.error} />}
       {agent.data && (
         <>
           <nav aria-label="智能体详情导航" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/dashboard`}>概览</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/profile`}>说明</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
@@ -306,6 +572,56 @@ export function AgentPage() {
               </dl>
             </section>
           </div>}
+          {activeTab === "profile" && <section aria-label="Managed Instructions" className="agent-instructions-page">
+            {save.error && <ErrorNotice error={save.error} />}
+            <div className="agent-instructions-grid">
+              <aside aria-label="Instruction files" className="instruction-files-card">
+                <div className="instruction-card-header">
+                  <h2>Files</h2>
+                  <button
+                    aria-expanded={showInstructionForm}
+                    aria-label="新增文件"
+                    className="icon-button"
+                    onClick={() => (showInstructionForm ? closeInstructionForm() : openInstructionForm())}
+                    type="button"
+                  >
+                    +
+                  </button>
+                </div>
+                {showInstructionForm && (
+                  <form className="instruction-create-form" onSubmit={appendInstruction}>
+                    <label>
+                      文件名
+                      <input value={newInstructionName} onChange={(event) => setNewInstructionName(event.target.value)} required />
+                    </label>
+                    <div className="instruction-create-actions">
+                      <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
+                      <button className="small-button" disabled={save.isPending} type="submit">确认</button>
+                    </div>
+                  </form>
+                )}
+                <ul className="instruction-file-list">
+                  {instructionDocs.map((doc) => (
+                    <li
+                      className={selectedInstruction?.key === doc.key ? "selected" : undefined}
+                      key={doc.key}
+                    >
+                      <button onClick={() => setSelectedInstructionKey(doc.key)} type="button">
+                        <code>{doc.name}</code>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+              <article aria-label="Instruction content" className="instruction-content-card">
+                {selectedInstruction?.content ? (
+                  <pre>{selectedInstruction.content}</pre>
+                ) : (
+                  <div className="instruction-empty-content" />
+                )}
+              </article>
+            </div>
+          </section>}
           {activeTab === "configuration" && (
             <div className="agent-configuration-layout">
               <form className="panel agent-config-card" onSubmit={submit}>
@@ -342,6 +658,7 @@ export function AgentPage() {
                   </select>
                 </label>
                   <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
+                  <label className="agent-property-row"><span>Desired Skills</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
                   <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
                   <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
                 </div>
@@ -354,6 +671,63 @@ export function AgentPage() {
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
                   <div>
+                    <p className="eyebrow">Snapshot</p>
+                    <h2>配置快照</h2>
+                  </div>
+                </div>
+                {configuration.error && <ErrorNotice error={configuration.error} />}
+                {configuration.data && (
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>更新时间</span><strong>{configuration.data.updatedAt ?? "未记录"}</strong></div>
+                  </div>
+                )}
+              </section>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Adapter</p>
+                    <h2>Runtime Adapter</h2>
+                  </div>
+                  <button disabled={testAdapterEnvironment.isPending} onClick={() => testAdapterEnvironment.mutate()} type="button">
+                    测试环境
+                  </button>
+                </div>
+                {adapterModels.error && <ErrorNotice error={adapterModels.error} />}
+                {adapterMetadata.error && <ErrorNotice error={adapterMetadata.error} />}
+                {adapterQuotaWindows.error && <ErrorNotice error={adapterQuotaWindows.error} />}
+                {testAdapterEnvironment.error && <ErrorNotice error={testAdapterEnvironment.error} />}
+                <div className="agent-summary-grid">
+                  <div className="summary-metric"><span>Runtime</span><strong>{runtime}</strong></div>
+                  <div className="summary-metric"><span>Models</span><strong>{adapterModelRows.length}</strong></div>
+                  <div className="summary-metric"><span>Skills</span><strong>{adapterMetadata.data?.capabilities?.skills ? "supported" : "unsupported"}</strong></div>
+                  <div className="summary-metric"><span>Quota</span><strong>{adapterQuotaWindows.data?.ok ? "ok" : (adapterQuotaWindows.data?.error ?? "unknown")}</strong></div>
+                </div>
+                <div className="list">
+                  {adapterModelRows.map((model) => (
+                    <article className="row" key={model.id}>
+                      <strong>{model.label}</strong>
+                      <span className="muted">{model.id}</span>
+                    </article>
+                  ))}
+                </div>
+                {adapterTestChecks.length > 0 && (
+                  <div className="list">
+                    {adapterTestChecks.map((check) => (
+                      <article className="row" key={check.id ?? check.label}>
+                        <strong>{check.label ?? check.id}</strong>
+                        <Badge>{check.status ?? "unknown"}</Badge>
+                        {check.message && <span className="muted">{check.message}</span>}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
                     <p className="eyebrow">Runtime</p>
                     <h2>Runtime State</h2>
                   </div>
@@ -363,12 +737,24 @@ export function AgentPage() {
                 </div>
                 {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
                 {resetSession.error && <ErrorNotice error={resetSession.error} />}
+                {taskSessions.error && <ErrorNotice error={taskSessions.error} />}
                 {runtimeState.data && (
                   <div className="agent-summary-grid">
                     <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
                     <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
                   </div>
                 )}
+                <div className="list">
+                  {taskSessionRows.map((session) => (
+                    <article className="row" key={session.id}>
+                      <div>
+                        <strong>{session.taskKey}</strong>
+                        <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {session.updatedAt}</p>
+                      </div>
+                      <Badge>{session.status}</Badge>
+                    </article>
+                  ))}
+                </div>
               </section>
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
@@ -401,6 +787,126 @@ export function AgentPage() {
               </section>
             </div>
           )}
+          {activeTab === "skills" && <section className="agent-skills-page">
+            <div className="agent-skills-page-header">
+              <div>
+                <h2>Skill 管理</h2>
+                <p className="muted">管理当前智能体的 skill 列表、启用状态和私有 skill 安装。</p>
+              </div>
+              <button onClick={() => setSkillDialogOpen(true)} type="button">创建技能</button>
+            </div>
+            {skills.error && <ErrorNotice error={skills.error} />}
+            {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
+            {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
+            {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
+            {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
+            <div className="agent-skills-library">
+              {skillsAnalytics.data && (
+                <section className="agent-skill-tags-card">
+                  <div className="agent-skill-source-heading">
+                    <h3>使用分析</h3>
+                    <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
+                  </div>
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>总次数</span><strong>{skillsAnalytics.data.totalCount ?? 0}</strong></div>
+                    <div className="summary-metric"><span>运行次数</span><strong>{skillsAnalytics.data.totalRunsWithSkills ?? 0}</strong></div>
+                    <div className="summary-metric"><span>技能数</span><strong>{skillsAnalytics.data.skills.length}</strong></div>
+                  </div>
+                </section>
+              )}
+              {[
+                { label: "组织技能", rows: organizationSkillEntries },
+                { label: "外部技能", rows: externalSkillEntries },
+              ].map((group) => (
+                <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>
+                  <div className="agent-skill-source-heading">
+                    <h3>{group.label}</h3>
+                    <Badge>{group.rows.length}</Badge>
+                  </div>
+                  <div className="agent-skill-tag-list">
+                    {group.rows.map((entry, index) => {
+                      const key = skillEntryKey(entry, index);
+                      const selected = selectedSkillKey === key;
+                      const name = skillEntryName(entry);
+                      const actionName = skillActionName(entry);
+                      const source = skillField(entry, ["source", "scope", "kind"], "runtime");
+                      const enabled = skillEnabled(entry, desiredSkillRows);
+                      const isBuiltin = source.toLowerCase() === "builtin";
+                      return (
+                        <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
+                          <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
+                            <code>{name}</code>
+                            <Badge>{enabled ? "yes" : "no"}</Badge>
+                            <span>{skillListField(entry, ["tags", "categories"])}</span>
+                          </button>
+                          <div className="agent-skill-row-actions">
+                            <button className="secondary small-button" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
+                              {selected ? "Hide" : "Show"}
+                            </button>
+                            {isBuiltin ? (
+                              <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">Fork</button>
+                            ) : (
+                              <>
+                                <button
+                                  className="secondary small-button"
+                                  disabled={enableSkills.isPending || syncSkills.isPending}
+                                  onClick={() => (enabled ? disableSkill(actionName) : enableSkill(actionName))}
+                                  type="button"
+                                >
+                                  {enabled ? "Disable" : "Enable"}
+                                </button>
+                                <button className="danger small-button" disabled type="button">Delete</button>
+                              </>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+              {selectedSkill && (
+                <section className="agent-skill-detail-card">
+                  <div>
+                    <strong>{skillEntryName(selectedSkill)}</strong>
+                    <Badge>{skillField(selectedSkill, ["source", "scope", "kind"], "runtime")}</Badge>
+                    <span>v{skillField(selectedSkill, ["version"], "-")}</span>
+                  </div>
+                  <p>{skillField(selectedSkill, ["description", "summary"], "")}</p>
+                  <div className="muted">allowed_tools: {skillListField(selectedSkill, ["allowedTools", "allowed_tools"])}</div>
+                  <div className="muted">forbidden_tools: {skillListField(selectedSkill, ["forbiddenTools", "forbidden_tools"])}</div>
+                  <pre>{String(selectedSkill.prompt ?? selectedSkill.markdown ?? selectedSkill.content ?? "")}</pre>
+                </section>
+              )}
+            </div>
+            {skillDialogOpen && (
+              <div aria-modal="true" className="modal-backdrop" role="dialog">
+                <section className="panel task-modal skill-create-dialog">
+                  <div className="task-modal-header">
+                    <div>
+                      <h2>创建技能</h2>
+                      <p className="muted">粘贴 manifest YAML，安装为当前智能体私有 skill。</p>
+                    </div>
+                  </div>
+                  <label>
+                    Skill YAML
+                    <textarea
+                      className="skill-yaml-textarea"
+                      placeholder={"schema_version: 1\nname: my_skill\ndescription: ...\nprompt: ..."}
+                      value={installSkillDraft}
+                      onChange={(event) => setInstallSkillDraft(event.target.value)}
+                    />
+                  </label>
+                  <div className="task-modal-actions">
+                    <button className="secondary" onClick={() => setSkillDialogOpen(false)} type="button">取消</button>
+                    <button disabled={!parseSkillNameFromYaml(installSkillDraft) || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">
+                      创建
+                    </button>
+                  </div>
+                </section>
+              </div>
+            )}
+          </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
             <AgentRunDetail run={selectedRun} />

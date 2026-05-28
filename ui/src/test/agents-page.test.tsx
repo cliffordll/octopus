@@ -20,6 +20,9 @@ it("opens the first agent by default and creates one from the new agent flow", a
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([agent]);
     }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Suggested Agent" });
+    }
     if (path === "/api/agents/agent-1" && init?.method === "GET") {
       return respond(agent);
     }
@@ -67,9 +70,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.click(
     within(screen.getByRole("navigation", { name: "智能体导航" })).getByRole("link", { name: /新建智能体/ }),
   );
+  await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
+  expect(screen.getByLabelText("智能体名称")).toHaveValue("Suggested Agent");
+  await userEvent.clear(screen.getByLabelText("智能体名称"));
   await userEvent.type(await screen.findByLabelText("智能体名称"), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "claude_local");
+  await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -79,8 +86,9 @@ it("opens the first agent by default and creates one from the new agent flow", a
       body: JSON.stringify({
         name: "Reviewer",
         role: "qa",
-        agentRuntimeType: "codex_local",
+        agentRuntimeType: "claude_local",
         agentRuntimeConfig: {},
+        desiredSkills: ["review", "debug"],
       }),
     }),
   );
@@ -90,6 +98,9 @@ it("creates the first agent as the organization CEO", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") {
       return respond([]);
+    }
+    if (path === "/api/orgs/org-empty/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Founder" });
     }
     return respond({ id: "agent-ceo", name: "Founder", role: "ceo", status: "idle" }, 201);
   });

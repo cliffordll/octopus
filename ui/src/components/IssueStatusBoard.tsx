@@ -8,13 +8,13 @@ type IssueWithCreatedAt = IssueListItem & { createdAt?: string | null };
 
 function issueStatusLabel(status: IssueStatus): string {
   const labels: Record<IssueStatus, string> = {
-    backlog: "Backlog",
-    todo: "Todo",
-    in_progress: "In Progress",
-    in_review: "In Review",
-    done: "Done",
-    blocked: "Blocked",
-    cancelled: "Cancelled",
+    backlog: "待规划",
+    todo: "待处理",
+    in_progress: "进行中",
+    in_review: "评审中",
+    done: "已完成",
+    blocked: "阻塞",
+    cancelled: "已取消",
   };
   return labels[status];
 }
@@ -71,10 +71,10 @@ export function IssueStatusBoard({
   return (
     <>
       <div className="project-issue-status-summary">
-        <div className="summary-metric"><span>Total</span><strong>{issues.length}</strong></div>
-        <div className="summary-metric"><span>Active</span><strong>{activeIssueCount}</strong></div>
-        <div className="summary-metric"><span>Blocked</span><strong>{groupedIssues.blocked.length}</strong></div>
-        <div className="summary-metric"><span>Done</span><strong>{groupedIssues.done.length}</strong></div>
+        <div className="summary-metric"><span>总数</span><strong>{issues.length}</strong></div>
+        <div className="summary-metric"><span>活跃</span><strong>{activeIssueCount}</strong></div>
+        <div className="summary-metric"><span>阻塞</span><strong>{groupedIssues.blocked.length}</strong></div>
+        <div className="summary-metric"><span>完成</span><strong>{groupedIssues.done.length}</strong></div>
       </div>
       <div className="project-issue-status-groups">
         {ISSUE_STATUSES.map((issueStatus) => (
@@ -87,7 +87,7 @@ export function IssueStatusBoard({
               <Badge>{groupedIssues[issueStatus].length}</Badge>
             </div>
             {groupedIssues[issueStatus].length === 0 ? (
-              <p className="muted">No issues.</p>
+              <p className="muted">暂无任务。</p>
             ) : (
               <div className="project-issue-status-list">
                 {groupedIssues[issueStatus].map((issue) => (
