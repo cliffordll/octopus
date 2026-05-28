@@ -14,6 +14,8 @@ export function OrganizationPage() {
   const [description, setDescription] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [brandColor, setBrandColor] = useState("");
+  const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
   const queryClient = useQueryClient();
   const organization = useQuery({
     queryKey: ["organization", orgId],
@@ -25,6 +27,8 @@ export function OrganizationPage() {
       setDescription(organization.data.description ?? "");
       setBudgetMonthlyCents(String(organization.data.budgetMonthlyCents ?? ""));
       setBrandColor(organization.data.brandColor ?? "");
+      setRequireBoardApprovalForNewAgents(Boolean(organization.data.requireBoardApprovalForNewAgents));
+      setDefaultChatIssueCreationMode(organization.data.defaultChatIssueCreationMode ?? "disabled");
     }
   }, [organization.data]);
   const update = useMutation({
@@ -34,6 +38,8 @@ export function OrganizationPage() {
         description: description.trim() || null,
         budgetMonthlyCents: budgetMonthlyCents.trim() ? Number(budgetMonthlyCents) : undefined,
         brandColor: brandColor.trim() || null,
+        requireBoardApprovalForNewAgents,
+        defaultChatIssueCreationMode,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization", orgId] }),
   });
@@ -71,6 +77,25 @@ export function OrganizationPage() {
         <label>
           品牌色
           <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
+        </label>
+        <label className="checkbox-row">
+          <input
+            checked={requireBoardApprovalForNewAgents}
+            onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
+            type="checkbox"
+          />
+          新建智能体需要审批
+        </label>
+        <label>
+          默认聊天任务创建模式
+          <select
+            value={defaultChatIssueCreationMode}
+            onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
+          >
+            <option value="disabled">disabled</option>
+            <option value="manual">manual</option>
+            <option value="automatic">automatic</option>
+          </select>
         </label>
         {update.error && <ErrorNotice error={update.error} />}
         <button type="submit">保存组织</button>

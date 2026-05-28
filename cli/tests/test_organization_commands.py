@@ -85,3 +85,51 @@ def test_organization_commands_support_budget_and_brand_color() -> None:
     assert requests[1].read() == (
         b'{"budgetMonthlyCents":600000,"brandColor":"#2244dd"}'
     )
+
+
+def test_organization_commands_support_policy_fields() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "org-1", "name": "Core"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "organization",
+                "create",
+                "--name",
+                "Core",
+                "--require-board-approval-for-new-agents",
+                "--default-chat-issue-creation-mode",
+                "manual",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "update",
+                "org-1",
+                "--no-require-board-approval-for-new-agents",
+                "--default-chat-issue-creation-mode",
+                "disabled",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].read() == (
+        b'{"name":"Core","requireBoardApprovalForNewAgents":true,'
+        b'"defaultChatIssueCreationMode":"manual"}'
+    )
+    assert requests[1].read() == (
+        b'{"requireBoardApprovalForNewAgents":false,'
+        b'"defaultChatIssueCreationMode":"disabled"}'
+    )

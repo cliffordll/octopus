@@ -106,6 +106,32 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
+def test_issue_list_only_sends_route_supported_filters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/orgs/org-1/issues"
+        assert "projectId=project-1" in str(request.url)
+        assert "assigneeUserId" not in str(request.url)
+        assert "reviewerAgentId" not in str(request.url)
+        assert "reviewerUserId" not in str(request.url)
+        assert "parentId" not in str(request.url)
+        return httpx.Response(200, json=[])
+
+    assert (
+        main(
+            [
+                "issue",
+                "list",
+                "--org-id",
+                "org-1",
+                "--project-id",
+                "project-1",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+
 def test_issue_get_json_outputs_work_products() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/issues/issue-1"

@@ -14,6 +14,8 @@ export interface OrganizationDetail extends OrganizationSummary {
   budgetMonthlyCents: number;
   spentMonthlyCents: number;
   brandColor: string | null;
+  requireBoardApprovalForNewAgents?: boolean;
+  defaultChatIssueCreationMode?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +25,8 @@ export interface CreateOrganizationPayload {
   description?: string | null;
   budgetMonthlyCents?: number;
   brandColor?: string | null;
+  requireBoardApprovalForNewAgents?: boolean;
+  defaultChatIssueCreationMode?: string;
 }
 
 export type UpdateOrganizationPayload = Partial<CreateOrganizationPayload>;

@@ -6,6 +6,22 @@ from typing import Any
 from ..client import ApiClient
 
 
+def _add_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    approval = parser.add_mutually_exclusive_group()
+    approval.add_argument(
+        "--require-board-approval-for-new-agents",
+        dest="require_board_approval_for_new_agents",
+        action="store_true",
+        default=None,
+    )
+    approval.add_argument(
+        "--no-require-board-approval-for-new-agents",
+        dest="require_board_approval_for_new_agents",
+        action="store_false",
+    )
+    parser.add_argument("--default-chat-issue-creation-mode")
+
+
 def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser(
         "organization", aliases=["org"], help="Manage organizations"
@@ -24,6 +40,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--description")
     create_parser.add_argument("--budget-monthly-cents", type=int)
     create_parser.add_argument("--brand-color")
+    _add_policy_arguments(create_parser)
     create_parser.set_defaults(handler=create_organization)
 
     update_parser = actions.add_parser("update", help="Update an organization")
@@ -32,6 +49,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     update_parser.add_argument("--description")
     update_parser.add_argument("--budget-monthly-cents", type=int)
     update_parser.add_argument("--brand-color")
+    _add_policy_arguments(update_parser)
     update_parser.set_defaults(handler=update_organization)
 
 
@@ -51,6 +69,12 @@ def create_organization(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["budgetMonthlyCents"] = args.budget_monthly_cents
     if args.brand_color is not None:
         payload["brandColor"] = args.brand_color
+    if args.require_board_approval_for_new_agents is not None:
+        payload["requireBoardApprovalForNewAgents"] = (
+            args.require_board_approval_for_new_agents
+        )
+    if args.default_chat_issue_creation_mode is not None:
+        payload["defaultChatIssueCreationMode"] = args.default_chat_issue_creation_mode
     return client.request("POST", "/api/orgs", json=payload)
 
 
@@ -62,6 +86,8 @@ def update_organization(args: argparse.Namespace, client: ApiClient) -> Any:
             "description": args.description,
             "budgetMonthlyCents": args.budget_monthly_cents,
             "brandColor": args.brand_color,
+            "requireBoardApprovalForNewAgents": args.require_board_approval_for_new_agents,
+            "defaultChatIssueCreationMode": args.default_chat_issue_creation_mode,
         }.items()
         if value is not None
     }
