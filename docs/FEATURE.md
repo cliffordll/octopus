@@ -185,6 +185,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 - 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，补齐上游当前 server 已纳入的 runtime adapter、环境检查、模型发现、skills 管理、managed instructions 与 runtime quota window 能力边界。
 - 交付：`http`、`claude_local`、`opencode_local` adapter 的上游兼容执行行为；runtime environment test API；Codex/OpenCode 模型发现；Codex/Claude/OpenCode skills snapshot、sync、enable、private skill 和 analytics 路由；新建本地 runtime agent 的 managed instructions materialization；adapter quota window probe 能力；session/usage/错误的基础归一化。
+- 执行顺序：先完成 14R1 服务端契约闭环，包括 skills enable/private/analytics、runtime metadata/config doc 和 quota window probe API；再完成 14R2 本地 CLI adapter 深化，包括 Claude/OpenCode 独立 adapter、Codex managed home、真实 environment probe、model discovery、skills entries 和 managed instructions materialization。
 - 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务；模型发现、skills 管理、instructions materialization、环境探针、quota window probe 均可验证；`gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在本阶段返回明确未纳入或未实现结果。
 
 ### Step 15: Workspace 与执行产物
