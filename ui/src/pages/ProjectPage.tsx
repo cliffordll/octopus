@@ -78,13 +78,24 @@ export function ProjectPage() {
   return (
     <OrgWorkspace orgId={orgId}>
       <header className="page-header">
-        <div className="project-detail-title">
-          <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
-          <div className="project-heading-row">
-            <span className="project-color-dot" style={{ background: project.data?.color ?? "#6366f1" }} />
-            <h1>{project.data?.name ?? "载入中..."}</h1>
+        <div className="project-header-identity">
+          <span className="project-avatar-lg" style={{ background: project.data?.color ?? "#6366f1" }}>
+            {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
+          </span>
+          <div className="project-detail-title">
+            <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
+            <div className="project-heading-row">
+              <h1>{project.data?.name ?? "载入中..."}</h1>
+            </div>
+            {project.data && (
+              <div className="project-header-meta">
+                <Badge>{project.data.status}</Badge>
+                <Badge>{project.data.urlKey}</Badge>
+                <span>{project.data.leadAgentId ?? "No lead"}</span>
+              </div>
+            )}
+            {project.data?.description && <p className="muted">{project.data.description}</p>}
           </div>
-          {project.data?.description && <p className="muted">{project.data.description}</p>}
         </div>
         {project.data && (
           <div className="project-header-badges">

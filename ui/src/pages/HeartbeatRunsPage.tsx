@@ -40,6 +40,25 @@ function runStatusLabel(status: HeartbeatRun["status"]): string {
   return labels[status] ?? status;
 }
 
+function runUsageMetric(run: HeartbeatRun, key: string): string {
+  const value = run.usageJson?.[key];
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string" && value.trim()) return value;
+  return "-";
+}
+
+function RunUsageSummary({ run }: { run: HeartbeatRun }) {
+  if (!run.usageJson || Object.keys(run.usageJson).length === 0) return null;
+  return (
+    <div className="agent-run-metrics">
+      <div><span>Input</span><strong>{runUsageMetric(run, "inputTokens")}</strong></div>
+      <div><span>Output</span><strong>{runUsageMetric(run, "outputTokens")}</strong></div>
+      <div><span>Cached</span><strong>{runUsageMetric(run, "cachedInputTokens")}</strong></div>
+      <div><span>Cost</span><strong>{runUsageMetric(run, "costCents")}</strong></div>
+    </div>
+  );
+}
+
 function AgentHeartbeatRow({
   agent,
   latestRun,
@@ -230,7 +249,7 @@ export function HeartbeatRunsPage() {
           {detail.error && <ErrorNotice error={detail.error} />}
           {events.error && <ErrorNotice error={events.error} />}
           {detail.data && (
-            <div className="heartbeat-detail-summary">
+            <div className="heartbeat-detail-summary run-summary-card">
               <div className="meta-line">
                 <Badge>{detail.data.status}</Badge>
                 <Badge>{detail.data.invocationSource}</Badge>
@@ -245,6 +264,13 @@ export function HeartbeatRunsPage() {
                 <div><dt>开始时间</dt><dd>{formatRunTime(detail.data.startedAt)}</dd></div>
                 <div><dt>结束时间</dt><dd>{formatRunTime(detail.data.finishedAt)}</dd></div>
               </dl>
+              <RunUsageSummary run={detail.data} />
+              {(detail.data.sessionIdBefore || detail.data.sessionIdAfter) && (
+                <dl className="agent-run-session">
+                  <div><dt>Session Before</dt><dd>{detail.data.sessionIdBefore ?? "无"}</dd></div>
+                  <div><dt>Session After</dt><dd>{detail.data.sessionIdAfter ?? "无"}</dd></div>
+                </dl>
+              )}
             </div>
           )}
           {detail.data?.error && <p className="error-notice">{detail.data.error}</p>}

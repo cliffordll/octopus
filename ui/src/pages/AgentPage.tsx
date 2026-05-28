@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeType, UpdateAgentPayload } from "../api/types";
+import type { AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -18,6 +18,77 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function formatRunTime(value?: string | null): string {
+  return value || "无";
+}
+
+function summarizeRun(run: HeartbeatRun | null): string {
+  if (!run) return "No runs yet.";
+  if (run.error?.trim()) return run.error.trim();
+  const summary = run.resultJson?.summary ?? run.resultJson?.result ?? run.resultJson?.message;
+  return typeof summary === "string" && summary.trim() ? summary.trim() : run.id;
+}
+
+function runMetric(run: HeartbeatRun | null, key: string): string {
+  const value = run?.usageJson?.[key];
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string" && value.trim()) return value;
+  return "-";
+}
+
+function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
+  if (!run) {
+    return (
+      <section className="panel agent-run-detail-card">
+        <p className="muted">No runs yet.</p>
+      </section>
+    );
+  }
+  const hasUsage = Boolean(run.usageJson && Object.keys(run.usageJson).length > 0);
+  const hasSession = Boolean(run.sessionIdBefore || run.sessionIdAfter);
+  return (
+    <section className="panel agent-run-detail-card" data-testid="agent-runs-detail-pane">
+      <div className="agent-run-detail-header">
+        <div>
+          <div className="meta-line">
+            <Badge>{run.status}</Badge>
+            <Badge>{run.invocationSource}</Badge>
+            {run.triggerDetail && <Badge>{run.triggerDetail}</Badge>}
+          </div>
+          <h2>{run.id.slice(0, 8)}</h2>
+          <p className="muted">{summarizeRun(run)}</p>
+        </div>
+        {run.processPid && <Badge>PID {run.processPid}</Badge>}
+      </div>
+      <dl className="detail-grid compact">
+        <div><dt>Run ID</dt><dd>{run.id}</dd></div>
+        <div><dt>Started</dt><dd>{formatRunTime(run.startedAt)}</dd></div>
+        <div><dt>Finished</dt><dd>{formatRunTime(run.finishedAt)}</dd></div>
+        <div><dt>Exit</dt><dd>{run.exitCode ?? "无"}</dd></div>
+        <div><dt>Retry Of</dt><dd>{run.retryOfRunId ?? "无"}</dd></div>
+        <div><dt>External Run</dt><dd>{run.externalRunId ?? "无"}</dd></div>
+      </dl>
+      {hasUsage && (
+        <div className="agent-run-metrics">
+          <div><span>Input</span><strong>{runMetric(run, "inputTokens")}</strong></div>
+          <div><span>Output</span><strong>{runMetric(run, "outputTokens")}</strong></div>
+          <div><span>Cached</span><strong>{runMetric(run, "cachedInputTokens")}</strong></div>
+          <div><span>Cost</span><strong>{runMetric(run, "costCents")}</strong></div>
+        </div>
+      )}
+      {hasSession && (
+        <dl className="agent-run-session">
+          <div><dt>Session Before</dt><dd>{run.sessionIdBefore ?? "无"}</dd></div>
+          <div><dt>Session After</dt><dd>{run.sessionIdAfter ?? "无"}</dd></div>
+        </dl>
+      )}
+      {run.error && <p className="error-notice">{run.error}</p>}
+      {run.stdoutExcerpt && <pre className="run-excerpt">{run.stdoutExcerpt}</pre>}
+      {run.stderrExcerpt && <pre className="run-excerpt error">{run.stderrExcerpt}</pre>}
+    </section>
+  );
 }
 
 export function AgentPage() {
@@ -35,6 +106,7 @@ export function AgentPage() {
   const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
@@ -117,15 +189,31 @@ export function AgentPage() {
     if (taskTitle.trim()) assignTask.mutate();
   }
   const canChat = agent.data?.agentRuntimeType === "codex_local" && agent.data.status !== "terminated";
+  const runRows = Array.isArray(runs.data) ? runs.data : [];
+  const sortedRuns = useMemo(
+    () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
+    [runRows],
+  );
+  const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
       <header className="page-header agent-page-header">
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
-          <div className="agent-title-row">
-            <h1>{agent.data?.name ?? "载入中..."}</h1>
-            {agent.data && <Badge>{agent.data.status}</Badge>}
+        <div className="agent-header-identity">
+          <div className="agent-avatar-lg">{agent.data?.name?.slice(0, 1).toUpperCase() ?? "A"}</div>
+          <div>
+            <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
+            <div className="agent-title-row">
+              <h1>{agent.data?.name ?? "载入中..."}</h1>
+              {agent.data && <Badge>{agent.data.status}</Badge>}
+            </div>
+            {agent.data && (
+              <div className="agent-header-meta">
+                <Badge>{agent.data.role}</Badge>
+                <Badge>{agent.data.agentRuntimeType}</Badge>
+                <span>{agent.data.title ?? "No title"}</span>
+              </div>
+            )}
           </div>
         </div>
         {agent.data && (
@@ -153,41 +241,73 @@ export function AgentPage() {
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
-          <section className="panel agent-overview">
-            <div className="meta-line">
-              <Badge>{agent.data.role}</Badge><Badge>{agent.data.status}</Badge><Badge>{agent.data.agentRuntimeType}</Badge>
-            </div>
-            <dl className="agent-properties">
-              <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
-              <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
-              <div><dt>最近 Heartbeat</dt><dd>{agent.data.lastHeartbeatAt ?? "暂无"}</dd></div>
-            </dl>
-          </section>
-          <section className="panel">
-            <h2>Runtime 状态</h2>
-            {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-            {runtimeState.data && (
-              <dl className="agent-properties">
-                <div><dt>最近运行</dt><dd>{runtimeState.data.lastRunStatus ?? "暂无"}</dd></div>
-                <div><dt>会话</dt><dd>{runtimeState.data.sessionDisplayId ?? "暂无"}</dd></div>
-                <div><dt>Tokens</dt><dd>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</dd></div>
-                <div><dt>成本</dt><dd>{runtimeState.data.totalCostCents} cents</dd></div>
+            <section className="panel agent-latest-run-card">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Latest Run</p>
+                  <h2>{selectedRun ? selectedRun.id.slice(0, 8) : "No runs yet"}</h2>
+                  <p className="muted">{summarizeRun(selectedRun)}</p>
+                </div>
+                {selectedRun && <Badge>{selectedRun.status}</Badge>}
+              </div>
+              <dl className="detail-grid compact">
+                <div><dt>Source</dt><dd>{selectedRun?.invocationSource ?? "-"}</dd></div>
+                <div><dt>Started</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
+                <div><dt>Finished</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
+                <div><dt>Last Heartbeat</dt><dd>{agent.data.lastHeartbeatAt ?? "暂无"}</dd></div>
               </dl>
-            )}
-          </section>
+            </section>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Runtime</p>
+                  <h2>Runtime State</h2>
+                </div>
+              </div>
+              {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+              {runtimeState.data && (
+                <div className="agent-summary-grid">
+                  <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
+                  <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
+                  <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
+                  <div className="summary-metric"><span>Cost</span><strong>{runtimeState.data.totalCostCents} cents</strong></div>
+                </div>
+              )}
+            </section>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Profile</p>
+                  <h2>智能体档案</h2>
+                </div>
+              </div>
+              <dl className="agent-properties">
+                <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
+                <div><dt>角色</dt><dd>{agent.data.role}</dd></div>
+                <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
+                <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
+              </dl>
+            </section>
           </div>}
-          {activeTab === "configuration" && <form className="panel form agent-configuration" onSubmit={submit}>
-            <h2>基础配置</h2>
-            <label>智能体名称<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-            <label>职务<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-            <label>
-              角色
+          {activeTab === "configuration" && <form className="panel agent-config-card" onSubmit={submit}>
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Configuration</p>
+                <h2>基础配置</h2>
+                <p className="muted">按上游详情页的属性行布局展示，运行配置保留可编辑 JSON。</p>
+              </div>
+            </div>
+            <div className="agent-property-list">
+              <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
+              <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+              <label className="agent-property-row">
+                <span>角色</span>
               <select value={role} onChange={(event) => setRole(event.target.value as AgentRole)}>
                 {ROLES.map((item) => <option key={item}>{item}</option>)}
               </select>
             </label>
-            <label>
-              上级智能体
+              <label className="agent-property-row">
+                <span>上级智能体</span>
               <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
                 <option value="">未设置</option>
                 {(organizationAgents.data ?? [])
@@ -195,33 +315,50 @@ export function AgentPage() {
                   .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </label>
-            <label>能力描述<textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
-            <h2 className="form-section-title">执行配置</h2>
-            <label>
-              Runtime
+              <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
+              <label className="agent-property-row">
+                <span>Runtime</span>
               <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
                 {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
               </select>
             </label>
-            <label>月度预算（cents）<input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
-            <label>Agent runtime config<textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
-            <label>Runtime config<textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+              <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
+              <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+              <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+            </div>
             {configurationError && <p className="error-notice">{configurationError}</p>}
             {save.error && <ErrorNotice error={save.error} />}
-            <button disabled={save.isPending} type="submit">保存配置</button>
-          </form>}
-          {activeTab === "runs" && <section className="panel agent-runs">
-            <h2>Heartbeat Runs</h2>
-            {runs.error && <ErrorNotice error={runs.error} />}
-            <div className="list">
-              {runs.data?.map((run) => (
-                <article className="row" key={run.id}>
-                  <span>{run.invocationSource}</span>
-                  <Badge>{run.status}</Badge>
-                </article>
-              ))}
+            <div className="agent-property-actions">
+              <button disabled={save.isPending} type="submit">保存配置</button>
             </div>
-          </section>}
+          </form>}
+          {activeTab === "runs" && <div className="agent-runs-layout">
+            {runs.error && <ErrorNotice error={runs.error} />}
+            <AgentRunDetail run={selectedRun} />
+            <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">
+              <div className="panel-heading">
+                <div>
+                  <h2>Runs</h2>
+                  <p className="muted">最近运行</p>
+                </div>
+              </div>
+              {runs.isSuccess && sortedRuns.length === 0 && <p className="muted">No runs yet.</p>}
+              {sortedRuns.map((run) => (
+                <button
+                  className={`agent-run-list-button ${selectedRun?.id === run.id ? "selected" : ""}`}
+                  key={run.id}
+                  onClick={() => setSelectedRunId(run.id)}
+                  type="button"
+                >
+                  <span>
+                    <strong>{run.id.slice(0, 8)}</strong>
+                    <small>{summarizeRun(run)}</small>
+                  </span>
+                  <Badge>{run.status}</Badge>
+                </button>
+              ))}
+            </aside>
+          </div>}
         </>
       )}
       {taskDialogOpen && agent.data && (
