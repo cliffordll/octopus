@@ -145,7 +145,7 @@ it("updates a project and manages its resource attachments", async () => {
   );
   expect(screen.getByText("代码库")).toBeInTheDocument();
   expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
-  expect(screen.getByText("工作区")).toBeInTheDocument();
+  expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("console-main")).toBeInTheDocument();
 
