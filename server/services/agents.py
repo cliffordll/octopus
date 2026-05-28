@@ -258,6 +258,21 @@ def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
     }
 
 
+def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
+    if runtime_type != "opencode_local":
+        return
+    model = config.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError(
+            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+        )
+    provider, separator, model_name = model.strip().partition("/")
+    if not separator or not provider.strip() or not model_name.strip():
+        raise ValueError(
+            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+        )
+
+
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -311,6 +326,11 @@ class AgentService:
         name = self._deduplicate_name(candidate_name, existing)
         agent_id = str(uuid.uuid4())
         role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
+        agent_runtime_type = payload.get("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
+        agent_runtime_config = normalize_instructions_paths(
+            dict(payload.get("agentRuntimeConfig", {}))
+        )
+        _validate_runtime_config(agent_runtime_type, agent_runtime_config)
         values: dict[str, Any] = {
             "id": agent_id,
             "org_id": org_id,
@@ -323,12 +343,8 @@ class AgentService:
             "status": DEFAULT_AGENT_STATUS,
             "reports_to": payload.get("reportsTo"),
             "capabilities": payload.get("capabilities"),
-            "agent_runtime_type": payload.get(
-                "agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE
-            ),
-            "agent_runtime_config": normalize_instructions_paths(
-                dict(payload.get("agentRuntimeConfig", {}))
-            ),
+            "agent_runtime_type": agent_runtime_type,
+            "agent_runtime_config": agent_runtime_config,
             "runtime_config": dict(payload.get("runtimeConfig", {})),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
@@ -423,6 +439,14 @@ class AgentService:
             patch["agentRuntimeConfig"] = normalize_instructions_paths(
                 cast(dict[str, Any], patch["agentRuntimeConfig"])
             )
+        next_runtime_type = cast(
+            str, patch.get("agentRuntimeType", existing.agent_runtime_type)
+        )
+        next_runtime_config = cast(
+            dict[str, Any],
+            patch.get("agentRuntimeConfig", existing.agent_runtime_config),
+        )
+        _validate_runtime_config(next_runtime_type, next_runtime_config)
         field_map = {
             "name": "name",
             "role": "role",
