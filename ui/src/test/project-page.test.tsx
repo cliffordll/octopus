@@ -203,6 +203,31 @@ it("updates a project and manages its resource attachments", async () => {
       body: JSON.stringify({ resourceId: "resource-2", role: "working_set", sortOrder: 3 }),
     }),
   );
+  await userEvent.type(screen.getByLabelText("资源名称"), "设计文档");
+  await userEvent.selectOptions(screen.getByLabelText("资源类型"), "url");
+  await userEvent.type(screen.getByLabelText("资源定位"), "https://example.com/design");
+  await userEvent.type(screen.getByLabelText("资源说明"), "上游参考");
+  await userEvent.selectOptions(screen.getByLabelText("新增资源角色"), "reference");
+  await userEvent.type(screen.getByLabelText("新增资源备注"), "先读这个");
+  await userEvent.click(screen.getByRole("button", { name: "新增并关联资源" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        newResources: [
+          {
+            name: "设计文档",
+            kind: "url",
+            locator: "https://example.com/design",
+            description: "上游参考",
+            role: "reference",
+            note: "先读这个",
+          },
+        ],
+      }),
+    }),
+  );
 
   await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "任务" }));
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(

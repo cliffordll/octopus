@@ -2588,12 +2588,20 @@ pre {
 
 .agent-skill-tag-description {
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 4;
   color: #aab6c8;
   display: -webkit-box;
   line-height: 1.45;
-  min-height: 34px;
   overflow: hidden;
+}
+
+.agent-skill-tag-note {
+  background: rgba(56, 134, 232, 0.08);
+  border: 1px solid rgba(56, 134, 232, 0.22);
+  border-radius: 10px;
+  color: #bfd7ff;
+  line-height: 1.45;
+  padding: 8px 9px;
 }
 
 .agent-skill-enabled-pill {

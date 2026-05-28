@@ -169,6 +169,18 @@ function skillDescription(entry: Record<string, unknown>): string {
   return descriptionFromMarkdown(entry.markdown ?? entry.prompt ?? entry.content);
 }
 
+function booleanSkillField(entry: Record<string, unknown>, key: string): boolean {
+  return entry[key] === true;
+}
+
+function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string {
+  const explicit = skillField(entry, ["loadNote", "loadingNote", "detail"], "");
+  if (explicit) return explicit;
+  if (booleanSkillField(entry, "alwaysEnabled")) return "Always loaded by Rudder for every agent run.";
+  if (enabled) return "Enabled for this agent. Future runs can load this skill.";
+  return "Installed, not enabled. Future runs will not load it until enabled.";
+}
+
 function skillEntryName(entry: Record<string, unknown>): string {
   return skillField(entry, ["runtimeName", "name", "key", "selectionKey"], "skill");
 }
@@ -912,6 +924,9 @@ export function AgentPage() {
                       const tags = skillListField(entry, ["tags", "categories"]);
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
+                      const originLabel = skillField(entry, ["originLabel"], "");
+                      const locationLabel = skillField(entry, ["locationLabel"], "");
+                      const loadNote = skillLoadNote(entry, enabled);
                       const state = skillState(entry);
                       return (
                         <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
@@ -921,11 +936,12 @@ export function AgentPage() {
                               <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "已启用" : "未启用"}</span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
+                            <span className="agent-skill-tag-note">{loadNote}</span>
                             <span className="agent-skill-tag-facts">
-                              <span><small>来源</small>{sourceLabel}</span>
+                              <span><small>来源</small>{originLabel || sourceLabel}</span>
                               <span><small>状态</small>{state}</span>
                               <span><small>版本</small>{version ? `v${version}` : "-"}</span>
-                              <span><small>标签</small>{tags}</span>
+                              <span><small>{locationLabel ? "位置" : "标签"}</small>{locationLabel || tags}</span>
                             </span>
                           </button>
                           <div className="agent-skill-row-actions">
