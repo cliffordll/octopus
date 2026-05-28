@@ -209,6 +209,10 @@ it("lists conversations without sidebar filters and identifies their selected ag
   expect(within(messageNavigation).getByRole("heading", { name: "消息" })).toBeInTheDocument();
   expect(within(messageNavigation).getByRole("heading", { name: "对话" })).toBeInTheDocument();
   expect(within(messageNavigation).getByRole("link", { name: /新建对话/ })).toHaveClass("context-action-entry");
+  expect(within(messageNavigation).getByRole("link", { name: "审批管理" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/approvals",
+  );
   expect(await within(messageNavigation).findByText("Builder")).toBeInTheDocument();
   expect(messageNavigation).toHaveTextContent("发布计划");
   expect(messageNavigation).toHaveTextContent("归档调研");

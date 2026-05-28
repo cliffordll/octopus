@@ -36,13 +36,15 @@ it("lists and creates organizations", async () => {
   expect(await screen.findByRole("link", { name: "核心团队" })).toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("组织名称"), "设计团队");
+  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "250000");
+  await userEvent.type(screen.getByLabelText("品牌色"), "#3366ff");
   await userEvent.click(screen.getByRole("button", { name: "新建组织" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ name: "设计团队" }),
+      body: JSON.stringify({ name: "设计团队", budgetMonthlyCents: 250000, brandColor: "#3366ff" }),
     }),
   );
   expect(await screen.findByText("首个智能体将作为 CEO 创建")).toBeInTheDocument();

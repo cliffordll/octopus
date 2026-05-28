@@ -7,6 +7,8 @@ import { AgentsPage } from "../pages/AgentsPage";
 import { NewAgentPage } from "../pages/NewAgentPage";
 import { ChatPage } from "../pages/ChatPage";
 import { ChatsPage } from "../pages/ChatsPage";
+import { GoalPage } from "../pages/GoalPage";
+import { GoalsPage } from "../pages/GoalsPage";
 import { HomePage } from "../pages/HomePage";
 import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
 import { IssuePage } from "../pages/IssuePage";
@@ -26,6 +28,9 @@ export function App() {
         <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />
         <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
         <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
+        <Route path="orgs/:orgId/goals" element={<GoalsPage />} />
+        <Route path="orgs/:orgId/goals/:goalId" element={<GoalPage />} />
+        <Route path="orgs/:orgId/goals/:goalId/:tab" element={<GoalPage />} />
         <Route path="orgs/:orgId/issues" element={<IssuesPage />} />
         <Route path="orgs/:orgId/issues/:issueId" element={<IssuePage />} />
         <Route path="orgs/:orgId/approvals" element={<ApprovalsPage />} />

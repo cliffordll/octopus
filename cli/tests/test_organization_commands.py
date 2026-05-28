@@ -38,3 +38,50 @@ def test_organization_create_posts_name() -> None:
 
     assert result == 0
     assert "Core" in output.getvalue()
+
+
+def test_organization_commands_support_budget_and_brand_color() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "org-1", "name": "Core"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "organization",
+                "create",
+                "--name",
+                "Core",
+                "--budget-monthly-cents",
+                "500000",
+                "--brand-color",
+                "#3366ff",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "update",
+                "org-1",
+                "--budget-monthly-cents",
+                "600000",
+                "--brand-color",
+                "#2244dd",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert requests[0].read() == (
+        b'{"name":"Core","budgetMonthlyCents":500000,"brandColor":"#3366ff"}'
+    )
+    assert requests[1].read() == (
+        b'{"budgetMonthlyCents":600000,"brandColor":"#2244dd"}'
+    )

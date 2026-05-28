@@ -35,6 +35,73 @@ def test_approval_create_posts_parsed_payload() -> None:
     assert result == 0
 
 
+def test_approval_commands_support_issue_ids_and_payload_overrides() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "approval-1", "status": "pending"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "approval",
+                "create",
+                "--org-id",
+                "org-1",
+                "--type",
+                "chat_issue_creation",
+                "--payload",
+                "{}",
+                "--requested-by-agent-id",
+                "agent-1",
+                "--issue-id",
+                "issue-1",
+                "--issue-id",
+                "issue-2",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "approval",
+                "approve",
+                "approval-1",
+                "--payload",
+                '{"labels":["backend"]}',
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "approval",
+                "resubmit",
+                "approval-1",
+                "--payload",
+                "{}",
+                "--issue-id",
+                "issue-3",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].read() == (
+        b'{"type":"chat_issue_creation","payload":{},'
+        b'"requestedByAgentId":"agent-1","issueIds":["issue-1","issue-2"]}'
+    )
+    assert requests[1].read() == b'{"payload":{"labels":["backend"]}}'
+    assert requests[2].read() == b'{"payload":{},"issueIds":["issue-3"]}'
+
+
 def test_approval_decision_and_resubmit_use_existing_endpoints() -> None:
     paths: list[str] = []
 
