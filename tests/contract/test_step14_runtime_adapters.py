@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
+from packages.runtimes.codex_local.runner import execute as execute_codex_local
+from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
 
 
@@ -297,6 +299,217 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     assert entries["conversation-to-skill"]["targetPath"] == str(
         codex_home / "skills" / "conversation-to-skill"
     )
+
+
+async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codex_home = tmp_path / "codex-home"
+    skill_dir = codex_home / "skills" / "review"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    captured_logs: list[tuple[str, str]] = []
+    captured_env: dict[str, str] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                (
+                    '{"type":"thread.started","thread_id":"thread-14"}\n'
+                    '{"type":"item.completed","item":{"type":"agent_message",'
+                    '"text":"done"}}\n'
+                    '{"type":"turn.completed","usage":{"input_tokens":10,'
+                    '"cached_input_tokens":4,"output_tokens":6}}\n'
+                ).encode(),
+                b"OpenAI telemetry disabled\nmeaningful warning\n",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    async def on_log(stream: str, chunk: str) -> None:
+        captured_logs.append((stream, chunk))
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "env": {
+                    "CODEX_HOME": str(codex_home),
+                    "OPENAI_API_KEY": "test-key",
+                },
+            },
+            on_log=on_log,
+        )
+    )
+
+    assert captured_env["CODEX_HOME"] == str(codex_home)
+    assert result.usage_json == {
+        "inputTokens": 10,
+        "cachedInputTokens": 4,
+        "outputTokens": 6,
+        "billingType": "api",
+        "biller": "openai",
+    }
+    assert result.result_json == {
+        "stdout": (
+            '{"type":"thread.started","thread_id":"thread-14"}\n'
+            '{"type":"item.completed","item":{"type":"agent_message",'
+            '"text":"done"}}\n'
+            '{"type":"turn.completed","usage":{"input_tokens":10,'
+            '"cached_input_tokens":4,"output_tokens":6}}\n'
+        ),
+        "stderr": "meaningful warning\n",
+        "summary": "done",
+        "loadedSkills": [
+            {
+                "key": "review",
+                "runtimeName": "review",
+                "name": "Review",
+                "description": "Review code changes.",
+            }
+        ],
+        "billingType": "api",
+        "biller": "openai",
+    }
+    assert ("stderr", "meaningful warning\n") in captured_logs
+    assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
+
+
+async def test_codex_execute_uses_default_managed_codex_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    default_home = (
+        tmp_path / ".octopus" / "runtime-homes" / "codex_local" / "org-14" / "agent-14"
+    )
+    skill_dir = default_home / "skills" / "default-skill"
+    skill_dir.mkdir(parents=True)
+    skill_dir.joinpath("SKILL.md").write_text(
+        "# Default Skill\n\nDefault managed skill.", encoding="utf-8"
+    )
+    captured_env: dict[str, str] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                (
+                    '{"type":"thread.started","thread_id":"thread-default"}\n'
+                    '{"type":"turn.completed","usage":{}}\n'
+                ).encode(),
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert captured_env["CODEX_HOME"] == str(default_home)
+    assert result.result_json is not None
+    assert result.result_json["loadedSkills"] == [
+        {
+            "key": "default-skill",
+            "runtimeName": "default-skill",
+            "name": "Default Skill",
+            "description": "Default managed skill.",
+        }
+    ]
+
+
+async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCodexProcess:
+        returncode = 1
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                (
+                    '{"type":"turn.failed","error":{"message":'
+                    '"write_stdin failed because stdin is closed"}}\n'
+                ).encode(),
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("failed Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert result.error_message == "Codex exited with code 1"
+
+
+async def _noop_log(stream: str, chunk: str) -> None:
+    return None
 
 
 async def test_agent_skills_enable_private_and_analytics_routes(
