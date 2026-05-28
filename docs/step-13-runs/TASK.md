@@ -1,6 +1,6 @@
 # Step 13: Run 调度与恢复
 
-状态：开发中
+状态：已完成
 
 ## 上游依据
 
@@ -45,11 +45,14 @@ Step 11 已落地 agent wakeup、heartbeat run、run event 与实际 adapter 执
 - Server 已将 HTTP wakeup/invoke/retry 改为先返回 `queued` run，再通过后台派发完成执行；Step 11 的手动执行 API 因此演进为可观察队列语义。
 - Server 已实现 `idempotencyKey` 复用、paused wakeup 合并/恢复、per-agent 启动锁、队列恢复、timer tick、cancel/retry 路由、live child process interruption、recovery context 及 cancel/retry activity。
 - Lifespan 已启动 heartbeat scheduler，按配置周期触发 timer、恢复持久化 queued run，并将启动时遗留的 `running` run 标记为 `process_lost` 后排入一次 automatic recovery。
-- Tests 已覆盖 API path、scheduler 启动触发、幂等、已有并发占位下的排队恢复、paused 重放、cancel/retry、活跃 process 中断、orphaned run 自动恢复和增量 events。
+- Server 已持久化本地 child process 的 `processPid` 与 `processStartedAt`，用于恢复记录和审计；server recovery 不主动终止不可验证归属的 OS 进程，避免 PID 复用导致误杀。
+- Tests 已覆盖 API path、scheduler 启动触发、幂等、已有并发占位下的排队恢复、paused 重放、cancel/retry、活跃 process 中断、child process metadata 持久化、orphaned run 自动恢复、不终止不可验证 child process 和增量 events。
 
-## 待继续实现
+## 安全边界
 
-- 当前已完成 orphaned `running` 状态识别与单次 automatic recovery；尚未持久化并安全核验 child PID，因此 server 重启后遗留的 OS 级孤儿进程主动终止仍待继续实现。
+- Step 13 不主动清理 server 重启后遗留的 OS 级孤儿进程。原因是当前仅持久化 PID，无法可靠证明该 PID 仍属于本服务启动的原 child process；在 Windows 和长生命周期开发环境中，PID 复用可能导致误杀 Codex、测试进程或其他系统进程。
+- 对 orphaned `running` run 的处理策略是：标记原 run 为 `failed/process_lost`，记录 `processPid`，追加 lifecycle event，并在未超过限制时创建一次 automatic recovery run。
+- 活跃运行中的 cancel/timeout 仍由当前 runtime adapter 通过内存中的 process handle 处理；这与 recovery 阶段扫描历史 PID 并主动 kill 是不同安全等级。
 
 ## Scheduler 配置
 
@@ -70,7 +73,7 @@ Step 11 已落地 agent wakeup、heartbeat run、run event 与实际 adapter 执
 - 相同 `idempotencyKey` 不创建重复运行；竞争领取不重复执行同一 run。
 - 达到并发限制的 run 保持排队，释放容量后可恢复运行。
 - paused wakeup 能在恢复后重放；timer 能基于已配置 agent 触发运行。
-- 运行可取消、终态可重试，恢复 run 保留原始 run 关联与 recovery context；安全的 orphan child process 终止完成后再关闭本步骤。
+- 运行可取消、终态可重试，恢复 run 保留原始 run 关联与 recovery context；orphaned `running` run 会被标记为 `process_lost` 并触发一次 automatic recovery，且不会主动终止不可验证归属的 OS 进程。
 - events 支持增量读取，Step 11 已建立的存储 contract 不发生破坏性变化。
 
 ## Curl 验收 Demo
