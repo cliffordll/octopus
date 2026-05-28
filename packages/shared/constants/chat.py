@@ -11,6 +11,7 @@ ChatMessageKind = Literal[
 ChatMessageStatus = Literal[
     "streaming", "completed", "stopped", "failed", "interrupted"
 ]
+ChatContextEntityType = Literal["issue", "project", "agent"]
 
 CHAT_CONVERSATION_STATUSES: tuple[ChatConversationStatus, ...] = (
     "active",
@@ -35,4 +36,9 @@ CHAT_MESSAGE_STATUSES: tuple[ChatMessageStatus, ...] = (
     "stopped",
     "failed",
     "interrupted",
+)
+CHAT_CONTEXT_ENTITY_TYPES: tuple[ChatContextEntityType, ...] = (
+    "issue",
+    "project",
+    "agent",
 )
