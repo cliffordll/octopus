@@ -464,6 +464,147 @@ async def test_codex_execute_uses_default_managed_codex_home(
     ]
 
 
+async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_home.joinpath(".config", "gh").mkdir(parents=True)
+    operator_home.joinpath(".config", "gh", "hosts.yml").write_text(
+        "github.com: {}\n", encoding="utf-8"
+    )
+    operator_home.joinpath(".npmrc").write_text(
+        "//registry.npmjs.org/:_authToken=test\n", encoding="utf-8"
+    )
+    codex_home = tmp_path / "codex-home"
+    captured_env: dict[str, str] = {}
+    logs: list[tuple[str, str]] = []
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                b'{"type":"thread.started","thread_id":"thread-home"}\n',
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "env": {
+                    "CODEX_HOME": str(codex_home),
+                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                },
+            },
+            on_log=on_log,
+        )
+    )
+
+    managed_home = codex_home / "home"
+    assert captured_env["HOME"] == str(managed_home)
+    assert captured_env["USERPROFILE"] == str(managed_home)
+    assert captured_env["AGENT_HOME"] == str(managed_home)
+    assert managed_home.joinpath(".config", "gh", "hosts.yml").exists()
+    assert managed_home.joinpath(".npmrc").exists()
+    assert any("Shared 2 local CLI credential entries" in chunk for _, chunk in logs)
+
+
+async def test_codex_execute_retries_unknown_resume_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_args: list[tuple[str, ...]] = []
+    logs: list[tuple[str, str]] = []
+
+    class FakeCodexProcess:
+        def __init__(self, returncode: int, stdout: bytes, stderr: bytes) -> None:
+            self.returncode = returncode
+            self._stdout = stdout
+            self._stderr = stderr
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            raise AssertionError("Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_args.append(args)
+        if len(captured_args) == 1:
+            return FakeCodexProcess(
+                1,
+                b"",
+                b"Error: thread/resume failed: no rollout found for thread id old\n",
+            )
+        return FakeCodexProcess(
+            0,
+            (
+                b'{"type":"thread.started","thread_id":"new-thread"}\n'
+                b'{"type":"item.completed","item":{"type":"agent_message",'
+                b'"text":"retried"}}\n'
+            ),
+            b"",
+        )
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "_octopus": {"sessionIdBefore": "old-thread"},
+            },
+            on_log=on_log,
+        )
+    )
+
+    assert captured_args[0][-3:] == ("resume", "old-thread", "-")
+    assert captured_args[1][-1:] == ("-",)
+    assert result.exit_code == 0
+    assert result.session_id_after == "new-thread"
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "retried"
+    assert any("retrying with a fresh session" in chunk for _, chunk in logs)
+
+
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

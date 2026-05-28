@@ -632,6 +632,13 @@ class HeartbeatService:
                 running, workspace_context
             )
             runtime_config = dict(agent.agent_runtime_config)
+            runtime_context = runtime_config.get("_octopus")
+            if not isinstance(runtime_context, dict):
+                runtime_context = {}
+            runtime_config["_octopus"] = {
+                **runtime_context,
+                "sessionIdBefore": running.session_id_before,
+            }
             workspace_env = None
             workspace_payload = None
             if workspace_context is not None:
