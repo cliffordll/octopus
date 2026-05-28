@@ -839,6 +839,8 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
                 "env": {
                     "CODEX_HOME": str(codex_home),
                     "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "GIT_AUTHOR_NAME": "Bad Author",
+                    "GIT_AUTHOR_EMAIL": "agent@host.local",
                 },
             },
             on_log=on_log,
@@ -849,6 +851,16 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     assert captured_env["HOME"] == str(managed_home)
     assert captured_env["USERPROFILE"] == str(managed_home)
     assert captured_env["AGENT_HOME"] == str(managed_home)
+    assert captured_env["GIT_CONFIG_GLOBAL"] == str(managed_home / ".gitconfig")
+    assert "GIT_AUTHOR_NAME" not in captured_env
+    assert "GIT_AUTHOR_EMAIL" not in captured_env
+    assert captured_env["GIT_CONFIG_KEY_0"] == "credential.helper"
+    assert captured_env["GIT_CONFIG_VALUE_0"] == ""
+    assert captured_env["GIT_CONFIG_KEY_1"] == "credential.helper"
+    assert captured_env["GIT_CONFIG_VALUE_1"] == "!gh auth git-credential"
+    assert (managed_home / ".gitconfig").read_text(encoding="utf-8") == (
+        "[user]\n\tuseConfigOnly = true\n"
+    )
     assert managed_home.joinpath(".config", "gh", "hosts.yml").exists()
     assert managed_home.joinpath(".npmrc").exists()
     assert any("Shared 2 local CLI credential entries" in chunk for _, chunk in logs)

@@ -45,6 +45,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     if not _string(env.get("CODEX_HOME")):
         env["CODEX_HOME"] = str(_default_codex_home(context))
     await _prepare_managed_home(env, context.on_log)
+    _prepare_managed_git_config(env)
     apply_runtime_context_env(env, context)
     billing_type = _billing_type(env)
     biller = _biller(env, billing_type)
@@ -420,6 +421,46 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
                 f"{managed_home}: {', '.join(linked)}\n"
             ),
         )
+
+
+def _prepare_managed_git_config(env: dict[str, str]) -> None:
+    home = _string(env.get("HOME"))
+    if not home:
+        return
+    git_config = Path(home).expanduser() / ".gitconfig"
+    git_config.parent.mkdir(parents=True, exist_ok=True)
+    git_config.write_text("[user]\n\tuseConfigOnly = true\n", encoding="utf-8")
+    env["GIT_CONFIG_GLOBAL"] = str(git_config)
+    _clear_unsafe_git_identity(env, "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL")
+    _clear_unsafe_git_identity(env, "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+    _append_git_config_env(env, "credential.helper", "")
+    _append_git_config_env(env, "credential.helper", "!gh auth git-credential")
+
+
+def _clear_unsafe_git_identity(
+    env: dict[str, str], name_key: str, email_key: str
+) -> None:
+    email = _string(env.get(email_key))
+    name = _string(env.get(name_key))
+    if not email and not name:
+        env.pop(name_key, None)
+        env.pop(email_key, None)
+        return
+    if not email or email.lower().endswith(".local"):
+        env.pop(name_key, None)
+        env.pop(email_key, None)
+
+
+def _append_git_config_env(env: dict[str, str], key: str, value: str) -> None:
+    try:
+        index = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        index = 0
+    if index < 0:
+        index = 0
+    env[f"GIT_CONFIG_KEY_{index}"] = key
+    env[f"GIT_CONFIG_VALUE_{index}"] = value
+    env["GIT_CONFIG_COUNT"] = str(index + 1)
 
 
 def _operator_home(env: dict[str, str]) -> Path:
