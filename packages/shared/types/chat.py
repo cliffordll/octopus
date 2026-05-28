@@ -104,6 +104,13 @@ class CreateChatConversationPayload(TypedDict, total=False):
     preferredAgentId: NotRequired[str | None]
     issueCreationMode: NotRequired[ChatIssueCreationMode]
     planMode: NotRequired[bool]
+    contextLinks: NotRequired[list[CreateChatContextLinkPayload]]
+
+
+class CreateChatContextLinkPayload(TypedDict):
+    entityType: ChatContextEntityType
+    entityId: str
+    metadata: NotRequired[dict[str, Any] | None]
 
 
 class UpdateChatConversationPayload(TypedDict, total=False):
@@ -121,6 +128,10 @@ class UpdateChatConversationPayload(TypedDict, total=False):
 class UpdateChatConversationUserStatePayload(TypedDict, total=False):
     pinned: NotRequired[bool]
     unread: NotRequired[bool]
+
+
+class SetChatProjectContextPayload(TypedDict, total=False):
+    projectId: NotRequired[str | None]
 
 
 class AddChatMessagePayload(TypedDict):

@@ -4,10 +4,15 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schema import ChatConversation, ChatConversationUserState, ChatMessage
+from ..schema import (
+    ChatContextLink,
+    ChatConversation,
+    ChatConversationUserState,
+    ChatMessage,
+)
 
 
 async def create_conversation(
@@ -17,6 +22,65 @@ async def create_conversation(
     session.add(row)
     await session.flush()
     return row
+
+
+async def create_context_link(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> ChatContextLink:
+    existing = await get_context_link(
+        session,
+        conversation_id=str(fields["conversation_id"]),
+        entity_type=str(fields["entity_type"]),
+        entity_id=str(fields["entity_id"]),
+    )
+    if existing is not None:
+        return existing
+    row = ChatContextLink(**dict(fields))
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_context_link(
+    session: AsyncSession,
+    *,
+    conversation_id: str,
+    entity_type: str,
+    entity_id: str,
+) -> ChatContextLink | None:
+    result = await session.execute(
+        select(ChatContextLink).where(
+            ChatContextLink.conversation_id == conversation_id,
+            ChatContextLink.entity_type == entity_type,
+            ChatContextLink.entity_id == entity_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_context_links(
+    session: AsyncSession, conversation_ids: Sequence[str]
+) -> Sequence[ChatContextLink]:
+    if not conversation_ids:
+        return []
+    result = await session.execute(
+        select(ChatContextLink)
+        .where(ChatContextLink.conversation_id.in_(conversation_ids))
+        .order_by(ChatContextLink.created_at, ChatContextLink.id)
+    )
+    return result.scalars().all()
+
+
+async def delete_project_context_links(
+    session: AsyncSession, *, org_id: str, conversation_id: str
+) -> None:
+    await session.execute(
+        delete(ChatContextLink).where(
+            ChatContextLink.org_id == org_id,
+            ChatContextLink.conversation_id == conversation_id,
+            ChatContextLink.entity_type == "project",
+        )
+    )
 
 
 async def get_conversation(
