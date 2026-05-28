@@ -5,6 +5,8 @@ import contextlib
 import os
 from datetime import UTC, datetime
 
+from ..context_env import apply_runtime_context_env
+from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
     materialize_runtime_skills,
@@ -27,7 +29,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("OpenCode adapter cwd must be a string")
-    prompt = string(context.config.get("promptTemplate")) or ""
+    prompt = runtime_prompt_from_config(context.config)
     args = build_args(context.config)
     env = dict(os.environ)
     configured_env = context.config.get("env")
@@ -46,6 +48,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         context=context,
         env=env,
     )
+    apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="opencode_local",
         config=context.config,

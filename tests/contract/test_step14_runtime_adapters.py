@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
+from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
+from packages.runtimes.opencode_local.runner import execute as execute_opencode_local
 from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
 
@@ -235,8 +237,11 @@ async def test_http_environment_validates_url_shape(
 
 
 async def test_agent_skills_snapshot_and_sync_routes(
-    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     application, factory = app
     org_id = await _seed_org(factory)
     skills_root = tmp_path / "skills"
@@ -263,8 +268,15 @@ async def test_agent_skills_snapshot_and_sync_routes(
     )
     assert agent["capabilities"] == "Review code and explain runtime risks."
     assert agent["desiredSkills"] == ["review"]
+    runtime_config = agent["agentRuntimeConfig"]
+    assert "promptTemplate" not in runtime_config
+    assert runtime_config["instructionsBundleMode"] == "managed"
+    assert runtime_config["instructionsEntryFile"] == "SOUL.md"
+    assert Path(runtime_config["instructionsRootPath"]).is_dir()
+    soul_path = Path(runtime_config["instructionsFilePath"])
+    assert soul_path.name == "SOUL.md"
     assert (
-        agent["agentRuntimeConfig"]["promptTemplate"]
+        soul_path.read_text(encoding="utf-8")
         == "Use the agent capabilities as operating guidance."
     )
 
@@ -344,6 +356,61 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert entries["conversation-to-skill"]["state"] == "missing"
     assert entries["conversation-to-skill"]["sourceClass"] == "bundled"
     assert entries["conversation-to-skill"]["readOnly"] is True
+
+
+async def test_local_runtime_agent_resolves_explicit_relative_instructions_path(
+    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    create_code, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Explicit Instructions Agent",
+            "agentRuntimeType": "codex_local",
+            "agentRuntimeConfig": {
+                "cwd": str(workspace),
+                "instructionsFilePath": "instructions/SOUL.md",
+                "promptTemplate": "Keep this legacy prompt because path is explicit.",
+            },
+        },
+    )
+
+    assert create_code == 201
+    config = agent["agentRuntimeConfig"]
+    assert config["instructionsFilePath"] == str(
+        (workspace / "instructions" / "SOUL.md").resolve()
+    )
+    assert "instructionsBundleMode" not in config
+    assert (
+        config["promptTemplate"] == "Keep this legacy prompt because path is explicit."
+    )
+
+
+async def test_local_runtime_agent_rejects_relative_instructions_without_absolute_cwd(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    create_code, error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Invalid Instructions Agent",
+            "agentRuntimeType": "codex_local",
+            "agentRuntimeConfig": {"instructionsFilePath": "SOUL.md"},
+        },
+    )
+
+    assert create_code == 422
+    assert "Relative instructionsFilePath requires" in error["detail"]
 
 
 async def test_codex_skills_sync_materializes_desired_bundled_skill(
@@ -842,6 +909,63 @@ async def test_codex_execute_injects_runtime_context_env(
     assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
 
 
+async def test_claude_and_opencode_execute_inject_runtime_context_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, dict[str, str]] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful local process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        captured[command] = dict(kwargs["env"])
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.claude_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_claude_local(
+        _runtime_context_for_env(
+            command="claude-test",
+            config={"command": "claude-test"},
+        )
+    )
+    await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={"command": "opencode-test", "model": "openai/gpt-5"},
+        )
+    )
+
+    for command in ("claude-test", "opencode-test"):
+        env = captured[command]
+        assert env["RUDDER_AGENT_ID"] == "agent-14"
+        assert env["RUDDER_ORG_ID"] == "org-14"
+        assert env["RUDDER_RUN_ID"] == "run-14"
+        assert env["RUDDER_TASK_ID"] == "task-1"
+        assert env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+        assert env["AGENT_HOME"] == "D:/agents/agent-14"
+        assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+        assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+
+
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -888,6 +1012,35 @@ async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
 
 async def _noop_log(stream: str, chunk: str) -> None:
     return None
+
+
+def _runtime_context_for_env(
+    *, command: str, config: dict[str, Any]
+) -> RuntimeExecutionContext:
+    return RuntimeExecutionContext(
+        run_id="run-14",
+        agent_id="agent-14",
+        org_id="org-14",
+        agent_name=command,
+        config={
+            **config,
+            "_octopus": {
+                "taskId": "task-1",
+                "wakeReason": "assignment",
+            },
+        },
+        workspace={
+            "rudderWorkspace": {
+                "cwd": "D:/workspaces/task-1",
+                "source": "workspace",
+                "strategy": "worktree",
+                "agentHome": "D:/agents/agent-14",
+                "skillsDir": "D:/agents/agent-14/skills",
+            },
+            "rudderRuntimePrimaryUrl": "http://svc",
+        },
+        on_log=lambda stream, chunk: _noop_log(stream, chunk),
+    )
 
 
 async def test_agent_skills_enable_private_and_analytics_routes(
