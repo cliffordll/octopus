@@ -282,7 +282,6 @@ h1, h2, p {
 
 .heartbeat-filter {
   display: block;
-  margin-bottom: 18px;
   max-width: 260px;
 }
 
@@ -292,13 +291,78 @@ h1, h2, p {
   width: 100%;
 }
 
-.heartbeat-layout {
-  display: grid;
+.heartbeat-page-header {
+  align-items: start;
   gap: 18px;
-  grid-template-columns: minmax(270px, 360px) minmax(320px, 1fr);
 }
 
-.heartbeat-runs,
+.heartbeat-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.heartbeat-agents {
+  margin-bottom: 18px;
+}
+
+.heartbeat-agent-list {
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.heartbeat-agent-row {
+  align-items: center;
+  background: #111722;
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(140px, 0.8fr) minmax(180px, 1fr) auto;
+  padding: 14px;
+}
+
+.heartbeat-agent-row:last-child {
+  border-bottom: 0;
+}
+
+.heartbeat-agent-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.heartbeat-agent-row strong,
+.heartbeat-agent-main a {
+  color: #e8edf5;
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heartbeat-agent-row span {
+  color: #8792a6;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heartbeat-agent-actions {
+  align-items: end;
+}
+
+.heartbeat-inspection-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 320px);
+}
+
+.heartbeat-run-rail,
 .heartbeat-detail {
   display: flex;
   flex-direction: column;
@@ -328,8 +392,10 @@ h1, h2, p {
   align-items: center;
   background: #111722;
   border: 1px solid #202a3b;
+  border-radius: 10px;
   color: #e8edf5;
   display: flex;
+  gap: 10px;
   justify-content: space-between;
   padding: 11px;
   text-align: left;
@@ -337,7 +403,12 @@ h1, h2, p {
 }
 
 .heartbeat-run.selected {
+  background: #152033;
   border-color: #3886e8;
+}
+
+.heartbeat-run:hover {
+  border-color: #33425b;
 }
 
 .heartbeat-run span {
@@ -366,9 +437,18 @@ h1, h2, p {
   padding: 11px;
 }
 
-.heartbeat-event span {
+.heartbeat-event div {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.heartbeat-event span,
+.heartbeat-event p {
   color: #8792a6;
   font-size: 13px;
+  margin: 0;
 }
 
 .page-header {
@@ -1215,8 +1295,21 @@ pre {
   .org-content {
     padding: 22px 16px;
   }
-  .heartbeat-layout, .organization-member {
+  .heartbeat-summary-grid,
+  .heartbeat-agent-row,
+  .heartbeat-inspection-layout,
+  .organization-member {
     grid-template-columns: 1fr;
+  }
+  .heartbeat-page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .heartbeat-filter {
+    max-width: none;
+  }
+  .heartbeat-agent-actions {
+    align-items: stretch;
   }
   .context-nav {
     flex-direction: row;
