@@ -11,21 +11,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.projects import get_project_by_id
 from packages.database.queries.workspaces import (
     create_execution_workspace,
+    create_workspace_operation,
     create_workspace_runtime_service,
     get_execution_workspace_by_id,
     list_execution_workspaces,
     list_project_workspaces,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
+    update_workspace_operation,
     update_workspace_runtime_service,
 )
-from packages.database.schema import ExecutionWorkspace, Issue, WorkspaceRuntimeService
+from packages.database.schema import (
+    ExecutionWorkspace,
+    Issue,
+    WorkspaceOperation,
+    WorkspaceRuntimeService,
+)
 from packages.shared.constants.workspace import (
     ExecutionWorkspaceMode,
     ExecutionWorkspaceStatus,
     ExecutionWorkspaceStrategyType,
 )
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
+from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
 from packages.shared.types.workspace import WorkspaceRuntimeService as RuntimeServiceData
 
 
@@ -397,6 +405,56 @@ class WorkspaceService:
         )
         return [self._to_runtime_service(row) for row in rows]
 
+    async def begin_operation(
+        self,
+        *,
+        org_id: str,
+        run_id: str | None,
+        execution_workspace_id: str | None,
+        phase: str,
+        command: str | None = None,
+        cwd: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkspaceOperationData:
+        row = await create_workspace_operation(
+            self._session,
+            {
+                "org_id": org_id,
+                "execution_workspace_id": execution_workspace_id,
+                "heartbeat_run_id": run_id,
+                "phase": phase,
+                "command": command,
+                "cwd": cwd,
+                "status": "running",
+                "metadata_json": metadata,
+            },
+        )
+        return self._to_operation(row)
+
+    async def finish_operation(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        exit_code: int | None = None,
+        stdout_excerpt: str | None = None,
+        stderr_excerpt: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkspaceOperationData | None:
+        row = await update_workspace_operation(
+            self._session,
+            operation_id,
+            {
+                "status": status,
+                "exit_code": exit_code,
+                "stdout_excerpt": stdout_excerpt,
+                "stderr_excerpt": stderr_excerpt,
+                "metadata_json": metadata,
+                "finished_at": datetime.now(UTC),
+            },
+        )
+        return self._to_operation(row) if row is not None else None
+
     async def _resolve_project_workspace_id(
         self,
         *,
@@ -542,6 +600,31 @@ class WorkspaceService:
             "stoppedAt": _iso(row.stopped_at),
             "stopPolicy": row.stop_policy,
             "healthStatus": cast(Any, row.health_status),
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    def _to_operation(self, row: WorkspaceOperation) -> WorkspaceOperationData:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "executionWorkspaceId": row.execution_workspace_id,
+            "heartbeatRunId": row.heartbeat_run_id,
+            "phase": cast(Any, row.phase),
+            "command": row.command,
+            "cwd": row.cwd,
+            "status": cast(Any, row.status),
+            "exitCode": row.exit_code,
+            "logStore": row.log_store,
+            "logRef": row.log_ref,
+            "logBytes": row.log_bytes,
+            "logSha256": row.log_sha256,
+            "logCompressed": row.log_compressed,
+            "stdoutExcerpt": row.stdout_excerpt,
+            "stderrExcerpt": row.stderr_excerpt,
+            "metadata": row.metadata_json,
+            "startedAt": row.started_at.isoformat(),
+            "finishedAt": _iso(row.finished_at),
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }

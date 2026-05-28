@@ -11,6 +11,7 @@ from packages.database.schema import (
     ExecutionWorkspace,
     ProjectWorkspace,
     WorkspaceRuntimeService,
+    WorkspaceOperation,
 )
 
 
@@ -171,5 +172,50 @@ async def list_workspace_runtime_services_for_workspace(
             desc(WorkspaceRuntimeService.updated_at),
             desc(WorkspaceRuntimeService.created_at),
         )
+    )
+    return result.scalars().all()
+
+
+async def create_workspace_operation(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> WorkspaceOperation:
+    row = WorkspaceOperation(**dict(fields))
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def update_workspace_operation(
+    session: AsyncSession, operation_id: str, fields: Mapping[str, Any]
+) -> WorkspaceOperation | None:
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(WorkspaceOperation)
+        .where(WorkspaceOperation.id == operation_id)
+        .values(**values)
+        .returning(WorkspaceOperation)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_workspace_operations_for_run(
+    session: AsyncSession, run_id: str
+) -> Sequence[WorkspaceOperation]:
+    result = await session.execute(
+        select(WorkspaceOperation)
+        .where(WorkspaceOperation.heartbeat_run_id == run_id)
+        .order_by(WorkspaceOperation.started_at, WorkspaceOperation.created_at)
+    )
+    return result.scalars().all()
+
+
+async def list_workspace_operations_for_execution_workspace(
+    session: AsyncSession, execution_workspace_id: str
+) -> Sequence[WorkspaceOperation]:
+    result = await session.execute(
+        select(WorkspaceOperation)
+        .where(WorkspaceOperation.execution_workspace_id == execution_workspace_id)
+        .order_by(desc(WorkspaceOperation.started_at), desc(WorkspaceOperation.created_at))
     )
     return result.scalars().all()

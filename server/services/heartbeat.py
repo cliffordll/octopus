@@ -620,6 +620,9 @@ class HeartbeatService:
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
             workspace_context = await self._prepare_workspace_context(running)
+            adapter_operation = await self._begin_adapter_workspace_operation(
+                running, workspace_context
+            )
             runtime_config = dict(agent.agent_runtime_config)
             workspace_env = None
             workspace_payload = None
@@ -663,6 +666,14 @@ class HeartbeatService:
                     cancel_event=cancellation,
                     on_process_started=on_process_started,
                 )
+            )
+            await self._finish_adapter_workspace_operation(
+                adapter_operation,
+                status="succeeded" if not result.error_message else "failed",
+                exit_code=result.exit_code,
+                stdout_excerpt=stdout or None,
+                stderr_excerpt=stderr or result.error_message,
+                metadata={"adapterExecution": True, "timedOut": result.timed_out},
             )
             if cancellation.is_set():
                 return running
@@ -753,6 +764,12 @@ class HeartbeatService:
             if running.status == "cancelled":
                 return running
             message = str(exc)
+            await self._finish_adapter_workspace_operation(
+                locals().get("adapter_operation"),
+                status="failed",
+                stderr_excerpt=message,
+                metadata={"error": message},
+            )
             failed = await update_run(
                 self._session,
                 running.id,
@@ -830,6 +847,32 @@ class HeartbeatService:
             running.context_snapshot = updated.context_snapshot
         workspace_payload = workspace_context.get("workspace")
         workspace_id = workspace_context.get("executionWorkspaceId")
+        operation = await WorkspaceService(self._session).begin_operation(
+            org_id=running.org_id,
+            run_id=running.id,
+            execution_workspace_id=(
+                workspace_id if isinstance(workspace_id, str) else None
+            ),
+            phase="workspace_provision",
+            cwd=(
+                workspace_payload.get("rudderWorkspace", {}).get("cwd")
+                if isinstance(workspace_payload, dict)
+                and isinstance(workspace_payload.get("rudderWorkspace"), dict)
+                else None
+            ),
+            metadata={
+                "projectWorkspaceId": workspace_context.get("projectWorkspaceId"),
+                "preflight": True,
+            },
+        )
+        await WorkspaceService(self._session).finish_operation(
+            operation["id"],
+            status="succeeded",
+            metadata={
+                "projectWorkspaceId": workspace_context.get("projectWorkspaceId"),
+                "preflight": True,
+            },
+        )
         await self._append_event(
             running,
             await self._next_event_sequence(running.id),
@@ -842,6 +885,48 @@ class HeartbeatService:
             },
         )
         return workspace_context if isinstance(workspace_payload, dict) else None
+
+    async def _begin_adapter_workspace_operation(
+        self, running: HeartbeatRunRow, workspace_context: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if workspace_context is None:
+            return None
+        workspace_payload = workspace_context.get("workspace")
+        workspace = (
+            workspace_payload.get("rudderWorkspace")
+            if isinstance(workspace_payload, dict)
+            else None
+        )
+        return await WorkspaceService(self._session).begin_operation(
+            org_id=running.org_id,
+            run_id=running.id,
+            execution_workspace_id=cast(str | None, workspace_context.get("executionWorkspaceId")),
+            phase="workspace_provision",
+            command="runtime_adapter.execute",
+            cwd=workspace.get("cwd") if isinstance(workspace, dict) else None,
+            metadata={"adapterExecution": True},
+        )
+
+    async def _finish_adapter_workspace_operation(
+        self,
+        operation: object,
+        *,
+        status: str,
+        exit_code: int | None = None,
+        stdout_excerpt: str | None = None,
+        stderr_excerpt: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if not isinstance(operation, dict) or not isinstance(operation.get("id"), str):
+            return
+        await WorkspaceService(self._session).finish_operation(
+            operation["id"],
+            status=status,
+            exit_code=exit_code,
+            stdout_excerpt=stdout_excerpt,
+            stderr_excerpt=stderr_excerpt,
+            metadata=metadata,
+        )
 
     async def _next_event_sequence(self, run_id: str) -> int:
         events = await list_run_events(self._session, run_id, limit=1000)
