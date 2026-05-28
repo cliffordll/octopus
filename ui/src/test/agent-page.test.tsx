@@ -344,10 +344,14 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             sourceClass: "bundled",
             origin: "bundled",
             state: "installed",
+            alwaysEnabled: true,
+            originLabel: "Rudder",
+            locationLabel: "bundled skills",
             version: "1.0",
             enabled: true,
             tags: ["quality"],
-            description: "Review code changes",
+            description:
+              "Turn the current conversation's workflow into a reusable agent skill. Use this whenever the user wants to make a workflow reusable.",
             prompt: "Review carefully.",
           },
           {
@@ -408,7 +412,9 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
   expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
   await userEvent.click(screen.getByText("Review"));
-  expect(screen.getByText("Review code changes")).toBeInTheDocument();
+  expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
+  expect(screen.getByText("Always loaded by Rudder for every agent run.")).toBeInTheDocument();
+  expect(screen.getByText("Rudder")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();

@@ -368,9 +368,22 @@ export interface CreateProjectPayload {
   leadAgentId?: string | null;
   targetDate?: string | null;
   executionWorkspacePolicy?: Record<string, unknown> | null;
+  resourceAttachments?: ProjectResourceAttachmentInput[];
+  newResources?: CreateProjectInlineResourceInput[];
 }
 
 export type UpdateProjectPayload = Partial<CreateProjectPayload>;
+
+export interface CreateProjectInlineResourceInput {
+  name: string;
+  kind: OrganizationResource["kind"];
+  locator: string;
+  description?: string | null;
+  metadata?: Record<string, unknown> | null;
+  role?: ProjectResourceRole;
+  note?: string | null;
+  sortOrder?: number;
+}
 
 export interface ProjectResourceAttachmentInput {
   resourceId: string;
