@@ -9,7 +9,34 @@ afterEach(() => {
 });
 
 it("controls an agent from its overview and shows runtime status", async () => {
-  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    title: "Build owner",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "codex_local",
+    agentRuntimeConfig: {
+      model: "gpt-5",
+      cwd: "D:/work/app",
+      instructionsRootPath: "D:/work/app/.agent",
+      instructionsFilePath: "D:/work/app/.agent/SOUL.md",
+      agentsMdPath: "D:/work/app/AGENTS.md",
+      promptTemplate: "Ship product changes",
+      skillsRootPath: "D:/work/app/.agent/skills",
+      managedInstructionFiles: [
+        { name: "TOOLS.md", path: "D:/work/app/.agent/TOOLS.md", content: "Tool policy" },
+        { name: "MEMORY.md", path: "D:/work/app/.agent/MEMORY.md", content: "Memory policy" },
+        { name: "NOTES.md", path: "D:/work/app/.agent/NOTES.md", content: "Project notes" },
+      ],
+    },
+    runtimeConfig: { memory: "Keep deployment context" },
+    budgetMonthlyCents: 0,
+    capabilities: "Ship product changes",
+    desiredSkills: ["review"],
+    reportsTo: "lead-1",
+  };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
@@ -34,6 +61,47 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行心跳" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
+  const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
+  expect(within(tabs).getByRole("link", { name: "说明" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/agents/agent-1/profile",
+  );
+  expect(within(tabs).getByRole("link", { name: "技能" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/agents/agent-1/skills",
+  );
+  await userEvent.click(within(tabs).getByRole("link", { name: "说明" }));
+  const instructionsPanel = screen.getByRole("region", { name: "Managed Instructions" });
+  expect(await within(instructionsPanel).findByRole("heading", { name: "Files" })).toBeInTheDocument();
+  expect(within(instructionsPanel).getByRole("button", { name: "SOUL.md" }).closest("li")).toHaveClass("selected");
+  expect(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" })).toBeInTheDocument();
+  expect(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" })).toBeInTheDocument();
+  expect(within(instructionsPanel).getByRole("button", { name: "MEMORY.md" })).toBeInTheDocument();
+  expect(within(instructionsPanel).getByRole("button", { name: "NOTES.md" })).toBeInTheDocument();
+  expect(within(screen.getByRole("complementary", { name: "Instruction files" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
+  const instructionContent = screen.getByRole("article", { name: "Instruction content" });
+  expect(within(instructionsPanel).getByText(/Ship product changes/)).toBeInTheDocument();
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
+  expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" }));
+  expect(within(instructionContent).getByText(/Tool policy/)).toBeInTheDocument();
+  const instructionFiles = screen.getByRole("complementary", { name: "Instruction files" });
+  await userEvent.click(within(instructionFiles).getByRole("button", { name: "新增文件" }));
+  expect(within(instructionFiles).getByLabelText("文件名")).toHaveValue("NEW.md");
+  expect(within(instructionFiles).queryByLabelText("路径")).not.toBeInTheDocument();
+  expect(within(instructionFiles).queryByLabelText("内容")).not.toBeInTheDocument();
+  await userEvent.clear(within(instructionFiles).getByLabelText("文件名"));
+  await userEvent.type(within(instructionFiles).getByLabelText("文件名"), "RUNBOOK.md");
+  expect(within(instructionFiles).getByRole("button", { name: "取消" })).toBeInTheDocument();
+  await userEvent.click(within(instructionFiles).getByRole("button", { name: "确认" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining("RUNBOOK.md"),
+    }),
+  );
+  await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
   expect(await screen.findByText("succeeded")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
@@ -216,10 +284,13 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
   expect(await screen.findByText("GPT-5")).toBeInTheDocument();
   expect(await screen.findByText("not configured")).toBeInTheDocument();
-  expect(await screen.findByText("Review")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
   expect(await screen.findByText("CWD")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("link", { name: "技能" }));
+  expect(await screen.findByText("Agent Skills")).toBeInTheDocument();
+  expect(await screen.findByText("Review")).toBeInTheDocument();
 
   await userEvent.clear(screen.getByLabelText("Desired Skills"));
   await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
