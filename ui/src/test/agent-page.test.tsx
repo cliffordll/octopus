@@ -136,3 +136,34 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(await within(screen.getByTestId("agent-runs-detail-pane")).findByText("succeeded")).toBeInTheDocument();
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
+
+it("shows configuration revisions, rolls back, and resets runtime session", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
+      return respond({ agentId: "agent-1", sessionDisplayId: "session-1", lastRunStatus: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0, lastError: null });
+    }
+    if (path === "/api/agents/agent-1/config-revisions" && init?.method === "GET") {
+      return respond([{ id: "revision-1", agentId: "agent-1", createdAt: "2026-05-28T00:00:00Z", runtimeConfig: {} }]);
+    }
+    return respond({ id: "agent-1" });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByText("Config Revisions")).toBeInTheDocument();
+  expect(await screen.findByText("revision-1")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "回滚" }));
+  await userEvent.click(screen.getByRole("button", { name: "重置会话" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/config-revisions/revision-1/rollback",
+    expect.objectContaining({ method: "POST" }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/runtime-state/reset-session",
+    expect.objectContaining({ method: "POST", body: JSON.stringify({ forceFreshSession: true }) }),
+  );
+});

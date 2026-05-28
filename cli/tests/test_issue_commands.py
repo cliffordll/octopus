@@ -25,6 +25,87 @@ def test_issue_list_passes_organization_and_status() -> None:
     assert "OCT-1" in output.getvalue()
 
 
+def test_issue_commands_support_full_server_fields() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "title": "Review"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "issue",
+                "list",
+                "--org-id",
+                "org-1",
+                "--project-id",
+                "project-1",
+                "--goal-id",
+                "goal-1",
+                "--origin-kind",
+                "manual",
+                "--origin-id",
+                "origin-1",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "create",
+                "--org-id",
+                "org-1",
+                "--title",
+                "Review",
+                "--project-id",
+                "project-1",
+                "--goal-id",
+                "goal-1",
+                "--assignee-agent-id",
+                "agent-1",
+                "--reviewer-agent-id",
+                "agent-2",
+                "--parent-id",
+                "parent-1",
+                "--request-depth",
+                "2",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "update",
+                "issue-1",
+                "--goal-id",
+                "goal-2",
+                "--reviewer-user-id",
+                "user-1",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert "projectId=project-1" in str(requests[0].url)
+    assert "goalId=goal-1" in str(requests[0].url)
+    assert "originKind=manual" in str(requests[0].url)
+    assert requests[1].read() == (
+        b'{"title":"Review","projectId":"project-1","goalId":"goal-1",'
+        b'"parentId":"parent-1","assigneeAgentId":"agent-1",'
+        b'"reviewerAgentId":"agent-2","requestDepth":2}'
+    )
+    assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
+
+
 def test_issue_comment_and_review_post_payloads() -> None:
     requests: list[httpx.Request] = []
 

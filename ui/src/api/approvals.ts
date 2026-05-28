@@ -4,6 +4,7 @@ import type {
   ApprovalListItem,
   ApprovalStatus,
   CreateApprovalPayload,
+  ResolveApprovalPayload,
   ResubmitApprovalPayload,
 } from "./types";
 
@@ -27,23 +28,23 @@ export const approvalsApi = {
       "POST",
       payload,
     ),
-  approve: (approvalId: string, decisionNote?: string): Promise<ApprovalDetail> =>
+  approve: (approvalId: string, payload?: string | ResolveApprovalPayload): Promise<ApprovalDetail> =>
     jsonRequest<ApprovalDetail>(
       `${approvalRoot(approvalId)}/approve`,
       "POST",
-      decisionNote ? { decisionNote } : {},
+      typeof payload === "string" ? { decisionNote: payload } : payload ?? {},
     ),
-  reject: (approvalId: string, decisionNote?: string): Promise<ApprovalDetail> =>
+  reject: (approvalId: string, payload?: string | ResolveApprovalPayload): Promise<ApprovalDetail> =>
     jsonRequest<ApprovalDetail>(
       `${approvalRoot(approvalId)}/reject`,
       "POST",
-      decisionNote ? { decisionNote } : {},
+      typeof payload === "string" ? { decisionNote: payload } : payload ?? {},
     ),
-  requestRevision: (approvalId: string, decisionNote?: string): Promise<ApprovalDetail> =>
+  requestRevision: (approvalId: string, payload?: string | ResolveApprovalPayload): Promise<ApprovalDetail> =>
     jsonRequest<ApprovalDetail>(
       `${approvalRoot(approvalId)}/request-revision`,
       "POST",
-      decisionNote ? { decisionNote } : {},
+      typeof payload === "string" ? { decisionNote: payload } : payload ?? {},
     ),
   resubmit: (approvalId: string, payload: ResubmitApprovalPayload): Promise<ApprovalDetail> =>
     jsonRequest<ApprovalDetail>(`${approvalRoot(approvalId)}/resubmit`, "POST", payload),

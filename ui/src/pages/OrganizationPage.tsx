@@ -12,6 +12,8 @@ export function OrganizationPage() {
   const { orgId = "" } = useParams();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
+  const [brandColor, setBrandColor] = useState("");
   const queryClient = useQueryClient();
   const organization = useQuery({
     queryKey: ["organization", orgId],
@@ -21,6 +23,8 @@ export function OrganizationPage() {
     if (organization.data) {
       setName(organization.data.name);
       setDescription(organization.data.description ?? "");
+      setBudgetMonthlyCents(String(organization.data.budgetMonthlyCents ?? ""));
+      setBrandColor(organization.data.brandColor ?? "");
     }
   }, [organization.data]);
   const update = useMutation({
@@ -28,6 +32,8 @@ export function OrganizationPage() {
       organizationsApi.update(orgId, {
         name: name.trim(),
         description: description.trim() || null,
+        budgetMonthlyCents: budgetMonthlyCents.trim() ? Number(budgetMonthlyCents) : undefined,
+        brandColor: brandColor.trim() || null,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization", orgId] }),
   });
@@ -52,6 +58,19 @@ export function OrganizationPage() {
         <label>
           描述
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <label>
+          月度预算（cents）
+          <input
+            min="0"
+            type="number"
+            value={budgetMonthlyCents}
+            onChange={(event) => setBudgetMonthlyCents(event.target.value)}
+          />
+        </label>
+        <label>
+          品牌色
+          <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
         </label>
         {update.error && <ErrorNotice error={update.error} />}
         <button type="submit">保存组织</button>
