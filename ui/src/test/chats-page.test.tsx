@@ -185,7 +185,7 @@ it("keeps a link to the conversation when the first reply request fails", async 
   expect(screen.getByRole("navigation", { name: "消息导航" })).toHaveTextContent("请规划部署");
 });
 
-it("filters conversations and identifies their selected agent", async () => {
+it("lists conversations without sidebar filters and identifies their selected agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([
@@ -207,20 +207,24 @@ it("filters conversations and identifies their selected agent", async () => {
   renderApp("/orgs/org-1/chats");
   const messageNavigation = screen.getByRole("navigation", { name: "消息导航" });
   expect(await within(messageNavigation).findByText("Builder")).toBeInTheDocument();
+  expect(messageNavigation).toHaveTextContent("发布计划");
   expect(messageNavigation).toHaveTextContent("归档调研");
-  expect(screen.getByRole("option", { name: "进行中 (1)" })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "已归档 (1)" })).toBeInTheDocument();
-
-  await userEvent.selectOptions(screen.getByLabelText("状态"), "active");
-  expect(messageNavigation).not.toHaveTextContent("归档调研");
-
-  await userEvent.selectOptions(screen.getByLabelText("状态"), "");
-  await userEvent.selectOptions(screen.getByLabelText("智能体"), "agent-2");
   expect(messageNavigation).toHaveTextContent("设计讨论");
-  expect(messageNavigation).not.toHaveTextContent("发布计划");
+  expect(screen.queryByLabelText("搜索对话")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("状态")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("智能体")).not.toBeInTheDocument();
+});
 
-  await userEvent.type(screen.getByLabelText("搜索对话"), "没有");
-  expect(screen.getByText("没有匹配的对话")).toBeInTheDocument();
+it("shows an empty sidebar state when no conversations exist", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats");
+  expect(await within(screen.getByRole("navigation", { name: "消息导航" })).findByText("暂无对话")).toBeInTheDocument();
 });
 
 it("shows the selected conversation and agent identity while sending messages", async () => {

@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, type PropsWithChildren, type ReactNode } from "react";
+import { type PropsWithChildren, type ReactNode } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { issuesApi } from "../api/issues";
-import type { ChatConversation } from "../api/types";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
@@ -12,14 +11,12 @@ function ContextWorkspace({
   label,
   title,
   navigationLabel,
-  headerControls,
   sidebar,
   children,
 }: PropsWithChildren<{
   label: string;
   title: string;
   navigationLabel: string;
-  headerControls?: ReactNode;
   sidebar: ReactNode;
 }>) {
   return (
@@ -27,7 +24,6 @@ function ContextWorkspace({
       <aside className="org-sidebar context-sidebar">
         <p className="org-sidebar-label">{label}</p>
         <h2>{title}</h2>
-        {headerControls}
         <nav aria-label={navigationLabel} className="context-nav">
           {sidebar}
         </nav>
@@ -38,58 +34,21 @@ function ContextWorkspace({
 }
 
 export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ChatConversation["status"] | "">("");
-  const [agentId, setAgentId] = useState("");
   const chats = useQuery({ queryKey: ["chats", orgId], queryFn: () => chatsApi.list(orgId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
   const conversations = Array.isArray(chats.data) ? chats.data : [];
-  const statusCounts = conversations.reduce(
-    (counts, chat) => ({ ...counts, [chat.status]: counts[chat.status] + 1 }),
-    { active: 0, resolved: 0, archived: 0 },
-  );
-  const chatList = conversations.filter((chat) => {
-    const matchesSearch = chat.title.toLowerCase().includes(search.trim().toLowerCase());
-    return matchesSearch && (!status || chat.status === status) && (!agentId || chat.preferredAgentId === agentId);
-  });
   return (
     <ContextWorkspace
       label="Messages"
       navigationLabel="消息导航"
       title="会话"
-      headerControls={
-        <div className="context-filters">
-          <label>
-            搜索对话
-            <input value={search} onChange={(event) => setSearch(event.target.value)} />
-          </label>
-          <label>
-            状态
-            <select value={status} onChange={(event) => setStatus(event.target.value as ChatConversation["status"] | "")}>
-              <option value="">全部状态 ({conversations.length})</option>
-              <option value="active">进行中 ({statusCounts.active})</option>
-              <option value="resolved">已解决 ({statusCounts.resolved})</option>
-              <option value="archived">已归档 ({statusCounts.archived})</option>
-            </select>
-          </label>
-          <label>
-            智能体
-            <select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
-              <option value="">全部智能体</option>
-              {agentList.map((agent) => (
-                <option key={agent.id} value={agent.id}>{agent.name}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      }
       sidebar={
         <>
           <NavLink className="new-chat-entry" end to={`/orgs/${orgId}/chats`}>+ 新建对话</NavLink>
           {chats.error && <ErrorNotice error={chats.error} />}
-          {chatList.map((chat) => (
+          {conversations.map((chat) => (
             <NavLink key={chat.id} to={`/orgs/${orgId}/chats/${chat.id}`}>
               <span className="context-item-copy">
                 <strong>{chat.title}</strong>
@@ -100,7 +59,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
               <Badge>{chat.status}</Badge>
             </NavLink>
           ))}
-          {chats.isSuccess && chatList.length === 0 && <p className="context-empty">没有匹配的对话</p>}
+          {chats.isSuccess && conversations.length === 0 && <p className="context-empty">暂无对话</p>}
         </>
       }
     >
