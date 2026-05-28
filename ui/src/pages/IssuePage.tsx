@@ -123,7 +123,7 @@ export function IssuePage() {
                 <span className="muted">当前状态：{issue.data.status}</span>
               </div>
               <div className="actions">
-                <button onClick={() => review.mutate("approve")} type="button">批准 Review</button>
+                <button onClick={() => review.mutate("approve")} type="button">Approve Review</button>
                 <button className="secondary" onClick={() => review.mutate("request_changes")} type="button">
                   请求修改
                 </button>
@@ -178,7 +178,7 @@ export function IssuePage() {
       {!issue.data && (
         <header className="page-header">
           <div>
-            <Link className="back-link" to={`/orgs/${orgId}/issues`}>返回 Issues</Link>
+            <Link className="back-link" to={`/orgs/${orgId}/issues`}>Back to Issues</Link>
             <h1>载入中...</h1>
           </div>
         </header>

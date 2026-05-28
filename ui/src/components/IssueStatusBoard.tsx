@@ -42,11 +42,11 @@ function issueCreatedAt(issue: IssueListItem): string {
 function issueOwner(issue: IssueListItem, agentNameById: Map<string, string>): string {
   if (issue.assigneeAgentId) return agentNameById.get(issue.assigneeAgentId) ?? issue.assigneeAgentId;
   if (issue.assigneeUserId) return issue.assigneeUserId;
-  return "未分配";
+  return "Unassigned";
 }
 
 function issueProject(issue: IssueListItem, projectNameById: Map<string, string>): string {
-  if (!issue.projectId) return "未关联";
+  if (!issue.projectId) return "Unlinked";
   return projectNameById.get(issue.projectId) ?? issue.projectId;
 }
 
@@ -104,9 +104,9 @@ export function IssueStatusBoard({
                       {issue.title}
                     </Link>
                     <dl className="project-issue-card-meta">
-                      <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
-                      <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById)}</dd></div>
-                      {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
+                      <div><dt>Created</dt><dd>{issueCreatedAt(issue)}</dd></div>
+                      <div><dt>Owner</dt><dd>{issueOwner(issue, agentNameById)}</dd></div>
+                      {showProject && <div><dt>Project</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
                     </dl>
                   </article>
                 ))}

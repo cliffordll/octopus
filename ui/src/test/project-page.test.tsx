@@ -91,7 +91,7 @@ it("updates a project and manages its resource attachments", async () => {
 
   renderApp("/orgs/org-1/projects/project-1");
   expect(await screen.findByRole("heading", { name: "控制台" })).toBeInTheDocument();
-  const tabs = screen.getByRole("navigation", { name: "项目详情导航" });
+  const tabs = screen.getByRole("navigation", { name: "Project detail navigation" });
   expect(within(tabs).getByRole("link", { name: "Configuration" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/configuration",
@@ -105,12 +105,12 @@ it("updates a project and manages its resource attachments", async () => {
     "/orgs/org-1/projects/project-1/issues",
   );
 
-  await userEvent.clear(screen.getByLabelText("描述"));
-  await userEvent.type(screen.getByLabelText("描述"), "更新后的描述");
+  await userEvent.clear(screen.getByLabelText("Description"));
+  await userEvent.type(screen.getByLabelText("Description"), "更新后的描述");
   await userEvent.selectOptions(screen.getByLabelText("Lead"), "agent-1");
   await userEvent.type(screen.getByLabelText("Target Date"), "2026-06-01");
   await userEvent.type(screen.getByLabelText("Goal IDs"), "goal-1,goal-2");
-  await userEvent.click(screen.getByRole("button", { name: "保存 Project" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save Project" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
     expect.objectContaining({
@@ -130,7 +130,7 @@ it("updates a project and manages its resource attachments", async () => {
   expect(await screen.findByText("Repository")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Resource ID"), "resource-2");
   await userEvent.type(screen.getByLabelText("Sort Order"), "3");
-  await userEvent.click(screen.getByRole("button", { name: "添加 Resource" }));
+  await userEvent.click(screen.getByRole("button", { name: "Add Resource" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1/resources",
     expect.objectContaining({
@@ -139,16 +139,16 @@ it("updates a project and manages its resource attachments", async () => {
     }),
   );
 
-  await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "Issues" }));
+  await userEvent.click(within(screen.getByRole("navigation", { name: "Project detail navigation" })).getByRole("link", { name: "Issues" }));
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
   );
   const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
   expect(projectIssueCard).not.toBeNull();
-  expect(projectIssueCard).toHaveTextContent("创建时间");
+  expect(projectIssueCard).toHaveTextContent("Created");
   expect(projectIssueCard).toHaveTextContent("2026-05-28T10:00:00Z");
-  expect(projectIssueCard).toHaveTextContent("归属");
+  expect(projectIssueCard).toHaveTextContent("Owner");
   expect(projectIssueCard).toHaveTextContent("Builder");
   const issueSummary = screen.getByText("Total").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();

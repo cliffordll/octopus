@@ -20,7 +20,7 @@ it("opens the first project for an organization with projects", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects");
-  expect(await screen.findByRole("link", { name: "返回 Projects" })).toHaveAttribute(
+  expect(await screen.findByRole("link", { name: "Back to Projects" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects",
   );
@@ -61,9 +61,9 @@ it("creates a project from the upstream-style empty state dialog", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "Add Project" }));
   const dialog = within(screen.getByRole("dialog", { name: "Add Project" }));
-  await userEvent.type(dialog.getByLabelText("Project 名称"), "发布流程");
-  await userEvent.selectOptions(dialog.getByLabelText("Project 状态"), "planned");
-  await userEvent.click(screen.getByRole("button", { name: "新建 Project" }));
+  await userEvent.type(dialog.getByLabelText("Project Name"), "发布流程");
+  await userEvent.selectOptions(dialog.getByLabelText("Project Status"), "planned");
+  await userEvent.click(screen.getByRole("button", { name: "Create Project" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/projects",

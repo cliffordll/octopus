@@ -51,9 +51,9 @@ it("groups issues by status and creates issues for an organization", async () =>
   );
   const issueCard = screen.getByRole("link", { name: "实现登录流程" }).closest(".project-issue-status-row");
   expect(issueCard).not.toBeNull();
-  expect(issueCard).toHaveTextContent("创建时间");
+  expect(issueCard).toHaveTextContent("Created");
   expect(issueCard).toHaveTextContent("2026-05-28T10:00:00Z");
-  expect(issueCard).toHaveTextContent("归属");
+  expect(issueCard).toHaveTextContent("Owner");
   expect(issueCard).toHaveTextContent("Builder");
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
   const issueSummary = screen.getByText("Total").closest(".project-issue-status-summary");
