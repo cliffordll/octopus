@@ -14,6 +14,7 @@ export function AppShell() {
   const location = useLocation();
   const [organizationMenuOpen, setOrganizationMenuOpen] = useState(false);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
+  const isMessagesArea = /^\/orgs\/[^/]+\/(chats|approvals)/.test(location.pathname);
   const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|settings)/.test(location.pathname);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
@@ -34,7 +35,7 @@ export function AppShell() {
         <nav className="global-nav" aria-label="主导航">
           {selectedOrganizationId ? (
             <>
-              <NavLink to={`/orgs/${selectedOrganizationId}/chats`}>
+              <NavLink className={isMessagesArea ? "active" : undefined} to={`/orgs/${selectedOrganizationId}/chats`}>
                 <span aria-hidden="true" className="nav-icon">M</span>
                 <span>消息</span>
               </NavLink>

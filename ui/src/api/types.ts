@@ -91,7 +91,12 @@ export interface CreateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  projectId?: string | null;
+  goalId?: string | null;
   assigneeAgentId?: string | null;
+  assigneeUserId?: string | null;
+  reviewerAgentId?: string | null;
+  reviewerUserId?: string | null;
 }
 
 export interface UpdateIssuePayload {
@@ -100,6 +105,58 @@ export interface UpdateIssuePayload {
   status?: IssueStatus;
   priority?: IssuePriority;
 }
+
+export type GoalLevel = "organization" | "team" | "agent" | "task";
+export type GoalStatus = "planned" | "active" | "achieved" | "cancelled";
+
+export interface Goal {
+  id: string;
+  orgId: string;
+  title: string;
+  description: string | null;
+  level: GoalLevel;
+  status: GoalStatus;
+  parentId: string | null;
+  ownerAgentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoalDependencyPreview {
+  id: string;
+  title: string;
+}
+
+export interface GoalDependencies {
+  goalId: string;
+  blockers: string[];
+  isLastRootOrganizationGoal: boolean;
+  counts: {
+    childGoals: number;
+    linkedProjects: number;
+    linkedIssues: number;
+    automations: number;
+    costEvents: number;
+    financeEvents: number;
+  };
+  previews: {
+    childGoals: GoalDependencyPreview[];
+    linkedProjects: GoalDependencyPreview[];
+    linkedIssues: GoalDependencyPreview[];
+    automations: GoalDependencyPreview[];
+  };
+}
+
+export interface CreateGoalPayload {
+  title: string;
+  description?: string | null;
+  level?: GoalLevel;
+  status?: GoalStatus;
+  parentId?: string | null;
+  ownerAgentId?: string | null;
+}
+
+export type UpdateGoalPayload = Partial<CreateGoalPayload>;
 
 export type ApprovalType =
   | "hire_agent"
@@ -135,7 +192,14 @@ export interface ApprovalDetail extends ApprovalListItem {
 export interface CreateApprovalPayload {
   type: ApprovalType;
   payload: Record<string, unknown>;
+  requestedByAgentId?: string | null;
   issueIds?: string[];
+}
+
+export interface ResolveApprovalPayload {
+  decisionNote?: string;
+  decidedByUserId?: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface ResubmitApprovalPayload {
@@ -181,6 +245,8 @@ export interface ProjectDetail {
   orgId: string;
   urlKey: string;
   goalId: string | null;
+  goalIds?: string[];
+  goals?: GoalDependencyPreview[];
   name: string;
   description: string | null;
   status: ProjectStatus;
@@ -200,13 +266,13 @@ export interface CreateProjectPayload {
   name: string;
   description?: string | null;
   status?: ProjectStatus;
+  goalIds?: string[];
+  leadAgentId?: string | null;
+  targetDate?: string | null;
+  executionWorkspacePolicy?: Record<string, unknown> | null;
 }
 
-export interface UpdateProjectPayload {
-  name?: string;
-  description?: string | null;
-  status?: ProjectStatus;
-}
+export type UpdateProjectPayload = Partial<CreateProjectPayload>;
 
 export interface ProjectResourceAttachmentInput {
   resourceId: string;
@@ -273,6 +339,20 @@ export interface AgentDetail extends Agent {
   capabilities?: string | null;
 }
 
+export interface AgentConfiguration {
+  agentId: string;
+  runtimeConfig: Record<string, unknown>;
+  permissions?: Record<string, boolean>;
+  updatedAt?: string;
+}
+
+export interface AgentConfigRevision {
+  id: string;
+  agentId: string;
+  runtimeConfig: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface CreateAgentPayload {
   name: string;
   role: AgentRole;
@@ -303,14 +383,49 @@ export interface AgentRuntimeState {
   lastError: string | null;
 }
 
+export interface AgentTaskSession {
+  id: string;
+  agentId: string;
+  taskKey: string;
+  sessionDisplayId: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResetAgentSessionPayload {
+  taskKey?: string | null;
+  forceFreshSession?: boolean;
+}
+
 export interface HeartbeatRun {
   id: string;
   orgId: string;
   agentId: string;
   invocationSource: string;
+  triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  wakeupRequestId?: string | null;
+  exitCode?: number | null;
+  signal?: string | null;
+  usageJson?: Record<string, unknown> | null;
+  resultJson?: Record<string, unknown> | null;
+  sessionIdBefore?: string | null;
+  sessionIdAfter?: string | null;
+  stdoutExcerpt?: string | null;
+  stderrExcerpt?: string | null;
+  errorCode?: string | null;
+  externalRunId?: string | null;
+  processPid?: number | null;
+  processStartedAt?: string | null;
+  retryOfRunId?: string | null;
+  processLossRetryCount?: number;
+  contextSnapshot?: Record<string, unknown> | null;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface HeartbeatRunEvent {

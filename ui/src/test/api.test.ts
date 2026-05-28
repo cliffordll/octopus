@@ -144,7 +144,9 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }, 202))
       .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }))
-      .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]));
+      .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "cancelled" }))
+      .mockReturnValueOnce(jsonResponse({ id: "run-2", status: "queued", retryOfRunId: "run-1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await agentsApi.create("org-1", {
@@ -154,10 +156,12 @@ describe("agent and heartbeat APIs", () => {
       agentRuntimeConfig: {},
     });
     await agentsApi.pause("agent-1");
-    await heartbeatApi.invoke("agent-1");
+    await heartbeatApi.invoke("agent-1", { idempotencyKey: "once", forceFreshSession: true, reason: "manual" });
     await heartbeatApi.list("org-1", "agent-1");
     await heartbeatApi.get("run-1");
-    await heartbeatApi.listEvents("run-1");
+    await heartbeatApi.listEvents("run-1", { afterSeq: 3, limit: 20 });
+    await heartbeatApi.cancel("run-1");
+    await heartbeatApi.retry("run-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -167,7 +171,10 @@ describe("agent and heartbeat APIs", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "/api/agents/agent-1/heartbeat/invoke",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey: "once", forceFreshSession: true, reason: "manual" }),
+      }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
@@ -181,8 +188,108 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/api/heartbeat-runs/run-1/events",
+      "/api/heartbeat-runs/run-1/events?afterSeq=3&limit=20",
       expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/heartbeat-runs/run-1/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/heartbeat-runs/run-1/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("posts approval payload overrides and issue links", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "pending" }, 201))
+      .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "approved" }))
+      .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "pending" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await approvalsApi.create("org-1", {
+      type: "chat_issue_creation",
+      payload: {},
+      requestedByAgentId: "agent-1",
+      issueIds: ["issue-1"],
+    });
+    await approvalsApi.approve("approval-1", { payload: { labels: ["backend"] } });
+    await approvalsApi.resubmit("approval-1", { payload: {}, issueIds: ["issue-2"] });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/approvals",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          type: "chat_issue_creation",
+          payload: {},
+          requestedByAgentId: "agent-1",
+          issueIds: ["issue-1"],
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/approvals/approval-1/approve",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ payload: { labels: ["backend"] } }),
+      }),
+    );
+  });
+
+  it("covers agent configuration management routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ name: "Builder" }))
+      .mockReturnValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(jsonResponse({ id: "agent-1", runtimeConfig: {} }))
+      .mockReturnValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(jsonResponse({ id: "revision-1" }))
+      .mockReturnValueOnce(jsonResponse({ id: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ agentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "queued" }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await agentsApi.nameSuggestion("org-1");
+    await agentsApi.configurations("org-1");
+    await agentsApi.configuration("agent-1");
+    await agentsApi.configRevisions("agent-1");
+    await agentsApi.configRevision("agent-1", "revision-1");
+    await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
+    await agentsApi.resetSession("agent-1", { taskKey: "task-1", forceFreshSession: true });
+    await heartbeatApi.wakeup("agent-1", { reason: "manual" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/agents/name-suggestion",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/agents/agent-1/config-revisions/revision-1/rollback",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/agents/agent-1/runtime-state/reset-session",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ taskKey: "task-1", forceFreshSession: true }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/agents/agent-1/wakeup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "manual" }),
+      }),
     );
   });
 });
