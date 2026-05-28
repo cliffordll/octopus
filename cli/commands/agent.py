@@ -45,6 +45,23 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     configurations_parser = actions.add_parser("configurations")
     configurations_parser.add_argument("--org-id", required=True)
     configurations_parser.set_defaults(handler=list_configurations)
+    adapter_models_parser = actions.add_parser("adapter-models")
+    adapter_models_parser.add_argument("--org-id", required=True)
+    adapter_models_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    adapter_models_parser.set_defaults(handler=list_adapter_models)
+    adapter_metadata_parser = actions.add_parser("adapter-metadata")
+    adapter_metadata_parser.add_argument("--org-id", required=True)
+    adapter_metadata_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    adapter_metadata_parser.set_defaults(handler=get_adapter_metadata)
+    adapter_quota_parser = actions.add_parser("adapter-quota-windows")
+    adapter_quota_parser.add_argument("--org-id", required=True)
+    adapter_quota_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    adapter_quota_parser.set_defaults(handler=get_adapter_quota_windows)
+    adapter_test_parser = actions.add_parser("adapter-test-environment")
+    adapter_test_parser.add_argument("--org-id", required=True)
+    adapter_test_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    adapter_test_parser.add_argument("--runtime-config", default="{}")
+    adapter_test_parser.set_defaults(handler=test_adapter_environment)
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
     get_parser.set_defaults(handler=get_agent)
@@ -64,23 +81,54 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     task_sessions_parser = actions.add_parser("task-sessions")
     task_sessions_parser.add_argument("agent_id")
     task_sessions_parser.set_defaults(handler=list_task_sessions)
+    skills_parser = actions.add_parser("skills")
+    skills_parser.add_argument("agent_id")
+    skills_parser.set_defaults(handler=get_skills)
+    skills_sync_parser = actions.add_parser("skills-sync")
+    skills_sync_parser.add_argument("agent_id")
+    skills_sync_parser.add_argument("--desired-skill", action="append", default=[])
+    skills_sync_parser.set_defaults(handler=sync_skills)
+    skills_enable_parser = actions.add_parser("skills-enable")
+    skills_enable_parser.add_argument("agent_id")
+    skills_enable_parser.add_argument("--skill", action="append", default=[])
+    skills_enable_parser.set_defaults(handler=enable_skills)
+    private_skill_parser = actions.add_parser("private-skill")
+    private_skill_parser.add_argument("agent_id")
+    private_skill_parser.add_argument("--name", required=True)
+    private_skill_parser.add_argument("--slug")
+    private_skill_parser.add_argument("--description")
+    private_skill_parser.add_argument("--markdown")
+    private_skill_parser.set_defaults(handler=create_private_skill)
+    skills_analytics_parser = actions.add_parser("skills-analytics")
+    skills_analytics_parser.add_argument("agent_id")
+    skills_analytics_parser.add_argument("--window-days", type=int, default=30)
+    skills_analytics_parser.set_defaults(handler=get_skills_analytics)
     create_parser = actions.add_parser("create")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--name", required=True)
     create_parser.add_argument("--role", required=True, choices=ROLES)
     create_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     create_parser.add_argument("--runtime-config", default="{}")
+    create_parser.add_argument("--icon")
+    create_parser.add_argument("--desired-skill", action="append", default=[])
+    create_parser.add_argument("--metadata")
     create_parser.set_defaults(handler=create_agent)
     update_parser = actions.add_parser("update")
     update_parser.add_argument("agent_id")
     update_parser.add_argument("--name")
     update_parser.add_argument("--title")
+    update_parser.add_argument("--icon")
     update_parser.add_argument("--role", choices=ROLES)
     update_parser.add_argument("--reports-to")
     update_parser.add_argument("--capabilities")
+    update_parser.add_argument("--desired-skill", action="append")
     update_parser.add_argument("--runtime", choices=RUNTIMES)
     update_parser.add_argument("--runtime-config")
     update_parser.add_argument("--budget-monthly-cents", type=int)
+    update_parser.add_argument("--replace-agent-runtime-config", action="store_true")
+    update_parser.add_argument("--status")
+    update_parser.add_argument("--spent-monthly-cents", type=int)
+    update_parser.add_argument("--metadata")
     update_parser.set_defaults(handler=update_agent)
     rollback_parser = actions.add_parser("rollback")
     rollback_parser.add_argument("agent_id")
@@ -89,7 +137,6 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     reset_session_parser = actions.add_parser("reset-session")
     reset_session_parser.add_argument("agent_id")
     reset_session_parser.add_argument("--task-key")
-    reset_session_parser.add_argument("--force-fresh-session", action="store_true")
     reset_session_parser.set_defaults(handler=reset_session)
     wakeup_parser = actions.add_parser("wakeup")
     wakeup_parser.add_argument("agent_id")
@@ -133,6 +180,30 @@ def list_configurations(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/orgs/{args.org_id}/agent-configurations")
 
 
+def list_adapter_models(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET", f"/api/orgs/{args.org_id}/adapters/{args.runtime}/models"
+    )
+
+
+def get_adapter_metadata(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/orgs/{args.org_id}/adapters/{args.runtime}")
+
+
+def get_adapter_quota_windows(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET", f"/api/orgs/{args.org_id}/adapters/{args.runtime}/quota-windows"
+    )
+
+
+def test_adapter_environment(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/orgs/{args.org_id}/adapters/{args.runtime}/test-environment",
+        json={"agentRuntimeConfig": _json_object(args.runtime_config)},
+    )
+
+
 def get_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}")
 
@@ -160,16 +231,67 @@ def list_task_sessions(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}/task-sessions")
 
 
+def get_skills(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/skills")
+
+
+def sync_skills(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/agents/{args.agent_id}/skills/sync",
+        json={"desiredSkills": args.desired_skill},
+    )
+
+
+def enable_skills(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/agents/{args.agent_id}/skills/enable",
+        json={"skills": args.skill},
+    )
+
+
+def create_private_skill(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = {
+        key: value
+        for key, value in {
+            "name": args.name,
+            "slug": args.slug,
+            "description": args.description,
+            "markdown": args.markdown,
+        }.items()
+        if value is not None
+    }
+    return client.request(
+        "POST", f"/api/agents/{args.agent_id}/skills/private", json=payload
+    )
+
+
+def get_skills_analytics(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET",
+        f"/api/agents/{args.agent_id}/skills/analytics",
+        params={"windowDays": args.window_days},
+    )
+
+
 def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload: dict[str, Any] = {
+        "name": args.name,
+        "role": args.role,
+        "agentRuntimeType": args.runtime,
+        "agentRuntimeConfig": _json_object(args.runtime_config),
+    }
+    if args.icon:
+        payload["icon"] = args.icon
+    if args.desired_skill:
+        payload["desiredSkills"] = args.desired_skill
+    if args.metadata:
+        payload["metadata"] = _json_object(args.metadata)
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/agents",
-        json={
-            "name": args.name,
-            "role": args.role,
-            "agentRuntimeType": args.runtime,
-            "agentRuntimeConfig": _json_object(args.runtime_config),
-        },
+        json=payload,
     )
 
 
@@ -179,16 +301,25 @@ def update_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         for key, value in {
             "name": args.name,
             "title": args.title,
+            "icon": args.icon,
             "role": args.role,
             "reportsTo": args.reports_to,
             "capabilities": args.capabilities,
+            "status": args.status,
             "agentRuntimeType": args.runtime,
             "budgetMonthlyCents": args.budget_monthly_cents,
+            "spentMonthlyCents": args.spent_monthly_cents,
         }.items()
         if value is not None
     }
+    if args.desired_skill is not None:
+        payload["desiredSkills"] = args.desired_skill
     if args.runtime_config is not None:
         payload["agentRuntimeConfig"] = _json_object(args.runtime_config)
+    if args.metadata is not None:
+        payload["metadata"] = _json_object(args.metadata)
+    if args.replace_agent_runtime_config:
+        payload["replaceAgentRuntimeConfig"] = True
     if not payload:
         raise ValueError("At least one update field is required.")
     return client.request("PATCH", f"/api/agents/{args.agent_id}", json=payload)
@@ -206,8 +337,6 @@ def reset_session(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, Any] = {}
     if args.task_key:
         payload["taskKey"] = args.task_key
-    if args.force_fresh_session:
-        payload["forceFreshSession"] = True
     return client.request(
         "POST",
         f"/api/agents/{args.agent_id}/runtime-state/reset-session",

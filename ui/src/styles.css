@@ -378,6 +378,11 @@ h1, h2, p {
   margin-bottom: 0;
 }
 
+.project-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .project-create-dialog {
   max-width: 520px;
 }
@@ -1017,7 +1022,8 @@ h1, h2, p {
   border-radius: 7px;
   color: #97a1b2;
   display: flex;
-  justify-content: space-between;
+  gap: 8px;
+  justify-content: flex-start;
   padding: 9px 11px;
 }
 
@@ -1093,8 +1099,12 @@ h1, h2, p {
   display: flex;
   font-size: 13px;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 9px 10px;
+}
+
+.context-nav a .badge {
+  margin-left: auto;
 }
 
 .context-nav a.active, .context-nav a:hover {
@@ -1115,6 +1125,24 @@ h1, h2, p {
   color: #b5d5fa;
   font-weight: 500;
   justify-content: flex-start;
+}
+
+.context-entry-icon {
+  align-items: center;
+  background: #151b25;
+  border-radius: 5px;
+  color: #8ebbf1;
+  display: inline-flex;
+  flex: 0 0 22px;
+  font-size: 11px;
+  font-weight: 600;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.project-entry-icon {
+  color: #fff;
 }
 
 .context-project-group {
@@ -1841,6 +1869,16 @@ pre {
   padding: 6px 10px;
 }
 
+.inline-input-action {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.inline-input-action input {
+  flex: 1;
+}
+
 .detail-tabs {
   border-bottom: 1px solid #202938;
   display: flex;
@@ -1932,6 +1970,387 @@ pre {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+}
+
+.agent-instructions-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-instructions-grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 180px minmax(0, 1fr);
+}
+
+.instruction-files-card,
+.instruction-content-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.instruction-files-card {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.instruction-card-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.instruction-card-header h2 {
+  color: #8792a6;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.icon-button {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  color: #e8edf5;
+  display: inline-flex;
+  font-size: 16px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  width: 28px;
+}
+
+.icon-button:hover {
+  background: #152033;
+  border-color: #3886e8;
+}
+
+.instruction-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.instruction-file-list li {
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.instruction-file-list li:hover {
+  background: #151c29;
+}
+
+.instruction-file-list li.selected {
+  background: rgba(56, 134, 232, 0.08);
+  border-color: #3886e8;
+}
+
+.instruction-file-list button {
+  background: transparent;
+  border: 0;
+  color: #e8edf5;
+  cursor: pointer;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.instruction-file-list code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.instruction-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.instruction-create-form label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.instruction-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.instruction-content-card {
+  min-height: 520px;
+  min-width: 0;
+}
+
+.instruction-content-card pre {
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 10px;
+  color: #dce5f2;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  min-height: 488px;
+  overflow: auto;
+  padding: 16px;
+  white-space: pre-wrap;
+}
+
+.instruction-empty-content {
+  min-height: 488px;
+}
+
+.agent-skills-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.agent-skills-page h2 {
+  color: #e8edf5;
+  font-size: 24px;
+  margin: 0 0 6px;
+}
+
+.agent-skills-page-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.agent-skills-library {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-skills-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skills-table-card,
+.agent-skill-detail-card,
+.agent-skill-install-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.agent-skill-tags-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+}
+
+.agent-skill-source-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-skill-source-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skill-source-heading h3 {
+  color: #e8edf5;
+  font-size: 14px;
+  margin: 0;
+}
+
+.agent-skill-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.agent-skill-tag {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+}
+
+.agent-skill-tag.selected,
+.agent-skill-tag:hover {
+  background: rgba(56, 134, 232, 0.08);
+  border-color: #3886e8;
+}
+
+.agent-skill-tag-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #dce5f2;
+  display: inline-flex;
+  gap: 8px;
+  padding: 2px 6px;
+}
+
+.agent-skill-tag-main code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.agent-skill-tag-main span {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.agent-skills-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.agent-skills-table th {
+  background: #151c29;
+  color: #8792a6;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 10px 12px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.agent-skills-table td {
+  border-top: 1px solid #202a3b;
+  color: #dce5f2;
+  padding: 12px;
+  vertical-align: top;
+}
+
+.agent-skills-table code,
+.agent-skill-detail-card code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.agent-skills-table .right {
+  text-align: right;
+}
+
+.agent-skill-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.muted-cell {
+  color: #8792a6;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-table-cell {
+  color: #8792a6;
+  text-align: center;
+}
+
+.agent-skill-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-skill-detail-card > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skill-detail-card pre {
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 10px;
+  color: #dce5f2;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.agent-skill-install-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-skill-install-card h3 {
+  color: #e8edf5;
+  font-size: 15px;
+  margin: 0;
+}
+
+.agent-skill-install-card label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.agent-skill-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-skill-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.skill-yaml-textarea {
+  min-height: 180px;
+}
+
+.skill-create-dialog {
+  max-width: 680px;
+}
+
+.skill-create-dialog label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
 }
 
 .agent-run-detail-header {
@@ -2188,6 +2607,7 @@ pre {
     flex-direction: column;
   }
   .agent-runs-layout,
+  .agent-instructions-grid,
   .agent-property-row,
   .agent-run-metrics,
   .agent-run-session,

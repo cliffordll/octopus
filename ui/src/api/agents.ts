@@ -4,10 +4,17 @@ import type {
   AgentConfigRevision,
   AgentConfiguration,
   AgentDetail,
+  AgentRuntimeEnvironmentTestResult,
+  AgentRuntimeModel,
   AgentRuntimeState,
+  AgentSkillAnalytics,
+  AgentSkillSnapshot,
   AgentTaskSession,
   CreateAgentPayload,
+  PrivateSkillPayload,
+  ProviderQuotaResult,
   ResetAgentSessionPayload,
+  RuntimeAdapterMetadata,
   UpdateAgentPayload,
 } from "./types";
 
@@ -22,6 +29,31 @@ export const agentsApi = {
     request<{ name: string }>(`/api/orgs/${encodeURIComponent(orgId)}/agents/name-suggestion`, { method: "GET" }),
   configurations: (orgId: string): Promise<AgentConfiguration[]> =>
     request<AgentConfiguration[]>(`/api/orgs/${encodeURIComponent(orgId)}/agent-configurations`, { method: "GET" }),
+  adapterModels: (orgId: string, runtime: string): Promise<AgentRuntimeModel[]> =>
+    request<AgentRuntimeModel[]>(
+      `/api/orgs/${encodeURIComponent(orgId)}/adapters/${encodeURIComponent(runtime)}/models`,
+      { method: "GET" },
+    ),
+  adapterMetadata: (orgId: string, runtime: string): Promise<RuntimeAdapterMetadata> =>
+    request<RuntimeAdapterMetadata>(
+      `/api/orgs/${encodeURIComponent(orgId)}/adapters/${encodeURIComponent(runtime)}`,
+      { method: "GET" },
+    ),
+  adapterQuotaWindows: (orgId: string, runtime: string): Promise<ProviderQuotaResult> =>
+    request<ProviderQuotaResult>(
+      `/api/orgs/${encodeURIComponent(orgId)}/adapters/${encodeURIComponent(runtime)}/quota-windows`,
+      { method: "GET" },
+    ),
+  testAdapterEnvironment: (
+    orgId: string,
+    runtime: string,
+    agentRuntimeConfig: Record<string, unknown>,
+  ): Promise<AgentRuntimeEnvironmentTestResult> =>
+    jsonRequest<AgentRuntimeEnvironmentTestResult>(
+      `/api/orgs/${encodeURIComponent(orgId)}/adapters/${encodeURIComponent(runtime)}/test-environment`,
+      "POST",
+      { agentRuntimeConfig },
+    ),
   get: (agentId: string): Promise<AgentDetail> =>
     request<AgentDetail>(agentRoot(agentId), { method: "GET" }),
   create: (orgId: string, payload: CreateAgentPayload): Promise<Agent> =>
@@ -49,6 +81,19 @@ export const agentsApi = {
     request<AgentTaskSession[]>(`${agentRoot(agentId)}/task-sessions`, { method: "GET" }),
   resetSession: (agentId: string, payload: ResetAgentSessionPayload): Promise<AgentRuntimeState> =>
     jsonRequest<AgentRuntimeState>(`${agentRoot(agentId)}/runtime-state/reset-session`, "POST", payload),
+  skills: (agentId: string): Promise<AgentSkillSnapshot> =>
+    request<AgentSkillSnapshot>(`${agentRoot(agentId)}/skills`, { method: "GET" }),
+  syncSkills: (agentId: string, desiredSkills: string[]): Promise<AgentSkillSnapshot> =>
+    jsonRequest<AgentSkillSnapshot>(`${agentRoot(agentId)}/skills/sync`, "POST", { desiredSkills }),
+  enableSkills: (agentId: string, skills: string[]): Promise<AgentSkillSnapshot> =>
+    jsonRequest<AgentSkillSnapshot>(`${agentRoot(agentId)}/skills/enable`, "POST", { skills }),
+  createPrivateSkill: (agentId: string, payload: PrivateSkillPayload): Promise<Record<string, unknown>> =>
+    jsonRequest<Record<string, unknown>>(`${agentRoot(agentId)}/skills/private`, "POST", payload),
+  skillsAnalytics: (agentId: string, windowDays = 30): Promise<AgentSkillAnalytics> =>
+    request<AgentSkillAnalytics>(
+      `${agentRoot(agentId)}/skills/analytics?windowDays=${encodeURIComponent(String(windowDays))}`,
+      { method: "GET" },
+    ),
   pause: (agentId: string): Promise<Agent> =>
     jsonRequest<Agent>(`${agentRoot(agentId)}/pause`, "POST", {}),
   resume: (agentId: string): Promise<Agent> =>
