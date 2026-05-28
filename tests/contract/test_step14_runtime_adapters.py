@@ -195,6 +195,7 @@ async def test_local_runtime_environment_reports_cwd_command_and_auth_checks(
     opencode_checks = {check["id"]: check for check in opencode["checks"]}
     assert opencode_checks["cwd"]["status"] == "failed"
     assert opencode_checks["command"]["status"] == "failed"
+    assert opencode_checks["model"]["status"] == "failed"
     assert opencode_checks["auth"]["status"] == "warning"
 
     codex_code, codex = await _request(
@@ -215,6 +216,51 @@ async def test_local_runtime_environment_reports_cwd_command_and_auth_checks(
     assert codex_checks["cwd"]["status"] == "ok"
     assert codex_checks["command"]["status"] == "ok"
     assert codex_checks["auth"]["status"] == "ok"
+
+
+async def test_opencode_environment_validates_model_configuration(
+    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+
+    invalid_code, invalid = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/opencode_local/test-environment",
+        json={
+            "agentRuntimeConfig": {
+                "cwd": str(cwd),
+                "command": sys.executable,
+                "model": "gpt-5",
+            }
+        },
+    )
+    valid_code, valid = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/opencode_local/test-environment",
+        json={
+            "agentRuntimeConfig": {
+                "cwd": str(cwd),
+                "command": sys.executable,
+                "model": "openai/gpt-5",
+            }
+        },
+    )
+
+    assert invalid_code == 200
+    invalid_checks = {check["id"]: check for check in invalid["checks"]}
+    assert invalid["status"] == "failed"
+    assert invalid_checks["model"]["status"] == "failed"
+    assert "provider/model" in invalid_checks["model"]["message"]
+
+    assert valid_code == 200
+    valid_checks = {check["id"]: check for check in valid["checks"]}
+    assert valid_checks["model"]["status"] == "ok"
+    assert valid_checks["model"]["message"] == "Configured model: openai/gpt-5"
 
 
 async def test_http_environment_validates_url_shape(
@@ -260,6 +306,7 @@ async def test_agent_skills_snapshot_and_sync_routes(
             "agentRuntimeType": "opencode_local",
             "agentRuntimeConfig": {
                 "command": sys.executable,
+                "model": "openai/gpt-5",
                 "promptTemplate": "Use the agent capabilities as operating guidance.",
                 "skillsRootPath": str(skills_root),
             },
@@ -411,6 +458,81 @@ async def test_local_runtime_agent_rejects_relative_instructions_without_absolut
 
     assert create_code == 422
     assert "Relative instructionsFilePath requires" in error["detail"]
+
+
+async def test_opencode_local_agent_requires_provider_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    missing_code, missing_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Missing Model",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {},
+        },
+    )
+    invalid_code, invalid_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Invalid Model",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {"model": "gpt-5"},
+        },
+    )
+
+    assert missing_code == 422
+    assert "opencode_local requires agentRuntimeConfig.model" in missing_error["detail"]
+    assert invalid_code == 422
+    assert "provider/model" in invalid_error["detail"]
+
+
+async def test_opencode_local_update_requires_provider_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "Process Agent"},
+    )
+
+    switch_code, switch_error = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent['id']}",
+        json={"agentRuntimeType": "opencode_local"},
+    )
+    valid_code, valid = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent['id']}",
+        json={
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {"model": "openai/gpt-5"},
+        },
+    )
+    invalid_code, invalid_error = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent['id']}",
+        json={"agentRuntimeConfig": {"model": "gpt-5"}},
+    )
+
+    assert switch_code == 422
+    assert "opencode_local requires agentRuntimeConfig.model" in switch_error["detail"]
+    assert valid_code == 200
+    assert valid["agentRuntimeType"] == "opencode_local"
+    assert invalid_code == 422
+    assert "provider/model" in invalid_error["detail"]
 
 
 async def test_codex_skills_sync_materializes_desired_bundled_skill(

@@ -130,6 +130,7 @@ async def test_local_cli_runtimes_reuse_process_execution_contract(
         runtime_config={
             "command": sys.executable,
             "args": ["-c", "print('local-cli-ok')"],
+            **({"model": "openai/gpt-5"} if runtime_type == "opencode_local" else {}),
         },
     )
     heartbeat = HeartbeatService(session)
