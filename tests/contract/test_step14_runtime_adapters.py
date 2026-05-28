@@ -398,6 +398,51 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
     assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
 
 
+async def test_codex_execute_infers_openrouter_biller_from_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b'{"type":"turn.completed","usage":{}}\n', b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "env": {"OPENAI_API_KEY": "sk-test", "OPENROUTER_API_KEY": "sk-or"},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert result.usage_json is not None
+    assert result.usage_json["billingType"] == "api"
+    assert result.usage_json["biller"] == "openrouter"
+    assert result.result_json is not None
+    assert result.result_json["biller"] == "openrouter"
+
+
 async def test_codex_execute_uses_default_managed_codex_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
