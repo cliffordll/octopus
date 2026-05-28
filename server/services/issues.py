@@ -34,6 +34,7 @@ from packages.shared.types.issue import (
     IssueListItem,
     UpdateIssuePayload,
 )
+from .goals import GoalService
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
 _REOPENABLE_STATUSES = {"done", "cancelled"}
@@ -130,6 +131,12 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        if not values.get("project_id") and not values.get("goal_id"):
+            default_goal = await GoalService(
+                self._session
+            ).get_default_organization_goal(org_id)
+            if default_goal is not None:
+                values["goal_id"] = default_goal["id"]
         row = await create_issue(self._session, values)
         await insert_activity_log(
             self._session,
@@ -160,6 +167,15 @@ class IssueService:
             for key, value in payload.items()
             if key in ISSUE_UPDATE_TO_COLUMN
         }
+        next_project_id = payload.get("projectId", current.project_id)
+        next_goal_id = payload.get("goalId", current.goal_id)
+        if not next_project_id and not next_goal_id:
+            default_goal = await GoalService(
+                self._session
+            ).get_default_organization_goal(current.org_id)
+            next_goal_id = default_goal["id"] if default_goal is not None else None
+        if next_goal_id != current.goal_id:
+            values["goal_id"] = next_goal_id
 
         workflow_actions: list[tuple[str, Mapping[str, Any] | None]] = []
         review_decision = payload.get("reviewDecision")

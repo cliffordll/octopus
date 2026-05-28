@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 ORG_AGENT_LIST_PATH = "/api/orgs/{orgId}/agents"
+ORG_AGENT_NAME_SUGGESTION_PATH = "/api/orgs/{orgId}/agents/name-suggestion"
 ORG_AGENT_CONFIGURATIONS_PATH = "/api/orgs/{orgId}/agent-configurations"
 AGENT_DETAIL_PATH = "/api/agents/{id}"
 AGENT_PAUSE_PATH = "/api/agents/{id}/pause"

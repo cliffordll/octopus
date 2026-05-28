@@ -17,6 +17,7 @@ from .issue_comments import IssueComment
 from .issues import Issue
 from .organizations import Organization
 from .projects import Project
+from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
 
 __all__ = [
@@ -38,6 +39,8 @@ __all__ = [
     "Issue",
     "Organization",
     "Project",
+    "Goal",
+    "ProjectGoal",
     "OrganizationResource",
     "ProjectResourceAttachment",
 ]

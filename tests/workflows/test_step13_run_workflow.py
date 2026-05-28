@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+import sys
+import asyncio
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from packages.database.clients import (
+    async_transaction,
+    create_database_engine,
+    create_session_factory,
+)
+from packages.database.schema import (
+    AgentWakeupRequest,
+    Base,
+    HeartbeatRun,
+    Organization,
+)
+from packages.shared.types.agent import Agent
+from server.services.agents import AgentService
+from server.services.heartbeat import HeartbeatService
+
+
+@pytest.fixture
+async def session() -> AsyncIterator[AsyncSession]:
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    async with factory() as active_session:
+        yield active_session
+    await engine.dispose()
+
+
+async def _seed_agent(
+    session: AsyncSession, *, name: str, runtime_config: dict | None = None
+) -> Agent:
+    org = Organization(url_key=name.lower(), name=name, issue_prefix="RUN")
+    agent_service = AgentService(session)
+    async with async_transaction(session):
+        session.add(org)
+        await session.flush()
+        agent = await agent_service.create_agent(
+            org.id,
+            {
+                "name": name,
+                "runtimeConfig": runtime_config or {},
+                "agentRuntimeConfig": {
+                    "command": sys.executable,
+                    "args": ["-c", "print('run-ok')"],
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+    return agent
+
+
+async def test_wakeup_idempotency_reuses_existing_run(session: AsyncSession) -> None:
+    agent = await _seed_agent(session, name="Idempotent")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        first = await heartbeat.wakeup(
+            agent["id"],
+            {"idempotencyKey": "request-1"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        second = await heartbeat.wakeup(
+            agent["id"],
+            {"idempotencyKey": "request-1"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert first is not None and second is not None
+    assert second["id"] == first["id"]
+    assert len((await session.execute(select(HeartbeatRun))).scalars().all()) == 1
+
+
+async def test_queued_run_resumes_after_concurrency_slot_is_available(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="Queued",
+        runtime_config={"heartbeat": {"maxConcurrentRuns": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        blocking = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+        )
+        session.add(blocking)
+        await session.flush()
+        queued = await heartbeat.wakeup(
+            agent["id"], {}, actor_type="board", actor_id="local-board"
+        )
+    assert queued is not None and queued["status"] == "queued"
+
+    async with async_transaction(session):
+        blocking.status = "succeeded"
+        blocking.finished_at = datetime.now(UTC)
+        resumed = await heartbeat.resume_queued_runs(agent["id"])
+    assert resumed[0]["id"] == queued["id"]
+    assert resumed[0]["status"] == "succeeded"
+
+
+async def test_paused_wakeup_coalesces_and_replays_on_resume(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="Paused")
+    agents = AgentService(session)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        await agents.pause_agent(
+            agent["id"], actor_type="board", actor_id="local-board"
+        )
+        assert (
+            await heartbeat.wakeup(
+                agent["id"],
+                {"idempotencyKey": "paused-1"},
+                actor_type="board",
+                actor_id="local-board",
+            )
+            is None
+        )
+        assert (
+            await heartbeat.wakeup(
+                agent["id"],
+                {"idempotencyKey": "paused-1"},
+                actor_type="board",
+                actor_id="local-board",
+            )
+            is None
+        )
+        await agents.resume_agent(
+            agent["id"], actor_type="board", actor_id="local-board"
+        )
+        resumed = await heartbeat.resume_deferred_wakeups(agent["id"])
+
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert wakeup.coalesced_count == 1
+    assert resumed[0]["status"] == "succeeded"
+
+
+async def test_cancel_retry_and_timer_preserve_recovery_context(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="Recover",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        queued = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="queued",
+        )
+        session.add(queued)
+        await session.flush()
+        cancelled = await heartbeat.cancel_run(queued.id)
+        assert cancelled is not None
+        retried = await heartbeat.retry_run(
+            queued.id, actor_type="board", actor_id="local-board"
+        )
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert cancelled is not None and cancelled["status"] == "cancelled"
+    assert retried is not None and retried["retryOfRunId"] == queued.id
+    assert retried["contextSnapshot"] is not None
+    assert retried["contextSnapshot"]["recovery"]["recoveryTrigger"] == "manual"
+    assert timed[0]["invocationSource"] == "timer"
+
+
+async def test_orphaned_running_run_enqueues_automatic_recovery(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="Orphaned")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        orphan = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+        )
+        session.add(orphan)
+        await session.flush()
+        recovery = await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(orphan)
+    assert orphan.status == "failed"
+    assert orphan.error_code == "process_lost"
+    assert recovery[0]["status"] == "queued"
+    assert recovery[0]["invocationSource"] == "automation"
+    assert recovery[0]["retryOfRunId"] == orphan.id
+    assert recovery[0]["processLossRetryCount"] == 1
+    assert recovery[0]["contextSnapshot"] is not None
+    assert recovery[0]["contextSnapshot"]["recovery"]["recoveryTrigger"] == "automatic"
+
+
+async def test_process_run_persists_child_process_metadata(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ProcessMeta")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert isinstance(run["processPid"], int)
+    assert run["processPid"] > 0
+    assert run["processStartedAt"] is not None
+
+
+async def test_orphaned_running_run_does_not_terminate_tracked_child_process(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="OrphanedChild")
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(30)",
+    )
+    try:
+        heartbeat = HeartbeatService(session)
+        async with async_transaction(session):
+            orphan = HeartbeatRun(
+                org_id=agent["orgId"],
+                agent_id=agent["id"],
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="running",
+                process_pid=child.pid,
+                process_started_at=datetime.now(UTC),
+            )
+            session.add(orphan)
+            await session.flush()
+            recovery = await heartbeat.recover_orphaned_runs()
+
+        assert recovery and recovery[0]["retryOfRunId"] == orphan.id
+        assert child.returncode is None
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
