@@ -30,6 +30,7 @@ class RuntimeExecutionResult:
     usage_json: dict[str, Any] | None = None
     session_id_after: str | None = None
     result_json: dict[str, Any] | None = None
+    runtime_services: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
