@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import hashlib
+from pathlib import Path
 import re
 from collections.abc import Sequence
 from typing import Any, cast
@@ -113,6 +114,22 @@ def _workspace_key(agent_id: str, name: str) -> str:
     return f"{_derive_url_key(name)}--{short_id}"
 
 
+def _agent_home_root(row: AgentRow) -> Path:
+    workspace_key = _derive_url_key(row.workspace_key, row.id)
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "workspaces"
+        / f"org_{row.org_id}"
+        / "agents"
+        / workspace_key
+    ).resolve()
+
+
+def _agent_skills_root(row: AgentRow) -> Path:
+    return _agent_home_root(row) / "skills"
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -146,6 +163,54 @@ def _contains_redacted(value: Any) -> bool:
     return False
 
 
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _draft_skill_markdown(payload: dict[str, Any]) -> str:
+    markdown = payload.get("markdown")
+    if isinstance(markdown, str) and markdown.strip():
+        return markdown
+    lines = [
+        "---",
+        f"name: {payload['name']}",
+    ]
+    description = payload.get("description")
+    if isinstance(description, str) and description.strip():
+        lines.append(f"description: {description.strip()}")
+    lines.extend(
+        [
+            "---",
+            "",
+            f"# {payload['name']}",
+            "",
+            description.strip()
+            if isinstance(description, str) and description.strip()
+            else "Describe what this skill does.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _skill_description_from_markdown(markdown: str) -> str | None:
+    lines = markdown.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        value = line.strip()
+        if value == "---":
+            return None
+        if value.lower().startswith("description:"):
+            description = value.split(":", 1)[1].strip().strip("\"'")
+            return description or None
+    return None
+
+
 def _apply_desired_skills_to_entries(
     snapshot: dict[str, Any], desired_skills: list[str]
 ) -> None:
@@ -167,7 +232,11 @@ def _apply_desired_skills_to_entries(
 def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
     return {
         **row.agent_runtime_config,
-        "_octopus": {"orgId": row.org_id, "agentId": row.id},
+        "_octopus": {
+            "orgId": row.org_id,
+            "agentId": row.id,
+            "agentSkillsRootPath": str(_agent_skills_root(row)),
+        },
     }
 
 
@@ -484,25 +553,38 @@ class AgentService:
         if existing is None:
             return None
         slug = _derive_url_key(payload.get("slug") or payload["name"])
+        skills_root = _agent_skills_root(existing)
+        skill_dir = (skills_root / slug).resolve()
+        if not _is_relative_to(skill_dir, skills_root.resolve()):
+            raise ValueError("Invalid agent skill slug")
+        skill_file = skill_dir / "SKILL.md"
+        if skill_file.is_file():
+            raise AgentConflictError(f"Agent skill already exists: {slug}")
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        markdown = _draft_skill_markdown(payload)
+        skill_file.write_text(markdown, encoding="utf-8")
+        description = _skill_description_from_markdown(markdown) or payload.get(
+            "description"
+        )
         entry = {
             "key": slug,
-            "selectionKey": f"private:{slug}",
-            "runtimeName": payload["name"],
-            "description": payload.get("description"),
+            "selectionKey": f"agent:{slug}",
+            "runtimeName": slug,
+            "description": description,
             "desired": False,
             "configurable": True,
             "alwaysEnabled": False,
-            "managed": True,
-            "state": "available",
+            "managed": False,
+            "state": "external",
             "sourceClass": "agent_home",
-            "origin": "organization_managed",
-            "originLabel": "Agent private skill",
+            "origin": "user_installed",
+            "originLabel": "Agent skill",
             "locationLabel": "AGENT_HOME/skills",
             "readOnly": False,
-            "sourcePath": None,
+            "sourcePath": str(skill_dir),
             "targetPath": None,
-            "workspaceEditPath": None,
-            "detail": payload.get("markdown"),
+            "workspaceEditPath": str(skill_file),
+            "detail": "Installed, not enabled. Future runs will not load it until enabled.",
         }
         await insert_activity_log(
             self._session,

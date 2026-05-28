@@ -22,6 +22,7 @@ def skill_snapshot_from_root(
     persistent_materialization: bool = False,
 ) -> dict[str, Any]:
     root = config.get("skillsRootPath")
+    agent_skills_root = _agent_skills_root(config)
     desired = set(desired_skills)
     available: list[Path] = []
     warnings: list[str] = []
@@ -38,10 +39,16 @@ def skill_snapshot_from_root(
         if skill_dir.name in seen_keys:
             continue
         available.append(skill_dir)
+    agent_home: list[Path] = []
+    if agent_skills_root is not None:
+        agent_home = _skill_dirs(agent_skills_root)
     if materialize and skills_home is not None:
-        _materialize_desired_skills(skills_home, available, desired, warnings)
+        _materialize_desired_skills(
+            skills_home, [*available, *agent_home], desired, warnings
+        )
     entries = _skill_entries(
         available,
+        agent_home=agent_home,
         desired=desired,
         skills_home=skills_home,
         location_label=location_label,
@@ -62,6 +69,16 @@ def skill_snapshot_from_root(
     }
 
 
+def _agent_skills_root(config: dict[str, Any]) -> Path | None:
+    context = config.get("_octopus")
+    if not isinstance(context, dict):
+        return None
+    value = context.get("agentSkillsRootPath")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return Path(value).expanduser().resolve()
+
+
 def _bundled_skills_root() -> Path:
     return Path(__file__).resolve().parents[2] / "server" / "skills" / "bundled"
 
@@ -79,6 +96,7 @@ def _skill_dirs(root_path: Path) -> list[Path]:
 def _skill_entries(
     available: list[Path],
     *,
+    agent_home: list[Path],
     desired: set[str],
     skills_home: Path | None,
     location_label: str,
@@ -92,7 +110,8 @@ def _skill_entries(
     installed = _read_installed_skill_targets(skills_home) if skills_home else {}
     entries: list[dict[str, Any]] = []
     available_by_key = {skill_dir.name: skill_dir for skill_dir in available}
-    available_names = set(available_by_key)
+    agent_home_by_key = {skill_dir.name: skill_dir for skill_dir in agent_home}
+    available_names = set(available_by_key) | set(agent_home_by_key)
     bundled_root = _bundled_skills_root()
     for skill_dir in available:
         is_bundled = skill_dir.parent == bundled_root
@@ -116,8 +135,39 @@ def _skill_entries(
                 persistent_materialization=persistent_materialization,
             )
         )
+    for skill_dir in agent_home:
+        selection_key = _agent_selection_key(skill_dir.name)
+        entries.append(
+            _skill_entry(
+                skill_dir,
+                desired=selection_key in desired or skill_dir.name in desired,
+                skills_home=skills_home,
+                installed_target=installed.get(skill_dir.name)
+                if persistent_materialization
+                else None,
+                location_label="AGENT_HOME/skills",
+                source_class="agent_home",
+                origin="user_installed",
+                origin_label="Agent skill",
+                read_only=False,
+                installed_detail=installed_detail,
+                missing_detail=missing_detail,
+                external_conflict_detail=external_conflict_detail,
+                external_detail=external_detail,
+                persistent_materialization=persistent_materialization,
+                selection_key=selection_key,
+                available_state="external",
+                managed=False,
+                detail="Installed, not enabled. Future runs will not load it until enabled.",
+            )
+        )
     for desired_skill in desired:
-        if desired_skill in available_by_key:
+        if (
+            desired_skill in available_by_key
+            or desired_skill in agent_home_by_key
+            or desired_skill.startswith("agent:")
+            and desired_skill.removeprefix("agent:") in agent_home_by_key
+        ):
             continue
         warnings.append(f'Desired skill "{desired_skill}" is not available.')
         entries.append(_missing_skill_entry(desired_skill))
@@ -162,11 +212,13 @@ def _skill_entry(
     external_conflict_detail: str | None,
     external_detail: str | None,
     persistent_materialization: bool,
+    selection_key: str | None = None,
+    available_state: str = "available",
+    managed: bool = True,
+    detail: str | None = None,
 ) -> dict[str, Any]:
     description = _skill_description(skill_dir.joinpath("SKILL.md"))
-    state = "configured" if desired else "available"
-    managed = True
-    detail = None
+    state = "configured" if desired else available_state
     target_path = (
         str(skills_home / skill_dir.name)
         if persistent_materialization and skills_home is not None
@@ -186,6 +238,7 @@ def _skill_entry(
     return {
         **_base_skill_entry(
             key=skill_dir.name,
+            selection_key=selection_key or skill_dir.name,
             runtime_name=skill_dir.name,
             desired=desired,
             state=state,
@@ -207,6 +260,7 @@ def _skill_entry(
 def _base_skill_entry(
     *,
     key: str,
+    selection_key: str | None = None,
     runtime_name: str | None,
     desired: bool,
     state: str,
@@ -214,7 +268,7 @@ def _base_skill_entry(
 ) -> dict[str, Any]:
     return {
         "key": key,
-        "selectionKey": key,
+        "selectionKey": selection_key or key,
         "runtimeName": runtime_name,
         "description": None,
         "desired": desired,
@@ -240,6 +294,10 @@ def _missing_skill_entry(key: str) -> dict[str, Any]:
         "workspaceEditPath": None,
         "detail": "This desired skill is not available from configured or bundled skills.",
     }
+
+
+def _agent_selection_key(slug: str) -> str:
+    return f"agent:{slug}"
 
 
 _SOURCE_MARKER = ".octopus-source"
@@ -281,7 +339,7 @@ def _materialize_desired_skills(
 ) -> None:
     by_key = {skill_dir.name: skill_dir for skill_dir in available}
     for key in sorted(desired):
-        source = by_key.get(key)
+        source = by_key.get(key.removeprefix("agent:"))
         if source is None:
             continue
         target = skills_home / source.name
