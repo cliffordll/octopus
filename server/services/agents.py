@@ -67,6 +67,10 @@ from packages.shared.types.agent import (
 )
 from packages.runtimes import get_runtime_adapter
 
+from .agent_instructions import (
+    materialize_default_instructions_for_new_agent,
+    normalize_instructions_paths,
+)
 from .agent_names import pick_unique_agent_name
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -121,6 +125,20 @@ def _agent_home_root(row: AgentRow) -> Path:
         / ".octopus"
         / "workspaces"
         / f"org_{row.org_id}"
+        / "agents"
+        / workspace_key
+    ).resolve()
+
+
+def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
+    workspace_key = _derive_url_key(
+        cast(str | None, values.get("workspace_key")), cast(str, values["id"])
+    )
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "workspaces"
+        / f"org_{values['org_id']}"
         / "agents"
         / workspace_key
     ).resolve()
@@ -308,7 +326,9 @@ class AgentService:
             "agent_runtime_type": payload.get(
                 "agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE
             ),
-            "agent_runtime_config": dict(payload.get("agentRuntimeConfig", {})),
+            "agent_runtime_config": normalize_instructions_paths(
+                dict(payload.get("agentRuntimeConfig", {}))
+            ),
             "runtime_config": dict(payload.get("runtimeConfig", {})),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
@@ -316,6 +336,17 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        next_runtime_config = materialize_default_instructions_for_new_agent(
+            row, _agent_home_root_from_values(values)
+        )
+        if next_runtime_config is not None:
+            updated = await update_agent(
+                self._session,
+                row.id,
+                {"agent_runtime_config": next_runtime_config},
+            )
+            if updated is not None:
+                row = updated
         desired_skills = list(payload.get("desiredSkills", []))
         if desired_skills:
             desired_skills = await replace_enabled_skill_keys(
@@ -388,6 +419,10 @@ class AgentService:
                 **existing.agent_runtime_config,
                 **cast(dict[str, Any], patch["agentRuntimeConfig"]),
             }
+        if "agentRuntimeConfig" in patch:
+            patch["agentRuntimeConfig"] = normalize_instructions_paths(
+                cast(dict[str, Any], patch["agentRuntimeConfig"])
+            )
         field_map = {
             "name": "name",
             "role": "role",
