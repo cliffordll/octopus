@@ -20,6 +20,7 @@ const ROLES: ProjectResourceRole[] = [
 export function ProjectPage() {
   const { orgId = "", projectId = "", tab = "configuration" } = useParams();
   const activeTab = ["configuration", "resources", "issues"].includes(tab) ? tab : "configuration";
+  const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
   const [resourceId, setResourceId] = useState("");
@@ -41,12 +42,17 @@ export function ProjectPage() {
   });
   useEffect(() => {
     if (project.data) {
+      setProjectName(project.data.name);
       setDescription(project.data.description ?? "");
       setStatus(project.data.status);
     }
   }, [project.data]);
   const update = useMutation({
-    mutationFn: () => projectsApi.update(projectId, { description: description.trim() || null, status }),
+    mutationFn: () => projectsApi.update(projectId, {
+      description: description.trim() || null,
+      name: projectName.trim() || project.data?.name,
+      status,
+    }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] }),
   });
   const addResource = useMutation({
@@ -72,40 +78,111 @@ export function ProjectPage() {
   return (
     <OrgWorkspace orgId={orgId}>
       <header className="page-header">
-        <div>
+        <div className="project-detail-title">
           <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
-          <h1>{project.data?.name ?? "载入中..."}</h1>
+          <div className="project-heading-row">
+            <span className="project-color-dot" style={{ background: project.data?.color ?? "#6366f1" }} />
+            <h1>{project.data?.name ?? "载入中..."}</h1>
+          </div>
+          {project.data?.description && <p className="muted">{project.data.description}</p>}
         </div>
+        {project.data && (
+          <div className="project-header-badges">
+            <Badge>{project.data.status}</Badge>
+            <Badge>{project.data.urlKey}</Badge>
+          </div>
+        )}
       </header>
       {project.data && (
         <>
+          <div className="project-summary-grid">
+            <div className="summary-metric"><span>Status</span><strong>{project.data.status}</strong></div>
+            <div className="summary-metric"><span>Lead</span><strong>{project.data.leadAgentId ?? "None"}</strong></div>
+            <div className="summary-metric"><span>Target</span><strong>{project.data.targetDate ?? "None"}</strong></div>
+            <div className="summary-metric"><span>Updated</span><strong>{project.data.updatedAt || "-"}</strong></div>
+          </div>
           <nav aria-label="项目详情导航" className="detail-tabs">
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>Configuration</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>Resources</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>Issues</NavLink>
           </nav>
-          {activeTab === "configuration" && <form className="panel form project-configuration" onSubmit={save}>
-            <div className="meta-line"><Badge>{project.data.urlKey}</Badge><Badge>{project.data.status}</Badge></div>
-            <label>
-              描述
-              <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-            </label>
-            <label>
-              状态
-              <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
-                {STATUSES.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
+          {activeTab === "configuration" && <form className="panel project-properties-card" onSubmit={save}>
+            <div className="panel-heading">
+              <div>
+                <h2>Configuration</h2>
+                <p className="muted">项目属性以行内配置方式展示，布局对齐上游 ProjectProperties。</p>
+              </div>
+            </div>
+            <div className="project-property-list">
+              <label className="project-property-row">
+                <span>Name</span>
+                <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
+              </label>
+              <label className="project-property-row project-property-row-start">
+                <span>描述</span>
+                <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+              </label>
+              <label className="project-property-row">
+                <span>Status</span>
+                <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
+                  {STATUSES.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <div className="project-property-row">
+                <span>URL Key</span>
+                <strong>{project.data.urlKey}</strong>
+              </div>
+              <div className="project-property-row">
+                <span>Lead</span>
+                <strong>{project.data.leadAgentId ?? "None"}</strong>
+              </div>
+              <div className="project-property-row">
+                <span>Goals</span>
+                <div className="project-goal-chips">
+                  {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
+                  {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
+                  {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">No linked goals</span>}
+                </div>
+              </div>
+              <div className="project-property-row">
+                <span>Created</span>
+                <strong>{project.data.createdAt || "-"}</strong>
+              </div>
+              <div className="project-property-row">
+                <span>Updated</span>
+                <strong>{project.data.updatedAt || "-"}</strong>
+              </div>
+            </div>
             {update.error && <ErrorNotice error={update.error} />}
-            <button type="submit">保存 Project</button>
+            <div className="project-property-actions">
+              <button type="submit">保存 Project</button>
+            </div>
           </form>}
           {activeTab === "resources" && <section className="panel project-resources">
-            <h2>资源</h2>
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Project Context</p>
+                <h2>Resources</h2>
+                <p className="muted">选择智能体在本项目真正需要使用的资源，组织资源目录保持统一管理。</p>
+              </div>
+            </div>
             {resources.error && <ErrorNotice error={resources.error} />}
-            <div className="list">
+            <div className="project-resource-summary">
+              {ROLES.map((item) => (
+                <div className="summary-metric" key={item}>
+                  <span>{item}</span>
+                  <strong>{resources.data?.filter((attachment) => attachment.role === item).length ?? 0}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="project-resource-grid">
               {resources.data?.map((attachment) => (
-                <article className="row" key={attachment.id}>
-                  <span>{attachment.resource.name}</span>
+                <article className="project-resource-card" key={attachment.id}>
+                  <div>
+                    <strong>{attachment.resource.name}</strong>
+                    <span>{attachment.resource.locator}</span>
+                    {attachment.note && <p>{attachment.note}</p>}
+                  </div>
                   <Badge>{attachment.role}</Badge>
                   <button
                     className="secondary small-button"
@@ -116,6 +193,7 @@ export function ProjectPage() {
                   </button>
                 </article>
               ))}
+              {resources.isSuccess && resources.data.length === 0 && <p className="muted">No resources attached.</p>}
             </div>
             <form className="form resource-form" onSubmit={attach}>
               <label>
@@ -133,7 +211,12 @@ export function ProjectPage() {
             </form>
           </section>}
           {activeTab === "issues" && <section className="panel project-issues">
-            <h2>任务</h2>
+            <div className="panel-heading">
+              <div>
+                <h2>Issues</h2>
+                <p className="muted">当前项目关联任务。</p>
+              </div>
+            </div>
             {issues.error && <ErrorNotice error={issues.error} />}
             {issues.isSuccess && issues.data.length === 0 && <p className="muted">暂无关联任务。</p>}
             <div className="list">
