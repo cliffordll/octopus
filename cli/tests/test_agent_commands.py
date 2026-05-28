@@ -472,7 +472,7 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
         requests[1].url
     )
     assert requests[2].method == "POST"
-    assert requests[2].url.path == "/api/agents/agent-1/heartbeat/invoke"
+    assert requests[2].url.path == "/api/agents/agent-1/wakeup"
     assert requests[2].read() == (
         b'{"idempotencyKey":"once","reason":"manual","forceFreshSession":true}'
     )

@@ -13,7 +13,12 @@ import { HomePage } from "../pages/HomePage";
 import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
-import { OrganizationIndexPage, OrganizationPage, OrganizationStructurePage } from "../pages/OrganizationPage";
+import {
+  OrganizationIndexPage,
+  OrganizationPage,
+  OrganizationStructurePage,
+  OrganizationWorkspacesPage,
+} from "../pages/OrganizationPage";
 import { OrganizationsPage } from "../pages/OrganizationsPage";
 import { ProjectPage } from "../pages/ProjectPage";
 import { ProjectsPage } from "../pages/ProjectsPage";
@@ -28,6 +33,7 @@ export function App() {
         <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />
         <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
         <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
+        <Route path="orgs/:orgId/workspaces" element={<OrganizationWorkspacesPage />} />
         <Route path="orgs/:orgId/goals" element={<GoalsPage />} />
         <Route path="orgs/:orgId/goals/:goalId" element={<GoalPage />} />
         <Route path="orgs/:orgId/goals/:goalId/:tab" element={<GoalPage />} />
