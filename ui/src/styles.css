@@ -248,36 +248,116 @@ h1, h2, p {
   margin: 0 auto;
 }
 
-.organization-structure {
-  display: grid;
-  gap: 12px;
-}
-
-.organization-member {
-  align-items: center;
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
-}
-
-.organization-member-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.organization-member-copy span,
-.organization-member p {
-  color: #8792a6;
-  font-size: 13px;
-  margin: 0;
-}
-
 .organization-empty-state {
   align-items: start;
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.org-chart-controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.org-chart-controls button {
+  min-width: 38px;
+  padding: 8px 10px;
+}
+
+.organization-chart {
+  background: #0c111b;
+  border: 1px solid #202a3b;
+  border-radius: 14px;
+  min-height: 560px;
+  overflow: hidden;
+  position: relative;
+}
+
+.organization-chart-edges {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.organization-chart-edges path {
+  stroke: #33425b;
+  stroke-width: 1.5;
+}
+
+.organization-chart-layer {
+  position: absolute;
+  transform-origin: 0 0;
+}
+
+.organization-chart-card {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  color: #e8edf5;
+  display: flex;
+  gap: 12px;
+  min-height: 108px;
+  padding: 14px;
+  position: absolute;
+  text-decoration: none;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+  width: 210px;
+}
+
+.organization-chart-card:hover {
+  background: #152033;
+  border-color: #3886e8;
+  transform: translateY(-1px);
+}
+
+.organization-chart-avatar {
+  align-items: center;
+  background: #1a2435;
+  border: 1px solid #2a3950;
+  border-radius: 999px;
+  color: #d9e7ff;
+  display: flex;
+  flex: 0 0 38px;
+  font-size: 16px;
+  font-weight: 700;
+  height: 38px;
+  justify-content: center;
+}
+
+.organization-chart-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.organization-chart-copy strong,
+.organization-chart-copy span,
+.organization-chart-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-chart-copy strong {
+  color: #e8edf5;
+  font-size: 14px;
+}
+
+.organization-chart-copy span {
+  color: #b8c2d4;
+  font-size: 12px;
+}
+
+.organization-chart-copy small {
+  color: #8792a6;
+  font-size: 11px;
 }
 
 .heartbeat-filter {
@@ -1297,8 +1377,7 @@ pre {
   }
   .heartbeat-summary-grid,
   .heartbeat-agent-row,
-  .heartbeat-inspection-layout,
-  .organization-member {
+  .heartbeat-inspection-layout {
     grid-template-columns: 1fr;
   }
   .heartbeat-page-header {
