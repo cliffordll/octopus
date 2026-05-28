@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
+import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -43,6 +43,60 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
+}
+
+type InstructionDoc = {
+  content: string;
+  key: string;
+  name: string;
+  path: string;
+  source: string;
+};
+
+function stringConfig(config: Record<string, unknown>, key: string): string {
+  const value = config[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function managedInstructionFiles(config: Record<string, unknown>): InstructionDoc[] {
+  const files = config.managedInstructionFiles;
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .map((item, index) => {
+      const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `instruction-${index + 1}.md`;
+      const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : name;
+      const content = typeof item.content === "string" ? item.content : "";
+      return { content, key: `managed:${path}:${index}`, name, path, source: "managedInstructionFiles" };
+    });
+}
+
+function buildInstructionDocs(agent: AgentDetail): InstructionDoc[] {
+  const config = agent.agentRuntimeConfig ?? {};
+  const docs: InstructionDoc[] = [];
+  const promptTemplate = stringConfig(config, "promptTemplate") || agent.capabilities || "";
+  const instructionsFilePath = stringConfig(config, "instructionsFilePath");
+  if (instructionsFilePath || promptTemplate) {
+    docs.push({
+      content: promptTemplate,
+      key: "soul",
+      name: "SOUL.md",
+      path: instructionsFilePath || "SOUL.md",
+      source: instructionsFilePath ? "instructionsFilePath" : "promptTemplate",
+    });
+  }
+  const agentsMdPath = stringConfig(config, "agentsMdPath");
+  if (agentsMdPath) {
+    docs.push({
+      content: "",
+      key: "agents-md",
+      name: "AGENTS.md",
+      path: agentsMdPath,
+      source: "agentsMdPath",
+    });
+  }
+  docs.push(...managedInstructionFiles(config));
+  return docs;
 }
 
 function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
@@ -100,7 +154,7 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
 
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
-  const activeTab = ["dashboard", "configuration", "runs"].includes(tab) ? tab : "dashboard";
+  const activeTab = ["dashboard", "profile", "configuration", "skills", "runs"].includes(tab) ? tab : "dashboard";
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<AgentRole>("general");
@@ -119,6 +173,9 @@ export function AgentPage() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
+  const [showInstructionForm, setShowInstructionForm] = useState(false);
+  const [newInstructionName, setNewInstructionName] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
@@ -150,12 +207,12 @@ export function AgentPage() {
   const skills = useQuery({
     queryKey: ["agent-skills", agentId],
     queryFn: () => agentsApi.skills(agentId),
-    enabled: activeTab === "configuration",
+    enabled: activeTab === "configuration" || activeTab === "skills",
   });
   const skillsAnalytics = useQuery({
     queryKey: ["agent-skills-analytics", agentId],
     queryFn: () => agentsApi.skillsAnalytics(agentId),
-    enabled: activeTab === "configuration",
+    enabled: activeTab === "configuration" || activeTab === "skills",
   });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -284,6 +341,46 @@ export function AgentPage() {
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
+  const instructionDocs = agent.data ? buildInstructionDocs(agent.data) : [];
+  const selectedInstruction = instructionDocs.find((doc) => doc.key === selectedInstructionKey) ?? instructionDocs[0];
+  function defaultInstructionName() {
+    const names = new Set(instructionDocs.map((doc) => doc.name.toLowerCase()));
+    if (!names.has("NEW.md".toLowerCase())) return "NEW.md";
+    let index = 2;
+    while (names.has(`NEW-${index}.md`.toLowerCase())) index += 1;
+    return `NEW-${index}.md`;
+  }
+  function openInstructionForm() {
+    setNewInstructionName(defaultInstructionName());
+    setShowInstructionForm(true);
+  }
+  function closeInstructionForm() {
+    setShowInstructionForm(false);
+    setNewInstructionName("");
+  }
+  function appendInstruction(event: FormEvent) {
+    event.preventDefault();
+    if (!agent.data || !newInstructionName.trim()) return;
+    const existingFiles = managedInstructionFiles(agent.data.agentRuntimeConfig).map((doc) => ({
+      content: doc.content,
+      name: doc.name,
+      path: doc.path,
+    }));
+    save.mutate({
+      agentRuntimeConfig: {
+        ...agent.data.agentRuntimeConfig,
+        managedInstructionFiles: [
+          ...existingFiles,
+          {
+            content: "",
+            name: newInstructionName.trim(),
+            path: newInstructionName.trim(),
+          },
+        ],
+      },
+    });
+    closeInstructionForm();
+  }
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
@@ -326,7 +423,9 @@ export function AgentPage() {
         <>
           <nav aria-label="智能体详情导航" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/dashboard`}>概览</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/profile`}>说明</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
@@ -378,6 +477,56 @@ export function AgentPage() {
               </dl>
             </section>
           </div>}
+          {activeTab === "profile" && <section aria-label="Managed Instructions" className="agent-instructions-page">
+            {save.error && <ErrorNotice error={save.error} />}
+            <div className="agent-instructions-grid">
+              <aside aria-label="Instruction files" className="instruction-files-card">
+                <div className="instruction-card-header">
+                  <h2>Files</h2>
+                  <button
+                    aria-expanded={showInstructionForm}
+                    aria-label="新增文件"
+                    className="icon-button"
+                    onClick={() => (showInstructionForm ? closeInstructionForm() : openInstructionForm())}
+                    type="button"
+                  >
+                    +
+                  </button>
+                </div>
+                {showInstructionForm && (
+                  <form className="instruction-create-form" onSubmit={appendInstruction}>
+                    <label>
+                      文件名
+                      <input value={newInstructionName} onChange={(event) => setNewInstructionName(event.target.value)} required />
+                    </label>
+                    <div className="instruction-create-actions">
+                      <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
+                      <button className="small-button" disabled={save.isPending} type="submit">确认</button>
+                    </div>
+                  </form>
+                )}
+                <ul className="instruction-file-list">
+                  {instructionDocs.map((doc) => (
+                    <li
+                      className={selectedInstruction?.key === doc.key ? "selected" : undefined}
+                      key={doc.key}
+                    >
+                      <button onClick={() => setSelectedInstructionKey(doc.key)} type="button">
+                        <code>{doc.name}</code>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+              <article aria-label="Instruction content" className="instruction-content-card">
+                {selectedInstruction?.content ? (
+                  <pre>{selectedInstruction.content}</pre>
+                ) : (
+                  <div className="instruction-empty-content" />
+                )}
+              </article>
+            </div>
+          </section>}
           {activeTab === "configuration" && (
             <div className="agent-configuration-layout">
               <form className="panel agent-config-card" onSubmit={submit}>
@@ -558,6 +707,54 @@ export function AgentPage() {
               </section>
             </div>
           )}
+          {activeTab === "skills" && <section className="panel agent-config-revisions-card">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Skills</p>
+                <h2>Agent Skills</h2>
+              </div>
+              <Badge>{skills.data?.mode ?? "unknown"}</Badge>
+            </div>
+            {skills.error && <ErrorNotice error={skills.error} />}
+            {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
+            {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
+            {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
+            {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
+            <div className="agent-summary-grid">
+              <div className="summary-metric"><span>Desired</span><strong>{skills.data?.desiredSkills?.length ?? 0}</strong></div>
+              <div className="summary-metric"><span>Entries</span><strong>{skillEntries.length}</strong></div>
+              <div className="summary-metric"><span>Usage</span><strong>{skillsAnalytics.data?.totalCount ?? 0}</strong></div>
+            </div>
+            <div className="list">
+              {skillEntries.map((entry) => (
+                <article className="row" key={String(entry.key ?? entry.selectionKey ?? entry.runtimeName)}>
+                  <strong>{String(entry.runtimeName ?? entry.key ?? entry.selectionKey ?? "skill")}</strong>
+                  {Boolean(entry.key) && <span className="muted">{String(entry.key)}</span>}
+                </article>
+              ))}
+            </div>
+            <div className="form">
+              <label>
+                Desired Skills
+                <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
+              </label>
+              <label>
+                Enable Skills
+                <input value={skillsToEnable} onChange={(event) => setSkillsToEnable(event.target.value)} />
+              </label>
+              <button disabled={enableSkills.isPending} onClick={() => enableSkills.mutate()} type="button">启用技能</button>
+              <button disabled={syncSkills.isPending} onClick={() => syncSkills.mutate()} type="button">同步技能</button>
+              <label>
+                Private Skill Name
+                <input value={privateSkillName} onChange={(event) => setPrivateSkillName(event.target.value)} />
+              </label>
+              <label>
+                Private Skill Markdown
+                <textarea value={privateSkillMarkdown} onChange={(event) => setPrivateSkillMarkdown(event.target.value)} />
+              </label>
+              <button disabled={!privateSkillName.trim() || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">创建私有技能</button>
+            </div>
+          </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
             <AgentRunDetail run={selectedRun} />
