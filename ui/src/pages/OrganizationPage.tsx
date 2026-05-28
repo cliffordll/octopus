@@ -116,6 +116,7 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <h2>组织</h2>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>组织架构</NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>心跳</NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>目标</NavLink>
         </section>
         <section className="local-nav-section">
           <h2>项目</h2>

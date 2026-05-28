@@ -106,6 +106,58 @@ export interface UpdateIssuePayload {
   priority?: IssuePriority;
 }
 
+export type GoalLevel = "organization" | "team" | "agent" | "task";
+export type GoalStatus = "planned" | "active" | "achieved" | "cancelled";
+
+export interface Goal {
+  id: string;
+  orgId: string;
+  title: string;
+  description: string | null;
+  level: GoalLevel;
+  status: GoalStatus;
+  parentId: string | null;
+  ownerAgentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoalDependencyPreview {
+  id: string;
+  title: string;
+}
+
+export interface GoalDependencies {
+  goalId: string;
+  blockers: string[];
+  isLastRootOrganizationGoal: boolean;
+  counts: {
+    childGoals: number;
+    linkedProjects: number;
+    linkedIssues: number;
+    automations: number;
+    costEvents: number;
+    financeEvents: number;
+  };
+  previews: {
+    childGoals: GoalDependencyPreview[];
+    linkedProjects: GoalDependencyPreview[];
+    linkedIssues: GoalDependencyPreview[];
+    automations: GoalDependencyPreview[];
+  };
+}
+
+export interface CreateGoalPayload {
+  title: string;
+  description?: string | null;
+  level?: GoalLevel;
+  status?: GoalStatus;
+  parentId?: string | null;
+  ownerAgentId?: string | null;
+}
+
+export type UpdateGoalPayload = Partial<CreateGoalPayload>;
+
 export type ApprovalType =
   | "hire_agent"
   | "approve_ceo_strategy"
@@ -186,6 +238,8 @@ export interface ProjectDetail {
   orgId: string;
   urlKey: string;
   goalId: string | null;
+  goalIds?: string[];
+  goals?: GoalDependencyPreview[];
   name: string;
   description: string | null;
   status: ProjectStatus;
