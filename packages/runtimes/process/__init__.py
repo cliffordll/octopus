@@ -7,10 +7,11 @@ import shlex
 from datetime import UTC, datetime
 from typing import Any
 
+from ..common import RuntimeCapabilityMixin
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
 
-class ProcessRuntimeAdapter:
+class ProcessRuntimeAdapter(RuntimeCapabilityMixin):
     type = "process"
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
@@ -41,8 +42,9 @@ class ProcessRuntimeAdapter:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        if context.on_process_started is not None and process.pid is not None:
-            await context.on_process_started(process.pid, datetime.now(UTC))
+        pid = getattr(process, "pid", None)
+        if context.on_process_started is not None and isinstance(pid, int):
+            await context.on_process_started(pid, datetime.now(UTC))
         communication = asyncio.create_task(process.communicate())
         try:
             cancelled = (

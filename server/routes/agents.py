@@ -22,12 +22,17 @@ from packages.shared.api_paths.agents import (
     AGENT_RESET_SESSION_PATH,
     AGENT_RESUME_PATH,
     AGENT_RUNTIME_STATE_PATH,
+    AGENT_SKILLS_PATH,
+    AGENT_SKILLS_SYNC_PATH,
     AGENT_TASK_SESSIONS_PATH,
     AGENT_TERMINATE_PATH,
     ORG_AGENT_CONFIGURATIONS_PATH,
     ORG_AGENT_LIST_PATH,
     ORG_AGENT_NAME_SUGGESTION_PATH,
+    ORG_ADAPTER_MODELS_PATH,
+    ORG_ADAPTER_TEST_ENVIRONMENT_PATH,
 )
+from packages.runtimes import get_runtime_adapter, list_runtime_models
 from packages.shared.api_paths.heartbeat import (
     AGENT_HEARTBEAT_INVOKE_PATH,
     AGENT_WAKEUP_PATH,
@@ -48,8 +53,10 @@ from packages.shared.types.agent import (
 )
 from packages.shared.types.heartbeat import HeartbeatRun, HeartbeatRunEvent
 from packages.shared.validators.agent import (
+    validate_agent_skills_sync,
     validate_create_agent,
     validate_reset_agent_session,
+    validate_test_agent_runtime_environment,
     validate_update_agent,
 )
 from packages.shared.validators.heartbeat import validate_wake_agent
@@ -268,6 +275,38 @@ async def list_agent_configurations_route(
     return await service.list_configurations_for_org(orgId)
 
 
+@router.get(ORG_ADAPTER_MODELS_PATH)
+async def list_adapter_models_route(
+    orgId: str,
+    type: str,
+    _: None = Depends(require_organization_access),
+) -> list[dict[str, str]]:
+    return await list_runtime_models(type)
+
+
+@router.post(ORG_ADAPTER_TEST_ENVIRONMENT_PATH)
+async def test_adapter_environment_route(
+    orgId: str,
+    type: str,
+    body: dict[str, Any] = Body(default={}),
+    _: None = Depends(require_board_access),
+) -> dict[str, Any]:
+    try:
+        payload = validate_test_agent_runtime_environment(body)
+        result = await get_runtime_adapter(type).test_environment(
+            payload["agentRuntimeConfig"]
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return {
+        "agentRuntimeType": result.agent_runtime_type,
+        "status": result.status,
+        "checks": result.checks,
+    }
+
+
 @router.get(AGENT_CONFIG_REVISIONS_PATH)
 async def list_agent_config_revisions_route(
     id: str,
@@ -372,6 +411,39 @@ async def reset_agent_runtime_session_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return result
+
+
+@router.get(AGENT_SKILLS_PATH)
+async def get_agent_skills_route(
+    id: str,
+    request: Request,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> dict[str, Any]:
+    agent = await _get_agent_or_404(id, request=request, service=service)
+    return await get_runtime_adapter(agent["agentRuntimeType"]).list_skills(
+        agent["agentRuntimeConfig"]
+    )
+
+
+@router.post(AGENT_SKILLS_SYNC_PATH)
+async def sync_agent_skills_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> dict[str, Any]:
+    agent = await _get_agent_or_404(id, request=request, service=service)
+    try:
+        payload = validate_agent_skills_sync(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return await get_runtime_adapter(agent["agentRuntimeType"]).sync_skills(
+        agent["agentRuntimeConfig"], payload["skills"]
+    )
 
 
 async def _invoke_agent(
