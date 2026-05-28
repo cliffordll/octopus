@@ -183,9 +183,9 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-14-runtime/`
 
-- 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，补齐当前确认需要支持的 runtime adapter、环境检查与能力发现边界。
-- 交付：`http`、`claude_local`、`opencode_local` adapter，runtime environment test API，runtime model discovery，runtime skills sync，session/usage/错误的基础归一化。
-- 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务；模型发现和 skills 同步可验证；`gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在本阶段返回明确未纳入结果。
+- 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，补齐上游当前 server 已纳入的 runtime adapter、环境检查、模型发现、skills 管理、managed instructions 与 runtime quota window 能力边界。
+- 交付：`http`、`claude_local`、`opencode_local` adapter 的上游兼容执行行为；runtime environment test API；Codex/OpenCode 模型发现；Codex/Claude/OpenCode skills snapshot、sync、enable、private skill 和 analytics 路由；新建本地 runtime agent 的 managed instructions materialization；adapter quota window probe 能力；session/usage/错误的基础归一化。
+- 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务；模型发现、skills 管理、instructions materialization、环境探针、quota window probe 均可验证；`gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在本阶段返回明确未纳入或未实现结果。
 
 ### Step 15: Workspace 与执行产物
 
@@ -200,7 +200,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 目录：`docs/step-16-governance/`
 
 - 目标：在 Step 11/13/14 运行基线产生的必要记录基础上，实现完整成本、预算限制、quota window 及关键活动治理闭环。
-- 交付：cost 记录、budget 校验、quota window 归集/查询、activity 扩展和查询。
+- 交付：cost 记录、budget 校验、Step 14 adapter quota window 输出的归集/查询与治理联动、activity 扩展和查询。
 - 验收：run 消耗可归集，预算和 quota 限制可解释，activity 副作用可测试。
 
 ### Step 17: Chat / Messenger 扩展
