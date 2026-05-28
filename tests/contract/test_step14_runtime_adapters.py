@@ -1004,6 +1004,10 @@ async def test_codex_execute_injects_runtime_context_env(
                 "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
                 "rudderRuntimePrimaryUrl": "http://svc",
             },
+            env={
+                "RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
+                "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": '[{"serviceName":"preview"}]',
+            },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
         )
     )
@@ -1039,6 +1043,10 @@ async def test_codex_execute_injects_runtime_context_env(
     assert captured_env["RUDDER_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
     assert captured_env["RUDDER_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'
+    )
+    assert captured_env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
+    assert captured_env["RUDDER_RUNTIME_SERVICE_INTENTS_JSON"] == (
+        '[{"serviceName":"preview"}]'
     )
     assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
 
@@ -1095,6 +1103,7 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
         assert env["RUDDER_RUN_ID"] == "run-14"
         assert env["RUDDER_TASK_ID"] == "task-1"
         assert env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+        assert env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
         assert env["AGENT_HOME"] == "D:/agents/agent-14"
         assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
         assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
@@ -1173,6 +1182,7 @@ def _runtime_context_for_env(
             },
             "rudderRuntimePrimaryUrl": "http://svc",
         },
+        env={"RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
         on_log=lambda stream, chunk: _noop_log(stream, chunk),
     )
 
