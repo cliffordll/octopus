@@ -14,6 +14,8 @@ export interface OrganizationDetail extends OrganizationSummary {
   budgetMonthlyCents: number;
   spentMonthlyCents: number;
   brandColor: string | null;
+  requireBoardApprovalForNewAgents?: boolean;
+  defaultChatIssueCreationMode?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +25,8 @@ export interface CreateOrganizationPayload {
   description?: string | null;
   budgetMonthlyCents?: number;
   brandColor?: string | null;
+  requireBoardApprovalForNewAgents?: boolean;
+  defaultChatIssueCreationMode?: string;
 }
 
 export type UpdateOrganizationPayload = Partial<CreateOrganizationPayload>;
@@ -64,6 +68,7 @@ export interface IssueDetail extends IssueListItem {
   requestDepth: number;
   startedAt: string | null;
   completedAt: string | null;
+  workProducts?: IssueWorkProduct[];
   createdAt: string;
 }
 
@@ -240,6 +245,96 @@ export interface ProjectResourceAttachment {
   updatedAt: string;
 }
 
+export interface WorkspaceRuntimeService {
+  id: string;
+  orgId: string;
+  projectId: string | null;
+  projectWorkspaceId: string | null;
+  executionWorkspaceId: string | null;
+  issueId: string | null;
+  scopeType: string;
+  scopeId: string | null;
+  serviceName: string;
+  status: string;
+  lifecycle: string;
+  reuseKey: string | null;
+  command: string | null;
+  cwd: string | null;
+  port: number | null;
+  url: string | null;
+  provider: string;
+  providerRef: string | null;
+  ownerAgentId: string | null;
+  startedByRunId: string | null;
+  lastUsedAt: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  stopPolicy: Record<string, unknown> | null;
+  healthStatus: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectWorkspace {
+  id: string;
+  orgId: string;
+  projectId: string;
+  name: string;
+  sourceType: string;
+  cwd: string | null;
+  repoUrl: string | null;
+  repoRef: string | null;
+  defaultRef: string | null;
+  visibility: string;
+  setupCommand: string | null;
+  cleanupCommand: string | null;
+  remoteProvider: string | null;
+  remoteWorkspaceRef: string | null;
+  sharedWorkspaceKey: string | null;
+  metadata: Record<string, unknown> | null;
+  isPrimary: boolean;
+  runtimeServices?: WorkspaceRuntimeService[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectCodebase {
+  configured: boolean;
+  scope: string;
+  workspaceId: string | null;
+  repoUrl: string | null;
+  repoRef: string | null;
+  defaultRef: string | null;
+  repoName: string | null;
+  localFolder: string | null;
+  managedFolder: string;
+  effectiveLocalFolder: string;
+  origin: string;
+}
+
+export interface IssueWorkProduct {
+  id: string;
+  orgId: string;
+  projectId: string | null;
+  issueId: string;
+  executionWorkspaceId: string | null;
+  runtimeServiceId: string | null;
+  type: string;
+  provider: string;
+  externalId: string | null;
+  title: string;
+  url: string | null;
+  status: string;
+  reviewState: string;
+  isPrimary: boolean;
+  healthStatus: string;
+  summary: string | null;
+  metadata: Record<string, unknown> | null;
+  createdByRunId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectDetail {
   id: string;
   orgId: string;
@@ -256,7 +351,10 @@ export interface ProjectDetail {
   pauseReason: "manual" | "budget" | "system" | null;
   pausedAt: string | null;
   executionWorkspacePolicy: Record<string, unknown> | null;
+  codebase?: ProjectCodebase;
   resources: ProjectResourceAttachment[];
+  workspaces?: ProjectWorkspace[];
+  primaryWorkspace?: ProjectWorkspace | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

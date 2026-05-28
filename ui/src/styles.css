@@ -534,6 +534,329 @@ h1, h2, p {
   gap: 6px;
 }
 
+.project-workspace-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.project-workspace-card,
+.workspace-context-card {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.project-workspace-card-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.project-workspace-card-heading h3 {
+  color: #e8edf5;
+  font-size: 14px;
+  margin: 0;
+}
+
+.project-workspace-properties,
+.issue-work-product-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.project-workspace-properties div,
+.issue-work-product-details div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.project-workspace-properties dt,
+.issue-work-product-details dt {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.project-workspace-properties dd,
+.issue-work-product-details dd {
+  color: #dce5f2;
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-workspace-list,
+.issue-work-product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-workspace-item {
+  background: #111722;
+  border: 1px solid #263246;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.project-workspace-item > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-workspace-item strong {
+  color: #e8edf5;
+}
+
+.project-workspace-item span {
+  color: #8792a6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.project-workspace-badges,
+.issue-work-product-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workspace-shell-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 300px minmax(0, 1fr);
+  height: calc(100vh - 152px);
+  min-height: 560px;
+  max-width: 1280px;
+}
+
+.workspace-files-card,
+.workspace-editor-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-card-header {
+  align-items: flex-start;
+  border-bottom: 1px solid #202a3b;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 13px 16px;
+}
+
+.workspace-card-header h2 {
+  color: #e8edf5;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.workspace-card-header p {
+  color: #8792a6;
+  font-size: 12px;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-files-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.workspace-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-tree-row {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #cbd5e1;
+  display: flex;
+  gap: 7px;
+  min-height: 32px;
+  padding-bottom: 6px;
+  padding-right: 8px;
+  padding-top: 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.workspace-tree-row:hover {
+  background: #172033;
+  color: #f1f5f9;
+}
+
+.workspace-tree-row.selected {
+  background: #1d2a3d;
+  border-color: #3b82f6;
+  color: #f8fafc;
+}
+
+.workspace-tree-chevron,
+.workspace-tree-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 18px;
+  font-size: 10px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  width: 18px;
+}
+
+.workspace-tree-chevron {
+  color: #8792a6;
+  flex-basis: 14px;
+  font-size: 14px;
+  height: auto;
+  width: 14px;
+}
+
+.workspace-tree-icon {
+  background: #182235;
+  border: 1px solid #2a3546;
+  border-radius: 5px;
+  color: #b6c5d8;
+}
+
+.workspace-tree-icon-p {
+  background: #1f2f1f;
+  border-color: #365a36;
+  color: #a7f3d0;
+}
+
+.workspace-tree-icon-a {
+  background: #1f2a44;
+  border-color: #365a8a;
+  color: #bfdbfe;
+}
+
+.workspace-tree-icon-k {
+  background: #2a2144;
+  border-color: #5b3f8f;
+  color: #ddd6fe;
+}
+
+.workspace-tree-icon-w {
+  background: #332a1a;
+  border-color: #7a5428;
+  color: #fed7aa;
+}
+
+.workspace-tree-icon-s,
+.workspace-tree-icon-json {
+  background: #142c2d;
+  border-color: #256b6e;
+  color: #99f6e4;
+}
+
+.workspace-tree-icon-config {
+  background: #281e32;
+  border-color: #694982;
+  color: #f0abfc;
+}
+
+.workspace-tree-icon-m,
+.workspace-tree-icon-n,
+.workspace-tree-icon-d {
+  background: #2a2730;
+  border-color: #55505e;
+  color: #d6d3d1;
+}
+
+.workspace-tree-label {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tree-row small {
+  color: #778397;
+  flex: 0 1 auto;
+  font-size: 10px;
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-editor-header {
+  align-items: center;
+}
+
+.workspace-editor-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-format-pill {
+  border: 1px solid #2a3546;
+  border-radius: 999px;
+  color: #aab6c8;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.workspace-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-editor-body > .muted {
+  padding: 24px;
+}
+
+.workspace-text-editor {
+  background: #0a0f18;
+  border: 0;
+  color: #dbeafe;
+  display: block;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  height: 100%;
+  line-height: 1.6;
+  min-height: 420px;
+  outline: none;
+  padding: 16px;
+  resize: none;
+  width: 100%;
+}
+
 .project-resource-summary {
   display: grid;
   gap: 10px;
@@ -1607,6 +1930,24 @@ button.danger {
   padding-top: 14px;
 }
 
+.issue-work-product-card {
+  background: #111722;
+  border: 1px solid #263246;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.issue-work-product-card strong {
+  color: #e8edf5;
+}
+
+.issue-work-product-card p {
+  color: #8792a6;
+  margin: 4px 0 0;
+}
+
 .issue-comment-actions {
   justify-content: flex-end;
 }
@@ -2664,6 +3005,11 @@ pre {
   .org-workspace {
     display: block;
     height: auto;
+  }
+  .workspace-shell-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
   }
   .org-sidebar {
     border-bottom: 1px solid #202633;

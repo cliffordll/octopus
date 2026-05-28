@@ -106,6 +106,64 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
+def test_issue_list_only_sends_route_supported_filters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/orgs/org-1/issues"
+        assert "projectId=project-1" in str(request.url)
+        assert "assigneeUserId" not in str(request.url)
+        assert "reviewerAgentId" not in str(request.url)
+        assert "reviewerUserId" not in str(request.url)
+        assert "parentId" not in str(request.url)
+        return httpx.Response(200, json=[])
+
+    assert (
+        main(
+            [
+                "issue",
+                "list",
+                "--org-id",
+                "org-1",
+                "--project-id",
+                "project-1",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+
+def test_issue_get_json_outputs_work_products() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/issues/issue-1"
+        return httpx.Response(
+            200,
+            json={
+                "id": "issue-1",
+                "title": "Review",
+                "workProducts": [
+                    {
+                        "id": "wp-1",
+                        "title": "Pull request",
+                        "type": "pull_request",
+                        "executionWorkspaceId": "exec-1",
+                    }
+                ],
+            },
+        )
+
+    output = io.StringIO()
+    assert (
+        main(
+            ["--json", "issue", "get", "issue-1"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+    assert "workProducts" in output.getvalue()
+    assert "exec-1" in output.getvalue()
+
+
 def test_issue_comment_and_review_post_payloads() -> None:
     requests: list[httpx.Request] = []
 
