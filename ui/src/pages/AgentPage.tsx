@@ -10,7 +10,7 @@ import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = ["process", "codex_local"];
+const RUNTIMES: AgentRuntimeType[] = ["process", "http", "codex_local", "claude_local", "opencode_local"];
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -18,6 +18,13 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function formatRunTime(value?: string | null): string {
@@ -103,6 +110,11 @@ export function AgentPage() {
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("0");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
+  const [desiredSkills, setDesiredSkills] = useState("");
+  const [skillsToEnable, setSkillsToEnable] = useState("");
+  const [privateSkillName, setPrivateSkillName] = useState("");
+  const [privateSkillMarkdown, setPrivateSkillMarkdown] = useState("");
+  const [adapterTestChecks, setAdapterTestChecks] = useState<Array<{ label?: string; id?: string; status?: string; message?: string }>>([]);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
@@ -120,6 +132,31 @@ export function AgentPage() {
     queryFn: () => agentsApi.configRevisions(agentId),
     enabled: activeTab === "configuration",
   });
+  const adapterModels = useQuery({
+    queryKey: ["adapter-models", orgId, runtime],
+    queryFn: () => agentsApi.adapterModels(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const adapterMetadata = useQuery({
+    queryKey: ["adapter-metadata", orgId, runtime],
+    queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const adapterQuotaWindows = useQuery({
+    queryKey: ["adapter-quota-windows", orgId, runtime],
+    queryFn: () => agentsApi.adapterQuotaWindows(orgId, runtime),
+    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  });
+  const skills = useQuery({
+    queryKey: ["agent-skills", agentId],
+    queryFn: () => agentsApi.skills(agentId),
+    enabled: activeTab === "configuration",
+  });
+  const skillsAnalytics = useQuery({
+    queryKey: ["agent-skills-analytics", agentId],
+    queryFn: () => agentsApi.skillsAnalytics(agentId),
+    enabled: activeTab === "configuration",
+  });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
     queryFn: () => heartbeatApi.list(orgId, agentId),
@@ -135,6 +172,7 @@ export function AgentPage() {
     setBudgetMonthlyCents(String(agent.data.budgetMonthlyCents ?? 0));
     setAgentRuntimeConfig(JSON.stringify(agent.data.agentRuntimeConfig ?? {}, null, 2));
     setRuntimeConfig(JSON.stringify(agent.data.runtimeConfig ?? {}, null, 2));
+    setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
   const action = useMutation({
     mutationFn: (operation: "pause" | "resume" | "terminate") => agentsApi[operation](agentId),
@@ -165,8 +203,39 @@ export function AgentPage() {
     },
   });
   const resetSession = useMutation({
-    mutationFn: () => agentsApi.resetSession(agentId, { forceFreshSession: true }),
+    mutationFn: () => agentsApi.resetSession(agentId, {}),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
+  });
+  const testAdapterEnvironment = useMutation({
+    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, readJsonObject(agentRuntimeConfig, "Agent runtime config")),
+    onSuccess: (result) => setAdapterTestChecks(result.checks),
+    onError: () => setAdapterTestChecks([]),
+  });
+  const syncSkills = useMutation({
+    mutationFn: () => agentsApi.syncSkills(agentId, parseCsv(desiredSkills)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+    },
+  });
+  const enableSkills = useMutation({
+    mutationFn: () => agentsApi.enableSkills(agentId, parseCsv(skillsToEnable)),
+    onSuccess: () => {
+      setSkillsToEnable("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+    },
+  });
+  const createPrivateSkill = useMutation({
+    mutationFn: () => agentsApi.createPrivateSkill(agentId, {
+      name: privateSkillName.trim(),
+      markdown: privateSkillMarkdown.trim() || null,
+    }),
+    onSuccess: () => {
+      setPrivateSkillName("");
+      setPrivateSkillMarkdown("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+    },
   });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
@@ -191,6 +260,7 @@ export function AgentPage() {
         role,
         reportsTo: reportsTo || null,
         capabilities: capabilities.trim() || null,
+        desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: readJsonObject(agentRuntimeConfig, "Agent runtime config"),
         runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
@@ -212,6 +282,8 @@ export function AgentPage() {
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
+  const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
+  const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
@@ -342,6 +414,7 @@ export function AgentPage() {
                   </select>
                 </label>
                   <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
+                  <label className="agent-property-row"><span>Desired Skills</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
                   <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
                   <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
                 </div>
@@ -351,6 +424,90 @@ export function AgentPage() {
                   <button disabled={save.isPending} type="submit">保存配置</button>
                 </div>
               </form>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Adapter</p>
+                    <h2>Runtime Adapter</h2>
+                  </div>
+                  <button disabled={testAdapterEnvironment.isPending} onClick={() => testAdapterEnvironment.mutate()} type="button">
+                    测试环境
+                  </button>
+                </div>
+                {adapterModels.error && <ErrorNotice error={adapterModels.error} />}
+                {adapterMetadata.error && <ErrorNotice error={adapterMetadata.error} />}
+                {adapterQuotaWindows.error && <ErrorNotice error={adapterQuotaWindows.error} />}
+                {testAdapterEnvironment.error && <ErrorNotice error={testAdapterEnvironment.error} />}
+                <div className="agent-summary-grid">
+                  <div className="summary-metric"><span>Runtime</span><strong>{runtime}</strong></div>
+                  <div className="summary-metric"><span>Models</span><strong>{adapterModelRows.length}</strong></div>
+                  <div className="summary-metric"><span>Skills</span><strong>{adapterMetadata.data?.capabilities?.skills ? "supported" : "unsupported"}</strong></div>
+                  <div className="summary-metric"><span>Quota</span><strong>{adapterQuotaWindows.data?.ok ? "ok" : (adapterQuotaWindows.data?.error ?? "unknown")}</strong></div>
+                </div>
+                <div className="list">
+                  {adapterModelRows.map((model) => (
+                    <article className="row" key={model.id}>
+                      <strong>{model.label}</strong>
+                      <span className="muted">{model.id}</span>
+                    </article>
+                  ))}
+                </div>
+                {adapterTestChecks.length > 0 && (
+                  <div className="list">
+                    {adapterTestChecks.map((check) => (
+                      <article className="row" key={check.id ?? check.label}>
+                        <strong>{check.label ?? check.id}</strong>
+                        <Badge>{check.status ?? "unknown"}</Badge>
+                        {check.message && <span className="muted">{check.message}</span>}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Skills</p>
+                    <h2>Agent Skills</h2>
+                  </div>
+                  <Badge>{skills.data?.mode ?? "unknown"}</Badge>
+                </div>
+                {skills.error && <ErrorNotice error={skills.error} />}
+                {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
+                {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
+                {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
+                {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
+                <div className="agent-summary-grid">
+                  <div className="summary-metric"><span>Desired</span><strong>{skills.data?.desiredSkills?.length ?? 0}</strong></div>
+                  <div className="summary-metric"><span>Entries</span><strong>{skillEntries.length}</strong></div>
+                  <div className="summary-metric"><span>Usage</span><strong>{skillsAnalytics.data?.totalCount ?? 0}</strong></div>
+                </div>
+                <div className="list">
+                  {skillEntries.map((entry) => (
+                    <article className="row" key={String(entry.key ?? entry.selectionKey ?? entry.runtimeName)}>
+                      <strong>{String(entry.runtimeName ?? entry.key ?? entry.selectionKey ?? "skill")}</strong>
+                      {Boolean(entry.key) && <span className="muted">{String(entry.key)}</span>}
+                    </article>
+                  ))}
+                </div>
+                <div className="form">
+                  <label>
+                    Enable Skills
+                    <input value={skillsToEnable} onChange={(event) => setSkillsToEnable(event.target.value)} />
+                  </label>
+                  <button disabled={enableSkills.isPending} onClick={() => enableSkills.mutate()} type="button">启用技能</button>
+                  <button disabled={syncSkills.isPending} onClick={() => syncSkills.mutate()} type="button">同步技能</button>
+                  <label>
+                    Private Skill Name
+                    <input value={privateSkillName} onChange={(event) => setPrivateSkillName(event.target.value)} />
+                  </label>
+                  <label>
+                    Private Skill Markdown
+                    <textarea value={privateSkillMarkdown} onChange={(event) => setPrivateSkillMarkdown(event.target.value)} />
+                  </label>
+                  <button disabled={!privateSkillName.trim() || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">创建私有技能</button>
+                </div>
+              </section>
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
                   <div>

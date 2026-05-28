@@ -262,7 +262,7 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.configRevisions("agent-1");
     await agentsApi.configRevision("agent-1", "revision-1");
     await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
-    await agentsApi.resetSession("agent-1", { taskKey: "task-1", forceFreshSession: true });
+    await agentsApi.resetSession("agent-1", { taskKey: "task-1" });
     await heartbeatApi.wakeup("agent-1", { reason: "manual" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -280,7 +280,7 @@ describe("agent and heartbeat APIs", () => {
       "/api/agents/agent-1/runtime-state/reset-session",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ taskKey: "task-1", forceFreshSession: true }),
+        body: JSON.stringify({ taskKey: "task-1" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -290,6 +290,58 @@ describe("agent and heartbeat APIs", () => {
         method: "POST",
         body: JSON.stringify({ reason: "manual" }),
       }),
+    );
+  });
+
+  it("covers runtime adapter and skills management routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "gpt-5", label: "GPT-5" }]))
+      .mockReturnValueOnce(jsonResponse({ type: "codex_local", capabilities: { models: true } }))
+      .mockReturnValueOnce(jsonResponse({ provider: "openai", ok: false, windows: [] }))
+      .mockReturnValueOnce(jsonResponse({ agentRuntimeType: "http", status: "pass", checks: [] }))
+      .mockReturnValueOnce(jsonResponse({ desiredSkills: [], entries: [] }))
+      .mockReturnValueOnce(jsonResponse({ desiredSkills: ["review"], entries: [] }))
+      .mockReturnValueOnce(jsonResponse({ desiredSkills: ["review", "debug"], entries: [] }))
+      .mockReturnValueOnce(jsonResponse({ key: "private:incident" }, 201))
+      .mockReturnValueOnce(jsonResponse({ totalCount: 0, skills: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await agentsApi.adapterModels("org-1", "codex_local");
+    await agentsApi.adapterMetadata("org-1", "codex_local");
+    await agentsApi.adapterQuotaWindows("org-1", "codex_local");
+    await agentsApi.testAdapterEnvironment("org-1", "http", { url: "https://example.test" });
+    await agentsApi.skills("agent-1");
+    await agentsApi.syncSkills("agent-1", ["review"]);
+    await agentsApi.enableSkills("agent-1", ["debug"]);
+    await agentsApi.createPrivateSkill("agent-1", { name: "Incident", markdown: "# Incident" });
+    await agentsApi.skillsAnalytics("agent-1", 14);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/adapters/codex_local/models",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/orgs/org-1/adapters/http/test-environment",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agentRuntimeConfig: { url: "https://example.test" } }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/agents/agent-1/skills/sync",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ desiredSkills: ["review"] }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
+      "/api/agents/agent-1/skills/analytics?windowDays=14",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 });
