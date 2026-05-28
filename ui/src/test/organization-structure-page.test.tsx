@@ -1,4 +1,5 @@
 import { cleanup, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
 
@@ -140,7 +141,16 @@ it("routes an organization root to the empty structure state", async () => {
 it("loads organization settings from the avatar destination route", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1" && init?.method === "GET") {
-      return respond({ id: "org-1", name: "核心团队", description: "核心组织" });
+      return respond({
+        id: "org-1",
+        name: "核心团队",
+        description: "核心组织",
+        requireBoardApprovalForNewAgents: true,
+        defaultChatIssueCreationMode: "manual",
+      });
+    }
+    if (path === "/api/orgs/org-1" && init?.method === "PATCH") {
+      return respond({ id: "org-1", name: "核心团队" });
     }
     return respond([]);
   });
@@ -149,6 +159,18 @@ it("loads organization settings from the avatar destination route", async () => 
   renderApp("/orgs/org-1/settings");
 
   expect(await screen.findByDisplayValue("核心团队")).toBeInTheDocument();
+  expect(screen.getByLabelText("新建智能体需要审批")).toBeChecked();
+  expect(screen.getByLabelText("默认聊天任务创建模式")).toHaveValue("manual");
+  await userEvent.click(screen.getByLabelText("新建智能体需要审批"));
+  await userEvent.selectOptions(screen.getByLabelText("默认聊天任务创建模式"), "disabled");
+  await userEvent.click(screen.getByRole("button", { name: "保存组织" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"requireBoardApprovalForNewAgents":false'),
+    }),
+  );
   expect(screen.getByRole("button", { name: "保存组织" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
 });
