@@ -155,3 +155,30 @@ class ResetAgentSessionPayload(TypedDict, total=False):
 
 class ResetAgentSessionResult(AgentRuntimeState):
     clearedTaskSessions: int
+
+
+class AgentRuntimeModel(TypedDict):
+    id: str
+    label: str
+
+
+class AgentRuntimeEnvironmentCheck(TypedDict, total=False):
+    id: str
+    label: str
+    status: str
+    message: str
+    hint: str | None
+
+
+class AgentRuntimeEnvironmentTestResult(TypedDict):
+    agentRuntimeType: str
+    status: str
+    checks: list[AgentRuntimeEnvironmentCheck]
+
+
+class AgentSkillSnapshot(TypedDict):
+    agentRuntimeType: str
+    supported: bool
+    desiredSkills: list[str]
+    entries: list[dict[str, Any]]
+    warnings: list[str]

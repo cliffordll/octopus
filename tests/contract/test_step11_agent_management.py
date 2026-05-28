@@ -639,6 +639,7 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert [event["eventType"] for event in events] == [
         "lifecycle",
         "adapter.invoke",
+        "lifecycle",
         "log",
         "lifecycle",
     ]

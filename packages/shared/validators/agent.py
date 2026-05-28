@@ -134,3 +134,28 @@ def validate_reset_agent_session(
     if isinstance(result.get("taskKey"), str):
         result["taskKey"] = result["taskKey"].strip() or None
     return cast(ResetAgentSessionPayload, result)
+
+
+def validate_test_agent_runtime_environment(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    _reject_unknown_fields(payload, {"agentRuntimeConfig"})
+    _record(payload, "agentRuntimeConfig")
+    return {"agentRuntimeConfig": dict(payload.get("agentRuntimeConfig", {}))}
+
+
+def validate_agent_skills_sync(payload: Mapping[str, Any]) -> dict[str, list[str]]:
+    _reject_unknown_fields(payload, {"skills"})
+    skills = payload.get("skills", [])
+    if not isinstance(skills, list) or any(
+        not isinstance(skill, str) or not skill.strip() for skill in skills
+    ):
+        raise ValueError("'skills' must be an array of non-empty strings")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        normalized = skill.strip()
+        if normalized not in seen:
+            seen.add(normalized)
+            deduped.append(normalized)
+    return {"skills": deduped}
