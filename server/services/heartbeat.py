@@ -55,6 +55,7 @@ from packages.shared.types.heartbeat import (
 )
 
 from .agents import AgentConflictError
+from .workspaces import WorkspaceService
 
 
 class HeartbeatService:
@@ -534,6 +535,7 @@ class HeartbeatService:
                     "triggeredBy": actor_type,
                     "actorId": actor_id,
                     "forceFreshSession": payload.get("forceFreshSession", False),
+                    **self._payload_context(payload.get("payload")),
                 },
             },
         )
@@ -617,14 +619,47 @@ class HeartbeatService:
 
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
+            workspace_context = await self._prepare_workspace_context(running)
+            runtime_config = dict(agent.agent_runtime_config)
+            workspace_env = None
+            workspace_payload = None
+            if workspace_context is not None:
+                workspace_payload = workspace_context.get("workspace")
+                env_payload = (
+                    workspace_payload.get("env")
+                    if isinstance(workspace_payload, dict)
+                    else None
+                )
+                workspace_env = (
+                    cast(dict[str, str], env_payload)
+                    if isinstance(env_payload, dict)
+                    else None
+                )
+                workspace_data = (
+                    workspace_payload.get("rudderWorkspace")
+                    if isinstance(workspace_payload, dict)
+                    else None
+                )
+                if (
+                    isinstance(workspace_data, dict)
+                    and isinstance(workspace_data.get("cwd"), str)
+                    and "cwd" not in runtime_config
+                ):
+                    runtime_config["cwd"] = workspace_data["cwd"]
             result = await adapter.execute(
                 RuntimeExecutionContext(
                     run_id=running.id,
                     agent_id=agent.id,
                     org_id=agent.org_id,
                     agent_name=agent.name,
-                    config=agent.agent_runtime_config,
+                    config=runtime_config,
                     on_log=on_log,
+                    env=workspace_env,
+                    workspace=(
+                        cast(dict[str, Any], workspace_payload)
+                        if isinstance(workspace_payload, dict)
+                        else None
+                    ),
                     cancel_event=cancellation,
                     on_process_started=on_process_started,
                 )
@@ -752,6 +787,38 @@ class HeartbeatService:
             payload={"agentRuntimeType": agent.agent_runtime_type},
         )
 
+    async def _prepare_workspace_context(
+        self, running: HeartbeatRunRow
+    ) -> dict[str, Any] | None:
+        workspace_context = await WorkspaceService(
+            self._session
+        ).prepare_runtime_context_for_run(running.id, running.context_snapshot)
+        if workspace_context is None:
+            return None
+        next_snapshot = dict(running.context_snapshot or {})
+        next_snapshot.update(workspace_context)
+        updated = await update_run(
+            self._session,
+            running.id,
+            {"context_snapshot": next_snapshot},
+        )
+        if updated is not None:
+            running.context_snapshot = updated.context_snapshot
+        workspace_payload = workspace_context.get("workspace")
+        workspace_id = workspace_context.get("executionWorkspaceId")
+        await self._append_event(
+            running,
+            await self._next_event_sequence(running.id),
+            "workspace.preflight",
+            message="workspace context prepared",
+            level="info",
+            payload={
+                "executionWorkspaceId": workspace_id,
+                "projectWorkspaceId": workspace_context.get("projectWorkspaceId"),
+            },
+        )
+        return workspace_context if isinstance(workspace_payload, dict) else None
+
     async def _next_event_sequence(self, run_id: str) -> int:
         events = await list_run_events(self._session, run_id, limit=1000)
         return (events[-1].seq if events else 0) + 1
@@ -874,6 +941,20 @@ class HeartbeatService:
             "requested_by_actor_id": actor_id,
             "idempotency_key": payload.get("idempotencyKey"),
         }
+
+    def _payload_context(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return {}
+        context: dict[str, Any] = {}
+        for source_key, target_key in (
+            ("issueId", "issueId"),
+            ("primaryIssueId", "primaryIssueId"),
+            ("projectId", "projectId"),
+        ):
+            value = payload.get(source_key)
+            if isinstance(value, str) and value:
+                context[target_key] = value
+        return context
 
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
         return {

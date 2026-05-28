@@ -15,6 +15,8 @@ class RuntimeExecutionContext:
     agent_name: str
     config: dict[str, Any]
     on_log: Callable[[str, str], Awaitable[None]]
+    env: dict[str, str] | None = None
+    workspace: dict[str, Any] | None = None
     cancel_event: asyncio.Event | None = None
     on_process_started: Callable[[int, datetime], Awaitable[None]] | None = None
 
