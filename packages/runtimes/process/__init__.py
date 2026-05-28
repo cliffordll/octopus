@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import shlex
+from datetime import UTC, datetime
 from typing import Any
 
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
@@ -40,6 +41,8 @@ class ProcessRuntimeAdapter:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        if context.on_process_started is not None and process.pid is not None:
+            await context.on_process_started(process.pid, datetime.now(UTC))
         communication = asyncio.create_task(process.communicate())
         try:
             cancelled = (
