@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from packages.shared.api_paths.chats import (
     CHAT_DETAIL_PATH,
     CHAT_MESSAGES_PATH,
+    CHAT_USER_STATE_PATH,
     ORG_CHAT_LIST_PATH,
 )
 from packages.shared.types.chat import (
@@ -17,6 +18,8 @@ from packages.shared.types.chat import (
 from packages.shared.validators.chat import (
     validate_add_chat_message,
     validate_create_chat_conversation,
+    validate_update_chat_conversation,
+    validate_update_chat_conversation_user_state,
 )
 
 from ..dependencies.access import (
@@ -31,9 +34,13 @@ router = APIRouter(tags=["chats"])
 
 
 async def _get_conversation_or_404(
-    conversation_id: str, *, request: Request, service: ChatService
+    conversation_id: str,
+    *,
+    request: Request,
+    service: ChatService,
+    user_id: str | None = None,
 ) -> ChatConversation:
-    conversation = await service.get(conversation_id)
+    conversation = await service.get(conversation_id, user_id=user_id)
     if conversation is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -45,11 +52,15 @@ async def _get_conversation_or_404(
 
 @router.get(ORG_CHAT_LIST_PATH)
 async def list_chats_route(
+    request: Request,
     orgId: str,
+    status: str = "active",
+    q: str | None = None,
     _: None = Depends(require_organization_access),
     service: ChatService = Depends(get_chat_service),
 ) -> list[ChatConversation]:
-    return await service.list_for_org(orgId)
+    actor = require_actor_identity(request)
+    return await service.list_for_org(orgId, status=status, q=q, user_id=actor.actor_id)
 
 
 @router.post(ORG_CHAT_LIST_PATH, status_code=status.HTTP_201_CREATED)
@@ -78,7 +89,65 @@ async def get_chat_route(
     request: Request,
     service: ChatService = Depends(get_chat_service),
 ) -> ChatConversation:
-    return await _get_conversation_or_404(id, request=request, service=service)
+    actor = require_actor_identity(request)
+    return await _get_conversation_or_404(
+        id, request=request, service=service, user_id=actor.actor_id
+    )
+
+
+@router.patch(CHAT_DETAIL_PATH)
+async def update_chat_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> ChatConversation:
+    current = await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_update_chat_conversation(body)
+        actor = require_actor_identity(request)
+        updated = await service.update(
+            current["id"],
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return updated
+
+
+@router.patch(CHAT_USER_STATE_PATH)
+async def update_chat_user_state_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> ChatConversation:
+    current = await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_update_chat_conversation_user_state(body)
+        actor = require_actor_identity(request)
+        updated = await service.update_user_state(
+            current["id"], payload, user_id=actor.actor_id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return updated
 
 
 @router.get(CHAT_MESSAGES_PATH)
