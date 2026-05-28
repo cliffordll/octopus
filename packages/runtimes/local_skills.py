@@ -152,7 +152,16 @@ def _sync_local_cli_credential_home_entries(
 
 
 def _ensure_link_or_copy(source: Path, target: Path) -> bool:
-    if target.exists() or target.is_symlink():
+    if target.is_symlink():
+        try:
+            linked = Path(os.readlink(target))
+        except OSError:
+            linked = Path()
+        resolved = linked if linked.is_absolute() else (target.parent / linked)
+        if _same_path(resolved, source):
+            return False
+        target.unlink(missing_ok=True)
+    elif target.exists():
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     try:

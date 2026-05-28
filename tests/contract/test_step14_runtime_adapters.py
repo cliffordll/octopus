@@ -148,6 +148,92 @@ async def test_adapter_models_and_environment_routes(
     assert unavailable_quota["ok"] is False
 
 
+async def test_local_runtime_environment_reports_cwd_command_and_auth_checks(
+    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    cwd = tmp_path / "workspace"
+    missing_cwd = tmp_path / "missing"
+    cwd.mkdir()
+
+    claude_code, claude = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/claude_local/test-environment",
+        json={
+            "agentRuntimeConfig": {
+                "cwd": str(cwd),
+                "command": sys.executable,
+                "env": {"ANTHROPIC_API_KEY": "test-key"},
+            }
+        },
+    )
+    opencode_code, opencode = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/opencode_local/test-environment",
+        json={
+            "agentRuntimeConfig": {
+                "cwd": str(missing_cwd),
+                "command": "definitely-missing-opencode",
+            }
+        },
+    )
+
+    assert claude_code == 200
+    assert claude["status"] == "ok"
+    claude_checks = {check["id"]: check for check in claude["checks"]}
+    assert claude_checks["cwd"]["status"] == "ok"
+    assert claude_checks["command"]["status"] == "ok"
+    assert claude_checks["auth"]["status"] == "ok"
+
+    assert opencode_code == 200
+    assert opencode["status"] == "failed"
+    opencode_checks = {check["id"]: check for check in opencode["checks"]}
+    assert opencode_checks["cwd"]["status"] == "failed"
+    assert opencode_checks["command"]["status"] == "failed"
+    assert opencode_checks["auth"]["status"] == "warning"
+
+    codex_code, codex = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/codex_local/test-environment",
+        json={
+            "agentRuntimeConfig": {
+                "cwd": str(cwd),
+                "command": sys.executable,
+                "env": {"OPENAI_API_KEY": "test-key"},
+            }
+        },
+    )
+    assert codex_code == 200
+    assert codex["status"] == "ok"
+    codex_checks = {check["id"]: check for check in codex["checks"]}
+    assert codex_checks["cwd"]["status"] == "ok"
+    assert codex_checks["command"]["status"] == "ok"
+    assert codex_checks["auth"]["status"] == "ok"
+
+
+async def test_http_environment_validates_url_shape(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/adapters/http/test-environment",
+        json={"agentRuntimeConfig": {"url": "not-a-url"}},
+    )
+
+    assert code == 200
+    assert result["status"] == "failed"
+    checks = {check["id"]: check for check in result["checks"]}
+    assert checks["url"]["status"] == "failed"
+
+
 async def test_agent_skills_snapshot_and_sync_routes(
     app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
 ) -> None:
