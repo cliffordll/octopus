@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import ActivityLog, Base, Organization
+from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
 from server.app import create_app
 
 
@@ -167,4 +167,9 @@ async def test_agent_skills_snapshot_and_sync_routes(
         actions = [
             row.action for row in (await session.execute(select(ActivityLog))).scalars()
         ]
+        skill_keys = [
+            row.skill_key
+            for row in (await session.execute(select(AgentEnabledSkill))).scalars()
+        ]
     assert "agent.skills_synced" in actions
+    assert skill_keys == ["review", "debug"]

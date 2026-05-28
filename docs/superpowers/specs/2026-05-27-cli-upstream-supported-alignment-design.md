@@ -2,7 +2,7 @@
 
 ## 目标
 
-在不修改 `server/`、`packages/` 或 API 契约的前提下，将 Python CLI 的命令面向上游 Rudder 中已经存在、且本项目服务端已经支持的能力靠齐。
+在不修改 `server/`、`packages/` 或 API 契约的前提下，将 Python CLI 的命令面向上游控制面中已经存在、且本项目服务端已经支持的能力靠齐。
 
 ## 范围
 

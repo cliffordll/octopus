@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -421,12 +421,13 @@ async def get_agent_skills_route(
     _: None = Depends(require_board_access),
     service: AgentService = Depends(get_agent_service),
 ) -> AgentSkillSnapshot:
-    agent = await _get_agent_or_404(id, request=request, service=service)
-    snapshot = await get_runtime_adapter(agent["agentRuntimeType"]).list_skills(
-        agent["agentRuntimeConfig"]
-    )
-    snapshot["desiredSkills"] = agent["desiredSkills"]
-    return cast(AgentSkillSnapshot, snapshot)
+    await _get_agent_or_404(id, request=request, service=service)
+    snapshot = await service.get_skill_snapshot(id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return snapshot
 
 
 @router.post(AGENT_SKILLS_SYNC_PATH)
@@ -445,20 +446,17 @@ async def sync_agent_skills_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     actor = require_actor_identity(request)
-    updated = await service.sync_desired_skills(
+    snapshot = await service.sync_skills(
         id,
         payload["desiredSkills"],
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
     )
-    if updated is None:
+    if snapshot is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
-    snapshot = await get_runtime_adapter(updated["agentRuntimeType"]).sync_skills(
-        updated["agentRuntimeConfig"], updated["desiredSkills"]
-    )
-    return cast(AgentSkillSnapshot, snapshot)
+    return snapshot
 
 
 async def _invoke_agent(

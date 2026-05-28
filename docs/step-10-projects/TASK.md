@@ -20,7 +20,7 @@
 
 ## 上游证据
 
-对照仓库：`D:\coding\rudder`。对照版本：`rudder@423ac762def58685300308890782ec67b76f9ee0`，提交日期 `2026-05-22`。
+对照仓库：本地上游参考仓库。对照版本：`423ac762def58685300308890782ec67b76f9ee0`，提交日期 `2026-05-22`。
 
 | 契约区域 | 上游证据路径 | 已确认结论 |
 | --- | --- | --- |
@@ -30,7 +30,7 @@
 | Service behavior | `server/src/services/projects.ts` | 创建分配默认 color、派生 `urlKey`、同步 goal links/resource attachments，并在响应中装载 goals/resources/workspaces |
 | Tests | `server/src/__tests__/project-routes.test.ts`；`server/src/__tests__/project-shortname-resolution.test.ts`；`server/src/__tests__/projects-service.test.ts` | 创建忽略 legacy `workspace` 输入、resource attachment、副作用与 shortname 行为可对照验证 |
 
-Rudder 上游与当前 Python 仓库均使用 `organization` / `org_id` 和 `/api/orgs/{orgId}/...` 表达业务作用域。Step 10 不存在 `company` 到 `organization` 的额外改名适配；API path、字段和访问语义直接按 Rudder 对齐。
+上游与当前 Python 仓库均使用 `organization` / `org_id` 和 `/api/orgs/{orgId}/...` 表达业务作用域。Step 10 不存在 `company` 到 `organization` 的额外改名适配；API path、字段和访问语义直接按上游对齐。
 
 ## 上游数据模型
 
@@ -68,7 +68,7 @@ Rudder 上游与当前 Python 仓库均使用 `organization` / `org_id` 和 `/ap
 | `PATCH /api/projects/{id}/resources/{attachmentId}` | 更新 resource attachment | `project.resource.updated` activity |
 | `DELETE /api/projects/{id}/resources/{attachmentId}` | 移除 resource attachment | `project.resource.detached` activity |
 
-Rudder 的 Project route 不提供 workspace mutation endpoint；但 Project service 在 list/detail/create/update 返回中装载 workspace 和 runtime service 信息。Workspace 的独立写入与运行行为仍需按 Step 15 核对相应上游入口。
+上游 Project route 不提供 workspace mutation endpoint；但 Project service 在 list/detail/create/update 返回中装载 workspace 和 runtime service 信息。Workspace 的独立写入与运行行为仍需按 Step 15 核对相应上游入口。
 
 路由还支持在 organization context 内使用 project `urlKey`/shortname 解析 `:id`；重名解析为歧义时返回冲突错误。此行为属于 project 核心 lookup 契约，应纳入 Step 10 的 route/service 测试。
 
@@ -82,21 +82,21 @@ Rudder 的 Project route 不提供 workspace mutation endpoint；但 Project ser
 
 ## 阶段切分决策
 
-Rudder 的 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`codebase`、`workspaces` 与 `primaryWorkspace`。当前开发计划将 Goal 放在 Step 12、Workspace 放在 Step 15，且尚未为 organization resource / project resource attachment 指定独立步骤。Step 10 若只实现基础 CRUD，将不能完整匹配上游 Project response。
+上游 Project 主响应已经聚合 `goalIds` / `goals`、`resources`、`codebase`、`workspaces` 与 `primaryWorkspace`。当前开发计划将 Goal 放在 Step 12、Workspace 放在 Step 15，且尚未为 organization resource / project resource attachment 指定独立步骤。Step 10 若只实现基础 CRUD，将不能完整匹配上游 Project response。
 
 推荐采用分阶段兼容方案：
 
 - Step 10 实现 project 主表、状态/基础字段、组织作用域、核心 CRUD、`urlKey` lookup、activity 和已存在 issue `projectId` 的主对象边界。
-- Step 10 同时纳入 resource attachment contract 与 API，因为该能力由 Rudder 的 Project route 直接暴露，且 `resources` 是 Project response 的正式字段。
+- Step 10 同时纳入 resource attachment contract 与 API，因为该能力由上游 Project route 直接暴露，且 `resources` 是 Project response 的正式字段。
 - Step 10 在 contract 文档和测试中明确标记 goal/workspace 聚合字段尚未启用，不用本地替代结构伪装完整上游 response。
 - Step 12 接入 `goalId` / `goalIds` / `goals` 关系行为。
 - Step 15 接入 `codebase`、`workspaces`、`primaryWorkspace`、execution workspace policy 的执行行为。
 
-若要求 Step 10 首次交付即完整匹配 Rudder 的 Project response，则必须把 Goal 关联和 Workspace 响应装载前移到 Step 10，并同步重写 `docs/FEATURE.md` 的阶段安排。代码开发前需确认采用哪一种方案。
+若要求 Step 10 首次交付即完整匹配上游 Project response，则必须把 Goal 关联和 Workspace 响应装载前移到 Step 10，并同步重写 `docs/FEATURE.md` 的阶段安排。代码开发前需确认采用哪一种方案。
 
 ## 本步范围
 
-按已冻结的 Rudder 契约，Step 10 只实现以下类别中被上游确认存在的能力：
+按已冻结的上游契约，Step 10 只实现以下类别中被上游确认存在的能力：
 
 - organization 范围内的 project 列表和详情读取。
 - project 创建和可更新字段的 mutation 行为。

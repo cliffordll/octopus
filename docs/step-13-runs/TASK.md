@@ -4,7 +4,7 @@
 
 ## 上游依据
 
-- 参考工程：`D:\coding\rudder`
+- 参考工程：本地上游参考仓库
 - 关键实现：`server/src/services/runtime-kernel/heartbeat.*.ts`、`server/src/routes/agents.management-routes.ts`
 - 关键表结构：`packages/db/src/schema/agent_wakeup_requests.ts`、`packages/db/src/schema/heartbeat_runs.ts`
 

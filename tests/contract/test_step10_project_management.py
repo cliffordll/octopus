@@ -49,7 +49,7 @@ def test_project_contract_modules_are_defined() -> None:
         validators.validate_create_project({"name": "Invalid", "status": "unknown"})
 
 
-def test_project_tables_match_rudder_step10_scope() -> None:
+def test_project_tables_match_upstream_step10_scope() -> None:
     table_names = {table.name for table in Base.metadata.sorted_tables}
     assert "projects" in table_names
     assert "organization_resources" in table_names

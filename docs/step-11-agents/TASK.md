@@ -8,7 +8,7 @@
 
 ## 上游证据范围
 
-以本地上游参考源码 `D:\coding\rudder` 为准，开发前逐项核对：
+以本地上游参考源码为准，开发前逐项核对：
 
 - Schema：`packages/db/src/schema/agents.ts`、`agent_config_revisions.ts`、`agent_runtime_state.ts`、`agent_task_sessions.ts`、`agent_wakeup_requests.ts`、`agent_api_keys.ts`。
 - Contract：`packages/shared/src/types/agent.ts`、`packages/shared/src/validators/agent.ts`、`packages/shared/src/constants.ts`。
@@ -29,7 +29,7 @@
 
 - 落地 agent contract、schema/query、migration、organization scope 与管理 API。
 - 实现创建、读取、更新、暂停、恢复、终止等已证实的生命周期行为。
-- 实现 manager/reporting 关系、workspace key 或同类已证实约束时，仅按上游行为落地，不引入 ownership 或 pod。
+- 实现 manager/reporting 关系、workspace key 或同类已证实约束时，仅按上游行为落地，不引入额外归属或聚合模型。
 
 实施记录：
 
