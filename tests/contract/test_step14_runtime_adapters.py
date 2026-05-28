@@ -195,11 +195,11 @@ async def test_agent_skills_snapshot_and_sync_routes(
     assert snapshot["supported"] is True
     assert snapshot["mode"] == "ephemeral"
     assert snapshot["desiredSkills"] == ["review"]
-    assert snapshot["entries"][0]["key"] == "review"
-    assert snapshot["entries"][0]["selectionKey"] == "review"
-    assert snapshot["entries"][0]["runtimeName"] == "review"
-    assert snapshot["entries"][0]["desired"] is True
-    assert snapshot["entries"][0]["state"] == "configured"
+    snapshot_entries = {entry["key"]: entry for entry in snapshot["entries"]}
+    assert snapshot_entries["review"]["selectionKey"] == "review"
+    assert snapshot_entries["review"]["runtimeName"] == "review"
+    assert snapshot_entries["review"]["desired"] is True
+    assert snapshot_entries["review"]["state"] == "configured"
     assert sync_code == 200
     assert sync["desiredSkills"] == ["review", "debug"]
 
@@ -253,9 +253,50 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
         "skill-optimizer",
     }.issubset(entries)
     assert entries["conversation-to-skill"]["desired"] is True
-    assert entries["conversation-to-skill"]["state"] == "configured"
+    assert entries["conversation-to-skill"]["state"] == "missing"
     assert entries["conversation-to-skill"]["sourceClass"] == "bundled"
     assert entries["conversation-to-skill"]["readOnly"] is True
+
+
+async def test_codex_skills_sync_materializes_desired_bundled_skill(
+    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    codex_home = tmp_path / "codex-home"
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Codex Skill Agent",
+            "agentRuntimeType": "codex_local",
+            "agentRuntimeConfig": {"env": {"CODEX_HOME": str(codex_home)}},
+        },
+    )
+
+    snapshot_code, snapshot = await _request(
+        application, "GET", f"/api/agents/{agent['id']}/skills"
+    )
+    target = codex_home / "skills" / "conversation-to-skill" / "SKILL.md"
+    assert snapshot_code == 200
+    assert target.exists() is False
+
+    sync_code, sync = await _request(
+        application,
+        "POST",
+        f"/api/agents/{agent['id']}/skills/sync",
+        json={"desiredSkills": ["conversation-to-skill"]},
+    )
+
+    assert sync_code == 200
+    assert target.is_file()
+    entries = {entry["key"]: entry for entry in sync["entries"]}
+    assert entries["conversation-to-skill"]["state"] == "installed"
+    assert entries["conversation-to-skill"]["managed"] is True
+    assert entries["conversation-to-skill"]["targetPath"] == str(
+        codex_home / "skills" / "conversation-to-skill"
+    )
 
 
 async def test_agent_skills_enable_private_and_analytics_routes(

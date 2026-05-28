@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ..common import RuntimeCapabilityMixin, skill_snapshot_from_root
@@ -26,14 +27,25 @@ class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
         ]
 
     def _skill_snapshot(
-        self, config: dict[str, Any], desired_skills: list[str]
+        self,
+        config: dict[str, Any],
+        desired_skills: list[str],
+        *,
+        materialize: bool,
     ) -> dict[str, Any]:
         return skill_snapshot_from_root(
             runtime_type=self.type,
             config=config,
             desired_skills=desired_skills,
             mode="persistent",
-            location_label="CODEX_HOME/skills",
+            location_label="managed CODEX_HOME/skills",
+            skills_home=_codex_skills_home(config),
+            materialize=materialize,
+            installed_detail="Enabled for this agent and materialized into the managed Codex skills home.",
+            missing_detail="Configured but not currently linked into the managed Codex skills home.",
+            external_conflict_detail="Skill name is occupied by a non-managed entry inside the managed Codex skills home.",
+            external_detail="Installed outside this project's management.",
+            persistent_materialization=True,
         )
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
@@ -234,3 +246,31 @@ def _string(value: Any) -> str | None:
 
 def _first_line(value: str) -> str | None:
     return next((line.strip() for line in value.splitlines() if line.strip()), None)
+
+
+def _codex_skills_home(config: dict[str, Any]) -> Path:
+    configured_home = _env_value(config, "CODEX_HOME")
+    if configured_home:
+        return Path(configured_home).expanduser().resolve() / "skills"
+    context = config.get("_octopus")
+    org_id = "default-org"
+    agent_id = "default-agent"
+    if isinstance(context, dict):
+        org_id = _string(context.get("orgId")) or org_id
+        agent_id = _string(context.get("agentId")) or agent_id
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "runtime-homes"
+        / "codex_local"
+        / org_id
+        / agent_id
+        / "skills"
+    )
+
+
+def _env_value(config: dict[str, Any], key: str) -> str | None:
+    env = config.get("env")
+    if isinstance(env, dict):
+        return _string(env.get(key))
+    return None
