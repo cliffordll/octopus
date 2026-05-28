@@ -11,12 +11,19 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Issue, Organization, WorkspaceRuntimeService
+from packages.database.schema import (
+    Base,
+    Issue,
+    IssueWorkProduct,
+    Organization,
+    WorkspaceRuntimeService,
+)
 from packages.database.queries.workspaces import list_workspace_operations_for_run
 from packages.runtimes.types import RuntimeExecutionResult
 import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
+from server.services.issues import IssueService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
 
@@ -302,6 +309,16 @@ async def test_adapter_runtime_services_are_persisted_and_released(
                         "url": "http://127.0.0.1:8001",
                     }
                 ],
+                work_products=[
+                    {
+                        "type": "preview_url",
+                        "provider": "custom",
+                        "title": "Preview",
+                        "url": "http://127.0.0.1:8001",
+                        "status": "active",
+                        "isPrimary": True,
+                    }
+                ],
             )
 
         async def test_environment(self, config):
@@ -391,6 +408,17 @@ async def test_adapter_runtime_services_are_persisted_and_released(
                 await session.execute(text("select id from workspace_runtime_services"))
             ).all()
             service = await session.get(WorkspaceRuntimeService, "svc-report-1")
+            product = (
+                await session.execute(
+                    text("select id from issue_work_products limit 1")
+                )
+            ).first()
+            product_row = (
+                await session.get(IssueWorkProduct, product[0])
+                if product is not None
+                else None
+            )
+            detail = await IssueService(session).get_by_id(issue.id)
             await session.commit()
     finally:
         await engine.dispose()
@@ -406,6 +434,15 @@ async def test_adapter_runtime_services_are_persisted_and_released(
     assert service.status == "stopped"
     assert service.health_status == "unknown"
     assert (run["resultJson"] or {})["runtimeServices"][0]["id"] == "svc-report-1"
+    assert detail is not None
+    assert product_row is not None
+    assert product_row.issue_id == detail["id"]
+    assert product_row.execution_workspace_id == run["contextSnapshot"][
+        "executionWorkspaceId"
+    ]
+    assert product_row.created_by_run_id == run["id"]
+    assert (run["resultJson"] or {})["workProducts"][0]["id"] == product_row.id
+    assert detail["workProducts"][0]["id"] == product_row.id
 
 
 async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> None:

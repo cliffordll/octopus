@@ -11,10 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.projects import get_project_by_id
 from packages.database.queries.workspaces import (
     create_execution_workspace,
+    create_issue_work_product,
     create_workspace_operation,
     create_workspace_runtime_service,
     get_execution_workspace_by_id,
     list_execution_workspaces,
+    list_issue_work_products,
     list_project_workspaces,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
@@ -24,6 +26,7 @@ from packages.database.queries.workspaces import (
 from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
+    IssueWorkProduct,
     WorkspaceOperation,
     WorkspaceRuntimeService,
 )
@@ -33,6 +36,7 @@ from packages.shared.constants.workspace import (
     ExecutionWorkspaceStrategyType,
 )
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
+from packages.shared.types.workspace import IssueWorkProduct as IssueWorkProductData
 from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
 from packages.shared.types.workspace import WorkspaceRuntimeService as RuntimeServiceData
 
@@ -405,6 +409,70 @@ class WorkspaceService:
         )
         return [self._to_runtime_service(row) for row in rows]
 
+    async def list_work_products_for_issue(
+        self, issue_id: str
+    ) -> list[IssueWorkProductData]:
+        rows = await list_issue_work_products(self._session, issue_id)
+        return [self._to_work_product(row) for row in rows]
+
+    async def persist_run_work_products(
+        self,
+        *,
+        run_id: str,
+        context_snapshot: dict[str, Any] | None,
+        products: list[dict[str, Any]] | None,
+    ) -> list[IssueWorkProductData]:
+        if not products:
+            return []
+        snapshot = dict(context_snapshot or {})
+        issue_id = snapshot.get("issueId") or snapshot.get("primaryIssueId")
+        if not isinstance(issue_id, str) or not issue_id:
+            return []
+        issue = await self._session.get(Issue, issue_id)
+        if issue is None:
+            return []
+        workspace_context = snapshot.get("workspace")
+        workspace = (
+            workspace_context.get("rudderWorkspace")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        stored: list[IssueWorkProductData] = []
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            title = _string(product.get("title"))
+            product_type = _string(product.get("type"))
+            provider = _string(product.get("provider")) or "rudder"
+            if not title or not product_type:
+                continue
+            row = await create_issue_work_product(
+                self._session,
+                {
+                    "org_id": issue.org_id,
+                    "project_id": product.get("projectId") or issue.project_id,
+                    "issue_id": issue.id,
+                    "execution_workspace_id": product.get("executionWorkspaceId")
+                    or (workspace.get("id") if isinstance(workspace, dict) else None),
+                    "runtime_service_id": product.get("runtimeServiceId"),
+                    "type": product_type,
+                    "provider": provider,
+                    "external_id": product.get("externalId"),
+                    "title": title,
+                    "url": product.get("url"),
+                    "status": _string(product.get("status")) or "active",
+                    "review_state": _string(product.get("reviewState")) or "none",
+                    "is_primary": bool(product.get("isPrimary")),
+                    "health_status": _string(product.get("healthStatus"))
+                    or "unknown",
+                    "summary": product.get("summary"),
+                    "metadata_json": product.get("metadata"),
+                    "created_by_run_id": run_id,
+                },
+            )
+            stored.append(self._to_work_product(row))
+        return stored
+
     async def begin_operation(
         self,
         *,
@@ -625,6 +693,30 @@ class WorkspaceService:
             "metadata": row.metadata_json,
             "startedAt": row.started_at.isoformat(),
             "finishedAt": _iso(row.finished_at),
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    def _to_work_product(self, row: IssueWorkProduct) -> IssueWorkProductData:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "projectId": row.project_id,
+            "issueId": row.issue_id,
+            "executionWorkspaceId": row.execution_workspace_id,
+            "runtimeServiceId": row.runtime_service_id,
+            "type": cast(Any, row.type),
+            "provider": row.provider,
+            "externalId": row.external_id,
+            "title": row.title,
+            "url": row.url,
+            "status": cast(Any, row.status),
+            "reviewState": cast(Any, row.review_state),
+            "isPrimary": row.is_primary,
+            "healthStatus": cast(Any, row.health_status),
+            "summary": row.summary,
+            "metadata": row.metadata_json,
+            "createdByRunId": row.created_by_run_id,
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }

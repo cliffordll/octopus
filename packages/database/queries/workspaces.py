@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.schema import (
     ExecutionWorkspace,
+    IssueWorkProduct,
     ProjectWorkspace,
     WorkspaceRuntimeService,
     WorkspaceOperation,
@@ -219,3 +220,33 @@ async def list_workspace_operations_for_execution_workspace(
         .order_by(desc(WorkspaceOperation.started_at), desc(WorkspaceOperation.created_at))
     )
     return result.scalars().all()
+
+
+async def list_issue_work_products(
+    session: AsyncSession, issue_id: str
+) -> Sequence[IssueWorkProduct]:
+    result = await session.execute(
+        select(IssueWorkProduct)
+        .where(IssueWorkProduct.issue_id == issue_id)
+        .order_by(desc(IssueWorkProduct.is_primary), desc(IssueWorkProduct.updated_at))
+    )
+    return result.scalars().all()
+
+
+async def create_issue_work_product(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> IssueWorkProduct:
+    if fields.get("is_primary"):
+        await session.execute(
+            update(IssueWorkProduct)
+            .where(
+                IssueWorkProduct.org_id == fields["org_id"],
+                IssueWorkProduct.issue_id == fields["issue_id"],
+                IssueWorkProduct.type == fields["type"],
+            )
+            .values(is_primary=False, updated_at=datetime.now(UTC))
+        )
+    row = IssueWorkProduct(**dict(fields))
+    session.add(row)
+    await session.flush()
+    return row

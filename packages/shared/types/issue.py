@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal, NotRequired, TypedDict
 
 from ..constants.issue import IssueOriginKind, IssuePriority, IssueStatus
+from .workspace import IssueWorkProduct
 
 
 class IssueListItem(TypedDict):
@@ -35,6 +36,7 @@ class IssueDetail(IssueListItem):
     startedAt: str | None
     completedAt: str | None
     createdAt: str
+    workProducts: list[IssueWorkProduct]
 
 
 class ListOrgIssuesQuery(TypedDict, total=False):
