@@ -1,4 +1,4 @@
-# Step 22: Auth / Actor / Access
+# Step 23: Auth / Actor / Access
 
 状态：待开发
 
@@ -16,7 +16,7 @@
 - 不发明上游不存在的角色或授权前置条件。
 - 不在 runtime adapter 内部硬编码真实 secret 来源；adapter 只消费本步骤解析后的受控 env/context。
 - 不把 local agent JWT/API key 作为业务所有权模型；它只用于上游兼容的本地 runtime 调用身份。
-- 基础调试可见性已在 Step 18 提前完成，本步骤只替换身份来源和访问语义，不重做 observability。
+- 基础调试可见性已在 Step 19 提前完成，本步骤只替换身份来源和访问语义，不重做 observability。
 
 ## 验收
 
