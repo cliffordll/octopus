@@ -1,6 +1,6 @@
 # Step 15: Workspace 与执行产物
 
-状态：待开发
+状态：15A-15H 已完成并通过基线验收
 
 ## 上游依据
 
@@ -101,12 +101,23 @@ queued run
 - 将 issue、project、run 需要关联 workspace 的字段纳入数据库查询层；已有字段不得改变语义。
 - Alembic migration 必须支持空库升级，并与 Step 4 migration 流程保持一致。
 
+实施记录：
+
+- `packages/database/schema/workspaces.py` 定义 `project_workspaces`、`execution_workspaces`、`workspace_runtime_services`、`workspace_operations`、`issue_work_products`。
+- `packages/database/migrations/versions/20260528_000007_workspaces.py` 支持空库升级到 workspace schema。
+- `packages/shared/constants/workspace.py`、`packages/shared/types/workspace.py`、`packages/shared/validators/workspace.py` 提供 workspace 枚举、类型和 update payload 校验。
+
 ## 15B：Project Workspace 管理与聚合
 
 - 实现 project workspace 的读取、聚合和 primary workspace 输出。
 - Project detail/list 响应需要返回上游兼容的 workspace 聚合字段，例如 `primaryWorkspace`、`workspaces` 或已在 contract 中确认的等价结构。
 - 不凭空增加上游没有的管理入口；如果上游只通过既有流程创建或维护 workspace，Python 侧也应保持相同入口。
 - 保证 project workspace 受 organization scope 约束，不能跨 organization 读取或关联。
+
+实施记录：
+
+- `server/services/projects.py` 支持 project workspace 创建、primary 切换和 project detail/list 聚合输出。
+- Project 响应已补齐 `workspaces`、`primaryWorkspace`、`codebase` 的最小上游兼容结构。
 
 ## 15C：Execution Workspace 策略解析
 
@@ -115,12 +126,23 @@ queued run
 - 保证每次 run 获得明确 workspace 决策：使用已有 workspace、创建 managed workspace、或返回可解释的 preflight 失败。
 - 策略解析必须幂等，重复触发同一 run 或恢复 run 不应创建不一致的 workspace 记录。
 
+实施记录：
+
+- `server/services/workspaces.py` 实现 `resolve_for_issue()`，按 issue/project policy 解析 `shared_workspace`、`isolated_workspace`、`operator_branch`、`agent_default`。
+- issue 会写回 `execution_workspace_id` 与 `execution_workspace_preference`，重复解析优先复用已有 active/idle/in_review workspace。
+
 ## 15D：Managed Workspace Preflight 与 Runtime Context 注入
 
 - 在 run 真正调用 runtime adapter 前执行 workspace preflight。
 - 构造并注入上游兼容 runtime context/env，包括主 workspace、workspace 列表、workspace source/strategy/id/repo/ref/branch/worktree path，以及 organization workspace/artifacts 目录。
 - 保留 runtime service intents、agent home、instructions、skills 等 Step 14 已建立能力的 context 入口，但不在本步骤重写 adapter 行为。
 - preflight 失败必须写入 run/event/operation 可追踪状态，并阻止 adapter 执行。
+
+实施记录：
+
+- `HeartbeatService._prepare_workspace_context()` 在 adapter 执行前调用 workspace preflight，并将结果写入 run `context_snapshot`。
+- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `RUDDER_WORKSPACE_ID`、`RUDDER_WORKSPACES_JSON`、`RUDDER_ORG_WORKSPACE_ROOT`、`RUDDER_ORG_ARTIFACTS_DIR`。
+- 本地 managed workspace 目录由 `WorkspaceService._ensure_managed_workspace_paths()` 统一生成，不由 route 或 adapter 拼接。
 
 ## 15E：Workspace Runtime Service 生命周期
 
@@ -129,12 +151,23 @@ queued run
 - 将已建立的 runtime service reports 注入 runtime adapter context，供本地 adapter 或后续 UI/CLI 使用。
 - 失败、取消和恢复时必须释放或标记 service 状态，避免遗留 running/in-use 业务记录。
 
+实施记录：
+
+- `RuntimeExecutionResult.runtime_services` 由 heartbeat 执行完成后统一交给 `WorkspaceService.persist_adapter_runtime_services()` 持久化。
+- ephemeral runtime service 在 run 结束、失败、取消或 recovery 收尾时由 `release_runtime_services_for_run()` 标记为 `stopped`。
+
 ## 15F：Workspace Operation 与 Run 关联
 
 - 实现 workspace operation 创建、状态更新、日志记录和查询边界。
 - 将 heartbeat run、execution workspace、workspace runtime service 和 operation 关联起来，方便恢复和审计。
 - 取消、timeout、preflight failure、adapter failure 和 recovery run 都需要有可解释 operation 状态。
 - operation 日志只记录控制面可追踪信息，不替代 Step 18 的附件或对象存储。
+
+实施记录：
+
+- `WorkspaceService.begin_operation()` / `finish_operation()` 记录 preflight 与 adapter execution operation。
+- operation 关联 `heartbeat_run_id` 与 `execution_workspace_id`，stdout/stderr excerpt 只记录控制面摘要。
+- `mark_run_workspace_interrupted()` 会把 cancel/recovery 时仍处于 `running` 的 operation 标记为 `failed`，并写入 `interrupted` 与原因 metadata。
 
 ## 15G：Work Product / Artifact 引用
 
@@ -143,6 +176,12 @@ queued run
 - Runtime adapter 输出中若包含产物引用，应通过统一 service 写入，不能由 adapter 直接操作业务表。
 - 产物引用必须受 organization/issue/workspace scope 约束。
 
+实施记录：
+
+- `RuntimeExecutionResult.work_products` 支持 adapter 输出 work product 引用。
+- `WorkspaceService.persist_run_work_products()` 统一写入 `issue_work_products`，并关联 issue、project、execution workspace、runtime service 和 run。
+- `IssueService.get_by_id()` 已聚合返回 `workProducts`。
+
 ## 15H：清理、恢复与测试
 
 - 补齐失败、取消、server 重启恢复时 workspace、runtime service、operation 和 run 的一致性处理。
@@ -150,12 +189,30 @@ queued run
 - 增加 contract tests 覆盖 workspace path、payload、response、枚举和错误结构。
 - 补充 curl 验收 demo，展示 project workspace、agent run、workspace context、runtime service、operation 和 work product 引用的最小闭环。
 
+实施记录：
+
+- `HeartbeatService.cancel_run()` 在标记 run cancelled 后调用 workspace 收尾，释放 ephemeral runtime service，并将未完成 operation 置为 failed。
+- `HeartbeatService.recover_orphaned_runs()` 在 server recovery 标记 orphaned run failed 后执行同样 workspace 收尾，并保留 automatic retry 语义。
+- `tests/contract/test_step15_workspace_contract.py` 覆盖 schema/migration、project workspace 聚合、execution workspace 解析、runtime context/env 注入、runtime service release、operation 记录、work product 引用、cancel/recovery 清理。
+
+curl 验收 demo：
+
+```powershell
+$base = "http://127.0.0.1:8000"
+$org = curl.exe -s -X POST "$base/api/orgs" -H "Content-Type: application/json" -d '{"urlKey":"step15-demo","name":"Step 15 Demo","issuePrefix":"WKS"}' | ConvertFrom-Json
+$project = curl.exe -s -X POST "$base/api/orgs/$($org.id)/projects" -H "Content-Type: application/json" -d '{"name":"Workspace Demo","executionWorkspacePolicy":{"enabled":true,"defaultMode":"isolated_workspace"}}' | ConvertFrom-Json
+curl.exe -s -X POST "$base/api/projects/$($project.id)/workspaces" -H "Content-Type: application/json" -d '{"name":"Primary","cwd":"D:/work/step15-demo"}'
+$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" -H "Content-Type: application/json" -d '{"name":"Workspace Agent","agentRuntimeType":"process","agentRuntimeConfig":{"command":"python","args":["-c","import os; print(os.environ.get(\"RUDDER_WORKSPACE_ID\"))"]}}' | ConvertFrom-Json
+$issue = curl.exe -s -X POST "$base/api/orgs/$($org.id)/issues" -H "Content-Type: application/json" -d "{\"title\":\"Workspace run demo\",\"projectId\":\"$($project.id)\"}" | ConvertFrom-Json
+curl.exe -s -X POST "$base/api/agents/$($agent.id)/wakeup" -H "Content-Type: application/json" -d "{\"payload\":{\"issueId\":\"$($issue.id)\"}}"
+```
+
 ## 当前实施基线
 
-- Step 10 已有 Project 管理和部分 workspace 聚合字段边界，但没有完整 workspace 行为。
-- Step 11/13 已有 run、event、cancel、retry 和 runtime adapter 执行链路。
-- Step 14 已有 runtime adapter、skills、model discovery、instructions 和 quota probe 能力，但 workspace context 仍不完整。
-- Step 15 尚未实现 project workspace、execution workspace、workspace runtime service、workspace operation 和 work product 引用闭环。
+- Step 10 已有 Project 管理，Step 15 已补齐 project workspace 聚合和 execution workspace 行为。
+- Step 11/13 已有 run、event、cancel、retry 和 runtime adapter 执行链路，Step 15 已接入 workspace preflight、context 注入和执行收尾。
+- Step 14 已有 runtime adapter、skills、model discovery、instructions 和 quota probe 能力，Step 15 已将 workspace context/env 提供给 adapter。
+- Step 15 已完成 project workspace、execution workspace、workspace runtime service、workspace operation 和 work product 引用闭环。
 
 ## 不包含
 
@@ -173,3 +230,11 @@ queued run
 - 失败、取消、timeout 和 recovery run 不会留下不一致的 workspace、service、operation 或 run 状态。
 - Runtime adapter 接收到的 workspace context/env 与上游结构保持兼容，adapter 差异不泄漏到业务 API。
 - Project、issue、run、workspace、work product 的关联全部受 organization scope 约束。
+
+已执行验证：
+
+- `uv run pytest tests/contract/test_step15_workspace_contract.py -q`：10 passed。
+- `uv run pytest tests/workflows/test_step13_run_workflow.py tests/contract/test_step15_workspace_contract.py -q`：17 passed。
+- `uv run ruff check packages/database/queries/workspaces.py server/services/workspaces.py server/services/heartbeat.py tests/contract/test_step15_workspace_contract.py`：All checks passed。
+- `uv run ruff check .`：All checks passed。
+- `uv run ruff format --check .`：193 files already formatted。

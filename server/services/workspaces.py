@@ -18,6 +18,7 @@ from packages.database.queries.workspaces import (
     list_execution_workspaces,
     list_issue_work_products,
     list_project_workspaces,
+    list_running_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
     update_workspace_operation,
@@ -38,7 +39,9 @@ from packages.shared.constants.workspace import (
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
 from packages.shared.types.workspace import IssueWorkProduct as IssueWorkProductData
 from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
-from packages.shared.types.workspace import WorkspaceRuntimeService as RuntimeServiceData
+from packages.shared.types.workspace import (
+    WorkspaceRuntimeService as RuntimeServiceData,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -340,9 +343,8 @@ class WorkspaceService:
             )
             status = _string(report.get("status")) or "running"
             lifecycle = _string(report.get("lifecycle")) or "ephemeral"
-            health_status = (
-                _string(report.get("healthStatus"))
-                or ("healthy" if status == "running" else "unknown")
+            health_status = _string(report.get("healthStatus")) or (
+                "healthy" if status == "running" else "unknown"
             )
             row = await create_workspace_runtime_service(
                 self._session,
@@ -371,9 +373,7 @@ class WorkspaceService:
                     "started_by_run_id": run_id,
                     "last_used_at": now,
                     "started_at": now,
-                    "stopped_at": None
-                    if status in {"starting", "running"}
-                    else now,
+                    "stopped_at": None if status in {"starting", "running"} else now,
                     "stop_policy": report.get("stopPolicy"),
                     "health_status": health_status,
                 },
@@ -400,6 +400,25 @@ class WorkspaceService:
                         "last_used_at": now,
                     },
                 )
+
+    async def mark_run_workspace_interrupted(
+        self, run_id: str, *, reason: str, message: str
+    ) -> None:
+        await self.release_runtime_services_for_run(run_id)
+        rows = await list_running_workspace_operations_for_run(self._session, run_id)
+        for row in rows:
+            metadata = dict(row.metadata_json or {})
+            metadata.update({"interrupted": True, "reason": reason})
+            await update_workspace_operation(
+                self._session,
+                row.id,
+                {
+                    "status": "failed",
+                    "stderr_excerpt": message,
+                    "metadata_json": metadata,
+                    "finished_at": datetime.now(UTC),
+                },
+            )
 
     async def list_runtime_services_for_workspace(
         self, execution_workspace_id: str
@@ -463,8 +482,7 @@ class WorkspaceService:
                     "status": _string(product.get("status")) or "active",
                     "review_state": _string(product.get("reviewState")) or "none",
                     "is_primary": bool(product.get("isPrimary")),
-                    "health_status": _string(product.get("healthStatus"))
-                    or "unknown",
+                    "health_status": _string(product.get("healthStatus")) or "unknown",
                     "summary": product.get("summary"),
                     "metadata_json": product.get("metadata"),
                     "created_by_run_id": run_id,
@@ -538,8 +556,14 @@ class WorkspaceService:
         if isinstance(policy_workspace_id, str):
             return policy_workspace_id
         workspaces = await list_project_workspaces(self._session, project_id)
-        primary = next((workspace for workspace in workspaces if workspace.is_primary), None)
-        return (primary or (workspaces[0] if workspaces else None)).id if workspaces else None
+        primary = next(
+            (workspace for workspace in workspaces if workspace.is_primary), None
+        )
+        return (
+            (primary or (workspaces[0] if workspaces else None)).id
+            if workspaces
+            else None
+        )
 
     async def _ensure_managed_workspace_paths(
         self, workspace: ExecutionWorkspaceData
@@ -602,7 +626,9 @@ class WorkspaceService:
         issue_id: str,
         mode: str,
     ) -> ExecutionWorkspace | None:
-        issue_scope = issue_id if mode in {"isolated_workspace", "operator_branch"} else None
+        issue_scope = (
+            issue_id if mode in {"isolated_workspace", "operator_branch"} else None
+        )
         rows = await list_execution_workspaces(
             self._session,
             org_id,
@@ -613,7 +639,9 @@ class WorkspaceService:
         )
         return rows[0] if rows else None
 
-    def _to_execution_workspace(self, row: ExecutionWorkspace) -> ExecutionWorkspaceData:
+    def _to_execution_workspace(
+        self, row: ExecutionWorkspace
+    ) -> ExecutionWorkspaceData:
         return {
             "id": row.id,
             "orgId": row.org_id,

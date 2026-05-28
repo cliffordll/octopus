@@ -221,6 +221,9 @@ class HeartbeatService:
             message="run cancelled",
             level="warning",
         )
+        await WorkspaceService(self._session).mark_run_workspace_interrupted(
+            run.id, reason="cancelled", message="run cancelled"
+        )
         agent = await get_agent_by_id(self._session, run.agent_id)
         if agent is not None and agent.status == "running":
             await update_agent(self._session, agent.id, {"status": "idle"})
@@ -350,6 +353,11 @@ class HeartbeatService:
                 message="run interrupted before server recovery",
                 level="error",
                 payload={"processPid": run.process_pid} if run.process_pid else None,
+            )
+            await WorkspaceService(self._session).mark_run_workspace_interrupted(
+                run.id,
+                reason="process_lost",
+                message="Run interrupted before server recovery",
             )
             if detached_message:
                 await self._append_event(
@@ -696,7 +704,9 @@ class HeartbeatService:
                 context_snapshot=running.context_snapshot,
                 reports=result.runtime_services,
             )
-            work_products = await WorkspaceService(self._session).persist_run_work_products(
+            work_products = await WorkspaceService(
+                self._session
+            ).persist_run_work_products(
                 run_id=running.id,
                 context_snapshot=running.context_snapshot,
                 products=result.work_products,
@@ -906,7 +916,9 @@ class HeartbeatService:
         return await WorkspaceService(self._session).begin_operation(
             org_id=running.org_id,
             run_id=running.id,
-            execution_workspace_id=cast(str | None, workspace_context.get("executionWorkspaceId")),
+            execution_workspace_id=cast(
+                str | None, workspace_context.get("executionWorkspaceId")
+            ),
             phase="workspace_provision",
             command="runtime_adapter.execute",
             cwd=workspace.get("cwd") if isinstance(workspace, dict) else None,

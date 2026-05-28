@@ -454,7 +454,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("issue_work_products_company_updated_idx", table_name="issue_work_products")
+    op.drop_index(
+        "issue_work_products_company_updated_idx", table_name="issue_work_products"
+    )
     op.drop_index(
         "issue_work_products_company_provider_external_id_idx",
         table_name="issue_work_products",

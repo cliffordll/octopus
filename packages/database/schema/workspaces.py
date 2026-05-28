@@ -51,9 +51,7 @@ class ProjectWorkspace(Base):
         String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    source_type: Mapped[str] = mapped_column(
-        Text, nullable=False, default="local_path"
-    )
+    source_type: Mapped[str] = mapped_column(Text, nullable=False, default="local_path")
     cwd: Mapped[str | None] = mapped_column(Text)
     repo_url: Mapped[str | None] = mapped_column(Text)
     repo_ref: Mapped[str | None] = mapped_column(Text)
@@ -129,9 +127,7 @@ class ExecutionWorkspace(Base):
     repo_url: Mapped[str | None] = mapped_column(Text)
     base_ref: Mapped[str | None] = mapped_column(Text)
     branch_name: Mapped[str | None] = mapped_column(Text)
-    provider_type: Mapped[str] = mapped_column(
-        Text, nullable=False, default="local_fs"
-    )
+    provider_type: Mapped[str] = mapped_column(Text, nullable=False, default="local_fs")
     provider_ref: Mapped[str | None] = mapped_column(Text)
     derived_from_execution_workspace_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("execution_workspaces.id", ondelete="SET NULL")
@@ -231,9 +227,7 @@ class WorkspaceRuntimeService(Base):
     stop_policy: Mapped[dict[str, Any] | None] = mapped_column(
         JSON().with_variant(JSONB(), "postgresql")
     )
-    health_status: Mapped[str] = mapped_column(
-        Text, nullable=False, default="unknown"
-    )
+    health_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -278,9 +272,7 @@ class WorkspaceOperation(Base):
     log_ref: Mapped[str | None] = mapped_column(Text)
     log_bytes: Mapped[int | None] = mapped_column(BigInteger)
     log_sha256: Mapped[str | None] = mapped_column(Text)
-    log_compressed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    log_compressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     stdout_excerpt: Mapped[str | None] = mapped_column(Text)
     stderr_excerpt: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
@@ -346,9 +338,7 @@ class IssueWorkProduct(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     review_state: Mapped[str] = mapped_column(Text, nullable=False, default="none")
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    health_status: Mapped[str] = mapped_column(
-        Text, nullable=False, default="unknown"
-    )
+    health_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
     summary: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON().with_variant(JSONB(), "postgresql")
