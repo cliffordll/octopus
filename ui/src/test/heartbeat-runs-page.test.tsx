@@ -20,6 +20,22 @@ it("filters organization heartbeat runs and opens their event detail", async () 
     retryOfRunId: null,
     processPid: 123,
     stdoutExcerpt: "adapter-ok",
+    contextSnapshot: {
+      executionWorkspaceId: "exec-1",
+      projectWorkspaceId: "workspace-1",
+      workspace: {
+        rudderWorkspace: {
+          id: "exec-1",
+          name: "Issue workspace",
+          cwd: "D:/coding/octopus/.octopus/workspaces/org-1/exec-1",
+          status: "open",
+          branchName: "issue/OCT-1",
+        },
+        env: {
+          RUDDER_WORKSPACE_ID: "exec-1",
+        },
+      },
+    },
   };
   const retriedRun = { ...run, id: "run-2", status: "queued", retryOfRunId: "run-1" };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -58,6 +74,9 @@ it("filters organization heartbeat runs and opens their event detail", async () 
   expect(await screen.findByText("heartbeat.started")).toBeInTheDocument();
   expect(screen.getByText("Started")).toBeInTheDocument();
   expect(screen.getByText("PID 123")).toBeInTheDocument();
+  expect(screen.getByText("执行工作区")).toBeInTheDocument();
+  expect(screen.getByText("exec-1")).toBeInTheDocument();
+  expect(screen.getByText("issue/OCT-1")).toBeInTheDocument();
   expect(screen.getByText("adapter-ok")).toBeInTheDocument();
 
   await userEvent.clear(screen.getByLabelText("afterSeq"));

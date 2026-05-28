@@ -106,6 +106,38 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
+def test_issue_get_json_outputs_work_products() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/issues/issue-1"
+        return httpx.Response(
+            200,
+            json={
+                "id": "issue-1",
+                "title": "Review",
+                "workProducts": [
+                    {
+                        "id": "wp-1",
+                        "title": "Pull request",
+                        "type": "pull_request",
+                        "executionWorkspaceId": "exec-1",
+                    }
+                ],
+            },
+        )
+
+    output = io.StringIO()
+    assert (
+        main(
+            ["--json", "issue", "get", "issue-1"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+    assert "workProducts" in output.getvalue()
+    assert "exec-1" in output.getvalue()
+
+
 def test_issue_comment_and_review_post_payloads() -> None:
     requests: list[httpx.Request] = []
 

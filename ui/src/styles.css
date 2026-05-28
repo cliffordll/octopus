@@ -534,6 +534,106 @@ h1, h2, p {
   gap: 6px;
 }
 
+.project-workspace-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.project-workspace-card,
+.workspace-context-card {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.project-workspace-card-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.project-workspace-card-heading h3 {
+  color: #e8edf5;
+  font-size: 14px;
+  margin: 0;
+}
+
+.project-workspace-properties,
+.issue-work-product-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.project-workspace-properties div,
+.issue-work-product-details div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.project-workspace-properties dt,
+.issue-work-product-details dt {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.project-workspace-properties dd,
+.issue-work-product-details dd {
+  color: #dce5f2;
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-workspace-list,
+.issue-work-product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-workspace-item {
+  background: #111722;
+  border: 1px solid #263246;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.project-workspace-item > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-workspace-item strong {
+  color: #e8edf5;
+}
+
+.project-workspace-item span {
+  color: #8792a6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.project-workspace-badges,
+.issue-work-product-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .project-resource-summary {
   display: grid;
   gap: 10px;
@@ -1605,6 +1705,24 @@ button.danger {
 .issue-comment-form {
   border-top: 1px solid #202a3b;
   padding-top: 14px;
+}
+
+.issue-work-product-card {
+  background: #111722;
+  border: 1px solid #263246;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.issue-work-product-card strong {
+  color: #e8edf5;
+}
+
+.issue-work-product-card p {
+  color: #8792a6;
+  margin: 4px 0 0;
 }
 
 .issue-comment-actions {

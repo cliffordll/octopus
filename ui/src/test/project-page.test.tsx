@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -22,7 +22,44 @@ it("updates a project and manages its resource attachments", async () => {
     color: null,
     pauseReason: null,
     pausedAt: null,
-    executionWorkspacePolicy: null,
+    executionWorkspacePolicy: { enabled: true, defaultMode: "shared_workspace" },
+    codebase: {
+      configured: true,
+      scope: "project",
+      workspaceId: "workspace-1",
+      repoUrl: "https://example.com/octopus.git",
+      repoRef: "main",
+      defaultRef: "main",
+      repoName: "octopus",
+      localFolder: "D:/coding/octopus",
+      managedFolder: ".octopus/workspaces/org-1",
+      effectiveLocalFolder: "D:/coding/octopus",
+      origin: "project_workspace",
+    },
+    workspaces: [
+      {
+        id: "workspace-1",
+        orgId: "org-1",
+        projectId: "project-1",
+        name: "主工作区",
+        sourceType: "git",
+        cwd: "D:/coding/octopus",
+        repoUrl: "https://example.com/octopus.git",
+        repoRef: "main",
+        defaultRef: "main",
+        visibility: "shared",
+        setupCommand: "npm install",
+        cleanupCommand: null,
+        remoteProvider: null,
+        remoteWorkspaceRef: null,
+        sharedWorkspaceKey: "console-main",
+        metadata: null,
+        isPrimary: true,
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      },
+    ],
+    primaryWorkspace: null,
     resources: [
       {
         id: "attachment-1",
@@ -106,6 +143,11 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/issues",
   );
+  expect(screen.getByText("代码库")).toBeInTheDocument();
+  expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
+  expect(screen.getByText("工作区")).toBeInTheDocument();
+  expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByText("console-main")).toBeInTheDocument();
 
   await userEvent.clear(screen.getByLabelText("描述"));
   await userEvent.type(screen.getByLabelText("描述"), "更新后的描述");
@@ -113,6 +155,10 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
+  await userEvent.clear(screen.getByLabelText("执行工作区策略 JSON"));
+  fireEvent.change(screen.getByLabelText("执行工作区策略 JSON"), {
+    target: { value: '{"enabled":true,"defaultMode":"isolated_workspace"}' },
+  });
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -125,6 +171,7 @@ it("updates a project and manages its resource attachments", async () => {
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
         goalIds: ["goal-1", "goal-2"],
+        executionWorkspacePolicy: { enabled: true, defaultMode: "isolated_workspace" },
       }),
     }),
   );
