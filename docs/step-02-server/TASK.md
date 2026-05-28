@@ -35,12 +35,14 @@
 | `OCTOPUS_LOG_LEVEL` | `info` | 日志等级 |
 | `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///./octopus.db` | 数据库连接 |
 | `OCTOPUS_AUTO_MIGRATE` | `false` | 启动前是否执行 Alembic `upgrade head` |
+| `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | Step 13 起是否启动 heartbeat scheduler |
+| `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | Step 13 起的 scheduler 周期秒数 |
 
 ## 关键行为
 
 - `uv run server` 通过 `server:main` 启动服务，并加载 `OCTOPUS_HOST`、`OCTOPUS_PORT` 和 `OCTOPUS_LOG_LEVEL` 配置。
 - `server.app:app` 保留为底层 ASGI 应用入口。
-- lifespan 只管理启动资源和释放流程，业务逻辑不放入应用入口。
+- lifespan 管理启动资源、释放流程及后续步骤注册的后台服务生命周期；业务规则仍保留在 service 层。
 - `/api/orgs` 使用已选定的资源路径，不增加独立产品接口。
 - board-scoped 请求没有 actor context 时返回 `503`，非 board actor 返回 `403`；这避免在认证能力尚未接入时伪造成功访问。
 
