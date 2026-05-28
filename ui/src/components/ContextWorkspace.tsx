@@ -49,14 +49,21 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
         <>
           <section className="context-nav-section">
             <h3>消息</h3>
-            <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>+ 新建对话</NavLink>
-            <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>审批管理</NavLink>
+            <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>
+              <span aria-hidden="true" className="context-entry-icon">+</span>
+              <span>新建对话</span>
+            </NavLink>
+            <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>
+              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span>审批管理</span>
+            </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>对话</h3>
             {chats.error && <ErrorNotice error={chats.error} />}
             {conversations.map((chat) => (
               <NavLink key={chat.id} to={`/orgs/${orgId}/chats/${chat.id}`}>
+                <span aria-hidden="true" className="context-entry-icon">C</span>
                 <span className="context-item-copy">
                   <strong>{chat.title}</strong>
                   <small>
@@ -118,25 +125,29 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
               end
               to={issuesRootPath}
             >
-              全部任务
+              <span aria-hidden="true" className="context-entry-icon">A</span>
+              <span>全部任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentStatus === "backlog" ? "active" : ""}
               to={`${issuesRootPath}?status=backlog`}
             >
-              草稿任务
+              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span>草稿任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentView === "following" ? "active" : ""}
               to={`${issuesRootPath}?view=following`}
             >
-              关注中
+              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span>关注中</span>
             </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>最近查看</h3>
             {visibleRecentIssues.map((issue) => (
               <NavLink key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
+                <span aria-hidden="true" className="context-entry-icon">R</span>
                 <span className="context-item-copy">
                   <strong>{issue.title}</strong>
                   <small>{issue.identifier ?? "未编号"}</small>
@@ -159,7 +170,14 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
                 key={project.id}
                 to={`${issuesRootPath}?projectId=${project.id}`}
               >
-                {project.name}
+                <span
+                  aria-hidden="true"
+                  className="context-entry-icon project-entry-icon"
+                  style={{ background: project.color ?? undefined }}
+                >
+                  P
+                </span>
+                <span>{project.name}</span>
               </NavLink>
             ))}
           </section>
@@ -183,13 +201,17 @@ export function AgentsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
         <>
           <section className="context-nav-section">
             <h3>智能体</h3>
-            <NavLink className="context-action-entry new-context-entry" to={`/orgs/${orgId}/agents/new`}>+ 新建智能体</NavLink>
+            <NavLink className="context-action-entry new-context-entry" to={`/orgs/${orgId}/agents/new`}>
+              <span aria-hidden="true" className="context-entry-icon">+</span>
+              <span>新建智能体</span>
+            </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>团队</h3>
             {agents.error && <ErrorNotice error={agents.error} />}
             {agentList.map((agent) => (
               <NavLink key={agent.id} to={`/orgs/${orgId}/agents/${agent.id}`}>
+                <span aria-hidden="true" className="context-entry-icon">A</span>
                 <span className="context-item-copy">
                   <strong>{agent.name}</strong>
                   <small>{agent.role}</small>

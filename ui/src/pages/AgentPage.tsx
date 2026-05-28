@@ -238,10 +238,20 @@ export function AgentPage() {
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
   });
+  const configuration = useQuery({
+    queryKey: ["agent-configuration", agentId],
+    queryFn: () => agentsApi.configuration(agentId),
+    enabled: activeTab === "configuration",
+  });
   const configRevisions = useQuery({
     queryKey: ["agent-config-revisions", agentId],
     queryFn: () => agentsApi.configRevisions(agentId),
     enabled: activeTab === "configuration",
+  });
+  const taskSessions = useQuery({
+    queryKey: ["agent-task-sessions", agentId],
+    queryFn: () => agentsApi.taskSessions(agentId),
+    enabled: activeTab === "configuration" || activeTab === "runs",
   });
   const adapterModels = useQuery({
     queryKey: ["adapter-models", orgId, runtime],
@@ -262,6 +272,11 @@ export function AgentPage() {
     queryKey: ["agent-skills", agentId],
     queryFn: () => agentsApi.skills(agentId),
     enabled: activeTab === "configuration" || activeTab === "skills",
+  });
+  const skillsAnalytics = useQuery({
+    queryKey: ["agent-skills-analytics", agentId],
+    queryFn: () => agentsApi.skillsAnalytics(agentId),
+    enabled: activeTab === "skills",
   });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -296,6 +311,13 @@ export function AgentPage() {
   });
   const invoke = useMutation({
     mutationFn: () => heartbeatApi.invoke(agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
+    },
+  });
+  const wakeup = useMutation({
+    mutationFn: () => heartbeatApi.wakeup(agentId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
@@ -388,6 +410,7 @@ export function AgentPage() {
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
+  const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
@@ -483,12 +506,14 @@ export function AgentPage() {
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
             <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
         )}
       </header>
       {action.error && <ErrorNotice error={action.error} />}
       {invoke.error && <ErrorNotice error={invoke.error} />}
+      {wakeup.error && <ErrorNotice error={wakeup.error} />}
       {agent.data && (
         <>
           <nav aria-label="智能体详情导航" className="detail-tabs">
@@ -646,6 +671,23 @@ export function AgentPage() {
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
                   <div>
+                    <p className="eyebrow">Snapshot</p>
+                    <h2>配置快照</h2>
+                  </div>
+                </div>
+                {configuration.error && <ErrorNotice error={configuration.error} />}
+                {configuration.data && (
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>更新时间</span><strong>{configuration.data.updatedAt ?? "未记录"}</strong></div>
+                  </div>
+                )}
+              </section>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
                     <p className="eyebrow">Adapter</p>
                     <h2>Runtime Adapter</h2>
                   </div>
@@ -695,12 +737,24 @@ export function AgentPage() {
                 </div>
                 {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
                 {resetSession.error && <ErrorNotice error={resetSession.error} />}
+                {taskSessions.error && <ErrorNotice error={taskSessions.error} />}
                 {runtimeState.data && (
                   <div className="agent-summary-grid">
                     <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
                     <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
                   </div>
                 )}
+                <div className="list">
+                  {taskSessionRows.map((session) => (
+                    <article className="row" key={session.id}>
+                      <div>
+                        <strong>{session.taskKey}</strong>
+                        <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {session.updatedAt}</p>
+                      </div>
+                      <Badge>{session.status}</Badge>
+                    </article>
+                  ))}
+                </div>
               </section>
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
@@ -742,10 +796,24 @@ export function AgentPage() {
               <button onClick={() => setSkillDialogOpen(true)} type="button">创建技能</button>
             </div>
             {skills.error && <ErrorNotice error={skills.error} />}
+            {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
             {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
             {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
             {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
             <div className="agent-skills-library">
+              {skillsAnalytics.data && (
+                <section className="agent-skill-tags-card">
+                  <div className="agent-skill-source-heading">
+                    <h3>使用分析</h3>
+                    <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
+                  </div>
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>总次数</span><strong>{skillsAnalytics.data.totalCount ?? 0}</strong></div>
+                    <div className="summary-metric"><span>运行次数</span><strong>{skillsAnalytics.data.totalRunsWithSkills ?? 0}</strong></div>
+                    <div className="summary-metric"><span>技能数</span><strong>{skillsAnalytics.data.skills.length}</strong></div>
+                  </div>
+                </section>
+              )}
               {[
                 { label: "组织技能", rows: organizationSkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },

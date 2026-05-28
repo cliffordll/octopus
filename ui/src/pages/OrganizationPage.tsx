@@ -303,9 +303,18 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
       <nav className="local-nav" aria-label="组织导航">
         <section className="local-nav-section">
           <h2>组织</h2>
-          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>组织架构</NavLink>
-          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>心跳</NavLink>
-          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>目标</NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>
+            <span aria-hidden="true" className="context-entry-icon">O</span>
+            <span>组织架构</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
+            <span aria-hidden="true" className="context-entry-icon">H</span>
+            <span>心跳</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>
+            <span aria-hidden="true" className="context-entry-icon">G</span>
+            <span>目标</span>
+          </NavLink>
         </section>
         <section className="local-nav-section">
           <h2>项目</h2>
@@ -317,7 +326,14 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
                 key={project.id}
                 to={`/orgs/${orgId}/projects/${project.id}`}
               >
-                {project.name}
+                <span
+                  aria-hidden="true"
+                  className="context-entry-icon project-entry-icon"
+                  style={{ background: project.color ?? undefined }}
+                >
+                  P
+                </span>
+                <span>{project.name}</span>
               </NavLink>
             ))}
             {projects.isSuccess && projectList.length === 0 && <p className="context-empty">暂无项目</p>}

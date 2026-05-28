@@ -59,6 +59,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "暂停" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "恢复" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
+  expect(within(header!).getByRole("button", { name: "唤醒" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行心跳" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
   const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
@@ -105,9 +106,14 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(await screen.findByText("succeeded")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
+  await userEvent.click(screen.getByRole("button", { name: "唤醒" }));
   await userEvent.click(screen.getByRole("button", { name: "运行心跳" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/pause",
+    expect.objectContaining({ method: "POST" }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/wakeup",
     expect.objectContaining({ method: "POST" }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
@@ -213,6 +219,12 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ agentId: "agent-1", sessionDisplayId: "session-1", lastRunStatus: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0, lastError: null });
     }
+    if (path === "/api/agents/agent-1/configuration" && init?.method === "GET") {
+      return respond({ ...agent, updatedAt: "2026-05-28T08:00:00Z" });
+    }
+    if (path === "/api/agents/agent-1/task-sessions" && init?.method === "GET") {
+      return respond([{ id: "session-row-1", agentId: "agent-1", taskKey: "issue-1", sessionDisplayId: "session-1", status: "active", createdAt: "", updatedAt: "2026-05-28T09:00:00Z" }]);
+    }
     if (path === "/api/agents/agent-1/config-revisions" && init?.method === "GET") {
       return respond([{ id: "revision-1", agentId: "agent-1", createdAt: "2026-05-28T00:00:00Z", runtimeConfig: {} }]);
     }
@@ -221,6 +233,9 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByRole("heading", { name: "配置快照" })).toBeInTheDocument();
+  expect(await screen.findByText("2026-05-28T08:00:00Z")).toBeInTheDocument();
+  expect(await screen.findByText("issue-1")).toBeInTheDocument();
   expect(await screen.findByText("Config Revisions")).toBeInTheDocument();
   expect(await screen.findByText("revision-1")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "回滚" }));
@@ -256,6 +271,9 @@ it("shows an empty skill list without placeholder skills", async () => {
     if (path === "/api/agents/agent-1/skills" && init?.method === "GET") {
       return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: [], entries: [], warnings: [] });
     }
+    if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
+      return respond({ agentId: "agent-1", windowDays: 30, totalCount: 0, totalRunsWithSkills: 0, skills: [] });
+    }
     return respond({});
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -263,6 +281,7 @@ it("shows an empty skill list without placeholder skills", async () => {
   renderApp("/orgs/org-1/agents/agent-1/skills");
 
   expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
   expect(screen.getByText("组织技能")).toBeInTheDocument();
   expect(screen.getByText("外部技能")).toBeInTheDocument();
@@ -347,6 +366,9 @@ it("manages runtime adapter probes and skills from configuration", async () => {
         warnings: [],
       });
     }
+    if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
+      return respond({ agentId: "agent-1", windowDays: 30, totalCount: 7, totalRunsWithSkills: 3, skills: [{ key: "review" }] });
+    }
     return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: ["review", "debug"], entries: [] });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -361,6 +383,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
   expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Show" })).toHaveLength(3);
