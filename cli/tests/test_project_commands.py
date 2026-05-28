@@ -114,10 +114,16 @@ def test_project_get_json_outputs_workspace_fields() -> None:
             json={
                 "id": "project-1",
                 "name": "Console",
-                "codebase": {"configured": True, "repoUrl": "https://example.com/octopus.git"},
+                "codebase": {
+                    "configured": True,
+                    "repoUrl": "https://example.com/octopus.git",
+                },
                 "workspaces": [{"id": "workspace-1", "name": "Main"}],
                 "primaryWorkspace": {"id": "workspace-1", "name": "Main"},
-                "executionWorkspacePolicy": {"enabled": True, "defaultMode": "shared_workspace"},
+                "executionWorkspacePolicy": {
+                    "enabled": True,
+                    "defaultMode": "shared_workspace",
+                },
             },
         )
 
