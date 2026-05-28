@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .types import RuntimeEnvironmentTestResult, RuntimeExecutionResult
@@ -81,6 +82,81 @@ def _unsupported_skill_snapshot(
     }
 
 
+def skill_snapshot_from_root(
+    *,
+    runtime_type: str,
+    config: dict[str, Any],
+    desired_skills: list[str],
+    mode: str,
+    location_label: str,
+) -> dict[str, Any]:
+    root = config.get("skillsRootPath")
+    desired = set(desired_skills)
+    entries: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    if isinstance(root, str) and root.strip():
+        root_path = Path(root)
+        if root_path.exists() and root_path.is_dir():
+            entries = [
+                _skill_entry(
+                    skill_dir,
+                    desired=skill_dir.name in desired,
+                    location_label=location_label,
+                )
+                for skill_dir in sorted(root_path.iterdir(), key=lambda item: item.name)
+                if skill_dir.is_dir() and skill_dir.joinpath("SKILL.md").is_file()
+            ]
+        else:
+            warnings.append(f"skillsRootPath does not exist: {root}")
+    return {
+        "agentRuntimeType": runtime_type,
+        "supported": True,
+        "mode": mode,
+        "desiredSkills": desired_skills,
+        "entries": entries,
+        "warnings": warnings,
+    }
+
+
+def _skill_entry(
+    skill_dir: Path, *, desired: bool, location_label: str
+) -> dict[str, Any]:
+    description = _skill_description(skill_dir.joinpath("SKILL.md"))
+    return {
+        "key": skill_dir.name,
+        "selectionKey": skill_dir.name,
+        "runtimeName": skill_dir.name,
+        "description": description,
+        "desired": desired,
+        "configurable": True,
+        "alwaysEnabled": False,
+        "managed": True,
+        "state": "configured" if desired else "available",
+        "sourceClass": "organization",
+        "origin": "organization_managed",
+        "originLabel": "Organization skill",
+        "locationLabel": location_label,
+        "readOnly": False,
+        "sourcePath": str(skill_dir),
+        "targetPath": None,
+        "workspaceEditPath": str(skill_dir.joinpath("SKILL.md")),
+        "detail": None,
+    }
+
+
+def _skill_description(skill_file: Path) -> str | None:
+    try:
+        lines = skill_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        return value
+    return None
+
+
 class RuntimeCapabilityMixin:
     type: str
     supports_local_agent_jwt = False
@@ -108,26 +184,23 @@ class RuntimeCapabilityMixin:
         return []
 
     async def list_skills(self, config: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "agentRuntimeType": self.type,
-            "supported": True,
-            "mode": "runtime",
-            "desiredSkills": [],
-            "entries": [],
-            "warnings": [],
-        }
+        return self._skill_snapshot(config, [])
 
     async def sync_skills(
         self, config: dict[str, Any], desired_skills: list[str]
     ) -> dict[str, Any]:
-        return {
-            "agentRuntimeType": self.type,
-            "supported": True,
-            "mode": "runtime",
-            "desiredSkills": desired_skills,
-            "entries": [],
-            "warnings": [],
-        }
+        return self._skill_snapshot(config, desired_skills)
+
+    def _skill_snapshot(
+        self, config: dict[str, Any], desired_skills: list[str]
+    ) -> dict[str, Any]:
+        return skill_snapshot_from_root(
+            runtime_type=self.type,
+            config=config,
+            desired_skills=desired_skills,
+            mode="runtime",
+            location_label="runtime skills",
+        )
 
     async def get_metadata(self) -> dict[str, Any]:
         return {

@@ -4,6 +4,7 @@ import importlib
 import sys
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -146,10 +147,16 @@ async def test_adapter_models_and_environment_routes(
 
 
 async def test_agent_skills_snapshot_and_sync_routes(
-    app: tuple[FastAPI, async_sessionmaker],
+    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
 ) -> None:
     application, factory = app
     org_id = await _seed_org(factory)
+    skills_root = tmp_path / "skills"
+    review_skill = skills_root / "review"
+    review_skill.mkdir(parents=True)
+    review_skill.joinpath("SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
     _, agent = await _request(
         application,
         "POST",
@@ -161,6 +168,7 @@ async def test_agent_skills_snapshot_and_sync_routes(
             "agentRuntimeConfig": {
                 "command": sys.executable,
                 "promptTemplate": "Use the agent capabilities as operating guidance.",
+                "skillsRootPath": str(skills_root),
             },
             "desiredSkills": ["review"],
         },
@@ -185,8 +193,13 @@ async def test_agent_skills_snapshot_and_sync_routes(
     assert snapshot_code == 200
     assert snapshot["agentRuntimeType"] == "opencode_local"
     assert snapshot["supported"] is True
-    assert snapshot["mode"] == "runtime"
+    assert snapshot["mode"] == "ephemeral"
     assert snapshot["desiredSkills"] == ["review"]
+    assert snapshot["entries"][0]["key"] == "review"
+    assert snapshot["entries"][0]["selectionKey"] == "review"
+    assert snapshot["entries"][0]["runtimeName"] == "review"
+    assert snapshot["entries"][0]["desired"] is True
+    assert snapshot["entries"][0]["state"] == "configured"
     assert sync_code == 200
     assert sync["desiredSkills"] == ["review", "debug"]
 
