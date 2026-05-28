@@ -360,8 +360,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             version: "1.0",
             enabled: true,
             tags: ["release"],
-            description: "Deploy safely",
-            prompt: "Deploy carefully.",
+            markdown: "---\ndescription: Deploy safely from frontmatter\n---\n\nDeploy carefully.",
           },
           {
             key: "debug",
@@ -405,18 +404,23 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("installed")).toBeInTheDocument();
   expect(await screen.findByText("external")).toBeInTheDocument();
   expect(await screen.findByText("missing")).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Show" })).toHaveLength(3);
+  expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
+  expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
   await userEvent.click(screen.getByText("Review"));
-  expect(await screen.findByText("Review carefully.")).toBeInTheDocument();
+  expect(screen.getByText("Review code changes")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
-  expect(await screen.findByText("Deploy carefully.")).toBeInTheDocument();
+  expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Disable" }));
   await userEvent.click(screen.getByText("Debug"));
   await userEvent.click(screen.getByRole("button", { name: "Enable" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
-  await userEvent.type(within(dialog).getByLabelText("Skill YAML"), "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it");
+  await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
+  await userEvent.type(within(dialog).getByLabelText("Short name"), "incident-response");
+  await userEvent.type(within(dialog).getByLabelText("描述"), "Handle incidents");
+  await userEvent.type(within(dialog).getByLabelText("Skill 内容"), "schema_version: 1\nprompt: handle it");
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -444,7 +448,12 @@ it("manages runtime adapter probes and skills from configuration", async () => {
     "/api/agents/agent-1/skills/private",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ name: "Incident", markdown: "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it" }),
+      body: JSON.stringify({
+        name: "Incident Response",
+        slug: "incident-response",
+        description: "Handle incidents",
+        markdown: "schema_version: 1\nprompt: handle it",
+      }),
     }),
   );
 });

@@ -131,6 +131,44 @@ function skillListField(entry: Record<string, unknown>, keys: string[]): string 
   return "-";
 }
 
+function nestedSkillField(entry: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const direct = entry[key];
+    if (typeof direct === "string" && direct.trim() && direct.trim() !== "---") return direct.trim();
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      const nested = nestedSkillField(direct as Record<string, unknown>, keys);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function descriptionFromMarkdown(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const lines = value.split(/\r?\n/);
+  if (lines[0]?.trim() === "---") {
+    for (const line of lines.slice(1)) {
+      const trimmed = line.trim();
+      if (trimmed === "---") break;
+      const match = trimmed.match(/^description\s*:\s*["']?(.+?)["']?$/i);
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  }
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === "---" || trimmed.startsWith("#")) continue;
+    if (/^[a-z0-9_-]+\s*:/i.test(trimmed)) continue;
+    return trimmed;
+  }
+  return "";
+}
+
+function skillDescription(entry: Record<string, unknown>): string {
+  const explicit = nestedSkillField(entry, ["description", "summary"]);
+  if (explicit) return explicit;
+  return descriptionFromMarkdown(entry.markdown ?? entry.prompt ?? entry.content);
+}
+
 function skillEntryName(entry: Record<string, unknown>): string {
   return skillField(entry, ["runtimeName", "name", "key", "selectionKey"], "skill");
 }
@@ -141,11 +179,6 @@ function skillActionName(entry: Record<string, unknown>): string {
 
 function skillEntryKey(entry: Record<string, unknown>, index: number): string {
   return String(entry.key ?? entry.selectionKey ?? entry.runtimeName ?? entry.name ?? index);
-}
-
-function parseSkillNameFromYaml(value: string): string {
-  const match = value.match(/^\s*name\s*:\s*["']?([^"'\r\n#]+)["']?/m);
-  return match?.[1]?.trim() ?? "";
 }
 
 function skillEnabled(entry: Record<string, unknown>, desiredSkills: string[]): boolean {
@@ -244,7 +277,10 @@ export function AgentPage() {
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
   const [desiredSkills, setDesiredSkills] = useState("");
   const [skillsToEnable, setSkillsToEnable] = useState("");
-  const [installSkillDraft, setInstallSkillDraft] = useState("");
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSkillSlug, setNewSkillSlug] = useState("");
+  const [newSkillDescription, setNewSkillDescription] = useState("");
+  const [newSkillMarkdown, setNewSkillMarkdown] = useState("");
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [selectedSkillKey, setSelectedSkillKey] = useState("");
   const [adapterTestChecks, setAdapterTestChecks] = useState<Array<{ label?: string; id?: string; status?: string; message?: string }>>([]);
@@ -381,11 +417,16 @@ export function AgentPage() {
   });
   const createPrivateSkill = useMutation({
     mutationFn: () => agentsApi.createPrivateSkill(agentId, {
-      name: parseSkillNameFromYaml(installSkillDraft),
-      markdown: installSkillDraft.trim() || null,
+      name: newSkillName.trim(),
+      slug: newSkillSlug.trim() || null,
+      description: newSkillDescription.trim() || null,
+      markdown: newSkillMarkdown.trim() || null,
     }),
     onSuccess: () => {
-      setInstallSkillDraft("");
+      setNewSkillName("");
+      setNewSkillSlug("");
+      setNewSkillDescription("");
+      setNewSkillMarkdown("");
       setSkillDialogOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
     },
@@ -439,7 +480,6 @@ export function AgentPage() {
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
-  const selectedSkill = skillEntries.find((entry, index) => skillEntryKey(entry, index) === selectedSkillKey) ?? null;
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const instructionDocs = agent.data ? buildInstructionDocs(agent.data) : [];
@@ -485,6 +525,13 @@ export function AgentPage() {
   function enableSkill(name: string) {
     if (!name.trim()) return;
     enableSkills.mutate([name.trim()]);
+  }
+  function closeSkillDialog() {
+    setSkillDialogOpen(false);
+    setNewSkillName("");
+    setNewSkillSlug("");
+    setNewSkillDescription("");
+    setNewSkillMarkdown("");
   }
   function disableSkill(name: string) {
     if (!name.trim()) return;
@@ -861,18 +908,27 @@ export function AgentPage() {
                       const actionName = skillActionName(entry);
                       const enabled = skillEnabled(entry, desiredSkillRows);
                       const isBundled = skillField(entry, ["sourceClass", "source", "origin"], "").toLowerCase() === "bundled";
+                      const description = skillDescription(entry) || skillField(entry, ["detail"], "");
+                      const tags = skillListField(entry, ["tags", "categories"]);
+                      const version = skillField(entry, ["version"], "");
+                      const sourceLabel = skillSourceLabel(entry);
+                      const state = skillState(entry);
                       return (
                         <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
                           <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
-                            <code>{name}</code>
-                            <Badge>{enabled ? "yes" : "no"}</Badge>
-                            <Badge>{skillState(entry)}</Badge>
-                            <span>{skillListField(entry, ["tags", "categories"])}</span>
+                            <span className="agent-skill-tag-title-row">
+                              <code>{name}</code>
+                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "已启用" : "未启用"}</span>
+                            </span>
+                            <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
+                            <span className="agent-skill-tag-facts">
+                              <span><small>来源</small>{sourceLabel}</span>
+                              <span><small>状态</small>{state}</span>
+                              <span><small>版本</small>{version ? `v${version}` : "-"}</span>
+                              <span><small>标签</small>{tags}</span>
+                            </span>
                           </button>
                           <div className="agent-skill-row-actions">
-                            <button className="secondary small-button" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
-                              {selected ? "Hide" : "Show"}
-                            </button>
                             {isBundled ? (
                               <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">Fork</button>
                             ) : (
@@ -895,21 +951,6 @@ export function AgentPage() {
                   </div>
                 </section>
               ))}
-              {selectedSkill && (
-                <section className="agent-skill-detail-card">
-                  <div>
-                    <strong>{skillEntryName(selectedSkill)}</strong>
-                    <Badge>{skillSourceLabel(selectedSkill)}</Badge>
-                    <Badge>{skillState(selectedSkill)}</Badge>
-                    <span>v{skillField(selectedSkill, ["version"], "-")}</span>
-                  </div>
-                  <p>{skillField(selectedSkill, ["description", "summary"], "")}</p>
-                  <div className="muted">allowed_tools: {skillListField(selectedSkill, ["allowedTools", "allowed_tools"])}</div>
-                  <div className="muted">forbidden_tools: {skillListField(selectedSkill, ["forbiddenTools", "forbidden_tools"])}</div>
-                  <div className="muted">workspaceEditPath: {skillField(selectedSkill, ["workspaceEditPath"], "-")}</div>
-                  <pre>{String(selectedSkill.prompt ?? selectedSkill.markdown ?? selectedSkill.content ?? "")}</pre>
-                </section>
-              )}
             </div>
             {skills.data?.warnings?.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             {skillDialogOpen && (
@@ -918,21 +959,33 @@ export function AgentPage() {
                   <div className="task-modal-header">
                     <div>
                       <h2>创建技能</h2>
-                      <p className="muted">粘贴 manifest YAML，安装为当前智能体私有 skill。</p>
+                      <p className="muted">安装为当前智能体私有 skill。Short name 可选，不填时由服务端根据名称生成。</p>
                     </div>
                   </div>
                   <label>
-                    Skill YAML
+                    名称
+                    <input value={newSkillName} onChange={(event) => setNewSkillName(event.target.value)} required />
+                  </label>
+                  <label>
+                    Short name
+                    <input value={newSkillSlug} onChange={(event) => setNewSkillSlug(event.target.value)} placeholder="incident-response" />
+                  </label>
+                  <label>
+                    描述
+                    <input value={newSkillDescription} onChange={(event) => setNewSkillDescription(event.target.value)} />
+                  </label>
+                  <label>
+                    Skill 内容
                     <textarea
                       className="skill-yaml-textarea"
-                      placeholder={"schema_version: 1\nname: my_skill\ndescription: ...\nprompt: ..."}
-                      value={installSkillDraft}
-                      onChange={(event) => setInstallSkillDraft(event.target.value)}
+                      placeholder={"schema_version: 1\nprompt: ..."}
+                      value={newSkillMarkdown}
+                      onChange={(event) => setNewSkillMarkdown(event.target.value)}
                     />
                   </label>
                   <div className="task-modal-actions">
-                    <button className="secondary" onClick={() => setSkillDialogOpen(false)} type="button">取消</button>
-                    <button disabled={!parseSkillNameFromYaml(installSkillDraft) || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">
+                    <button className="secondary" onClick={closeSkillDialog} type="button">取消</button>
+                    <button disabled={!newSkillName.trim() || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">
                       创建
                     </button>
                   </div>
