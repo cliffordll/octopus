@@ -583,6 +583,89 @@ h1, h2, p {
   margin: 10px;
 }
 
+.goal-tree {
+  border: 1px solid #202938;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.goal-tree-row {
+  align-items: center;
+  border-bottom: 1px solid #202938;
+  color: #dbe3ee;
+  display: flex;
+  gap: 8px;
+  min-height: 38px;
+  padding-right: 10px;
+}
+
+.goal-tree-row:hover {
+  background: #171e2b;
+  color: #eff3f9;
+}
+
+.goal-tree-row strong {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-tree-toggle {
+  background: transparent;
+  color: #8993a6;
+  padding: 0;
+  width: 16px;
+}
+
+.goal-tree-toggle-placeholder {
+  width: 16px;
+}
+
+.goal-tree-level {
+  color: #68748a;
+  font-size: 11px;
+  text-transform: capitalize;
+  width: 82px;
+}
+
+.goal-summary-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.summary-metric {
+  background: #10151e;
+  border: 1px solid #202938;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.summary-metric span {
+  color: #68748a;
+  display: block;
+  font-size: 11px;
+}
+
+.summary-metric strong {
+  color: #e8edf5;
+  display: block;
+  font-size: 13px;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-work-sections {
+  display: grid;
+  gap: 14px;
+}
+
 .grid-two {
   display: grid;
   gap: 20px;
