@@ -12,6 +12,9 @@ it("lists and creates organizations", async () => {
     if (path === "/api/orgs" && init?.method === "GET") {
       return respond([{ id: "org-1", urlKey: "core", name: "核心团队", status: "active" }]);
     }
+    if (path === "/api/orgs/org-2/agents" && init?.method === "GET") {
+      return respond([]);
+    }
     return respond({
       id: "org-2",
       urlKey: "design",
@@ -42,4 +45,5 @@ it("lists and creates organizations", async () => {
       body: JSON.stringify({ name: "设计团队" }),
     }),
   );
+  expect(await screen.findByText("首个智能体将作为 CEO 创建")).toBeInTheDocument();
 });

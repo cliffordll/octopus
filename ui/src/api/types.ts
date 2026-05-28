@@ -91,6 +91,7 @@ export interface CreateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  assigneeAgentId?: string | null;
 }
 
 export interface UpdateIssuePayload {
@@ -218,4 +219,125 @@ export interface UpdateProjectResourceAttachmentPayload {
   role?: ProjectResourceRole;
   note?: string | null;
   sortOrder?: number;
+}
+
+export type AgentStatus =
+  | "active"
+  | "paused"
+  | "idle"
+  | "running"
+  | "error"
+  | "pending_approval"
+  | "terminated";
+export type AgentRole =
+  | "ceo"
+  | "cto"
+  | "cmo"
+  | "cfo"
+  | "engineer"
+  | "designer"
+  | "pm"
+  | "qa"
+  | "devops"
+  | "researcher"
+  | "general";
+export type AgentRuntimeType =
+  | "process"
+  | "http"
+  | "claude_local"
+  | "codex_local"
+  | "gemini_local"
+  | "opencode_local"
+  | "pi_local"
+  | "cursor"
+  | "openclaw_gateway"
+  | "hermes_local";
+
+export interface Agent {
+  id: string;
+  orgId: string;
+  name: string;
+  urlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfig: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
+  budgetMonthlyCents: number;
+  lastHeartbeatAt: string | null;
+  reportsTo?: string | null;
+}
+
+export interface AgentDetail extends Agent {
+  capabilities?: string | null;
+}
+
+export interface CreateAgentPayload {
+  name: string;
+  role: AgentRole;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfig: Record<string, unknown>;
+}
+
+export interface UpdateAgentPayload {
+  name?: string;
+  title?: string | null;
+  role?: AgentRole;
+  reportsTo?: string | null;
+  capabilities?: string | null;
+  agentRuntimeType?: AgentRuntimeType;
+  agentRuntimeConfig?: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
+  budgetMonthlyCents?: number;
+}
+
+export interface AgentRuntimeState {
+  agentId: string;
+  agentRuntimeType: string;
+  sessionDisplayId: string | null;
+  lastRunStatus: string | null;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCostCents: number;
+  lastError: string | null;
+}
+
+export interface HeartbeatRun {
+  id: string;
+  orgId: string;
+  agentId: string;
+  invocationSource: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
+  error?: string | null;
+  createdAt?: string;
+}
+
+export interface HeartbeatRunEvent {
+  id: number;
+  orgId?: string;
+  runId: string;
+  agentId: string;
+  seq: number;
+  eventType: string;
+  stream?: string | null;
+  level?: string | null;
+  message: string | null;
+  payload?: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface ChatConversation {
+  id: string;
+  orgId: string;
+  title: string;
+  status: "active" | "resolved" | "archived";
+  preferredAgentId?: string | null;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  body: string;
+  status: "streaming" | "completed" | "stopped" | "failed" | "interrupted";
 }
