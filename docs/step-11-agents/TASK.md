@@ -100,7 +100,7 @@
 
 - 仅实现能够支撑 Agent 交互执行的最小 conversation/message contract、持久化、API 与 service 行为。
 - 打通用户或 board 消息创建、关联 agent、直接调用 `codex_local` runtime、保存响应及查询消息的闭环。
-- 不以本阶段实现宣称完整 Chat / Messenger 已交付；未被该调用链需要的会话能力和消息副作用继续归 Step 17。
+- 不以本阶段实现宣称完整 Chat / Messenger 已交付；未被该调用链需要的会话能力和消息副作用继续归 Step 16。
 
 实施记录：
 
@@ -109,7 +109,7 @@
 - Database 已实现 `chat_conversations`、`chat_messages` schema/query 及 `20260527_000006_chats.py` migration，仅纳入 Agent 对话闭环依赖的上游核心表。
 - Server 已实现 organization 内对话创建/列表/详情、消息读取及非流式消息回复入口；对话通过 `preferredAgentId` 选择 Agent runtime，并持久化 user/assistant message 与 `replyingAgentId`。
 - Contract tests 已覆盖 schema/migration、payload/path 以及由 `codex_local` 执行输出产生并读取持久化 assistant reply 的 HTTP 链路。
-- Context link、attachment、流式转录、消息编辑/重生成、完整副作用和 Messenger 聚合仍归 Step 17/18，不在本步骤扩展。
+- Context link、完整副作用和 Messenger 聚合归 Step 16；消息附件/产物引用与基础运行可见性归 Step 17；基础调试可见性归 Step 18。
 
 ## 已实现兼容清单
 
@@ -166,7 +166,7 @@
 - Run 定时触发、队列领取、并发合并、取消、重试和中断恢复归 Step 13。
 - `process`、`codex_local` 以外的 runtime adapter 及跨 runtime 的 session/environment/usage 深化归 Step 14。
 - 完整 workspace 建立、复用、runtime service 与执行产物归 Step 15。
-- 完整 cost、budget 与扩展 activity 治理归 Step 16。
+- cost summary 与 activity query 归 Step 19；budget、quota 与 skills analytics 治理归 Step 20。
 - API key、真实用户认证与完整权限行为归对应后续接入步骤。
 
 ## 本地验收流程
@@ -249,12 +249,12 @@ curl.exe -s "$base/api/chats/$($chat.id)/messages"
 ## 后续步骤边界
 
 - Step 11E 已实现 `codex_local` runtime adapter，使 Agent 能通过已建立的 run contract 启动 Codex 并保存基线执行结果。
-- Step 11F 已实现直接触发 Agent runtime 并记录回复的最小消息闭环；完整 Chat / Messenger 扩展仍归 Step 17。
+- Step 11F 已实现直接触发 Agent runtime 并记录回复的最小消息闭环；完整 Chat / Messenger 扩展仍归 Step 16。
 - Step 12 实现 Goal CRUD、层级与 `ownerAgentId` 同 organization 引用校验。
 - Step 13 在本步骤 run 基线上扩展调度、并发领取、取消、中断恢复和幂等语义。
 - Step 14 扩展 `codex_local` 以外的更多 runtime adapter 类型及跨 runtime 的 session/environment/usage 兼容行为。
 - Step 15 落地完整 workspace 生命周期与执行产物；本步骤只实现首个执行路径必须使用的最小上下文。
-- Step 16 落地完整 cost、budget 与 activity 治理；本步骤只保留执行闭环必须产生的记录。
+- Step 19/20 落地 cost、activity 与 budget 治理；本步骤只保留执行闭环必须产生的记录。
 - Avatar、attachment/storage 与完整 Chat / Messenger 不因最小 Agent 对话闭环而提前并入本步骤。
 
 ## 验收
