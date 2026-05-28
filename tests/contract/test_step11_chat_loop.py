@@ -165,7 +165,7 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
         return FakeCodexProcess()
 
     monkeypatch.setattr(
-        "packages.runtimes.codex_local.asyncio.create_subprocess_exec",
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
     org_id = await _seed_org(session_factory)
