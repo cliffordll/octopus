@@ -21,7 +21,9 @@ class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
     )
     quota_provider = "openai"
 
-    async def list_models(self) -> list[dict[str, str]]:
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
         return [
             {"id": "gpt-5-codex", "label": "GPT-5 Codex"},
             {"id": "gpt-5", "label": "GPT-5"},

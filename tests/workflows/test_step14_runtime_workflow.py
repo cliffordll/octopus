@@ -496,5 +496,44 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     assert capture["credential"] == "token=test\n"
 
 
+async def test_opencode_local_discovers_models_from_cli(tmp_path) -> None:
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import sys",
+                "assert sys.argv[1:] == ['models']",
+                "print('anthropic/claude-sonnet-4.5 Claude Sonnet')",
+                "print('openai/gpt-5 GPT-5')",
+                "print('openai/gpt-5 duplicate')",
+                "print('not-a-model')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    models = await adapter.list_models(
+        {"command": sys.executable, "args": [str(fake_opencode)]}
+    )
+
+    assert models == [
+        {"id": "anthropic/claude-sonnet-4.5", "label": "anthropic/claude-sonnet-4.5"},
+        {"id": "openai/gpt-5", "label": "openai/gpt-5"},
+    ]
+
+
+async def test_opencode_local_model_discovery_failure_returns_empty(tmp_path) -> None:
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text("import sys; sys.exit(2)", encoding="utf-8")
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    models = await adapter.list_models(
+        {"command": sys.executable, "args": [str(fake_opencode)]}
+    )
+
+    assert models == []
+
+
 async def _noop_log(stream: str, chunk: str) -> None:
     return None

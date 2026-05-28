@@ -43,8 +43,10 @@ def get_runtime_adapter(runtime_type: str) -> RuntimeAdapter:
     raise ValueError(f"Unknown runtime adapter: {runtime_type}")
 
 
-async def list_runtime_models(runtime_type: str) -> list[dict[str, str]]:
-    return await get_runtime_adapter(runtime_type).list_models()
+async def list_runtime_models(
+    runtime_type: str, config: dict | None = None
+) -> list[dict[str, str]]:
+    return await get_runtime_adapter(runtime_type).list_models(config)
 
 
 async def get_runtime_metadata(runtime_type: str) -> dict:

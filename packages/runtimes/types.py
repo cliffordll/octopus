@@ -52,7 +52,9 @@ class RuntimeAdapter(Protocol):
         self, config: dict[str, Any]
     ) -> RuntimeEnvironmentTestResult: ...
 
-    async def list_models(self) -> list[dict[str, str]]: ...
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]: ...
 
     async def list_skills(
         self, config: dict[str, Any], desired_skills: list[str] | None = None

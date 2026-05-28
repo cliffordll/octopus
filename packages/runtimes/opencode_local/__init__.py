@@ -9,6 +9,7 @@ from ..types import (
     RuntimeExecutionResult,
 )
 from .environment import test_environment as test_opencode_environment
+from .models import list_models as list_opencode_models
 from .runner import execute as execute_opencode
 from .skills import skill_snapshot
 
@@ -19,7 +20,6 @@ class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     agent_configuration_doc = (
         "Configure cwd, model, variant, env and OpenCode CLI options."
     )
-    _models = [{"id": "opencode/default", "label": "OpenCode Default"}]
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         return await execute_opencode(context)
@@ -29,8 +29,10 @@ class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     ) -> RuntimeEnvironmentTestResult:
         return await test_opencode_environment(config)
 
-    async def list_models(self) -> list[dict[str, str]]:
-        return self._models
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
+        return await list_opencode_models(config)
 
     def _skill_snapshot(
         self,
