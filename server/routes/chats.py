@@ -5,19 +5,24 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from packages.shared.api_paths.chats import (
+    CHAT_CONTEXT_LINKS_PATH,
     CHAT_DETAIL_PATH,
     CHAT_MESSAGES_PATH,
+    CHAT_PROJECT_CONTEXT_PATH,
     CHAT_USER_STATE_PATH,
     ORG_CHAT_LIST_PATH,
 )
 from packages.shared.types.chat import (
+    ChatContextLink,
     ChatConversation,
     ChatMessage,
     CreatedChatMessages,
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
+    validate_create_chat_context_link,
     validate_create_chat_conversation,
+    validate_set_chat_project_context,
     validate_update_chat_conversation,
     validate_update_chat_conversation_user_state,
 )
@@ -137,6 +142,64 @@ async def update_chat_user_state_route(
         actor = require_actor_identity(request)
         updated = await service.update_user_state(
             current["id"], payload, user_id=actor.actor_id
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return updated
+
+
+@router.post(CHAT_CONTEXT_LINKS_PATH, status_code=status.HTTP_201_CREATED)
+async def add_chat_context_link_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> ChatContextLink:
+    current = await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_create_chat_context_link(body)
+        actor = require_actor_identity(request)
+        linked = await service.add_context_link(
+            current["id"],
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if linked is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return linked
+
+
+@router.post(CHAT_PROJECT_CONTEXT_PATH)
+async def set_chat_project_context_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> ChatConversation:
+    current = await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_set_chat_project_context(body)
+        actor = require_actor_identity(request)
+        updated = await service.set_project_context(
+            current["id"],
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
         )
     except ValueError as exc:
         raise HTTPException(

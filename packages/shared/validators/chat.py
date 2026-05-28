@@ -4,10 +4,16 @@ from collections.abc import Mapping
 from typing import Any, cast
 import uuid
 
-from ..constants.chat import CHAT_CONVERSATION_STATUSES, CHAT_ISSUE_CREATION_MODES
+from ..constants.chat import (
+    CHAT_CONTEXT_ENTITY_TYPES,
+    CHAT_CONVERSATION_STATUSES,
+    CHAT_ISSUE_CREATION_MODES,
+)
 from ..types.chat import (
     AddChatMessagePayload,
+    CreateChatContextLinkPayload,
     CreateChatConversationPayload,
+    SetChatProjectContextPayload,
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
@@ -18,6 +24,7 @@ _CREATE_FIELDS = {
     "preferredAgentId",
     "issueCreationMode",
     "planMode",
+    "contextLinks",
 }
 
 _UPDATE_FIELDS = _CREATE_FIELDS | {
@@ -34,7 +41,42 @@ def validate_create_chat_conversation(
     _reject_unknown_fields(payload, _CREATE_FIELDS)
     result = dict(payload)
     _validate_conversation_common(result)
+    if "contextLinks" in result:
+        if not isinstance(result["contextLinks"], list):
+            raise ValueError("'contextLinks' must be a list")
+        result["contextLinks"] = [
+            validate_create_chat_context_link(link) for link in result["contextLinks"]
+        ]
     return cast(CreateChatConversationPayload, result)
+
+
+def validate_create_chat_context_link(
+    payload: Mapping[str, Any],
+) -> CreateChatContextLinkPayload:
+    _reject_unknown_fields(payload, {"entityType", "entityId", "metadata"})
+    result = dict(payload)
+    if result.get("entityType") not in CHAT_CONTEXT_ENTITY_TYPES:
+        raise ValueError(
+            f"'entityType' must be one of {list(CHAT_CONTEXT_ENTITY_TYPES)}"
+        )
+    entity_id = result.get("entityId")
+    if not isinstance(entity_id, str) or not entity_id.strip():
+        raise ValueError("'entityId' must be a non-empty string")
+    result["entityId"] = entity_id.strip()
+    if "metadata" in result and result["metadata"] is not None:
+        if not isinstance(result["metadata"], dict):
+            raise ValueError("'metadata' must be an object or null")
+    return cast(CreateChatContextLinkPayload, result)
+
+
+def validate_set_chat_project_context(
+    payload: Mapping[str, Any],
+) -> SetChatProjectContextPayload:
+    _reject_unknown_fields(payload, {"projectId"})
+    result = dict(payload)
+    if "projectId" in result and result["projectId"] is not None:
+        _validate_uuid(result["projectId"], "projectId")
+    return cast(SetChatProjectContextPayload, result)
 
 
 def validate_update_chat_conversation(

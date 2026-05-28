@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Any, Sequence, cast
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,20 +10,29 @@ from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import get_agent_by_id
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.chats import (
+    create_context_link,
     create_conversation,
     create_message,
+    delete_project_context_links,
     get_conversation,
     get_conversation_user_state,
     list_conversations,
+    list_context_links,
     list_messages,
     touch_conversation,
     update_conversation,
     upsert_conversation_user_state,
 )
+from packages.database.queries.issues import get_issue_by_id
 from packages.database.queries.organizations import get_organization_by_id
+from packages.database.queries.projects import get_project_by_id
+from packages.database.schema import Agent as AgentRow
+from packages.database.schema import ChatContextLink as ChatContextLinkRow
 from packages.database.schema import ChatConversation as ChatConversationRow
 from packages.database.schema import ChatConversationUserState
 from packages.database.schema import ChatMessage as ChatMessageRow
+from packages.database.schema import Issue as IssueRow
+from packages.database.schema import Project as ProjectRow
 from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
 from packages.shared.constants.chat import (
     ChatConversationStatus,
@@ -34,10 +43,15 @@ from packages.shared.constants.chat import (
 )
 from packages.shared.types.chat import (
     AddChatMessagePayload,
+    ChatContextLink,
     ChatConversation,
+    ChatLinkedEntity,
     ChatMessage,
+    ChatPrimaryIssueSummary,
+    CreateChatContextLinkPayload,
     CreateChatConversationPayload,
     CreatedChatMessages,
+    SetChatProjectContextPayload,
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
@@ -92,6 +106,9 @@ class ChatService:
             agent = await get_agent_by_id(self._session, preferred_agent_id)
             if agent is None or agent.org_id != org_id:
                 raise ValueError("Preferred agent must belong to the same organization")
+        await self._assert_context_links_belong_to_org(
+            org_id, payload.get("contextLinks", [])
+        )
         row = await create_conversation(
             self._session,
             {
@@ -106,6 +123,17 @@ class ChatService:
                 "created_by_user_id": actor_id if actor_type == "board" else None,
             },
         )
+        for link in payload.get("contextLinks", []):
+            await create_context_link(
+                self._session,
+                {
+                    "org_id": org_id,
+                    "conversation_id": row.id,
+                    "entity_type": link["entityType"],
+                    "entity_id": link["entityId"],
+                    "metadata_json": link.get("metadata"),
+                },
+            )
         await insert_activity_log(
             self._session,
             org_id=org_id,
@@ -114,7 +142,10 @@ class ChatService:
             action="chat.created",
             entity_type="chat",
             entity_id=row.id,
-            details={"title": row.title},
+            details={
+                "title": row.title,
+                "contextLinkCount": len(payload.get("contextLinks", [])),
+            },
         )
         return await self._to_conversation(row, user_id=actor_id)
 
@@ -201,6 +232,82 @@ class ChatService:
             unread=payload.get("unread"),
         )
         return await self._to_conversation(row, user_state=state)
+
+    async def add_context_link(
+        self,
+        conversation_id: str,
+        payload: CreateChatContextLinkPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ChatContextLink | None:
+        row = await get_conversation(self._session, conversation_id)
+        if row is None:
+            return None
+        await self._assert_context_links_belong_to_org(row.org_id, [payload])
+        link = await create_context_link(
+            self._session,
+            {
+                "org_id": row.org_id,
+                "conversation_id": row.id,
+                "entity_type": payload["entityType"],
+                "entity_id": payload["entityId"],
+                "metadata_json": payload.get("metadata"),
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="chat.context_linked",
+            entity_type="chat",
+            entity_id=row.id,
+            details=payload,
+        )
+        return (await self._hydrate_context_links([link]))[0]
+
+    async def set_project_context(
+        self,
+        conversation_id: str,
+        payload: SetChatProjectContextPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ChatConversation | None:
+        row = await get_conversation(self._session, conversation_id)
+        if row is None:
+            return None
+        project_id = payload.get("projectId")
+        if project_id is not None:
+            await self._assert_context_links_belong_to_org(
+                row.org_id, [{"entityType": "project", "entityId": project_id}]
+            )
+        await delete_project_context_links(
+            self._session, org_id=row.org_id, conversation_id=row.id
+        )
+        if project_id is not None:
+            await create_context_link(
+                self._session,
+                {
+                    "org_id": row.org_id,
+                    "conversation_id": row.id,
+                    "entity_type": "project",
+                    "entity_id": project_id,
+                    "metadata_json": None,
+                },
+            )
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="chat.project_context_updated",
+            entity_type="chat",
+            entity_id=row.id,
+            details={"projectId": project_id},
+        )
+        return await self._to_conversation(row, user_id=actor_id)
 
     async def list_messages(self, conversation_id: str) -> list[ChatMessage]:
         return [
@@ -316,6 +423,8 @@ class ChatService:
                 user_id=user_id,
             )
         is_unread = _is_unread(row, user_state)
+        context_links = await self._context_links_for_conversation(row.id)
+        primary_issue = await self._primary_issue_summary(row.primary_issue_id)
         return {
             "id": row.id,
             "orgId": row.org_id,
@@ -327,7 +436,7 @@ class ChatService:
             "preferredAgentId": row.preferred_agent_id,
             "routedAgentId": row.routed_agent_id,
             "primaryIssueId": row.primary_issue_id,
-            "primaryIssue": None,
+            "primaryIssue": primary_issue,
             "issueCreationMode": cast(ChatIssueCreationMode, row.issue_creation_mode),
             "planMode": row.plan_mode,
             "createdByUserId": row.created_by_user_id,
@@ -340,7 +449,7 @@ class ChatService:
             "unreadCount": 1 if is_unread else 0,
             "needsAttention": is_unread,
             "resolvedAt": _iso(row.resolved_at),
-            "contextLinks": [],
+            "contextLinks": context_links,
             "chatRuntime": {
                 "sourceType": "none",
                 "sourceLabel": "No runtime selected",
@@ -353,6 +462,93 @@ class ChatService:
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }
+
+    async def _context_links_for_conversation(
+        self, conversation_id: str
+    ) -> list[ChatContextLink]:
+        links = await list_context_links(self._session, [conversation_id])
+        return await self._hydrate_context_links(links)
+
+    async def _hydrate_context_links(
+        self, rows: Sequence[ChatContextLinkRow]
+    ) -> list[ChatContextLink]:
+        issue_ids = [row.entity_id for row in rows if row.entity_type == "issue"]
+        project_ids = [row.entity_id for row in rows if row.entity_type == "project"]
+        agent_ids = [row.entity_id for row in rows if row.entity_type == "agent"]
+        issue_map = {
+            issue_id: await get_issue_by_id(self._session, issue_id)
+            for issue_id in issue_ids
+        }
+        project_map = {
+            project_id: await get_project_by_id(self._session, project_id)
+            for project_id in project_ids
+        }
+        agent_map = {
+            agent_id: await get_agent_by_id(self._session, agent_id)
+            for agent_id in agent_ids
+        }
+        return [
+            {
+                "id": row.id,
+                "orgId": row.org_id,
+                "conversationId": row.conversation_id,
+                "entityType": cast(Any, row.entity_type),
+                "entityId": row.entity_id,
+                "metadata": row.metadata_json,
+                "entity": _linked_entity(
+                    row.entity_type,
+                    row.entity_id,
+                    issue_map.get(row.entity_id),
+                    project_map.get(row.entity_id),
+                    agent_map.get(row.entity_id),
+                ),
+                "createdAt": row.created_at.isoformat(),
+                "updatedAt": row.updated_at.isoformat(),
+            }
+            for row in rows
+        ]
+
+    async def _primary_issue_summary(
+        self, issue_id: str | None
+    ) -> ChatPrimaryIssueSummary | None:
+        if issue_id is None:
+            return None
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            return None
+        return {
+            "id": issue.id,
+            "identifier": issue.identifier,
+            "title": issue.title,
+            "status": issue.status,
+            "priority": issue.priority,
+        }
+
+    async def _assert_context_links_belong_to_org(
+        self,
+        org_id: str,
+        links: Sequence[CreateChatContextLinkPayload | dict[str, str]],
+    ) -> None:
+        for link in links:
+            entity_type = link["entityType"]
+            entity_id = link["entityId"]
+            if entity_type == "issue":
+                issue = await get_issue_by_id(self._session, entity_id)
+                if issue is None or issue.org_id != org_id:
+                    raise ValueError(
+                        "Issue context must belong to the same organization"
+                    )
+                continue
+            if entity_type == "project":
+                project = await get_project_by_id(self._session, entity_id)
+                if project is None or project.org_id != org_id:
+                    raise ValueError(
+                        "Project context must belong to the same organization"
+                    )
+                continue
+            agent = await get_agent_by_id(self._session, entity_id)
+            if agent is None or agent.org_id != org_id:
+                raise ValueError("Agent context must belong to the same organization")
 
     def _to_message(self, row: ChatMessageRow) -> ChatMessage:
         return {
@@ -388,3 +584,54 @@ def _is_unread(
     if user_state is None or row.last_message_at is None:
         return False
     return row.last_message_at > user_state.last_read_at
+
+
+def _linked_entity(
+    entity_type: str,
+    entity_id: str,
+    issue: IssueRow | None,
+    project: ProjectRow | None,
+    agent: AgentRow | None,
+) -> ChatLinkedEntity | None:
+    if entity_type == "issue" and issue is not None:
+        return cast(
+            ChatLinkedEntity,
+            {
+                "type": "issue",
+                "id": issue.id,
+                "label": issue.title,
+                "subtitle": issue.status,
+                "identifier": issue.identifier,
+                "status": issue.status,
+                "description": issue.description,
+                "priority": issue.priority,
+                "href": f"/issues/{issue.identifier or issue.id}",
+            },
+        )
+    if entity_type == "project" and project is not None:
+        return cast(
+            ChatLinkedEntity,
+            {
+                "type": "project",
+                "id": project.id,
+                "label": project.name,
+                "subtitle": project.description,
+                "identifier": None,
+                "status": project.status,
+                "href": f"/projects/{project.id}",
+            },
+        )
+    if entity_type == "agent" and agent is not None:
+        return cast(
+            ChatLinkedEntity,
+            {
+                "type": "agent",
+                "id": agent.id,
+                "label": agent.name,
+                "subtitle": agent.title,
+                "identifier": None,
+                "status": agent.status,
+                "href": f"/agents/{agent.id}",
+            },
+        )
+    return None
