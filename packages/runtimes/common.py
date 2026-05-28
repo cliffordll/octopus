@@ -34,7 +34,9 @@ class UnavailableRuntimeAdapter:
             ],
         )
 
-    async def list_models(self) -> list[dict[str, str]]:
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
         return []
 
     async def list_skills(
@@ -107,7 +109,9 @@ class RuntimeCapabilityMixin:
             ],
         )
 
-    async def list_models(self) -> list[dict[str, str]]:
+    async def list_models(
+        self, config: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
         return []
 
     async def list_skills(
