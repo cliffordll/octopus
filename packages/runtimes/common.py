@@ -51,6 +51,7 @@ def _unsupported_skill_snapshot(
     return {
         "agentRuntimeType": runtime_type,
         "supported": False,
+        "mode": "unsupported",
         "desiredSkills": desired_skills,
         "entries": [],
         "warnings": ["This adapter does not implement skill sync."],
@@ -84,6 +85,7 @@ class RuntimeCapabilityMixin:
         return {
             "agentRuntimeType": self.type,
             "supported": True,
+            "mode": "runtime",
             "desiredSkills": [],
             "entries": [],
             "warnings": [],
@@ -95,6 +97,7 @@ class RuntimeCapabilityMixin:
         return {
             "agentRuntimeType": self.type,
             "supported": True,
+            "mode": "runtime",
             "desiredSkills": desired_skills,
             "entries": [],
             "warnings": [],

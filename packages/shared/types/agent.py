@@ -20,6 +20,7 @@ class Agent(TypedDict):
     status: AgentStatus
     reportsTo: str | None
     capabilities: str | None
+    desiredSkills: list[str]
     agentRuntimeType: AgentRuntimeType
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
@@ -95,6 +96,8 @@ class AgentConfiguration(TypedDict):
     title: str | None
     status: AgentStatus
     reportsTo: str | None
+    capabilities: str | None
+    desiredSkills: list[str]
     agentRuntimeType: AgentRuntimeType
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
@@ -179,6 +182,7 @@ class AgentRuntimeEnvironmentTestResult(TypedDict):
 class AgentSkillSnapshot(TypedDict):
     agentRuntimeType: str
     supported: bool
+    mode: str
     desiredSkills: list[str]
     entries: list[dict[str, Any]]
     warnings: list[str]

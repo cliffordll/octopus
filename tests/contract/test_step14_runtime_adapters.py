@@ -9,10 +9,11 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Base, Organization
+from packages.database.schema import ActivityLog, Base, Organization
 from server.app import create_app
 
 
@@ -122,10 +123,20 @@ async def test_agent_skills_snapshot_and_sync_routes(
         f"/api/orgs/{org_id}/agents",
         json={
             "name": "Skill Agent",
+            "capabilities": "Review code and explain runtime risks.",
             "agentRuntimeType": "opencode_local",
-            "agentRuntimeConfig": {"command": sys.executable},
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "promptTemplate": "Use the agent capabilities as operating guidance.",
+            },
             "desiredSkills": ["review"],
         },
+    )
+    assert agent["capabilities"] == "Review code and explain runtime risks."
+    assert agent["desiredSkills"] == ["review"]
+    assert (
+        agent["agentRuntimeConfig"]["promptTemplate"]
+        == "Use the agent capabilities as operating guidance."
     )
 
     snapshot_code, snapshot = await _request(
@@ -135,11 +146,25 @@ async def test_agent_skills_snapshot_and_sync_routes(
         application,
         "POST",
         f"/api/agents/{agent['id']}/skills/sync",
-        json={"skills": ["review", "debug"]},
+        json={"desiredSkills": ["review", "debug"]},
     )
 
     assert snapshot_code == 200
     assert snapshot["agentRuntimeType"] == "opencode_local"
     assert snapshot["supported"] is True
+    assert snapshot["mode"] == "runtime"
+    assert snapshot["desiredSkills"] == ["review"]
     assert sync_code == 200
     assert sync["desiredSkills"] == ["review", "debug"]
+
+    detail_code, detail = await _request(
+        application, "GET", f"/api/agents/{agent['id']}"
+    )
+    assert detail_code == 200
+    assert detail["desiredSkills"] == ["review", "debug"]
+
+    async with factory() as session:
+        actions = [
+            row.action for row in (await session.execute(select(ActivityLog))).scalars()
+        ]
+    assert "agent.skills_synced" in actions
