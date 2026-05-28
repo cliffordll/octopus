@@ -559,11 +559,10 @@ class WorkspaceService:
         primary = next(
             (workspace for workspace in workspaces if workspace.is_primary), None
         )
-        return (
-            (primary or (workspaces[0] if workspaces else None)).id
-            if workspaces
-            else None
-        )
+        if not workspaces:
+            return None
+        selected = primary or workspaces[0]
+        return selected.id
 
     async def _ensure_managed_workspace_paths(
         self, workspace: ExecutionWorkspaceData

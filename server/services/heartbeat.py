@@ -904,7 +904,7 @@ class HeartbeatService:
 
     async def _begin_adapter_workspace_operation(
         self, running: HeartbeatRunRow, workspace_context: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
+    ) -> object | None:
         if workspace_context is None:
             return None
         workspace_payload = workspace_context.get("workspace")
