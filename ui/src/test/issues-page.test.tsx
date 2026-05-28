@@ -84,10 +84,17 @@ it("filters and creates issues for an organization", async () => {
   );
 });
 
-it("groups task navigation by task shortcuts, recent views, and project issues", async () => {
+it("groups task navigation by shortcuts, collapsed recent views, and project links", async () => {
   localStorage.setItem(
     "octopus:recent-issues:org-1",
-    JSON.stringify([{ id: "issue-recent", title: "最近处理", identifier: "OCT-9", status: "todo" }]),
+    JSON.stringify([
+      { id: "issue-recent-1", title: "最近处理 1", identifier: "OCT-9", status: "todo" },
+      { id: "issue-recent-2", title: "最近处理 2", identifier: "OCT-10", status: "todo" },
+      { id: "issue-recent-3", title: "最近处理 3", identifier: "OCT-11", status: "todo" },
+      { id: "issue-recent-4", title: "最近处理 4", identifier: "OCT-12", status: "todo" },
+      { id: "issue-recent-5", title: "最近处理 5", identifier: "OCT-13", status: "todo" },
+      { id: "issue-recent-6", title: "最近处理 6", identifier: "OCT-14", status: "todo" },
+    ]),
   );
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
@@ -171,26 +178,29 @@ it("groups task navigation by task shortcuts, recent views, and project issues",
     "/orgs/org-1/issues?view=following",
   );
   expect(within(taskNavigation).getByText("最近查看")).toBeInTheDocument();
-  expect(within(taskNavigation).getByRole("link", { name: /最近处理/ })).toHaveAttribute(
+  expect(within(taskNavigation).getByRole("link", { name: /最近处理 1/ })).toHaveAttribute(
     "href",
-    "/orgs/org-1/issues/issue-recent",
+    "/orgs/org-1/issues/issue-recent-1",
   );
+  expect(within(taskNavigation).getByRole("link", { name: /最近处理 5/ })).toBeInTheDocument();
+  expect(within(taskNavigation).queryByRole("link", { name: /最近处理 6/ })).not.toBeInTheDocument();
+  await userEvent.click(within(taskNavigation).getByRole("button", { name: "展开全部 6" }));
+  expect(within(taskNavigation).getByRole("link", { name: /最近处理 6/ })).toBeInTheDocument();
+  await userEvent.click(within(taskNavigation).getByRole("button", { name: "收起" }));
+  expect(within(taskNavigation).queryByRole("link", { name: /最近处理 6/ })).not.toBeInTheDocument();
   expect(within(taskNavigation).getByText("项目")).toBeInTheDocument();
   expect(await within(taskNavigation).findByRole("link", { name: "控制台" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues?projectId=project-1",
   );
-  expect(within(taskNavigation).getByRole("link", { name: /实现登录流程/ })).toHaveAttribute(
-    "href",
-    "/orgs/org-1/issues/issue-1",
-  );
-  expect(taskNavigation).toHaveTextContent("in_progress");
+  expect(within(taskNavigation).queryByRole("link", { name: /实现登录流程/ })).not.toBeInTheDocument();
+  expect(taskNavigation).not.toHaveTextContent("in_progress");
   expect(within(taskNavigation).getByRole("link", { name: "增长" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues?projectId=project-2",
   );
-  expect(within(taskNavigation).getByRole("link", { name: /设计增长实验/ })).toBeInTheDocument();
-  expect(taskNavigation).toHaveTextContent("blocked");
+  expect(within(taskNavigation).queryByRole("link", { name: /设计增长实验/ })).not.toBeInTheDocument();
+  expect(taskNavigation).not.toHaveTextContent("blocked");
   expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues?projectId=project-empty",

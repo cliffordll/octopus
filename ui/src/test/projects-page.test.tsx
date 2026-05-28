@@ -20,7 +20,10 @@ it("opens the first project for an organization with projects", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects");
-  expect(await screen.findByRole("heading", { name: "控制台" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "返回 Projects" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/projects",
+  );
   const organizationNavigation = screen.getByRole("navigation", { name: "组织导航" });
   expect(within(organizationNavigation).getByText("组织")).toBeInTheDocument();
   expect(within(organizationNavigation).getByRole("link", { name: "组织架构" }))

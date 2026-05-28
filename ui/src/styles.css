@@ -850,7 +850,7 @@ h1, h2, p {
 .context-project-name {
   color: #9da8ba;
   font-size: 13px;
-  margin: 7px 0 2px;
+  margin: 0;
 }
 
 .context-nav .context-sub-item {
@@ -877,6 +877,20 @@ h1, h2, p {
 .context-item-copy small {
   color: #68748a;
   font-size: 11px;
+}
+
+.context-nav-toggle {
+  background: transparent;
+  border: 0;
+  color: #7fa8dc;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.context-nav-toggle:hover {
+  color: #b5d5fa;
 }
 
 .context-empty {
