@@ -9,6 +9,8 @@ export function OrganizationsPage() {
   const [name, setName] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [brandColor, setBrandColor] = useState("");
+  const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const organizations = useQuery({
@@ -21,6 +23,8 @@ export function OrganizationsPage() {
       setName("");
       setBudgetMonthlyCents("");
       setBrandColor("");
+      setRequireBoardApprovalForNewAgents(false);
+      setDefaultChatIssueCreationMode("disabled");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
       navigate(`/orgs/${organization.id}/agents/new`);
     },
@@ -33,6 +37,8 @@ export function OrganizationsPage() {
         name: value,
         ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
         ...(brandColor.trim() ? { brandColor: brandColor.trim() } : {}),
+        requireBoardApprovalForNewAgents,
+        defaultChatIssueCreationMode,
       });
     }
   }
@@ -76,6 +82,25 @@ export function OrganizationsPage() {
           <label>
             品牌色
             <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={requireBoardApprovalForNewAgents}
+              onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
+              type="checkbox"
+            />
+            新建智能体需要审批
+          </label>
+          <label>
+            默认聊天任务创建模式
+            <select
+              value={defaultChatIssueCreationMode}
+              onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
+            >
+              <option value="disabled">disabled</option>
+              <option value="manual">manual</option>
+              <option value="automatic">automatic</option>
+            </select>
           </label>
           {create.error && <ErrorNotice error={create.error} />}
           <button disabled={create.isPending} type="submit">

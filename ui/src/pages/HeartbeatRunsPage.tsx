@@ -59,6 +59,43 @@ function RunUsageSummary({ run }: { run: HeartbeatRun }) {
   );
 }
 
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function WorkspaceContextSummary({ run }: { run: HeartbeatRun }) {
+  const snapshot = run.contextSnapshot;
+  const workspaceContext = snapshot?.workspace;
+  const workspace =
+    workspaceContext && typeof workspaceContext === "object" && !Array.isArray(workspaceContext)
+      ? (workspaceContext as Record<string, unknown>).rudderWorkspace
+      : null;
+  const workspaceRecord =
+    workspace && typeof workspace === "object" && !Array.isArray(workspace)
+      ? (workspace as Record<string, unknown>)
+      : {};
+  const executionWorkspaceId = stringField(snapshot?.executionWorkspaceId) ?? stringField(workspaceRecord.id);
+  const projectWorkspaceId = stringField(snapshot?.projectWorkspaceId);
+  const cwd = stringField(workspaceRecord.cwd);
+  const branchName = stringField(workspaceRecord.branchName);
+  const status = stringField(workspaceRecord.status);
+  if (!executionWorkspaceId && !projectWorkspaceId && !cwd && !branchName && !status) return null;
+  return (
+    <section className="workspace-context-card" aria-label="执行工作区">
+      <div className="project-workspace-card-heading">
+        <h3>执行工作区</h3>
+        {status && <Badge>{status}</Badge>}
+      </div>
+      <dl className="detail-grid compact">
+        {executionWorkspaceId && <div><dt>执行工作区 ID</dt><dd>{executionWorkspaceId}</dd></div>}
+        {projectWorkspaceId && <div><dt>项目工作区 ID</dt><dd>{projectWorkspaceId}</dd></div>}
+        {branchName && <div><dt>分支</dt><dd>{branchName}</dd></div>}
+        {cwd && <div><dt>目录</dt><dd>{cwd}</dd></div>}
+      </dl>
+    </section>
+  );
+}
+
 function AgentHeartbeatRow({
   agent,
   latestRun,
@@ -265,6 +302,7 @@ export function HeartbeatRunsPage() {
                 <div><dt>结束时间</dt><dd>{formatRunTime(detail.data.finishedAt)}</dd></div>
               </dl>
               <RunUsageSummary run={detail.data} />
+              <WorkspaceContextSummary run={detail.data} />
               {(detail.data.sessionIdBefore || detail.data.sessionIdAfter) && (
                 <dl className="agent-run-session">
                   <div><dt>Session Before</dt><dd>{detail.data.sessionIdBefore ?? "无"}</dd></div>

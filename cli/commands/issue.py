@@ -26,12 +26,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     list_parser.add_argument("--org-id", required=True)
     list_parser.add_argument("--status", choices=STATUSES)
     list_parser.add_argument("--assignee-agent-id")
-    list_parser.add_argument("--assignee-user-id")
-    list_parser.add_argument("--reviewer-agent-id")
-    list_parser.add_argument("--reviewer-user-id")
     list_parser.add_argument("--project-id")
     list_parser.add_argument("--goal-id")
-    list_parser.add_argument("--parent-id")
     list_parser.add_argument("--origin-kind")
     list_parser.add_argument("--origin-id")
     list_parser.set_defaults(handler=list_issues)
@@ -97,12 +93,8 @@ def list_issues(args: argparse.Namespace, client: ApiClient) -> Any:
         for key, value in {
             "status": args.status,
             "assigneeAgentId": args.assignee_agent_id,
-            "assigneeUserId": args.assignee_user_id,
-            "reviewerAgentId": args.reviewer_agent_id,
-            "reviewerUserId": args.reviewer_user_id,
             "projectId": args.project_id,
             "goalId": args.goal_id,
-            "parentId": args.parent_id,
             "originKind": args.origin_kind,
             "originId": args.origin_id,
         }.items()
