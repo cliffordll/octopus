@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Organization
+from packages.database.schema import Base, Issue, Organization
 from server.services.projects import ProjectService
+from server.services.workspaces import WorkspaceService
 
 
 def test_workspace_contract_modules_are_defined() -> None:
@@ -142,3 +143,59 @@ async def test_project_detail_includes_workspace_aggregation() -> None:
     assert detail["codebase"]["configured"] is True
     assert detail["codebase"]["workspaceId"] == workspace["id"]
 
+
+async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-resolution",
+                name="Step 15 Resolution",
+                issue_prefix="RES",
+            )
+            session.add(org)
+            await session.flush()
+            projects = ProjectService(session)
+            project = await projects.create_project(
+                org.id,
+                {
+                    "name": "Workspace Resolution",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await projects.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/primary"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Implement workspace resolution",
+                project_workspace_id=project_workspace["id"]
+                if project_workspace
+                else None,
+            )
+            session.add(issue)
+            await session.flush()
+
+            workspace = await WorkspaceService(session).resolve_for_issue(issue)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert workspace is not None
+    assert workspace["projectId"] == project["id"]
+    assert workspace["projectWorkspaceId"] == project_workspace["id"]
+    assert workspace["sourceIssueId"] == issue.id
+    assert workspace["mode"] == "isolated_workspace"
+    assert workspace["strategyType"] == "git_worktree"
