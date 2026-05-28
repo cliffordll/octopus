@@ -19,6 +19,8 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         raise ValueError("Process adapter cwd must be a string")
     env = dict(os.environ)
     env.update(configured_env(context.config.get("env")))
+    if context.env:
+        env.update(context.env)
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
     process = await asyncio.create_subprocess_exec(

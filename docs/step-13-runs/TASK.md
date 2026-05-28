@@ -61,6 +61,27 @@ Step 11 已落地 agent wakeup、heartbeat run、run event 与实际 adapter 执
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否在 server lifespan 启动 heartbeat scheduler |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | timer 检查与 queued run 恢复周期，最小 `0.1` 秒 |
 
+## Claim 的含义
+
+Claim 是 run 调度中的“领取执行权”。run 创建后先进入 `queued` 状态，表示任务已经登记但尚未开始执行；worker 准备执行时，需要先通过条件更新把它从 `queued` 原子地改为 `running`。
+
+```text
+queued -> running
+```
+
+这个动作的目的不是审批或权限校验，而是并发保护。多个 worker 可能同时看到同一个 `queued` run，只有成功 claim 的 worker 才能继续执行，其他 worker 必须放弃。
+
+典型条件更新如下：
+
+```sql
+UPDATE heartbeat_runs
+SET status = 'running'
+WHERE id = :run_id
+  AND status = 'queued'
+```
+
+如果更新成功，说明当前 worker 获得唯一执行权；如果没有更新到任何记录，说明该 run 已被其他 worker claim 或状态已经变化。
+
 ## 不包含
 
 - 新 adapter 或 runtime 类型实现，归 Step 14。
