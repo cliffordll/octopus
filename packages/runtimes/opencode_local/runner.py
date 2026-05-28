@@ -4,7 +4,9 @@ import asyncio
 import contextlib
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
+from ..local_skills import desired_skills_from_config, materialize_runtime_skills
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     auth_required,
@@ -36,6 +38,16 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    if not string(env.get("HOME")):
+        env["HOME"] = str(_default_home(context))
+    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    loaded_skills = materialize_runtime_skills(
+        runtime_type="opencode_local",
+        config=context.config,
+        desired_skills=desired_skills_from_config(context.config),
+        skills_home=Path(env["HOME"]).expanduser() / ".claude" / "skills",
+        location_label="managed Claude-compatible skills home",
+    )
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
     process = await asyncio.create_subprocess_exec(
@@ -74,6 +86,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                     signal="SIGTERM",
                     error_message="Run cancelled",
                     model=string(context.config.get("model")),
+                    loaded_skills=loaded_skills,
                 )
             cancelled.cancel()
             if communication not in done:
@@ -97,6 +110,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             timed_out=True,
             error_message=f"Timed out after {timeout_sec:g}s",
             model=string(context.config.get("model")),
+            loaded_skills=loaded_skills,
         )
     except asyncio.CancelledError:
         communication.cancel()
@@ -126,7 +140,9 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         error_message=error,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
-        result_json=_result_json(stdout_text, stderr_text, parsed, model, error),
+        result_json=_result_json(
+            stdout_text, stderr_text, parsed, model, error, loaded_skills
+        ),
     )
 
 
@@ -139,6 +155,7 @@ def _result(
     timed_out: bool = False,
     error_message: str | None = None,
     model: str | None = None,
+    loaded_skills: list[dict[str, str | None]] | None = None,
 ) -> RuntimeExecutionResult:
     stdout_text = stdout.decode(errors="replace")
     stderr_text = stderr.decode(errors="replace")
@@ -151,7 +168,7 @@ def _result(
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
         result_json=_result_json(
-            stdout_text, stderr_text, parsed, model, error_message
+            stdout_text, stderr_text, parsed, model, error_message, loaded_skills or []
         ),
     )
 
@@ -162,6 +179,7 @@ def _result_json(
     parsed: dict,
     model: str | None,
     error: str | None,
+    loaded_skills: list[dict[str, str | None]],
 ) -> dict:
     return {
         "stdout": stdout_text,
@@ -170,6 +188,19 @@ def _result_json(
         "costUsd": parsed["costUsd"],
         "provider": provider(model),
         "model": model,
+        "loadedSkills": loaded_skills,
         "modelUnavailable": model_unavailable(stdout_text, stderr_text, error),
         "authRequired": auth_required(stdout_text, stderr_text, error),
     }
+
+
+def _default_home(context: RuntimeExecutionContext) -> Path:
+    return (
+        Path.cwd()
+        / ".octopus"
+        / "runtime-homes"
+        / "opencode_local"
+        / context.org_id
+        / context.agent_id
+        / "home"
+    )
