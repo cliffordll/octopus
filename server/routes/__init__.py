@@ -8,6 +8,7 @@ from .issues import router as issues_router
 from .orgs import router as orgs_router
 from .projects import router as projects_router
 from .chats import router as chats_router
+from .goals import router as goals_router
 
 
 def register_routes(app: FastAPI) -> None:
@@ -17,3 +18,4 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(projects_router)
     app.include_router(agents_router)
     app.include_router(chats_router)
+    app.include_router(goals_router)

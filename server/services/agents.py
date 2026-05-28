@@ -57,6 +57,8 @@ from packages.shared.types.agent import (
     UpdateAgentPayload,
 )
 
+from .agent_names import pick_unique_agent_name
+
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_KEY_PATTERN = re.compile(
     r"(api[-_]?key|access[-_]?token|auth(?:_?token)?|authorization|bearer|secret|passwd|password|credential|jwt|private[-_]?key|cookie|connectionstring)",
@@ -158,6 +160,11 @@ class AgentService:
         }
         return detail
 
+    async def suggest_name(self, org_id: str) -> str:
+        existing = await list_org_agents(self._session, org_id)
+        name = pick_unique_agent_name([(row.name, row.status) for row in existing])
+        return self._deduplicate_name(name, existing)
+
     async def create_agent(
         self,
         org_id: str,
@@ -170,9 +177,11 @@ class AgentService:
         if manager_id is not None:
             await self._validate_manager(org_id, manager_id)
         existing = await list_org_agents(self._session, org_id)
-        name = self._deduplicate_name(
-            str(payload.get("name", "Agent")).strip() or "Agent", existing
+        requested_name = str(payload.get("name", "")).strip()
+        candidate_name = requested_name or pick_unique_agent_name(
+            [(row.name, row.status) for row in existing]
         )
+        name = self._deduplicate_name(candidate_name, existing)
         agent_id = str(uuid.uuid4())
         role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
         values: dict[str, Any] = {

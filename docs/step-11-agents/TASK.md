@@ -35,9 +35,9 @@
 
 - Shared contract 已实现 Agent status、role、runtime type、pause reason、request/response type、validator 与管理 API path。
 - Database 已实现 `agents` schema/query 及 `20260527_000003_agents.py` migration，保留 organization、status、reports-to 和 workspace-key 索引边界。
-- Server 已实现 organization-scoped Agent 创建/列表/详情/更新，以及暂停、恢复、终止生命周期 API；详情响应保留 `chainOfCommand` 与 `access` 结构。
-- Service 已实现短名和 workspace key 派生、同 organization manager 校验、reporting cycle 拒绝、terminated 列表过滤与 activity 输出。
-- Tests 已覆盖 contract、migration、管理路由、跨 organization scope、manager 校验、生命周期 activity 与 reporting cycle。
+- Server 已实现 organization-scoped Agent 创建/列表/详情/更新、个人名称建议，以及暂停、恢复、终止生命周期 API；详情响应保留 `chainOfCommand` 与 `access` 结构。
+- Service 已实现省略 `name` 时从兼容个人名称池自动选取未占用名称、短名和 workspace key 派生、同 organization manager 校验、reporting cycle 拒绝、terminated 列表过滤与 activity 输出。
+- Tests 已覆盖 contract、migration、管理路由、缺省名称分配/名称建议、跨 organization scope、manager 校验、生命周期 activity 与 reporting cycle。
 
 ### 11B: 配置治理与运行状态
 
@@ -64,7 +64,7 @@
 - Shared contract 已实现 heartbeat invocation source、wakeup/run status、wakeup payload 校验以及 wakeup、invoke、run/event 查询 API path。
 - Database 已实现 `heartbeat_runs`、`heartbeat_run_events` schema/query 及 `20260527_000005_heartbeat_runs.py` migration，并将运行结果关联至既有 wakeup request 与 runtime state。
 - Runtime 已建立统一 adapter contract 与 `process` adapter，支持真实命令调用、stdout/stderr 捕获、超时和退出错误归一化。
-- Server 已实现手动 wakeup/invoke、organization-scoped run 查询和 run event 查询；一次调用会推进 queued/running/final 状态并更新 agent/runtime state。
+- Server 已实现手动 wakeup/invoke、organization-scoped run 查询和 run event 查询；经 Step 13 扩展后，HTTP 触发先返回 `queued` run，由后台派发推进 running/final 状态并更新 agent/runtime state。
 - Activity 遵循手动调用边界记录 `heartbeat.invoked`；内部 wakeup 的业务活动仍由各自触发流程负责，避免扩大副作用语义。
 - 本阶段执行采用可验证的即时 process 执行路径；队列调度、并发领取、取消/恢复、多 adapter 与完整 workspace 仍分别归 Step 13-15 扩展。
 
@@ -118,7 +118,8 @@
 | Method / path | 本步骤行为 |
 | --- | --- |
 | `GET /api/orgs/{orgId}/agents` | organization 内 agent 列表 |
-| `POST /api/orgs/{orgId}/agents` | 创建 agent |
+| `POST /api/orgs/{orgId}/agents` | 创建 agent；省略 `name` 时由 server 分配个人名称 |
+| `GET /api/orgs/{orgId}/agents/name-suggestion` | 获取当前 organization 可用的个人名称建议 |
 | `GET /api/agents/{id}`、`PATCH /api/agents/{id}` | 详情与配置更新 |
 | `POST /api/agents/{id}/pause`、`resume`、`terminate` | 生命周期操作 |
 | `GET /api/orgs/{orgId}/agent-configurations` | organization 配置列表 |
@@ -211,7 +212,7 @@ curl.exe -s "$base/api/heartbeat-runs/$($run.id)/events"
 curl.exe -s "$base/api/agents/$($agent.id)/runtime-state"
 ```
 
-预期结果：`$run.status` 为 `succeeded`，run detail 的 `resultJson.stdout` 包含 `step-11-ok`，runtime state 的 `lastRunId` 与 `$run.id` 相同。
+预期结果：经 Step 13 扩展后 `$run.status` 初始为 `queued`；随后查询到的 run detail 状态为 `succeeded` 且 `resultJson.stdout` 包含 `step-11-ok`，runtime state 的 `lastRunId` 与 `$run.id` 相同。
 
 通过本地 Codex CLI 验收最小对话闭环：
 

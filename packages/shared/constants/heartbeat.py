@@ -19,6 +19,10 @@ HeartbeatRunStatus = Literal[
     "queued", "running", "succeeded", "failed", "cancelled", "timed_out"
 ]
 
+AGENT_RUN_CONCURRENCY_DEFAULT = 3
+AGENT_RUN_CONCURRENCY_MIN = 1
+AGENT_RUN_CONCURRENCY_MAX = 10
+
 HEARTBEAT_INVOCATION_SOURCES: tuple[HeartbeatInvocationSource, ...] = (
     "timer",
     "assignment",
