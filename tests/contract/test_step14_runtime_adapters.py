@@ -605,6 +605,112 @@ async def test_codex_execute_retries_unknown_resume_session(
     assert any("retrying with a fresh session" in chunk for _, chunk in logs)
 
 
+async def test_codex_execute_injects_runtime_context_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_env: dict[str, str] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b'{"type":"thread.started","thread_id":"thread-env"}\n', b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    monkeypatch.setenv("RUDDER_API_URL", "http://control.test")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "_octopus": {
+                    "taskId": "task-1",
+                    "wakeReason": "assignment",
+                    "wakeCommentId": "comment-1",
+                    "approvalId": "approval-1",
+                    "approvalStatus": "approved",
+                    "issueIds": ["issue-1", "issue-2"],
+                },
+            },
+            workspace={
+                "rudderWorkspace": {
+                    "cwd": "D:/workspaces/task-1",
+                    "source": "workspace",
+                    "strategy": "worktree",
+                    "workspaceId": "workspace-1",
+                    "repoUrl": "https://example.test/repo.git",
+                    "repoRef": "main",
+                    "branchName": "task-1",
+                    "worktreePath": "D:/worktrees/task-1",
+                    "agentHome": "D:/agents/agent-14",
+                    "instructionsDir": "D:/agents/agent-14/instructions",
+                    "memoryDir": "D:/agents/agent-14/memory",
+                    "skillsDir": "D:/agents/agent-14/skills",
+                    "orgWorkspaceRoot": "D:/orgs/org-14/workspaces",
+                    "orgSkillsDir": "D:/orgs/org-14/skills",
+                    "orgPlansDir": "D:/orgs/org-14/plans",
+                    "orgArtifactsDir": "D:/orgs/org-14/artifacts",
+                },
+                "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
+                "rudderRuntimePrimaryUrl": "http://svc",
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert captured_env["RUDDER_AGENT_ID"] == "agent-14"
+    assert captured_env["RUDDER_ORG_ID"] == "org-14"
+    assert captured_env["RUDDER_RUN_ID"] == "run-14"
+    assert captured_env["RUDDER_API_URL"] == "http://control.test"
+    assert captured_env["RUDDER_TASK_ID"] == "task-1"
+    assert captured_env["RUDDER_WAKE_REASON"] == "assignment"
+    assert captured_env["RUDDER_WAKE_COMMENT_ID"] == "comment-1"
+    assert captured_env["RUDDER_APPROVAL_ID"] == "approval-1"
+    assert captured_env["RUDDER_APPROVAL_STATUS"] == "approved"
+    assert captured_env["RUDDER_LINKED_ISSUE_IDS"] == "issue-1,issue-2"
+    assert captured_env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+    assert captured_env["RUDDER_WORKSPACE_SOURCE"] == "workspace"
+    assert captured_env["RUDDER_WORKSPACE_STRATEGY"] == "worktree"
+    assert captured_env["RUDDER_WORKSPACE_ID"] == "workspace-1"
+    assert captured_env["RUDDER_WORKSPACE_REPO_URL"] == "https://example.test/repo.git"
+    assert captured_env["RUDDER_WORKSPACE_REPO_REF"] == "main"
+    assert captured_env["RUDDER_WORKSPACE_BRANCH"] == "task-1"
+    assert captured_env["RUDDER_WORKSPACE_WORKTREE_PATH"] == "D:/worktrees/task-1"
+    assert captured_env["AGENT_HOME"] == "D:/agents/agent-14"
+    assert captured_env["RUDDER_AGENT_ROOT"] == "D:/agents/agent-14"
+    assert captured_env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+        "D:/agents/agent-14/instructions"
+    )
+    assert captured_env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+    assert captured_env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+    assert captured_env["RUDDER_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
+    assert captured_env["RUDDER_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
+    assert captured_env["RUDDER_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
+    assert captured_env["RUDDER_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
+    assert captured_env["RUDDER_RUNTIME_SERVICES_JSON"] == (
+        '[{"id": "svc-1", "url": "http://svc"}]'
+    )
+    assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+
+
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
