@@ -137,6 +137,23 @@ def _contains_redacted(value: Any) -> bool:
     return False
 
 
+def _desired_skills(metadata: dict[str, Any] | None) -> list[str]:
+    if not isinstance(metadata, dict):
+        return []
+    skills = metadata.get("desiredSkills", [])
+    if not isinstance(skills, list):
+        return []
+    return [skill for skill in skills if isinstance(skill, str) and skill]
+
+
+def _metadata_with_desired_skills(
+    metadata: dict[str, Any] | None, desired_skills: list[str]
+) -> dict[str, Any]:
+    updated = dict(metadata or {})
+    updated["desiredSkills"] = list(desired_skills)
+    return updated
+
+
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -184,6 +201,9 @@ class AgentService:
         name = self._deduplicate_name(candidate_name, existing)
         agent_id = str(uuid.uuid4())
         role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
+        metadata = payload.get("metadata")
+        if "desiredSkills" in payload:
+            metadata = _metadata_with_desired_skills(metadata, payload["desiredSkills"])
         values: dict[str, Any] = {
             "id": agent_id,
             "org_id": org_id,
@@ -204,7 +224,7 @@ class AgentService:
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
             "permissions": _normalized_permissions(payload.get("permissions"), role),
-            "metadata_json": payload.get("metadata"),
+            "metadata_json": metadata,
         }
         row = await create_agent(self._session, values)
         await insert_activity_log(
@@ -262,6 +282,10 @@ class AgentService:
                         f"Agent shortname '{next_key}' is already in use in this organization"
                     )
         patch = dict(payload)
+        if "desiredSkills" in patch:
+            patch["metadata"] = _metadata_with_desired_skills(
+                existing.metadata_json, cast(list[str], patch.pop("desiredSkills"))
+            )
         replace_runtime_config = patch.pop("replaceAgentRuntimeConfig", False)
         if "agentRuntimeConfig" in patch and not replace_runtime_config:
             patch["agentRuntimeConfig"] = {
@@ -324,6 +348,40 @@ class AgentService:
             )
         return self._to_agent(row)
 
+    async def sync_desired_skills(
+        self,
+        agent_id: str,
+        desired_skills: list[str],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> Agent | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        row = await update_agent(
+            self._session,
+            agent_id,
+            {
+                "metadata_json": _metadata_with_desired_skills(
+                    existing.metadata_json, desired_skills
+                )
+            },
+        )
+        if row is None:
+            return None
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.skills_synced",
+            entity_type="agent",
+            entity_id=row.id,
+            details={"desiredSkills": desired_skills},
+        )
+        return self._to_agent(row)
+
     async def get_configuration(self, agent_id: str) -> AgentConfiguration | None:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:
@@ -336,6 +394,8 @@ class AgentService:
             "title": row.title,
             "status": cast(AgentStatus, row.status),
             "reportsTo": row.reports_to,
+            "capabilities": row.capabilities,
+            "desiredSkills": _desired_skills(row.metadata_json),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": cast(
                 dict[str, Any], _sanitize_value(row.agent_runtime_config)
@@ -601,6 +661,7 @@ class AgentService:
             "status": cast(AgentStatus, row.status),
             "reportsTo": row.reports_to,
             "capabilities": row.capabilities,
+            "desiredSkills": _desired_skills(row.metadata_json),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": row.agent_runtime_config,
             "runtimeConfig": row.runtime_config,

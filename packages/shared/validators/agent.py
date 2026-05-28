@@ -145,12 +145,12 @@ def validate_test_agent_runtime_environment(
 
 
 def validate_agent_skills_sync(payload: Mapping[str, Any]) -> dict[str, list[str]]:
-    _reject_unknown_fields(payload, {"skills"})
-    skills = payload.get("skills", [])
+    _reject_unknown_fields(payload, {"desiredSkills"})
+    skills = payload.get("desiredSkills", [])
     if not isinstance(skills, list) or any(
         not isinstance(skill, str) or not skill.strip() for skill in skills
     ):
-        raise ValueError("'skills' must be an array of non-empty strings")
+        raise ValueError("'desiredSkills' must be an array of non-empty strings")
     deduped: list[str] = []
     seen: set[str] = set()
     for skill in skills:
@@ -158,4 +158,4 @@ def validate_agent_skills_sync(payload: Mapping[str, Any]) -> dict[str, list[str
         if normalized not in seen:
             seen.add(normalized)
             deduped.append(normalized)
-    return {"skills": deduped}
+    return {"desiredSkills": deduped}

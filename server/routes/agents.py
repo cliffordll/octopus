@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 from fastapi import (
     APIRouter,
@@ -48,6 +48,7 @@ from packages.shared.types.agent import (
     AgentConfigRevision,
     AgentDetail,
     AgentRuntimeState,
+    AgentSkillSnapshot,
     AgentTaskSession,
     ResetAgentSessionResult,
 )
@@ -419,11 +420,13 @@ async def get_agent_skills_route(
     request: Request,
     _: None = Depends(require_board_access),
     service: AgentService = Depends(get_agent_service),
-) -> dict[str, Any]:
+) -> AgentSkillSnapshot:
     agent = await _get_agent_or_404(id, request=request, service=service)
-    return await get_runtime_adapter(agent["agentRuntimeType"]).list_skills(
+    snapshot = await get_runtime_adapter(agent["agentRuntimeType"]).list_skills(
         agent["agentRuntimeConfig"]
     )
+    snapshot["desiredSkills"] = agent["desiredSkills"]
+    return cast(AgentSkillSnapshot, snapshot)
 
 
 @router.post(AGENT_SKILLS_SYNC_PATH)
@@ -433,17 +436,29 @@ async def sync_agent_skills_route(
     body: dict[str, Any] = Body(default={}),
     _: None = Depends(require_board_access),
     service: AgentService = Depends(get_agent_service),
-) -> dict[str, Any]:
-    agent = await _get_agent_or_404(id, request=request, service=service)
+) -> AgentSkillSnapshot:
+    await _get_agent_or_404(id, request=request, service=service)
     try:
         payload = validate_agent_skills_sync(body)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
-    return await get_runtime_adapter(agent["agentRuntimeType"]).sync_skills(
-        agent["agentRuntimeConfig"], payload["skills"]
+    actor = require_actor_identity(request)
+    updated = await service.sync_desired_skills(
+        id,
+        payload["desiredSkills"],
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
     )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    snapshot = await get_runtime_adapter(updated["agentRuntimeType"]).sync_skills(
+        updated["agentRuntimeConfig"], updated["desiredSkills"]
+    )
+    return cast(AgentSkillSnapshot, snapshot)
 
 
 async def _invoke_agent(
