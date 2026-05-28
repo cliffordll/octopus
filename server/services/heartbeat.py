@@ -676,6 +676,15 @@ class HeartbeatService:
                 final_status = "failed"
             else:
                 final_status = "succeeded"
+            runtime_services = await WorkspaceService(
+                self._session
+            ).persist_adapter_runtime_services(
+                run_id=running.id,
+                agent_id=agent.id,
+                agent_runtime_type=agent.agent_runtime_type,
+                context_snapshot=running.context_snapshot,
+                reports=result.runtime_services,
+            )
             final = await update_run(
                 self._session,
                 running.id,
@@ -694,7 +703,16 @@ class HeartbeatService:
                     "signal": result.signal,
                     "usage_json": result.usage_json,
                     "session_id_after": result.session_id_after,
-                    "result_json": result.result_json,
+                    "result_json": {
+                        **(result.result_json or {}),
+                        **(
+                            {"runtimeServices": runtime_services}
+                            if runtime_services
+                            else {}
+                        ),
+                    }
+                    if result.result_json or runtime_services
+                    else None,
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,
                 },
@@ -723,6 +741,9 @@ class HeartbeatService:
                 "lifecycle",
                 message=f"run {final_status}",
                 level="info" if final_status == "succeeded" else "error",
+            )
+            await WorkspaceService(self._session).release_runtime_services_for_run(
+                final.id
             )
             return final
         except Exception as exc:
@@ -758,6 +779,9 @@ class HeartbeatService:
             await update_agent(self._session, agent.id, {"status": "error"})
             await self._append_event(
                 failed, sequence, "error", message=message, level="error"
+            )
+            await WorkspaceService(self._session).release_runtime_services_for_run(
+                failed.id
             )
             return failed
         finally:

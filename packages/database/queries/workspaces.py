@@ -7,7 +7,11 @@ from typing import Any
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.schema import ExecutionWorkspace, ProjectWorkspace
+from packages.database.schema import (
+    ExecutionWorkspace,
+    ProjectWorkspace,
+    WorkspaceRuntimeService,
+)
 
 
 async def list_project_workspaces(
@@ -116,3 +120,56 @@ async def update_execution_workspace(
         .returning(ExecutionWorkspace)
     )
     return result.scalar_one_or_none()
+
+
+async def create_workspace_runtime_service(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> WorkspaceRuntimeService:
+    row = WorkspaceRuntimeService(**dict(fields))
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def update_workspace_runtime_service(
+    session: AsyncSession, service_id: str, fields: Mapping[str, Any]
+) -> WorkspaceRuntimeService | None:
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(WorkspaceRuntimeService)
+        .where(WorkspaceRuntimeService.id == service_id)
+        .values(**values)
+        .returning(WorkspaceRuntimeService)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_workspace_runtime_services_for_run(
+    session: AsyncSession, run_id: str
+) -> Sequence[WorkspaceRuntimeService]:
+    result = await session.execute(
+        select(WorkspaceRuntimeService)
+        .where(WorkspaceRuntimeService.started_by_run_id == run_id)
+        .order_by(
+            desc(WorkspaceRuntimeService.updated_at),
+            desc(WorkspaceRuntimeService.created_at),
+        )
+    )
+    return result.scalars().all()
+
+
+async def list_workspace_runtime_services_for_workspace(
+    session: AsyncSession, execution_workspace_id: str
+) -> Sequence[WorkspaceRuntimeService]:
+    result = await session.execute(
+        select(WorkspaceRuntimeService)
+        .where(
+            WorkspaceRuntimeService.execution_workspace_id == execution_workspace_id
+        )
+        .order_by(
+            desc(WorkspaceRuntimeService.updated_at),
+            desc(WorkspaceRuntimeService.created_at),
+        )
+    )
+    return result.scalars().all()

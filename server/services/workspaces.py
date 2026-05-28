@@ -11,18 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.projects import get_project_by_id
 from packages.database.queries.workspaces import (
     create_execution_workspace,
+    create_workspace_runtime_service,
     get_execution_workspace_by_id,
     list_execution_workspaces,
     list_project_workspaces,
+    list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
+    update_workspace_runtime_service,
 )
-from packages.database.schema import ExecutionWorkspace, Issue
+from packages.database.schema import ExecutionWorkspace, Issue, WorkspaceRuntimeService
 from packages.shared.constants.workspace import (
     ExecutionWorkspaceMode,
     ExecutionWorkspaceStatus,
     ExecutionWorkspaceStrategyType,
 )
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
+from packages.shared.types.workspace import WorkspaceRuntimeService as RuntimeServiceData
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -265,6 +269,7 @@ class WorkspaceService:
         if workspace is None:
             return None
         workspace = await self._ensure_managed_workspace_paths(workspace)
+        services = await self.list_runtime_services_for_workspace(workspace["id"])
         org_root = self._org_workspace_root(issue.org_id)
         artifacts_dir = org_root / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -277,9 +282,10 @@ class WorkspaceService:
             "rudderWorkspace": workspace,
             "rudderWorkspaces": [workspace],
             "rudderRuntimeServiceIntents": [],
-            "rudderRuntimeServices": [],
+            "rudderRuntimeServices": services,
             "env": workspace_env,
         }
+        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = _json_dump(services)
         return {
             "issueId": issue.id,
             "projectId": issue.project_id,
@@ -287,6 +293,109 @@ class WorkspaceService:
             "executionWorkspaceId": workspace["id"],
             "workspace": runtime_context,
         }
+
+    async def persist_adapter_runtime_services(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        agent_runtime_type: str,
+        context_snapshot: dict[str, Any] | None,
+        reports: list[dict[str, Any]] | None,
+    ) -> list[RuntimeServiceData]:
+        if not reports:
+            return []
+        snapshot = dict(context_snapshot or {})
+        workspace_context = snapshot.get("workspace")
+        workspace = (
+            workspace_context.get("rudderWorkspace")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        if not isinstance(workspace, dict):
+            return []
+        now = datetime.now(UTC)
+        records: list[RuntimeServiceData] = []
+        for index, report in enumerate(reports):
+            if not isinstance(report, dict):
+                continue
+            service_name = _string(report.get("serviceName")) or "service"
+            scope_type = _string(report.get("scopeType")) or "run"
+            scope_id = _string(report.get("scopeId")) or run_id
+            service_id = (
+                _string(report.get("id"))
+                or f"{run_id}:{agent_runtime_type}:{scope_type}:{scope_id}:{service_name}:{index}"
+            )
+            status = _string(report.get("status")) or "running"
+            lifecycle = _string(report.get("lifecycle")) or "ephemeral"
+            health_status = (
+                _string(report.get("healthStatus"))
+                or ("healthy" if status == "running" else "unknown")
+            )
+            row = await create_workspace_runtime_service(
+                self._session,
+                {
+                    "id": service_id,
+                    "org_id": workspace.get("orgId"),
+                    "project_id": report.get("projectId") or workspace.get("projectId"),
+                    "project_workspace_id": report.get("projectWorkspaceId")
+                    or workspace.get("projectWorkspaceId"),
+                    "execution_workspace_id": report.get("executionWorkspaceId")
+                    or workspace.get("id"),
+                    "issue_id": report.get("issueId") or snapshot.get("issueId"),
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                    "service_name": service_name,
+                    "status": status,
+                    "lifecycle": lifecycle,
+                    "reuse_key": report.get("reuseKey"),
+                    "command": report.get("command"),
+                    "cwd": report.get("cwd"),
+                    "port": report.get("port"),
+                    "url": report.get("url"),
+                    "provider": _string(report.get("provider")) or "adapter_managed",
+                    "provider_ref": report.get("providerRef"),
+                    "owner_agent_id": report.get("ownerAgentId") or agent_id,
+                    "started_by_run_id": run_id,
+                    "last_used_at": now,
+                    "started_at": now,
+                    "stopped_at": None
+                    if status in {"starting", "running"}
+                    else now,
+                    "stop_policy": report.get("stopPolicy"),
+                    "health_status": health_status,
+                },
+            )
+            records.append(self._to_runtime_service(row))
+        return records
+
+    async def release_runtime_services_for_run(self, run_id: str) -> None:
+        from packages.database.queries.workspaces import (
+            list_workspace_runtime_services_for_run,
+        )
+
+        rows = await list_workspace_runtime_services_for_run(self._session, run_id)
+        now = datetime.now(UTC)
+        for row in rows:
+            if row.lifecycle == "ephemeral" and row.status in {"starting", "running"}:
+                await update_workspace_runtime_service(
+                    self._session,
+                    row.id,
+                    {
+                        "status": "stopped",
+                        "health_status": "unknown",
+                        "stopped_at": now,
+                        "last_used_at": now,
+                    },
+                )
+
+    async def list_runtime_services_for_workspace(
+        self, execution_workspace_id: str
+    ) -> list[RuntimeServiceData]:
+        rows = await list_workspace_runtime_services_for_workspace(
+            self._session, execution_workspace_id
+        )
+        return [self._to_runtime_service(row) for row in rows]
 
     async def _resolve_project_workspace_id(
         self,
@@ -406,6 +515,37 @@ class WorkspaceService:
             "updatedAt": row.updated_at.isoformat(),
         }
 
+    def _to_runtime_service(self, row: WorkspaceRuntimeService) -> RuntimeServiceData:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "projectId": row.project_id,
+            "projectWorkspaceId": row.project_workspace_id,
+            "executionWorkspaceId": row.execution_workspace_id,
+            "issueId": row.issue_id,
+            "scopeType": cast(Any, row.scope_type),
+            "scopeId": row.scope_id,
+            "serviceName": row.service_name,
+            "status": cast(Any, row.status),
+            "lifecycle": cast(Any, row.lifecycle),
+            "reuseKey": row.reuse_key,
+            "command": row.command,
+            "cwd": row.cwd,
+            "port": row.port,
+            "url": row.url,
+            "provider": cast(Any, row.provider),
+            "providerRef": row.provider_ref,
+            "ownerAgentId": row.owner_agent_id,
+            "startedByRunId": row.started_by_run_id,
+            "lastUsedAt": row.last_used_at.isoformat(),
+            "startedAt": row.started_at.isoformat(),
+            "stoppedAt": _iso(row.stopped_at),
+            "stopPolicy": row.stop_policy,
+            "healthStatus": cast(Any, row.health_status),
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
 
 def _parse_datetime(value: object) -> datetime | None:
     if value is None or isinstance(value, datetime):
@@ -415,3 +555,7 @@ def _parse_datetime(value: object) -> datetime | None:
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _string(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None

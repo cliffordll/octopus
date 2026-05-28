@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Issue, Organization
+from packages.database.schema import Base, Issue, Organization, WorkspaceRuntimeService
+from packages.runtimes.types import RuntimeExecutionResult
+import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
 from server.services.projects import ProjectService
@@ -277,3 +279,129 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env() -> Non
     workspace = run["contextSnapshot"]["workspace"]["rudderWorkspace"]
     assert run["contextSnapshot"]["executionWorkspaceId"] == workspace["id"]
     assert workspace["id"] in (run["resultJson"] or {})["stdout"]
+
+
+async def test_adapter_runtime_services_are_persisted_and_released(
+    monkeypatch,
+) -> None:
+    class ReportingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"ok": True},
+                runtime_services=[
+                    {
+                        "id": "svc-report-1",
+                        "serviceName": "preview",
+                        "status": "running",
+                        "lifecycle": "ephemeral",
+                        "scopeType": "run",
+                        "url": "http://127.0.0.1:8001",
+                    }
+                ],
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: ReportingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: ReportingAdapter(),
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-services",
+                name="Step 15 Services",
+                issue_prefix="SVC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Runtime Service Project",
+                    "executionWorkspacePolicy": {"enabled": True},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/service-primary"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Run with runtime service",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Runtime Service Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            rows = (
+                await session.execute(text("select id from workspace_runtime_services"))
+            ).all()
+            service = await session.get(WorkspaceRuntimeService, "svc-report-1")
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert rows == [("svc-report-1",)]
+    assert service is not None
+    assert service.service_name == "preview"
+    assert service.execution_workspace_id == run["contextSnapshot"][
+        "executionWorkspaceId"
+    ]
+    assert service.status == "stopped"
+    assert service.health_status == "unknown"
+    assert (run["resultJson"] or {})["runtimeServices"][0]["id"] == "svc-report-1"
