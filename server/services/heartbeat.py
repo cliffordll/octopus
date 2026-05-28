@@ -696,6 +696,11 @@ class HeartbeatService:
                 context_snapshot=running.context_snapshot,
                 reports=result.runtime_services,
             )
+            work_products = await WorkspaceService(self._session).persist_run_work_products(
+                run_id=running.id,
+                context_snapshot=running.context_snapshot,
+                products=result.work_products,
+            )
             final = await update_run(
                 self._session,
                 running.id,
@@ -721,8 +726,9 @@ class HeartbeatService:
                             if runtime_services
                             else {}
                         ),
+                        **({"workProducts": work_products} if work_products else {}),
                     }
-                    if result.result_json or runtime_services
+                    if result.result_json or runtime_services or work_products
                     else None,
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,

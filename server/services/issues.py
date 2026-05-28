@@ -34,6 +34,7 @@ from packages.shared.types.issue import (
     IssueListItem,
     UpdateIssuePayload,
 )
+from .workspaces import WorkspaceService
 from .goals import GoalService
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
@@ -108,7 +109,7 @@ class IssueService:
         row = await get_issue_by_id(self._session, issue_id)
         if row is None:
             return None
-        return _to_detail(row)
+        return await self._to_detail(row)
 
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
         rows = await list_issue_comments(self._session, issue_id)
@@ -148,7 +149,7 @@ class IssueService:
             entity_id=row.id,
             details=dict(payload),
         )
-        return _to_detail(row)
+        return await self._to_detail(row)
 
     async def update_issue(
         self,
@@ -226,7 +227,7 @@ class IssueService:
                 entity_id=row.id,
                 details=dict(details) if details is not None else None,
             )
-        return _to_detail(row)
+        return await self._to_detail(row)
 
     async def add_comment(
         self,
@@ -262,6 +263,13 @@ class IssueService:
             details=dict(payload),
         )
         return comment
+
+    async def _to_detail(self, row: Issue) -> IssueDetail:
+        detail = _to_detail(row)
+        detail["workProducts"] = await WorkspaceService(
+            self._session
+        ).list_work_products_for_issue(row.id)
+        return detail
 
 
 def _to_list_item(row: Issue) -> IssueListItem:
@@ -306,4 +314,5 @@ def _to_detail(row: Issue) -> IssueDetail:
         startedAt=row.started_at.isoformat() if row.started_at else None,
         completedAt=row.completed_at.isoformat() if row.completed_at else None,
         createdAt=row.created_at.isoformat(),
+        workProducts=[],
     )
