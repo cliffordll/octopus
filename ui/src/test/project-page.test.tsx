@@ -38,17 +38,52 @@ it("updates a project and manages its resource attachments", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
     if (path.endsWith("/resources") && init?.method === "GET") return respond(project.resources);
     if (path === "/api/orgs/org-1/issues?projectId=project-1" && init?.method === "GET") {
-      return respond([{
-        id: "issue-1",
-        orgId: "org-1",
-        identifier: "OCT-1",
-        title: "完成控制台导航",
-        status: "in_progress",
-        priority: "high",
-        projectId: "project-1",
-      }]);
+      return respond([
+        {
+          id: "issue-1",
+          orgId: "org-1",
+          identifier: "OCT-1",
+          title: "完成控制台导航",
+          status: "in_progress",
+          priority: "high",
+          projectId: "project-1",
+          assigneeAgentId: "agent-1",
+          assigneeUserId: null,
+          createdAt: "2026-05-28T10:00:00Z",
+          updatedAt: "2026-05-28T11:00:00Z",
+        },
+        {
+          id: "issue-2",
+          orgId: "org-1",
+          identifier: "OCT-2",
+          title: "等待接口确认",
+          status: "blocked",
+          priority: "medium",
+          projectId: "project-1",
+          assigneeAgentId: null,
+          assigneeUserId: null,
+          createdAt: "2026-05-28T12:00:00Z",
+          updatedAt: "2026-05-28T13:00:00Z",
+        },
+        {
+          id: "issue-3",
+          orgId: "org-1",
+          identifier: "OCT-3",
+          title: "整理验收记录",
+          status: "done",
+          priority: "low",
+          projectId: "project-1",
+          assigneeAgentId: null,
+          assigneeUserId: null,
+          createdAt: "2026-05-28T14:00:00Z",
+          updatedAt: "2026-05-28T15:00:00Z",
+        },
+      ]);
     }
     return respond(project);
   });
@@ -91,6 +126,25 @@ it("updates a project and manages its resource attachments", async () => {
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
+  );
+  const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
+  expect(projectIssueCard).not.toBeNull();
+  expect(projectIssueCard).toHaveTextContent("创建时间");
+  expect(projectIssueCard).toHaveTextContent("2026-05-28T10:00:00Z");
+  expect(projectIssueCard).toHaveTextContent("归属");
+  expect(projectIssueCard).toHaveTextContent("Builder");
+  const issueSummary = screen.getByText("Total").closest(".project-issue-status-summary");
+  expect(issueSummary).not.toBeNull();
+  expect(within(issueSummary as HTMLElement).getByText("Total").closest(".summary-metric")).toHaveTextContent("3");
+  expect(within(issueSummary as HTMLElement).getByText("Active").closest(".summary-metric")).toHaveTextContent("2");
+  expect(within(issueSummary as HTMLElement).getByText("Blocked").closest(".summary-metric")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("Done").closest(".summary-metric")).toHaveTextContent("1");
+  expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "等待接口确认" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/issues/issue-2",
   );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues?projectId=project-1",
