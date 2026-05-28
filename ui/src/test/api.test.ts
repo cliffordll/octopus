@@ -144,7 +144,9 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }, 202))
       .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }))
-      .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]));
+      .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "cancelled" }))
+      .mockReturnValueOnce(jsonResponse({ id: "run-2", status: "queued", retryOfRunId: "run-1" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await agentsApi.create("org-1", {
@@ -154,10 +156,12 @@ describe("agent and heartbeat APIs", () => {
       agentRuntimeConfig: {},
     });
     await agentsApi.pause("agent-1");
-    await heartbeatApi.invoke("agent-1");
+    await heartbeatApi.invoke("agent-1", { idempotencyKey: "once", forceFreshSession: true, reason: "manual" });
     await heartbeatApi.list("org-1", "agent-1");
     await heartbeatApi.get("run-1");
-    await heartbeatApi.listEvents("run-1");
+    await heartbeatApi.listEvents("run-1", { afterSeq: 3, limit: 20 });
+    await heartbeatApi.cancel("run-1");
+    await heartbeatApi.retry("run-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -167,7 +171,10 @@ describe("agent and heartbeat APIs", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "/api/agents/agent-1/heartbeat/invoke",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey: "once", forceFreshSession: true, reason: "manual" }),
+      }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
@@ -181,8 +188,18 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/api/heartbeat-runs/run-1/events",
+      "/api/heartbeat-runs/run-1/events?afterSeq=3&limit=20",
       expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/heartbeat-runs/run-1/cancel",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/heartbeat-runs/run-1/retry",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 });

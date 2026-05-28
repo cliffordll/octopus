@@ -308,9 +308,29 @@ export interface HeartbeatRun {
   orgId: string;
   agentId: string;
   invocationSource: string;
+  triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  wakeupRequestId?: string | null;
+  exitCode?: number | null;
+  signal?: string | null;
+  usageJson?: Record<string, unknown> | null;
+  resultJson?: Record<string, unknown> | null;
+  sessionIdBefore?: string | null;
+  sessionIdAfter?: string | null;
+  stdoutExcerpt?: string | null;
+  stderrExcerpt?: string | null;
+  errorCode?: string | null;
+  externalRunId?: string | null;
+  processPid?: number | null;
+  processStartedAt?: string | null;
+  retryOfRunId?: string | null;
+  processLossRetryCount?: number;
+  contextSnapshot?: Record<string, unknown> | null;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface HeartbeatRunEvent {

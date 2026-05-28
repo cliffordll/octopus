@@ -14,10 +14,14 @@ it("filters organization heartbeat runs and opens their event detail", async () 
     orgId: "org-1",
     agentId: "agent-1",
     invocationSource: "on_demand",
-    status: "succeeded",
+    status: "running",
     createdAt: "2026-05-27T08:00:00",
     error: null,
+    retryOfRunId: null,
+    processPid: 123,
+    stdoutExcerpt: "adapter-ok",
   };
+  const retriedRun = { ...run, id: "run-2", status: "queued", retryOfRunId: "run-1" };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs" && init?.method === "GET") {
       return respond([{ id: "org-1", name: "核心团队", status: "active" }]);
@@ -27,9 +31,14 @@ it("filters organization heartbeat runs and opens their event detail", async () 
     }
     if (path.startsWith("/api/orgs/org-1/heartbeat-runs") && init?.method === "GET") return respond([run]);
     if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") return respond(run);
-    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") {
+    if (path === "/api/heartbeat-runs/run-1/events?afterSeq=0&limit=200" && init?.method === "GET") {
       return respond([{ id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.started", message: "Started", createdAt: "2026-05-27T08:00:00" }]);
     }
+    if (path === "/api/heartbeat-runs/run-1/events?afterSeq=1&limit=20" && init?.method === "GET") {
+      return respond([{ id: 2, runId: "run-1", agentId: "agent-1", seq: 2, eventType: "heartbeat.finished", message: "Finished", createdAt: "2026-05-27T08:00:01" }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1/cancel" && init?.method === "POST") return respond({ ...run, status: "cancelled" });
+    if (path === "/api/heartbeat-runs/run-1/retry" && init?.method === "POST") return respond(retriedRun, 202);
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -48,6 +57,26 @@ it("filters organization heartbeat runs and opens their event detail", async () 
   await userEvent.click(screen.getByRole("button", { name: /run-1/ }));
   expect(await screen.findByText("heartbeat.started")).toBeInTheDocument();
   expect(screen.getByText("Started")).toBeInTheDocument();
+  expect(screen.getByText("PID 123")).toBeInTheDocument();
+  expect(screen.getByText("adapter-ok")).toBeInTheDocument();
+
+  await userEvent.clear(screen.getByLabelText("afterSeq"));
+  await userEvent.type(screen.getByLabelText("afterSeq"), "1");
+  await userEvent.clear(screen.getByLabelText("limit"));
+  await userEvent.type(screen.getByLabelText("limit"), "20");
+  await userEvent.click(screen.getByRole("button", { name: "刷新事件" }));
+  expect(await screen.findByText("heartbeat.finished")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "取消运行" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-1/cancel",
+    expect.objectContaining({ method: "POST" }),
+  ));
+  await userEvent.click(screen.getByRole("button", { name: "重试运行" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-1/retry",
+    expect.objectContaining({ method: "POST" }),
+  ));
 });
 
 it("shows an empty state when an organization has no heartbeat runs", async () => {
