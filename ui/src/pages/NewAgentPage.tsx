@@ -25,6 +25,10 @@ export function NewAgentPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const nameSuggestion = useQuery({
+    queryKey: ["agent-name-suggestion", orgId],
+    queryFn: () => agentsApi.nameSuggestion(orgId),
+  });
   const isFirstAgent = agents.isSuccess && agents.data.length === 0;
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
   const create = useMutation({
@@ -55,7 +59,21 @@ export function NewAgentPage() {
       </header>
       <form className="panel form agent-create-form" onSubmit={submit}>
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
-        <label>智能体名称<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
+        <label>
+          智能体名称
+          <div className="inline-input-action">
+            <input value={name} onChange={(event) => setName(event.target.value)} required />
+            <button
+              className="secondary small-button"
+              disabled={!nameSuggestion.data?.name}
+              onClick={() => setName(nameSuggestion.data?.name ?? "")}
+              type="button"
+            >
+              使用名称建议
+            </button>
+          </div>
+        </label>
+        {nameSuggestion.error && <ErrorNotice error={nameSuggestion.error} />}
         <label>
           角色
           <select disabled={isFirstAgent} value={effectiveRole} onChange={(event) => setRole(event.target.value as AgentRole)}>

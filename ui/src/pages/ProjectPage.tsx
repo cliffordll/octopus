@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
@@ -31,7 +31,12 @@ export function ProjectPage() {
   const [resourceId, setResourceId] = useState("");
   const [role, setRole] = useState<ProjectResourceRole>("working_set");
   const [sortOrder, setSortOrder] = useState("");
+  const [editingResourceId, setEditingResourceId] = useState("");
+  const [editingRole, setEditingRole] = useState<ProjectResourceRole>("working_set");
+  const [editingNote, setEditingNote] = useState("");
+  const [editingSortOrder, setEditingSortOrder] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const project = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => projectsApi.get(projectId),
@@ -92,6 +97,25 @@ export function ProjectPage() {
     mutationFn: (attachmentId: string) => projectsApi.removeResource(projectId, attachmentId),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] }),
   });
+  const updateResource = useMutation({
+    mutationFn: () =>
+      projectsApi.updateResource(projectId, editingResourceId, {
+        role: editingRole,
+        note: editingNote.trim() || null,
+        ...(editingSortOrder.trim() ? { sortOrder: Number(editingSortOrder) } : {}),
+      }),
+    onSuccess: () => {
+      setEditingResourceId("");
+      void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
+    },
+  });
+  const removeProject = useMutation({
+    mutationFn: () => projectsApi.remove(projectId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
+      navigate(`/orgs/${orgId}/projects`);
+    },
+  });
   function save(event: FormEvent) {
     event.preventDefault();
     update.mutate();
@@ -99,6 +123,16 @@ export function ProjectPage() {
   function attach(event: FormEvent) {
     event.preventDefault();
     if (resourceId.trim()) addResource.mutate();
+  }
+  function startResourceEdit(attachment: { id: string; role: ProjectResourceRole; note: string | null; sortOrder: number }) {
+    setEditingResourceId(attachment.id);
+    setEditingRole(attachment.role);
+    setEditingNote(attachment.note ?? "");
+    setEditingSortOrder(String(attachment.sortOrder ?? ""));
+  }
+  function submitResourceEdit(event: FormEvent) {
+    event.preventDefault();
+    if (editingResourceId) updateResource.mutate();
   }
   const projectIssues = issues.data ?? [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
@@ -124,7 +158,12 @@ export function ProjectPage() {
             {project.data?.description && <p className="muted">{project.data.description}</p>}
           </div>
         </div>
-        {project.data && <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>}
+        {project.data && (
+          <div className="project-header-actions">
+            <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>
+            <button className="danger" disabled={removeProject.isPending} onClick={() => removeProject.mutate()} type="button">删除项目</button>
+          </div>
+        )}
       </header>
       {project.data && (
         <>
@@ -206,6 +245,7 @@ export function ProjectPage() {
               </div>
             </div>
             {update.error && <ErrorNotice error={update.error} />}
+            {removeProject.error && <ErrorNotice error={removeProject.error} />}
             <div className="project-property-actions">
               <button type="submit">保存项目</button>
             </div>
@@ -219,6 +259,7 @@ export function ProjectPage() {
               </div>
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
+            {updateResource.error && <ErrorNotice error={updateResource.error} />}
             <div className="project-resource-summary">
               {ROLES.map((item) => (
                 <div className="summary-metric" key={item}>
@@ -238,6 +279,13 @@ export function ProjectPage() {
                   <Badge>{attachment.role}</Badge>
                   <button
                     className="secondary small-button"
+                    onClick={() => startResourceEdit(attachment)}
+                    type="button"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    className="secondary small-button"
                     onClick={() => removeResource.mutate(attachment.id)}
                     type="button"
                   >
@@ -247,6 +295,31 @@ export function ProjectPage() {
               ))}
               {resources.isSuccess && resources.data.length === 0 && <p className="muted">暂无关联资源。</p>}
             </div>
+            {editingResourceId && (
+              <form className="form resource-form" onSubmit={submitResourceEdit}>
+                <label>
+                  角色
+                  <select value={editingRole} onChange={(event) => setEditingRole(event.target.value as ProjectResourceRole)}>
+                    {ROLES.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label>
+                  备注
+                  <input value={editingNote} onChange={(event) => setEditingNote(event.target.value)} />
+                </label>
+                <label>
+                  排序
+                  <input
+                    min="0"
+                    type="number"
+                    value={editingSortOrder}
+                    onChange={(event) => setEditingSortOrder(event.target.value)}
+                  />
+                </label>
+                <button className="secondary" onClick={() => setEditingResourceId("")} type="button">取消</button>
+                <button disabled={updateResource.isPending} type="submit">保存资源</button>
+              </form>
+            )}
             <form className="form resource-form" onSubmit={attach}>
               <label>
                 资源 ID

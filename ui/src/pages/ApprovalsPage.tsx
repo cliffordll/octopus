@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { approvalsApi } from "../api/approvals";
 import type { ApprovalListItem, ApprovalStatus } from "../api/types";
@@ -36,9 +36,23 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function parseJsonObject(value: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("审批 payload 必须是 JSON 对象");
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function ApprovalsPage() {
   const { orgId = "" } = useParams();
   const [status, setStatus] = useState<ApprovalStatus | "">("");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [approvalType, setApprovalType] = useState<ApprovalListItem["type"]>("chat_operation");
+  const [approvalPayload, setApprovalPayload] = useState("{}");
+  const [requestedByAgentId, setRequestedByAgentId] = useState("");
+  const [issueIds, setIssueIds] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approvals = useQuery({
     queryKey: ["approvals", orgId, status],
@@ -49,7 +63,32 @@ export function ApprovalsPage() {
       approvalsApi[action](approvalId),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] }),
   });
+  const createApproval = useMutation({
+    mutationFn: () =>
+      approvalsApi.create(orgId, {
+        type: approvalType,
+        payload: parseJsonObject(approvalPayload),
+        ...(requestedByAgentId.trim() ? { requestedByAgentId: requestedByAgentId.trim() } : {}),
+        ...(issueIds.trim()
+          ? { issueIds: issueIds.split(",").map((item) => item.trim()).filter(Boolean) }
+          : {}),
+      }),
+    onSuccess: () => {
+      setCreateDialogOpen(false);
+      setApprovalPayload("{}");
+      setRequestedByAgentId("");
+      setIssueIds("");
+      setCreateError(null);
+      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
+    },
+    onError: (error) => setCreateError(error instanceof Error ? error.message : "创建审批失败"),
+  });
   const approvalList = approvals.data ?? [];
+  function submitApproval(event: FormEvent) {
+    event.preventDefault();
+    setCreateError(null);
+    createApproval.mutate();
+  }
 
   return (
     <ChatsWorkspace orgId={orgId}>
@@ -72,6 +111,7 @@ export function ApprovalsPage() {
               {option.label}
             </button>
           ))}
+          <button className="secondary" onClick={() => setCreateDialogOpen(true)} type="button">创建审批</button>
         </div>
         {approvals.error && <ErrorNotice error={approvals.error} />}
         {decision.error && <ErrorNotice error={decision.error} />}
@@ -126,6 +166,45 @@ export function ApprovalsPage() {
           )}
         </div>
       </section>
+      {createDialogOpen && (
+        <div aria-modal="true" className="modal-backdrop" role="dialog">
+          <section className="panel task-modal">
+            <div className="task-modal-header">
+              <h2>创建审批</h2>
+              <button className="secondary" onClick={() => setCreateDialogOpen(false)} type="button">关闭</button>
+            </div>
+            <form className="form" onSubmit={submitApproval}>
+              <label>
+                审批类型
+                <select value={approvalType} onChange={(event) => setApprovalType(event.target.value as ApprovalListItem["type"])}>
+                  <option value="hire_agent">招聘智能体</option>
+                  <option value="approve_ceo_strategy">CEO 策略审批</option>
+                  <option value="budget_override_required">预算覆盖审批</option>
+                  <option value="chat_issue_creation">聊天创建任务审批</option>
+                  <option value="chat_operation">聊天操作审批</option>
+                </select>
+              </label>
+              <label>
+                Payload JSON
+                <textarea value={approvalPayload} onChange={(event) => setApprovalPayload(event.target.value)} />
+              </label>
+              <label>
+                发起智能体 ID
+                <input value={requestedByAgentId} onChange={(event) => setRequestedByAgentId(event.target.value)} />
+              </label>
+              <label>
+                任务 ID
+                <input value={issueIds} onChange={(event) => setIssueIds(event.target.value)} />
+              </label>
+              {createError && <p className="error-notice">{createError}</p>}
+              <div className="task-modal-actions">
+                <button className="secondary" onClick={() => setCreateDialogOpen(false)} type="button">取消</button>
+                <button disabled={createApproval.isPending} type="submit">创建</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </ChatsWorkspace>
   );
 }

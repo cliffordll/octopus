@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -63,6 +63,9 @@ it("shows approval management cards and resolves a pending approval", async () =
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/approvals" && init?.method === "GET") return respond(approvals);
+    if (path === "/api/orgs/org-1/approvals" && init?.method === "POST") {
+      return respond({ id: "approval-2", orgId: "org-1", type: "chat_operation", status: "pending", requestedByAgentId: "agent-1", requestedByUserId: null, createdAt: "", payload: {} }, 201);
+    }
     if (path === "/api/approvals/approval-1/reject" && init?.method === "POST") {
       return respond({ ...approvals[0], status: "rejected", payload: {}, decisionNote: null });
     }
@@ -73,7 +76,26 @@ it("shows approval management cards and resolves a pending approval", async () =
   renderApp("/orgs/org-1/approvals");
   expect(await screen.findByRole("heading", { name: "审批管理" })).toBeInTheDocument();
   expect(await screen.findByText("聊天操作审批")).toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "创建审批" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "创建审批" }));
+  const dialog = screen.getByRole("dialog");
+  await userEvent.selectOptions(within(dialog).getByLabelText("审批类型"), "chat_operation");
+  await userEvent.clear(within(dialog).getByLabelText("Payload JSON"));
+  fireEvent.change(within(dialog).getByLabelText("Payload JSON"), { target: { value: '{"action":"test"}' } });
+  await userEvent.type(within(dialog).getByLabelText("发起智能体 ID"), "agent-1");
+  await userEvent.type(within(dialog).getByLabelText("任务 ID"), "issue-1,issue-2");
+  await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/approvals",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        type: "chat_operation",
+        payload: { action: "test" },
+        requestedByAgentId: "agent-1",
+        issueIds: ["issue-1", "issue-2"],
+      }),
+    }),
+  );
   expect(screen.getByRole("link", { name: "打开完整审批" })).toHaveAttribute(
     "href",
     "/orgs/org-1/approvals/approval-1",

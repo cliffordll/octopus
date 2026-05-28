@@ -1,9 +1,10 @@
-import { screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 
@@ -130,6 +131,21 @@ it("updates a project and manages its resource attachments", async () => {
 
   await userEvent.click(within(tabs).getByRole("link", { name: "资源" }));
   expect(await screen.findByText("Repository")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+  const editResourceForm = screen.getByRole("button", { name: "保存资源" }).closest("form");
+  expect(editResourceForm).not.toBeNull();
+  await userEvent.selectOptions(within(editResourceForm as HTMLElement).getByLabelText("角色"), "reference");
+  await userEvent.type(within(editResourceForm as HTMLElement).getByLabelText("备注"), "主要仓库");
+  await userEvent.clear(within(editResourceForm as HTMLElement).getByLabelText("排序"));
+  await userEvent.type(within(editResourceForm as HTMLElement).getByLabelText("排序"), "2");
+  await userEvent.click(within(editResourceForm as HTMLElement).getByRole("button", { name: "保存资源" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1/resources/attachment-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ role: "reference", note: "主要仓库", sortOrder: 2 }),
+    }),
+  );
   await userEvent.type(screen.getByLabelText("资源 ID"), "resource-2");
   await userEvent.type(screen.getByLabelText("排序"), "3");
   await userEvent.click(screen.getByRole("button", { name: "添加资源" }));
@@ -168,5 +184,10 @@ it("updates a project and manages its resource attachments", async () => {
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues?projectId=project-1",
     expect.objectContaining({ method: "GET" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "删除项目" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({ method: "DELETE" }),
   );
 });

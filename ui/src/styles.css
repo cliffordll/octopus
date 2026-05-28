@@ -378,6 +378,11 @@ h1, h2, p {
   margin-bottom: 0;
 }
 
+.project-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .project-create-dialog {
   max-width: 520px;
 }
@@ -1017,7 +1022,8 @@ h1, h2, p {
   border-radius: 7px;
   color: #97a1b2;
   display: flex;
-  justify-content: space-between;
+  gap: 8px;
+  justify-content: flex-start;
   padding: 9px 11px;
 }
 
@@ -1093,8 +1099,12 @@ h1, h2, p {
   display: flex;
   font-size: 13px;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 9px 10px;
+}
+
+.context-nav a .badge {
+  margin-left: auto;
 }
 
 .context-nav a.active, .context-nav a:hover {
@@ -1115,6 +1125,24 @@ h1, h2, p {
   color: #b5d5fa;
   font-weight: 500;
   justify-content: flex-start;
+}
+
+.context-entry-icon {
+  align-items: center;
+  background: #151b25;
+  border-radius: 5px;
+  color: #8ebbf1;
+  display: inline-flex;
+  flex: 0 0 22px;
+  font-size: 11px;
+  font-weight: 600;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.project-entry-icon {
+  color: #fff;
 }
 
 .context-project-group {
@@ -1839,6 +1867,16 @@ pre {
 .small-button {
   font-size: 12px;
   padding: 6px 10px;
+}
+
+.inline-input-action {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.inline-input-action input {
+  flex: 1;
 }
 
 .detail-tabs {
