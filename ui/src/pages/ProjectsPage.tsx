@@ -41,15 +41,15 @@ export function ProjectsPage() {
       <header className="page-header">
         <div>
           <p className="eyebrow">Projects</p>
-          <h1>项目</h1>
-          <p className="muted">参考上游项目入口，项目作为组织下的工作空间入口。</p>
+          <h1>Projects</h1>
+          <p className="muted">Project workspaces under the current organization.</p>
         </div>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}
       {projects.isSuccess && projects.data.length === 0 && (
         <section className="panel project-empty-state">
           <h2>No projects yet.</h2>
-          <p className="muted">创建项目后，可以在详情页管理配置、资源和任务。</p>
+          <p className="muted">Create a project to manage configuration, resources, and issues.</p>
           <button type="button" onClick={() => setDialogOpen(true)}>Add Project</button>
         </section>
       )}
@@ -61,14 +61,14 @@ export function ProjectsPage() {
                 <p className="eyebrow">Project</p>
                 <h2>Add Project</h2>
               </div>
-              <button className="secondary small-button" onClick={() => setDialogOpen(false)} type="button">关闭</button>
+              <button className="secondary small-button" onClick={() => setDialogOpen(false)} type="button">Close</button>
             </div>
             <label>
-              Project 名称
+              Project Name
               <input value={name} onChange={(event) => setName(event.target.value)} required />
             </label>
             <label>
-              Project 状态
+              Project Status
               <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
                 {STATUSES.map((item) => <option key={item}>{item}</option>)}
               </select>
@@ -76,7 +76,7 @@ export function ProjectsPage() {
             {create.error && <ErrorNotice error={create.error} />}
             <div className="task-modal-actions">
               <button className="secondary" onClick={() => setDialogOpen(false)} type="button">Cancel</button>
-              <button disabled={create.isPending} type="submit">新建 Project</button>
+              <button disabled={create.isPending} type="submit">Create Project</button>
             </div>
           </form>
         </div>

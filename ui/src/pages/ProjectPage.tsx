@@ -112,7 +112,7 @@ export function ProjectPage() {
             {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
           </span>
           <div className="project-detail-title">
-            <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
+            <Link className="back-link" to={`/orgs/${orgId}/projects`}>Back to Projects</Link>
             <div className="project-heading-row">
               <h1>{project.data?.name ?? "载入中..."}</h1>
             </div>
@@ -142,7 +142,7 @@ export function ProjectPage() {
             <div className="summary-metric"><span>Target</span><strong>{project.data.targetDate ?? "None"}</strong></div>
             <div className="summary-metric"><span>Updated</span><strong>{project.data.updatedAt || "-"}</strong></div>
           </div>
-          <nav aria-label="项目详情导航" className="detail-tabs">
+          <nav aria-label="Project detail navigation" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>Configuration</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>Resources</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>Issues</NavLink>
@@ -151,7 +151,7 @@ export function ProjectPage() {
             <div className="panel-heading">
               <div>
                 <h2>Configuration</h2>
-                <p className="muted">项目属性以行内配置方式展示，布局对齐上游 ProjectProperties。</p>
+                <p className="muted">Configure project properties inline, matching the upstream ProjectProperties layout.</p>
               </div>
             </div>
             <div className="project-property-list">
@@ -160,7 +160,7 @@ export function ProjectPage() {
                 <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
               </label>
               <label className="project-property-row project-property-row-start">
-                <span>描述</span>
+                <span>Description</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
               </label>
               <label className="project-property-row">
@@ -215,7 +215,7 @@ export function ProjectPage() {
             </div>
             {update.error && <ErrorNotice error={update.error} />}
             <div className="project-property-actions">
-              <button type="submit">保存 Project</button>
+              <button type="submit">Save Project</button>
             </div>
           </form>}
           {activeTab === "resources" && <section className="panel project-resources project-tab-panel-wide">
@@ -223,7 +223,7 @@ export function ProjectPage() {
               <div>
                 <p className="eyebrow">Project Context</p>
                 <h2>Resources</h2>
-                <p className="muted">选择智能体在本项目真正需要使用的资源，组织资源目录保持统一管理。</p>
+                <p className="muted">Attach the resources agents need for this project while keeping the organization catalog centralized.</p>
               </div>
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
@@ -249,7 +249,7 @@ export function ProjectPage() {
                     onClick={() => removeResource.mutate(attachment.id)}
                     type="button"
                   >
-                    移除
+                    Remove
                   </button>
                 </article>
               ))}
@@ -276,19 +276,19 @@ export function ProjectPage() {
                 />
               </label>
               {addResource.error && <ErrorNotice error={addResource.error} />}
-              <button type="submit">添加 Resource</button>
+              <button type="submit">Add Resource</button>
             </form>
           </section>}
           {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
             <div className="panel-heading">
               <div>
                 <h2>Issues</h2>
-                <p className="muted">当前项目关联任务，按状态分组展示。</p>
+                <p className="muted">Linked project issues grouped by status.</p>
               </div>
             </div>
             {issues.error && <ErrorNotice error={issues.error} />}
             {agents.error && <ErrorNotice error={agents.error} />}
-            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
+            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">No linked issues.</p>}
             <IssueStatusBoard
               agents={agentList}
               issues={projectIssues}
