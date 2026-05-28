@@ -146,6 +146,24 @@ def _contains_redacted(value: Any) -> bool:
     return False
 
 
+def _apply_desired_skills_to_entries(
+    snapshot: dict[str, Any], desired_skills: list[str]
+) -> None:
+    desired = set(desired_skills)
+    entries = snapshot.get("entries")
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        selection_key = entry.get("selectionKey")
+        key = entry.get("key")
+        is_desired = selection_key in desired or key in desired
+        entry["desired"] = is_desired
+        if is_desired and entry.get("state") == "available":
+            entry["state"] = "configured"
+
+
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -371,6 +389,7 @@ class AgentService:
             row.agent_runtime_config
         )
         snapshot["desiredSkills"] = desired_skills
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
 
     async def sync_skills(
@@ -403,6 +422,7 @@ class AgentService:
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
             existing.agent_runtime_config, desired_skills
         )
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
 
     async def enable_skills(
@@ -425,6 +445,7 @@ class AgentService:
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
             existing.agent_runtime_config, desired_skills
         )
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
         await insert_activity_log(
             self._session,
             org_id=existing.org_id,

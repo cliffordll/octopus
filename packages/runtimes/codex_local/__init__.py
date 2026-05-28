@@ -7,7 +7,7 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin
+from ..common import RuntimeCapabilityMixin, skill_snapshot_from_root
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
 
@@ -24,6 +24,17 @@ class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
             {"id": "gpt-5-codex", "label": "GPT-5 Codex"},
             {"id": "gpt-5", "label": "GPT-5"},
         ]
+
+    def _skill_snapshot(
+        self, config: dict[str, Any], desired_skills: list[str]
+    ) -> dict[str, Any]:
+        return skill_snapshot_from_root(
+            runtime_type=self.type,
+            config=config,
+            desired_skills=desired_skills,
+            mode="persistent",
+            location_label="CODEX_HOME/skills",
+        )
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         command = _string(context.config.get("command")) or "codex"
