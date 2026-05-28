@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
@@ -9,8 +9,13 @@ import { useParams } from "react-router-dom";
 
 export function HeartbeatRunsPage() {
   const { orgId = "" } = useParams();
+  const queryClient = useQueryClient();
   const [agentId, setAgentId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [afterSeq, setAfterSeq] = useState("0");
+  const [eventLimit, setEventLimit] = useState("200");
+  const eventAfterSeq = Number(afterSeq) || 0;
+  const eventLimitValue = Number(eventLimit) || 1;
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -22,9 +27,25 @@ export function HeartbeatRunsPage() {
     enabled: Boolean(selectedRunId),
   });
   const events = useQuery({
-    queryKey: ["heartbeat-run-events", selectedRunId],
-    queryFn: () => heartbeatApi.listEvents(selectedRunId),
+    queryKey: ["heartbeat-run-events", selectedRunId, eventAfterSeq, eventLimitValue],
+    queryFn: () => heartbeatApi.listEvents(selectedRunId, { afterSeq: eventAfterSeq, limit: eventLimitValue }),
     enabled: Boolean(selectedRunId),
+  });
+  const cancelRun = useMutation({
+    mutationFn: (runId: string) => heartbeatApi.cancel(runId),
+    onSuccess: async (run) => {
+      queryClient.setQueryData(["heartbeat-run", run.id], run);
+      await queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+      await queryClient.invalidateQueries({ queryKey: ["heartbeat-run-events", run.id] });
+    },
+  });
+  const retryRun = useMutation({
+    mutationFn: (runId: string) => heartbeatApi.retry(runId),
+    onSuccess: async (run) => {
+      queryClient.setQueryData(["heartbeat-run", run.id], run);
+      await queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+      setSelectedRunId(run.id);
+    },
   });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
@@ -47,6 +68,8 @@ export function HeartbeatRunsPage() {
       </label>
       {agents.error && <ErrorNotice error={agents.error} />}
       {runs.error && <ErrorNotice error={runs.error} />}
+      {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
+      {retryRun.error && <ErrorNotice error={retryRun.error} />}
       <div className="heartbeat-layout">
         <section className="panel heartbeat-runs">
           <h2>运行记录</h2>
@@ -73,12 +96,51 @@ export function HeartbeatRunsPage() {
           {detail.error && <ErrorNotice error={detail.error} />}
           {events.error && <ErrorNotice error={events.error} />}
           {detail.data && (
-            <div className="meta-line">
-              <Badge>{detail.data.status}</Badge>
-              <Badge>{detail.data.invocationSource}</Badge>
+            <div className="heartbeat-detail-summary">
+              <div className="meta-line">
+                <Badge>{detail.data.status}</Badge>
+                <Badge>{detail.data.invocationSource}</Badge>
+                {detail.data.triggerDetail && <Badge>{detail.data.triggerDetail}</Badge>}
+                {detail.data.processPid && <Badge>PID {detail.data.processPid}</Badge>}
+              </div>
+              <div className="actions">
+                <button
+                  disabled={cancelRun.isPending || !["queued", "running"].includes(detail.data.status)}
+                  onClick={() => cancelRun.mutate(detail.data.id)}
+                  type="button"
+                >
+                  取消运行
+                </button>
+                <button
+                  disabled={retryRun.isPending || !["failed", "cancelled", "timed_out"].includes(detail.data.status)}
+                  onClick={() => retryRun.mutate(detail.data.id)}
+                  type="button"
+                >
+                  重试运行
+                </button>
+              </div>
+              <dl className="detail-grid compact">
+                <div><dt>重试来源</dt><dd>{detail.data.retryOfRunId ?? "无"}</dd></div>
+                <div><dt>退出码</dt><dd>{detail.data.exitCode ?? "无"}</dd></div>
+                <div><dt>开始时间</dt><dd>{detail.data.startedAt ?? "未开始"}</dd></div>
+                <div><dt>结束时间</dt><dd>{detail.data.finishedAt ?? "未结束"}</dd></div>
+              </dl>
             </div>
           )}
           {detail.data?.error && <p className="error-notice">{detail.data.error}</p>}
+          {detail.data?.stdoutExcerpt && <pre className="run-excerpt">{detail.data.stdoutExcerpt}</pre>}
+          {detail.data?.stderrExcerpt && <pre className="run-excerpt error">{detail.data.stderrExcerpt}</pre>}
+          {selectedRunId && (
+            <div className="heartbeat-event-controls">
+              <label>afterSeq
+                <input min="0" type="number" value={afterSeq} onChange={(event) => setAfterSeq(event.target.value)} />
+              </label>
+              <label>limit
+                <input min="1" type="number" value={eventLimit} onChange={(event) => setEventLimit(event.target.value)} />
+              </label>
+              <button type="button" onClick={() => void events.refetch()}>刷新事件</button>
+            </div>
+          )}
           <div className="heartbeat-events">
             {events.data?.map((event) => (
               <article className="heartbeat-event" key={event.id}>

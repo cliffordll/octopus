@@ -149,10 +149,42 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
         )
         == 0
     )
-    assert main(["heartbeat", "events", "run-1"], client=client) == 0
-    assert main(["heartbeat", "run", "--agent-id", "agent-1"], client=client) == 0
+    assert (
+        main(
+            ["heartbeat", "events", "run-1", "--after-seq", "3", "--limit", "20"],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "heartbeat",
+                "run",
+                "--agent-id",
+                "agent-1",
+                "--idempotency-key",
+                "once",
+                "--reason",
+                "manual",
+                "--force-fresh-session",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert main(["heartbeat", "cancel", "run-1"], client=client) == 0
+    assert main(["heartbeat", "retry", "run-1"], client=client) == 0
     assert "/api/orgs/org-1/heartbeat-runs?agentId=agent-1" in str(requests[0].url)
-    assert requests[1].url.path == "/api/heartbeat-runs/run-1/events"
+    assert "/api/heartbeat-runs/run-1/events?afterSeq=3&limit=20" in str(
+        requests[1].url
+    )
     assert requests[2].method == "POST"
     assert requests[2].url.path == "/api/agents/agent-1/heartbeat/invoke"
-    assert requests[2].read() == b"{}"
+    assert requests[2].read() == (
+        b'{"idempotencyKey":"once","reason":"manual","forceFreshSession":true}'
+    )
+    assert requests[3].method == "POST"
+    assert requests[3].url.path == "/api/heartbeat-runs/run-1/cancel"
+    assert requests[4].method == "POST"
+    assert requests[4].url.path == "/api/heartbeat-runs/run-1/retry"
