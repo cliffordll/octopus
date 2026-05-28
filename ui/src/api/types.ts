@@ -192,7 +192,14 @@ export interface ApprovalDetail extends ApprovalListItem {
 export interface CreateApprovalPayload {
   type: ApprovalType;
   payload: Record<string, unknown>;
+  requestedByAgentId?: string | null;
   issueIds?: string[];
+}
+
+export interface ResolveApprovalPayload {
+  decisionNote?: string;
+  decidedByUserId?: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface ResubmitApprovalPayload {
@@ -259,13 +266,13 @@ export interface CreateProjectPayload {
   name: string;
   description?: string | null;
   status?: ProjectStatus;
+  goalIds?: string[];
+  leadAgentId?: string | null;
+  targetDate?: string | null;
+  executionWorkspacePolicy?: Record<string, unknown> | null;
 }
 
-export interface UpdateProjectPayload {
-  name?: string;
-  description?: string | null;
-  status?: ProjectStatus;
-}
+export type UpdateProjectPayload = Partial<CreateProjectPayload>;
 
 export interface ProjectResourceAttachmentInput {
   resourceId: string;
@@ -332,6 +339,20 @@ export interface AgentDetail extends Agent {
   capabilities?: string | null;
 }
 
+export interface AgentConfiguration {
+  agentId: string;
+  runtimeConfig: Record<string, unknown>;
+  permissions?: Record<string, boolean>;
+  updatedAt?: string;
+}
+
+export interface AgentConfigRevision {
+  id: string;
+  agentId: string;
+  runtimeConfig: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface CreateAgentPayload {
   name: string;
   role: AgentRole;
@@ -360,6 +381,21 @@ export interface AgentRuntimeState {
   totalOutputTokens: number;
   totalCostCents: number;
   lastError: string | null;
+}
+
+export interface AgentTaskSession {
+  id: string;
+  agentId: string;
+  taskKey: string;
+  sessionDisplayId: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResetAgentSessionPayload {
+  taskKey?: string | null;
+  forceFreshSession?: boolean;
 }
 
 export interface HeartbeatRun {

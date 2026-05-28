@@ -22,12 +22,16 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser = actions.add_parser("create", help="Create an organization")
     create_parser.add_argument("--name", required=True)
     create_parser.add_argument("--description")
+    create_parser.add_argument("--budget-monthly-cents", type=int)
+    create_parser.add_argument("--brand-color")
     create_parser.set_defaults(handler=create_organization)
 
     update_parser = actions.add_parser("update", help="Update an organization")
     update_parser.add_argument("org_id")
     update_parser.add_argument("--name")
     update_parser.add_argument("--description")
+    update_parser.add_argument("--budget-monthly-cents", type=int)
+    update_parser.add_argument("--brand-color")
     update_parser.set_defaults(handler=update_organization)
 
 
@@ -43,13 +47,22 @@ def create_organization(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, object] = {"name": args.name}
     if args.description is not None:
         payload["description"] = args.description
+    if args.budget_monthly_cents is not None:
+        payload["budgetMonthlyCents"] = args.budget_monthly_cents
+    if args.brand_color is not None:
+        payload["brandColor"] = args.brand_color
     return client.request("POST", "/api/orgs", json=payload)
 
 
 def update_organization(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {
         key: value
-        for key, value in {"name": args.name, "description": args.description}.items()
+        for key, value in {
+            "name": args.name,
+            "description": args.description,
+            "budgetMonthlyCents": args.budget_monthly_cents,
+            "brandColor": args.brand_color,
+        }.items()
         if value is not None
     }
     if not payload:

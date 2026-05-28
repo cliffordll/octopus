@@ -115,6 +115,11 @@ export function AgentPage() {
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
   });
+  const configRevisions = useQuery({
+    queryKey: ["agent-config-revisions", agentId],
+    queryFn: () => agentsApi.configRevisions(agentId),
+    enabled: activeTab === "configuration",
+  });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
     queryFn: () => heartbeatApi.list(orgId, agentId),
@@ -151,6 +156,17 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
     },
+  });
+  const rollbackRevision = useMutation({
+    mutationFn: (revisionId: string) => agentsApi.rollbackConfigRevision(agentId, revisionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-config-revisions", agentId] });
+    },
+  });
+  const resetSession = useMutation({
+    mutationFn: () => agentsApi.resetSession(agentId, { forceFreshSession: true }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
   });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
@@ -195,6 +211,7 @@ export function AgentPage() {
     [runRows],
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
+  const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
     <AgentsWorkspace orgId={orgId}>
@@ -289,49 +306,101 @@ export function AgentPage() {
               </dl>
             </section>
           </div>}
-          {activeTab === "configuration" && <form className="panel agent-config-card" onSubmit={submit}>
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Configuration</p>
-                <h2>基础配置</h2>
-                <p className="muted">按上游详情页的属性行布局展示，运行配置保留可编辑 JSON。</p>
-              </div>
+          {activeTab === "configuration" && (
+            <div className="agent-configuration-layout">
+              <form className="panel agent-config-card" onSubmit={submit}>
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Configuration</p>
+                    <h2>基础配置</h2>
+                    <p className="muted">按上游详情页的属性行布局展示，运行配置保留可编辑 JSON。</p>
+                  </div>
+                </div>
+                <div className="agent-property-list">
+                  <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
+                  <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+                  <label className="agent-property-row">
+                    <span>角色</span>
+                  <select value={role} onChange={(event) => setRole(event.target.value as AgentRole)}>
+                    {ROLES.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                  <label className="agent-property-row">
+                    <span>上级智能体</span>
+                  <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
+                    <option value="">未设置</option>
+                    {(organizationAgents.data ?? [])
+                      .filter((item) => item.id !== agentId)
+                      .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                  <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
+                  <label className="agent-property-row">
+                    <span>Runtime</span>
+                  <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+                    {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
+                  </select>
+                </label>
+                  <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
+                  <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+                  <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+                </div>
+                {configurationError && <p className="error-notice">{configurationError}</p>}
+                {save.error && <ErrorNotice error={save.error} />}
+                <div className="agent-property-actions">
+                  <button disabled={save.isPending} type="submit">保存配置</button>
+                </div>
+              </form>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Runtime</p>
+                    <h2>Runtime State</h2>
+                  </div>
+                  <button disabled={resetSession.isPending} onClick={() => resetSession.mutate()} type="button">
+                    重置会话
+                  </button>
+                </div>
+                {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+                {resetSession.error && <ErrorNotice error={resetSession.error} />}
+                {runtimeState.data && (
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
+                  </div>
+                )}
+              </section>
+              <section className="panel agent-config-revisions-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">History</p>
+                    <h2>Config Revisions</h2>
+                  </div>
+                </div>
+                {configRevisions.error && <ErrorNotice error={configRevisions.error} />}
+                {rollbackRevision.error && <ErrorNotice error={rollbackRevision.error} />}
+                {configRevisions.isSuccess && revisionRows.length === 0 && <p className="muted">暂无配置版本。</p>}
+                <div className="list">
+                  {revisionRows.map((revision) => (
+                    <article className="row" key={revision.id}>
+                      <div>
+                        <strong>{revision.id}</strong>
+                        <p className="muted">{revision.createdAt || "未记录创建时间"}</p>
+                      </div>
+                      <button
+                        className="secondary"
+                        disabled={rollbackRevision.isPending}
+                        onClick={() => rollbackRevision.mutate(revision.id)}
+                        type="button"
+                      >
+                        回滚
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </section>
             </div>
-            <div className="agent-property-list">
-              <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-              <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-              <label className="agent-property-row">
-                <span>角色</span>
-              <select value={role} onChange={(event) => setRole(event.target.value as AgentRole)}>
-                {ROLES.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-              <label className="agent-property-row">
-                <span>上级智能体</span>
-              <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
-                <option value="">未设置</option>
-                {(organizationAgents.data ?? [])
-                  .filter((item) => item.id !== agentId)
-                  .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-              </select>
-            </label>
-              <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
-              <label className="agent-property-row">
-                <span>Runtime</span>
-              <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
-                {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-              <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
-              <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
-              <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
-            </div>
-            {configurationError && <p className="error-notice">{configurationError}</p>}
-            {save.error && <ErrorNotice error={save.error} />}
-            <div className="agent-property-actions">
-              <button disabled={save.isPending} type="submit">保存配置</button>
-            </div>
-          </form>}
+          )}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
             <AgentRunDetail run={selectedRun} />

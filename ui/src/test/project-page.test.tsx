@@ -107,19 +107,36 @@ it("updates a project and manages its resource attachments", async () => {
 
   await userEvent.clear(screen.getByLabelText("描述"));
   await userEvent.type(screen.getByLabelText("描述"), "更新后的描述");
+  await userEvent.selectOptions(screen.getByLabelText("Lead"), "agent-1");
+  await userEvent.type(screen.getByLabelText("Target Date"), "2026-06-01");
+  await userEvent.type(screen.getByLabelText("Goal IDs"), "goal-1,goal-2");
   await userEvent.click(screen.getByRole("button", { name: "保存 Project" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
-    expect.objectContaining({ method: "PATCH" }),
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        description: "更新后的描述",
+        name: "控制台",
+        status: "planned",
+        leadAgentId: "agent-1",
+        targetDate: "2026-06-01",
+        goalIds: ["goal-1", "goal-2"],
+      }),
+    }),
   );
 
   await userEvent.click(within(tabs).getByRole("link", { name: "Resources" }));
   expect(await screen.findByText("Repository")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Resource ID"), "resource-2");
+  await userEvent.type(screen.getByLabelText("Sort Order"), "3");
   await userEvent.click(screen.getByRole("button", { name: "添加 Resource" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1/resources",
-    expect.objectContaining({ method: "POST" }),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ resourceId: "resource-2", role: "working_set", sortOrder: 3 }),
+    }),
   );
 
   await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "Issues" }));

@@ -13,6 +13,12 @@ interface EventOptions {
 }
 
 export const heartbeatApi = {
+  wakeup: (agentId: string, options: InvokeOptions = {}): Promise<HeartbeatRun> =>
+    jsonRequest<HeartbeatRun>(
+      `/api/agents/${encodeURIComponent(agentId)}/wakeup`,
+      "POST",
+      options,
+    ),
   invoke: (agentId: string, options: InvokeOptions = {}): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(
       `/api/agents/${encodeURIComponent(agentId)}/heartbeat/invoke`,

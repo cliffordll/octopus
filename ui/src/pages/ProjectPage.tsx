@@ -25,8 +25,12 @@ export function ProjectPage() {
   const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
+  const [leadAgentId, setLeadAgentId] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const [goalIds, setGoalIds] = useState("");
   const [resourceId, setResourceId] = useState("");
   const [role, setRole] = useState<ProjectResourceRole>("working_set");
+  const [sortOrder, setSortOrder] = useState("");
   const queryClient = useQueryClient();
   const project = useQuery({
     queryKey: ["project", projectId],
@@ -45,13 +49,16 @@ export function ProjectPage() {
   const agents = useQuery({
     queryKey: ["agents", orgId],
     queryFn: () => agentsApi.list(orgId),
-    enabled: activeTab === "issues",
+    enabled: activeTab === "configuration" || activeTab === "issues",
   });
   useEffect(() => {
     if (project.data) {
       setProjectName(project.data.name);
       setDescription(project.data.description ?? "");
       setStatus(project.data.status);
+      setLeadAgentId(project.data.leadAgentId ?? "");
+      setTargetDate(project.data.targetDate ?? "");
+      setGoalIds((project.data.goalIds ?? (project.data.goalId ? [project.data.goalId] : [])).join(","));
     }
   }, [project.data]);
   const update = useMutation({
@@ -59,13 +66,25 @@ export function ProjectPage() {
       description: description.trim() || null,
       name: projectName.trim() || project.data?.name,
       status,
+      leadAgentId: leadAgentId || null,
+      targetDate: targetDate || null,
+      goalIds: goalIds
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
     }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] }),
   });
   const addResource = useMutation({
-    mutationFn: () => projectsApi.addResource(projectId, { resourceId: resourceId.trim(), role }),
+    mutationFn: () =>
+      projectsApi.addResource(projectId, {
+        resourceId: resourceId.trim(),
+        role,
+        ...(sortOrder.trim() ? { sortOrder: Number(sortOrder) } : {}),
+      }),
     onSuccess: () => {
       setResourceId("");
+      setSortOrder("");
       void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
     },
   });
@@ -150,6 +169,25 @@ export function ProjectPage() {
                   {STATUSES.map((item) => <option key={item}>{item}</option>)}
                 </select>
               </label>
+              <label className="project-property-row">
+                <span>Lead</span>
+                <select value={leadAgentId} onChange={(event) => setLeadAgentId(event.target.value)}>
+                  <option value="">None</option>
+                  {agentList.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="project-property-row">
+                <span>Target Date</span>
+                <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+              </label>
+              <label className="project-property-row">
+                <span>Goal IDs</span>
+                <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
+              </label>
               <div className="project-property-row">
                 <span>URL Key</span>
                 <strong>{project.data.urlKey}</strong>
@@ -227,6 +265,15 @@ export function ProjectPage() {
                 <select value={role} onChange={(event) => setRole(event.target.value as ProjectResourceRole)}>
                   {ROLES.map((item) => <option key={item}>{item}</option>)}
                 </select>
+              </label>
+              <label>
+                Sort Order
+                <input
+                  min="0"
+                  type="number"
+                  value={sortOrder}
+                  onChange={(event) => setSortOrder(event.target.value)}
+                />
               </label>
               {addResource.error && <ErrorNotice error={addResource.error} />}
               <button type="submit">添加 Resource</button>
