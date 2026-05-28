@@ -128,10 +128,18 @@ def _validate_conversation_common(result: dict[str, Any]) -> None:
 
 
 def validate_add_chat_message(payload: Mapping[str, Any]) -> AddChatMessagePayload:
-    _reject_unknown_fields(payload, {"body"})
+    _reject_unknown_fields(payload, {"body", "editUserMessageId"})
     if "body" not in payload:
         raise ValueError("'body' is required")
-    return {"body": _trimmed_text(payload["body"], "body", maximum=20000)}
+    result: dict[str, Any] = {
+        "body": _trimmed_text(payload["body"], "body", maximum=20000)
+    }
+    if "editUserMessageId" in payload:
+        edit_user_message_id = payload["editUserMessageId"]
+        if edit_user_message_id is not None:
+            _validate_uuid(edit_user_message_id, "editUserMessageId")
+        result["editUserMessageId"] = edit_user_message_id
+    return cast(AddChatMessagePayload, result)
 
 
 def _reject_unknown_fields(payload: Mapping[str, Any], allowed: set[str]) -> None:
