@@ -16,6 +16,9 @@ from packages.database.clients import (
     create_session_factory,
 )
 from packages.database.schema import Base, Organization
+from packages.runtimes.claude_local import ClaudeLocalRuntimeAdapter
+from packages.runtimes.opencode_local import OpenCodeLocalRuntimeAdapter
+from packages.runtimes.types import RuntimeExecutionContext
 from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import CreateAgentPayload
 from server.services.agents import AgentService
@@ -142,3 +145,137 @@ async def test_local_cli_runtimes_reuse_process_execution_contract(
     assert result is not None
     assert "local-cli-ok" in result["stdout"]
     assert isinstance(run["processPid"], int)
+
+
+async def test_claude_local_executes_stream_json_and_normalizes_result(
+    tmp_path,
+) -> None:
+    capture_path = tmp_path / "claude-capture.json"
+    fake_claude = tmp_path / "fake_claude.py"
+    fake_claude.write_text(
+        "\n".join(
+            [
+                "import json, os, sys",
+                "prompt = sys.stdin.read()",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'argv': sys.argv[1:], 'prompt': prompt}, fh)",
+                "print(json.dumps({'type':'system','subtype':'init','session_id':'claude-session-1','model':'claude-test'}))",
+                "print(json.dumps({'type':'assistant','session_id':'claude-session-1','message':{'content':[{'type':'text','text':'hello from claude'}]}}))",
+                "print(json.dumps({'type':'result','subtype':'success','session_id':'claude-session-1','result':'done','usage':{'input_tokens':3,'cache_read_input_tokens':1,'cache_creation_input_tokens':2,'output_tokens':5},'total_cost_usd':0.02}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    logs: list[tuple[str, str]] = []
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    async def on_process_started(_pid: int, _started_at) -> None:
+        return None
+
+    adapter = ClaudeLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-claude",
+            agent_id="agent-claude",
+            org_id="org-claude",
+            agent_name="Claude Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_claude)],
+                "model": "claude-test-model",
+                "effort": "high",
+                "maxTurnsPerRun": 4,
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+                "promptTemplate": "Respond from Claude.",
+            },
+            on_log=on_log,
+            on_process_started=on_process_started,
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+
+    assert "--print" in capture["argv"]
+    assert "-" in capture["argv"]
+    assert (
+        capture["argv"][capture["argv"].index("--output-format") + 1] == "stream-json"
+    )
+    assert "--verbose" in capture["argv"]
+    assert capture["argv"][capture["argv"].index("--model") + 1] == "claude-test-model"
+    assert capture["prompt"] == "Respond from Claude."
+    assert result.exit_code == 0
+    assert result.session_id_after == "claude-session-1"
+    assert result.usage_json == {
+        "inputTokens": 3,
+        "cachedInputTokens": 3,
+        "outputTokens": 5,
+    }
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "done"
+    assert result.result_json["model"] == "claude-test"
+    assert result.result_json["costUsd"] == 0.02
+    assert any(stream == "stdout" for stream, _ in logs)
+
+
+async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> None:
+    capture_path = tmp_path / "opencode-capture.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os, sys",
+                "prompt = sys.stdin.read()",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'argv': sys.argv[1:], 'prompt': prompt}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'ses_123'}))",
+                "print(json.dumps({'type':'text','part':{'type':'text','text':'hello from opencode'}}))",
+                "print(json.dumps({'type':'step_finish','part':{'reason':'stop','cost':0.003,'tokens':{'input':7,'output':11,'reasoning':2,'cache':{'read':5,'write':0}}}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    logs: list[tuple[str, str]] = []
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "model": "openai/gpt-5",
+                "variant": "default",
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+                "promptTemplate": "Respond from OpenCode.",
+            },
+            on_log=on_log,
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+
+    assert capture["argv"][:2] == ["run", "--format"]
+    assert capture["argv"][capture["argv"].index("--format") + 1] == "json"
+    assert capture["argv"][capture["argv"].index("--model") + 1] == "openai/gpt-5"
+    assert capture["argv"][capture["argv"].index("--variant") + 1] == "default"
+    assert capture["prompt"] == "Respond from OpenCode."
+    assert result.exit_code == 0
+    assert result.session_id_after == "ses_123"
+    assert result.usage_json == {
+        "inputTokens": 7,
+        "cachedInputTokens": 5,
+        "outputTokens": 13,
+    }
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "hello from opencode"
+    assert result.result_json["costUsd"] == 0.003
+    assert result.result_json["provider"] == "openai"
+    assert any(stream == "stdout" for stream, _ in logs)

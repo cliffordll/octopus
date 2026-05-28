@@ -70,3 +70,15 @@ async def replace_enabled_skill_keys(
     )
     await session.flush()
     return normalized
+
+
+async def add_enabled_skill_keys(
+    session: AsyncSession, *, org_id: str, agent_id: str, skill_keys: Iterable[str]
+) -> list[str]:
+    current = await list_enabled_skill_keys(session, agent_id)
+    return await replace_enabled_skill_keys(
+        session,
+        org_id=org_id,
+        agent_id=agent_id,
+        skill_keys=[*current, *_normalize_skill_keys(skill_keys)],
+    )

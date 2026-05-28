@@ -159,3 +159,43 @@ def validate_agent_skills_sync(payload: Mapping[str, Any]) -> dict[str, list[str
             seen.add(normalized)
             deduped.append(normalized)
     return {"desiredSkills": deduped}
+
+
+def validate_agent_skills_enable(payload: Mapping[str, Any]) -> dict[str, list[str]]:
+    _reject_unknown_fields(payload, {"skills"})
+    skills = payload.get("skills", [])
+    if not isinstance(skills, list) or any(
+        not isinstance(skill, str) or not skill.strip() for skill in skills
+    ):
+        raise ValueError("'skills' must be an array of non-empty strings")
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        normalized = skill.strip()
+        if normalized not in seen:
+            seen.add(normalized)
+            deduped.append(normalized)
+    if not deduped:
+        raise ValueError("'skills' must contain at least one skill")
+    return {"skills": deduped}
+
+
+def validate_agent_private_skill(payload: Mapping[str, Any]) -> dict[str, Any]:
+    _reject_unknown_fields(payload, {"name", "slug", "description", "markdown"})
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("'name' must be a non-empty string")
+    for field in ("slug", "description", "markdown"):
+        if (
+            field in payload
+            and payload[field] is not None
+            and not isinstance(payload[field], str)
+        ):
+            raise ValueError(f"'{field}' must be a string or null")
+    slug = payload.get("slug")
+    return {
+        "name": name.strip(),
+        "slug": slug.strip() if isinstance(slug, str) else None,
+        "description": payload.get("description"),
+        "markdown": payload.get("markdown"),
+    }

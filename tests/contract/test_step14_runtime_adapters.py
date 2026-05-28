@@ -27,6 +27,14 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
     )
     assert paths.AGENT_SKILLS_PATH == "/api/agents/{id}/skills"
     assert paths.AGENT_SKILLS_SYNC_PATH == "/api/agents/{id}/skills/sync"
+    assert paths.AGENT_SKILLS_ENABLE_PATH == "/api/agents/{id}/skills/enable"
+    assert paths.AGENT_SKILLS_PRIVATE_PATH == "/api/agents/{id}/skills/private"
+    assert paths.AGENT_SKILLS_ANALYTICS_PATH == "/api/agents/{id}/skills/analytics"
+    assert paths.ORG_ADAPTER_METADATA_PATH == "/api/orgs/{orgId}/adapters/{type}"
+    assert (
+        paths.ORG_ADAPTER_QUOTA_WINDOWS_PATH
+        == "/api/orgs/{orgId}/adapters/{type}/quota-windows"
+    )
 
 
 def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
@@ -111,6 +119,31 @@ async def test_adapter_models_and_environment_routes(
     assert skipped_code == 200
     assert skipped["status"] == "unavailable"
 
+    metadata_code, metadata = await _request(
+        application, "GET", f"/api/orgs/{org_id}/adapters/codex_local"
+    )
+    quota_code, quota = await _request(
+        application, "GET", f"/api/orgs/{org_id}/adapters/codex_local/quota-windows"
+    )
+    unavailable_quota_code, unavailable_quota = await _request(
+        application, "GET", f"/api/orgs/{org_id}/adapters/gemini_local/quota-windows"
+    )
+
+    assert metadata_code == 200
+    assert metadata["type"] == "codex_local"
+    assert metadata["capabilities"]["models"] is True
+    assert metadata["capabilities"]["skills"] is True
+    assert metadata["capabilities"]["quotaWindows"] is True
+    assert metadata["supportsLocalAgentJwt"] is True
+    assert isinstance(metadata["agentConfigurationDoc"], str)
+    assert quota_code == 200
+    assert quota["provider"] == "openai"
+    assert quota["ok"] is False
+    assert quota["windows"] == []
+    assert unavailable_quota_code == 200
+    assert unavailable_quota["provider"] == "gemini_local"
+    assert unavailable_quota["ok"] is False
+
 
 async def test_agent_skills_snapshot_and_sync_routes(
     app: tuple[FastAPI, async_sessionmaker],
@@ -173,3 +206,70 @@ async def test_agent_skills_snapshot_and_sync_routes(
         ]
     assert "agent.skills_synced" in actions
     assert skill_keys == ["review", "debug"]
+
+
+async def test_agent_skills_enable_private_and_analytics_routes(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Skill Ops Agent",
+            "agentRuntimeType": "codex_local",
+            "desiredSkills": ["review"],
+        },
+    )
+
+    enable_code, enabled = await _request(
+        application,
+        "POST",
+        f"/api/agents/{agent['id']}/skills/enable",
+        json={"skills": ["debug", "review"]},
+    )
+    private_code, private = await _request(
+        application,
+        "POST",
+        f"/api/agents/{agent['id']}/skills/private",
+        json={
+            "name": "Incident Notes",
+            "slug": "incident-notes",
+            "description": "Capture incident context.",
+            "markdown": "# Incident Notes\n",
+        },
+    )
+    analytics_code, analytics = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent['id']}/skills/analytics",
+    )
+
+    assert enable_code == 200
+    assert enabled["desiredSkills"] == ["review", "debug"]
+    assert private_code == 201
+    assert private["key"] == "incident-notes"
+    assert private["selectionKey"] == "private:incident-notes"
+    assert private["sourceClass"] == "agent_home"
+    assert private["desired"] is False
+    assert analytics_code == 200
+    assert analytics["agentId"] == agent["id"]
+    assert analytics["orgId"] == org_id
+    assert analytics["totalCount"] == 0
+    assert analytics["skills"] == []
+    assert analytics["days"] == []
+
+    detail_code, detail = await _request(
+        application, "GET", f"/api/agents/{agent['id']}"
+    )
+    assert detail_code == 200
+    assert detail["desiredSkills"] == ["review", "debug"]
+
+    async with factory() as session:
+        actions = [
+            row.action for row in (await session.execute(select(ActivityLog))).scalars()
+        ]
+    assert "agent.skills_enabled" in actions
+    assert "agent.private_skill_created" in actions

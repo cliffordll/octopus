@@ -186,3 +186,31 @@ class AgentSkillSnapshot(TypedDict):
     desiredSkills: list[str]
     entries: list[dict[str, Any]]
     warnings: list[str]
+
+
+class AgentSkillAnalytics(TypedDict):
+    agentId: str
+    orgId: str
+    windowDays: int
+    startDate: str
+    endDate: str
+    totalCount: int
+    totalRunsWithSkills: int
+    evidenceCounts: dict[str, int]
+    skills: list[dict[str, Any]]
+    days: list[dict[str, Any]]
+
+
+class ProviderQuotaResult(TypedDict, total=False):
+    provider: str
+    source: str | None
+    ok: bool
+    error: str
+    windows: list[dict[str, Any]]
+
+
+class RuntimeAdapterMetadata(TypedDict):
+    type: str
+    capabilities: dict[str, bool]
+    supportsLocalAgentJwt: bool
+    agentConfigurationDoc: str | None

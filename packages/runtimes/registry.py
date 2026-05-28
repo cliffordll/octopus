@@ -45,3 +45,11 @@ def get_runtime_adapter(runtime_type: str) -> RuntimeAdapter:
 
 async def list_runtime_models(runtime_type: str) -> list[dict[str, str]]:
     return await get_runtime_adapter(runtime_type).list_models()
+
+
+async def get_runtime_metadata(runtime_type: str) -> dict:
+    return await get_runtime_adapter(runtime_type).get_metadata()
+
+
+async def get_runtime_quota_windows(runtime_type: str) -> dict:
+    return await get_runtime_adapter(runtime_type).get_quota_windows()
