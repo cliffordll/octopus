@@ -51,22 +51,22 @@ it("groups issues by status and creates issues for an organization", async () =>
   );
   const issueCard = screen.getByRole("link", { name: "实现登录流程" }).closest(".project-issue-status-row");
   expect(issueCard).not.toBeNull();
-  expect(issueCard).toHaveTextContent("Created");
+  expect(issueCard).toHaveTextContent("创建时间");
   expect(issueCard).toHaveTextContent("2026-05-28T10:00:00Z");
-  expect(issueCard).toHaveTextContent("Owner");
+  expect(issueCard).toHaveTextContent("归属");
   expect(issueCard).toHaveTextContent("Builder");
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
-  const issueSummary = screen.getByText("Total").closest(".project-issue-status-summary");
+  const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
-  expect(within(issueSummary as HTMLElement).getByText("Total").closest(".summary-metric")).toHaveTextContent("1");
-  expect(within(issueSummary as HTMLElement).getByText("Active").closest(".summary-metric")).toHaveTextContent("1");
-  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "In Review" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Cancelled" })).toBeInTheDocument();
+  expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("1");
+  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "评审中" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "已取消" })).toBeInTheDocument();
 
   expect(screen.queryByLabelText("任务名称")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
@@ -224,8 +224,8 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
-  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "整理草稿" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-draft",
@@ -237,8 +237,8 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "关注中" }));
   expect(within(taskNavigation).getByRole("link", { name: "关注中" })).toHaveClass("active");
-  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "空项目" }));
   expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveClass("active");

@@ -20,7 +20,7 @@ it("opens the first project for an organization with projects", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects");
-  expect(await screen.findByRole("link", { name: "Back to Projects" })).toHaveAttribute(
+  expect(await screen.findByRole("link", { name: "返回项目列表" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects",
   );
