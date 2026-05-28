@@ -5,10 +5,13 @@ import importlib.util
 from pathlib import Path
 
 from sqlalchemy import Table, text
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from packages.database.clients import create_database_engine
+from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base
+from packages.database.schema import Base, Organization
+from server.services.projects import ProjectService
 
 
 def test_workspace_contract_modules_are_defined() -> None:
@@ -91,3 +94,51 @@ async def test_upgrade_to_head_creates_workspace_tables(tmp_path: Path) -> None:
         "workspace_operations",
         "issue_work_products",
     }
+
+
+async def test_project_detail_includes_workspace_aggregation() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-workspaces",
+                name="Step 15",
+                issue_prefix="WKS",
+            )
+            session.add(org)
+            await session.flush()
+            service = ProjectService(session)
+            project = await service.create_project(
+                org.id,
+                {"name": "Workspace Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            workspace = await service.create_workspace(
+                project["id"],
+                {
+                    "name": "Main",
+                    "cwd": "D:/work/main",
+                    "repoUrl": "https://example.test/org/repo.git",
+                    "repoRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await session.commit()
+
+            detail = await service.get_by_id(project["id"])
+    finally:
+        await engine.dispose()
+
+    assert workspace is not None
+    assert detail is not None
+    assert detail["workspaces"][0]["id"] == workspace["id"]
+    assert detail["primaryWorkspace"] is not None
+    assert detail["primaryWorkspace"]["id"] == workspace["id"]
+    assert detail["codebase"]["configured"] is True
+    assert detail["codebase"]["workspaceId"] == workspace["id"]
+
