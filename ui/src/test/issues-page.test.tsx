@@ -11,6 +11,15 @@ afterEach(() => {
 
 it("filters and creates issues for an organization", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
+      return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([
+        { id: "agent-1", name: "Builder", role: "engineer", status: "idle" },
+        { id: "agent-2", name: "Reviewer", role: "qa", status: "idle" },
+      ]);
+    }
     if (path.startsWith("/api/orgs/org-1/issues") && init?.method === "GET") {
       return respond([
         {
@@ -30,7 +39,7 @@ it("filters and creates issues for an organization", async () => {
         },
       ]);
     }
-    return respond({ id: "issue-2" });
+    return respond({ id: "issue-2", title: "核对发布说明" });
   });
   vi.stubGlobal("fetch", fetchMock);
 
@@ -46,11 +55,32 @@ it("filters and creates issues for an organization", async () => {
     expect.objectContaining({ method: "GET" }),
   );
 
-  await userEvent.type(screen.getByLabelText("Issue 标题"), "核对发布说明");
-  await userEvent.click(screen.getByRole("button", { name: "新建 Issue" }));
+  expect(screen.queryByLabelText("任务名称")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
+  const dialog = within(screen.getByRole("dialog", { name: "新建任务" }));
+  await userEvent.type(dialog.getByLabelText("任务名称"), "核对发布说明");
+  await userEvent.selectOptions(dialog.getByLabelText("智能体"), "agent-1");
+  await userEvent.selectOptions(dialog.getByLabelText("项目"), "project-1");
+  await userEvent.selectOptions(dialog.getByLabelText("Reviewer"), "agent-2");
+  await userEvent.selectOptions(dialog.getByLabelText("模型配置"), "gpt-5-codex");
+  await userEvent.type(dialog.getByLabelText("描述"), "检查发布说明和变更范围");
+  await userEvent.selectOptions(dialog.getByLabelText("代办"), "todo");
+  await userEvent.selectOptions(dialog.getByLabelText("优先级"), "high");
+  await userEvent.click(dialog.getByRole("button", { name: "创建任务" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues",
-    expect.objectContaining({ method: "POST" }),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        title: "核对发布说明",
+        description: "检查发布说明和变更范围",
+        projectId: "project-1",
+        assigneeAgentId: "agent-1",
+        reviewerAgentId: "agent-2",
+        priority: "high",
+        status: "todo",
+      }),
+    }),
   );
 });
 
@@ -168,12 +198,16 @@ it("groups task navigation by task shortcuts, recent views, and project issues",
   expect(taskNavigation).not.toHaveTextContent("暂无任务");
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
+  expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");
+  expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues?status=backlog",
     expect.objectContaining({ method: "GET" }),
   );
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "空项目" }));
+  expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveClass("active");
+  expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).not.toHaveClass("active");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues?projectId=project-empty",
     expect.objectContaining({ method: "GET" }),

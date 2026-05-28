@@ -91,7 +91,12 @@ export interface CreateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  projectId?: string | null;
+  goalId?: string | null;
   assigneeAgentId?: string | null;
+  assigneeUserId?: string | null;
+  reviewerAgentId?: string | null;
+  reviewerUserId?: string | null;
 }
 
 export interface UpdateIssuePayload {
