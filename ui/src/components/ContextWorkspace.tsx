@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type PropsWithChildren, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { issuesApi } from "../api/issues";
@@ -77,11 +77,17 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
 }
 
 export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+  const location = useLocation();
   const issues = useQuery({ queryKey: ["issues", orgId, ""], queryFn: () => issuesApi.list(orgId, {}) });
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const issueList = Array.isArray(issues.data) ? issues.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const [recentIssues, setRecentIssues] = useState(() => readRecentIssues(orgId));
+  const currentSearch = new URLSearchParams(location.search);
+  const currentProjectId = currentSearch.get("projectId") ?? "";
+  const currentStatus = currentSearch.get("status") ?? "";
+  const currentView = currentSearch.get("view") ?? "";
+  const issuesRootPath = `/orgs/${orgId}/issues`;
 
   useEffect(() => {
     setRecentIssues(readRecentIssues(orgId));
@@ -105,9 +111,25 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
         <>
           <section className="context-nav-section">
             <h3>任务</h3>
-            <NavLink className="context-all-link" end to={`/orgs/${orgId}/issues`}>全部任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/issues?status=backlog`}>草稿任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/issues?view=following`}>关注中</NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && !location.search ? "active" : ""}
+              end
+              to={issuesRootPath}
+            >
+              全部任务
+            </NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && currentStatus === "backlog" ? "active" : ""}
+              to={`${issuesRootPath}?status=backlog`}
+            >
+              草稿任务
+            </NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && currentView === "following" ? "active" : ""}
+              to={`${issuesRootPath}?view=following`}
+            >
+              关注中
+            </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>最近查看</h3>
@@ -128,7 +150,10 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
               const projectIssues = issueList.filter((issue) => issue.projectId === project.id);
               return (
                 <div className="context-project-group" key={project.id}>
-                  <NavLink className="context-project-name" to={`/orgs/${orgId}/issues?projectId=${project.id}`}>
+                  <NavLink
+                    className={() => currentProjectId === project.id ? "context-project-name active" : "context-project-name"}
+                    to={`${issuesRootPath}?projectId=${project.id}`}
+                  >
                     {project.name}
                   </NavLink>
                   {projectIssues.map((issue) => (
