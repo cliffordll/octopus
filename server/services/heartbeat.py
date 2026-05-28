@@ -62,8 +62,11 @@ class HeartbeatService:
     _active_run_ids: ClassVar[dict[str, set[str]]] = {}
     _cancel_events: ClassVar[dict[str, asyncio.Event]] = {}
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *, commit_process_metadata: bool = False
+    ) -> None:
         self._session = session
+        self._commit_process_metadata = commit_process_metadata
 
     async def wakeup(
         self,
@@ -302,13 +305,29 @@ class HeartbeatService:
         for run in await list_runs_by_status(self._session, "running"):
             if run.id in active_ids:
                 continue
+            agent = await get_agent_by_id(self._session, run.agent_id)
+            tracks_local_child = (
+                agent is not None
+                and agent.agent_runtime_type in {"process", "codex_local"}
+                and run.process_pid is not None
+            )
+            detached_message: str | None = None
+            if tracks_local_child:
+                detached_message = (
+                    f"Detached child pid {run.process_pid} was not terminated during "
+                    "server recovery because process ownership cannot be verified"
+                )
             failed = await update_run(
                 self._session,
                 run.id,
                 {
                     "status": "failed",
                     "finished_at": datetime.now(UTC),
-                    "error": "Run interrupted before server recovery",
+                    "error": (
+                        f"Process lost -- child pid {run.process_pid} is no longer running"
+                        if run.process_pid
+                        else "Run interrupted before server recovery"
+                    ),
                     "error_code": "process_lost",
                 },
             )
@@ -329,7 +348,17 @@ class HeartbeatService:
                 "lifecycle",
                 message="run interrupted before server recovery",
                 level="error",
+                payload={"processPid": run.process_pid} if run.process_pid else None,
             )
+            if detached_message:
+                await self._append_event(
+                    failed,
+                    await self._next_event_sequence(run.id),
+                    "lifecycle",
+                    message=detached_message,
+                    level="warn",
+                    payload={"processPid": run.process_pid},
+                )
             if run.process_loss_retry_count >= 1:
                 continue
             retry = await self.retry_run(
@@ -562,6 +591,30 @@ class HeartbeatService:
             )
             sequence += 1
 
+        async def on_process_started(pid: int, started_at: datetime) -> None:
+            nonlocal sequence, running
+            updated = await update_run(
+                self._session,
+                running.id,
+                {"process_pid": pid, "process_started_at": started_at},
+            )
+            if updated is not None:
+                running = updated
+                await self._append_event(
+                    updated,
+                    sequence,
+                    "lifecycle",
+                    message=f"child process spawned with pid {pid}",
+                    level="info",
+                    payload={
+                        "processPid": pid,
+                        "processStartedAt": started_at.isoformat(),
+                    },
+                )
+                sequence += 1
+            if self._commit_process_metadata:
+                await self._session.commit()
+
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
             result = await adapter.execute(
@@ -573,6 +626,7 @@ class HeartbeatService:
                     config=agent.agent_runtime_config,
                     on_log=on_log,
                     cancel_event=cancellation,
+                    on_process_started=on_process_started,
                 )
             )
             if cancellation.is_set():
@@ -889,8 +943,13 @@ async def dispatch_queued_agent(
 
     async def execute(run_id: str) -> None:
         async with session_factory() as session:
-            async with session.begin():
-                await HeartbeatService(session).execute_claimed_run(run_id)
+            service = HeartbeatService(session, commit_process_metadata=True)
+            try:
+                await service.execute_claimed_run(run_id)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
     await asyncio.gather(*(execute(run_id) for run_id in run_ids))
 

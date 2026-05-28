@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -217,3 +218,57 @@ async def test_orphaned_running_run_enqueues_automatic_recovery(
     assert recovery[0]["processLossRetryCount"] == 1
     assert recovery[0]["contextSnapshot"] is not None
     assert recovery[0]["contextSnapshot"]["recovery"]["recoveryTrigger"] == "automatic"
+
+
+async def test_process_run_persists_child_process_metadata(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ProcessMeta")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert isinstance(run["processPid"], int)
+    assert run["processPid"] > 0
+    assert run["processStartedAt"] is not None
+
+
+async def test_orphaned_running_run_does_not_terminate_tracked_child_process(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="OrphanedChild")
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(30)",
+    )
+    try:
+        heartbeat = HeartbeatService(session)
+        async with async_transaction(session):
+            orphan = HeartbeatRun(
+                org_id=agent["orgId"],
+                agent_id=agent["id"],
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="running",
+                process_pid=child.pid,
+                process_started_at=datetime.now(UTC),
+            )
+            session.add(orphan)
+            await session.flush()
+            recovery = await heartbeat.recover_orphaned_runs()
+
+        assert recovery and recovery[0]["retryOfRunId"] == orphan.id
+        assert child.returncode is None
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
