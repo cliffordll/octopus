@@ -50,6 +50,12 @@ it("shows an issue and records comments and review decisions", async () => {
 
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: "实现登录流程" })).toBeInTheDocument();
+  const properties = screen.getByRole("region", { name: "Issue properties" });
+  expect(properties).toHaveTextContent("Properties");
+  expect(properties).toHaveTextContent("Number");
+  expect(properties).toHaveTextContent("Depth");
+  expect(properties).toHaveTextContent("Started");
+  expect(properties).toHaveTextContent("Completed");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: "实现登录流程", identifier: "OCT-1", status: "in_review" },

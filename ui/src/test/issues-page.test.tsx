@@ -9,7 +9,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("filters and creates issues for an organization", async () => {
+it("groups issues by status and creates issues for an organization", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
       return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
@@ -31,11 +31,12 @@ it("filters and creates issues for an organization", async () => {
           priority: "high",
           projectId: null,
           goalId: null,
-          assigneeAgentId: null,
+          assigneeAgentId: "agent-1",
           assigneeUserId: null,
           originKind: "manual",
           originId: null,
-          updatedAt: "",
+          createdAt: "2026-05-28T10:00:00Z",
+          updatedAt: "2026-05-28T11:00:00Z",
         },
       ]);
     }
@@ -48,12 +49,24 @@ it("filters and creates issues for an organization", async () => {
     "href",
     "/orgs/org-1/issues/issue-1",
   );
-
-  await userEvent.selectOptions(screen.getByLabelText("状态筛选"), "in_review");
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/issues?status=in_review",
-    expect.objectContaining({ method: "GET" }),
-  );
+  const issueCard = screen.getByRole("link", { name: "实现登录流程" }).closest(".project-issue-status-row");
+  expect(issueCard).not.toBeNull();
+  expect(issueCard).toHaveTextContent("创建时间");
+  expect(issueCard).toHaveTextContent("2026-05-28T10:00:00Z");
+  expect(issueCard).toHaveTextContent("归属");
+  expect(issueCard).toHaveTextContent("Builder");
+  expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
+  const issueSummary = screen.getByText("Total").closest(".project-issue-status-summary");
+  expect(issueSummary).not.toBeNull();
+  expect(within(issueSummary as HTMLElement).getByText("Total").closest(".summary-metric")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("Active").closest(".summary-metric")).toHaveTextContent("1");
+  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "In Progress" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "In Review" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Done" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Cancelled" })).toBeInTheDocument();
 
   expect(screen.queryByLabelText("任务名称")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
@@ -115,11 +128,12 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
           priority: "medium",
           projectId: null,
           goalId: null,
-          assigneeAgentId: null,
+          assigneeAgentId: "agent-1",
           assigneeUserId: null,
           originKind: "manual",
           originId: null,
-          updatedAt: "",
+          createdAt: "2026-05-28T09:00:00Z",
+          updatedAt: "2026-05-28T09:30:00Z",
         },
       ]);
     }
@@ -210,10 +224,21 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
+  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "整理草稿" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/issues/issue-draft",
+  );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues?status=backlog",
     expect.objectContaining({ method: "GET" }),
   );
+
+  await userEvent.click(within(taskNavigation).getByRole("link", { name: "关注中" }));
+  expect(within(taskNavigation).getByRole("link", { name: "关注中" })).toHaveClass("active");
+  expect(screen.getByRole("heading", { name: "Backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "空项目" }));
   expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveClass("active");

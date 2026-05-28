@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
+import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import type { ProjectResourceRole, ProjectStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { IssueStatusBoard } from "../components/IssueStatusBoard";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
@@ -38,6 +40,11 @@ export function ProjectPage() {
   const issues = useQuery({
     queryKey: ["issues", orgId, "project", projectId],
     queryFn: () => issuesApi.list(orgId, { projectId }),
+    enabled: activeTab === "issues",
+  });
+  const agents = useQuery({
+    queryKey: ["agents", orgId],
+    queryFn: () => agentsApi.list(orgId),
     enabled: activeTab === "issues",
   });
   useEffect(() => {
@@ -74,10 +81,13 @@ export function ProjectPage() {
     event.preventDefault();
     if (resourceId.trim()) addResource.mutate();
   }
+  const projectIssues = issues.data ?? [];
+  const agentList = Array.isArray(agents.data) ? agents.data : [];
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
     <OrgWorkspace orgId={orgId}>
-      <header className="page-header">
+      <div className="project-detail-shell">
+      <header className="page-header project-detail-header">
         <div className="project-header-identity">
           <span className="project-avatar-lg" style={{ background: project.data?.color ?? "#6366f1" }}>
             {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
@@ -97,15 +107,16 @@ export function ProjectPage() {
             {project.data?.description && <p className="muted">{project.data.description}</p>}
           </div>
         </div>
-        {project.data && (
-          <div className="project-header-badges">
-            <Badge>{project.data.status}</Badge>
-            <Badge>{project.data.urlKey}</Badge>
-          </div>
-        )}
+        {project.data && <Link className="button secondary" to={`/orgs/${orgId}/chats`}>Chat</Link>}
       </header>
       {project.data && (
         <>
+          {project.data.pauseReason === "budget" && (
+            <div className="project-budget-stop">
+              <span />
+              Paused by budget hard stop
+            </div>
+          )}
           <div className="project-summary-grid">
             <div className="summary-metric"><span>Status</span><strong>{project.data.status}</strong></div>
             <div className="summary-metric"><span>Lead</span><strong>{project.data.leadAgentId ?? "None"}</strong></div>
@@ -117,7 +128,7 @@ export function ProjectPage() {
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>Resources</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>Issues</NavLink>
           </nav>
-          {activeTab === "configuration" && <form className="panel project-properties-card" onSubmit={save}>
+          {activeTab === "configuration" && <form className="panel project-properties-card project-tab-panel" onSubmit={save}>
             <div className="panel-heading">
               <div>
                 <h2>Configuration</h2>
@@ -169,7 +180,7 @@ export function ProjectPage() {
               <button type="submit">保存 Project</button>
             </div>
           </form>}
-          {activeTab === "resources" && <section className="panel project-resources">
+          {activeTab === "resources" && <section className="panel project-resources project-tab-panel-wide">
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">Project Context</p>
@@ -221,28 +232,27 @@ export function ProjectPage() {
               <button type="submit">添加 Resource</button>
             </form>
           </section>}
-          {activeTab === "issues" && <section className="panel project-issues">
+          {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
             <div className="panel-heading">
               <div>
                 <h2>Issues</h2>
-                <p className="muted">当前项目关联任务。</p>
+                <p className="muted">当前项目关联任务，按状态分组展示。</p>
               </div>
             </div>
             {issues.error && <ErrorNotice error={issues.error} />}
-            {issues.isSuccess && issues.data.length === 0 && <p className="muted">暂无关联任务。</p>}
-            <div className="list">
-              {issues.data?.map((issue) => (
-                <article className="issue-row" key={issue.id}>
-                  <span className="identifier">{issue.identifier ?? "-"}</span>
-                  <Link to={`/orgs/${orgId}/issues/${issue.id}`}>{issue.title}</Link>
-                  <Badge>{issue.priority}</Badge>
-                  <Badge>{issue.status}</Badge>
-                </article>
-              ))}
-            </div>
+            {agents.error && <ErrorNotice error={agents.error} />}
+            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
+            <IssueStatusBoard
+              agents={agentList}
+              issues={projectIssues}
+              orgId={orgId}
+              projects={project.data ? [project.data] : []}
+              showProject={false}
+            />
           </section>}
         </>
       )}
+      </div>
     </OrgWorkspace>
   );
 }

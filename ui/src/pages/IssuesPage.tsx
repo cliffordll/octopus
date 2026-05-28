@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import type { IssuePriority, IssueStatus } from "../api/types";
-import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { IssueStatusBoard } from "../components/IssueStatusBoard";
 
 const STATUSES: Array<IssueStatus | ""> = [
   "",
@@ -29,7 +29,7 @@ const MODEL_OPTIONS = [
 
 export function IssuesPage() {
   const { orgId = "" } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const requestedStatus = searchParams.get("status");
   const status = STATUSES.includes(requestedStatus as IssueStatus) ? requestedStatus as IssueStatus | "" : "";
   const projectId = searchParams.get("projectId") ?? "";
@@ -84,6 +84,7 @@ export function IssuesPage() {
   }
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
+  const issueList = Array.isArray(issues.data) ? issues.data : [];
   return (
     <IssuesWorkspace orgId={orgId}>
       <header className="page-header">
@@ -101,41 +102,14 @@ export function IssuesPage() {
             新建任务
           </button>
       </header>
-      <div className="toolbar">
-        <label>
-          状态筛选
-          <select
-            value={status}
-            onChange={(event) => {
-              const nextStatus = event.target.value;
-              setSearchParams({
-                ...(nextStatus ? { status: nextStatus } : {}),
-                ...(projectId ? { projectId } : {}),
-              });
-            }}
-          >
-            {STATUSES.map((item) => (
-              <option key={item || "all"} value={item}>
-                {item || "全部"}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
       {agents.error && <ErrorNotice error={agents.error} />}
       {projects.error && <ErrorNotice error={projects.error} />}
       {issues.error && <ErrorNotice error={issues.error} />}
       {create.error && <ErrorNotice error={create.error} />}
-      <section className="panel issue-table">
+      <section className="panel issue-table issue-status-board">
         {issues.isLoading && <p className="muted">载入中...</p>}
-        {issues.data?.map((issue) => (
-          <article className="issue-row" key={issue.id}>
-            <span className="identifier">{issue.identifier ?? "-"}</span>
-            <Link to={`/orgs/${orgId}/issues/${issue.id}`}>{issue.title}</Link>
-            <Badge>{issue.priority}</Badge>
-            <Badge>{issue.status}</Badge>
-          </article>
-        ))}
+        {issues.isSuccess && issueList.length === 0 && <p className="muted">暂无任务。</p>}
+        <IssueStatusBoard agents={agentList} issues={issueList} orgId={orgId} projects={projectList} />
       </section>
       {taskDialogOpen && (
         <div
