@@ -134,8 +134,12 @@ class SetChatProjectContextPayload(TypedDict, total=False):
     projectId: NotRequired[str | None]
 
 
-class AddChatMessagePayload(TypedDict):
+class AddChatMessagePayloadBase(TypedDict):
     body: str
+
+
+class AddChatMessagePayload(AddChatMessagePayloadBase, total=False):
+    editUserMessageId: NotRequired[str | None]
 
 
 class CreatedChatMessages(TypedDict):

@@ -199,6 +199,36 @@ async def list_messages(
     return result.scalars().all()
 
 
+async def get_message(
+    session: AsyncSession, *, conversation_id: str, message_id: str
+) -> ChatMessage | None:
+    result = await session.execute(
+        select(ChatMessage).where(
+            ChatMessage.conversation_id == conversation_id,
+            ChatMessage.id == message_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def supersede_turn_messages(
+    session: AsyncSession,
+    *,
+    conversation_id: str,
+    chat_turn_id: str,
+    at: datetime,
+) -> None:
+    await session.execute(
+        update(ChatMessage)
+        .where(
+            ChatMessage.conversation_id == conversation_id,
+            ChatMessage.chat_turn_id == chat_turn_id,
+            ChatMessage.superseded_at.is_(None),
+        )
+        .values(superseded_at=at, updated_at=at)
+    )
+
+
 async def touch_conversation(
     session: AsyncSession, conversation_id: str, at: datetime
 ) -> ChatConversation | None:

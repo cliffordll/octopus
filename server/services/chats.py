@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import get_agent_by_id
 from packages.database.queries.agent_skills import list_enabled_skill_keys
+from packages.database.queries.approvals import create_approval
 from packages.database.queries.chats import (
     create_context_link,
     create_conversation,
@@ -16,9 +17,11 @@ from packages.database.queries.chats import (
     delete_project_context_links,
     get_conversation,
     get_conversation_user_state,
+    get_message,
     list_conversations,
     list_context_links,
     list_messages,
+    supersede_turn_messages,
     touch_conversation,
     update_conversation,
     upsert_conversation_user_state,
@@ -38,6 +41,7 @@ from packages.shared.constants.chat import (
     ChatConversationStatus,
     ChatIssueCreationMode,
     ChatMessageKind,
+    CHAT_MESSAGE_KINDS,
     ChatMessageRole,
     ChatMessageStatus,
 )
@@ -332,8 +336,30 @@ class ChatService:
             raise ChatAvailabilityError(
                 "The selected chat agent is unavailable. Choose another agent before sending messages."
             )
-        turn_id = str(uuid.uuid4())
         user_message_at = datetime.now(UTC)
+        edit_user_message_id = payload.get("editUserMessageId")
+        turn_id = str(uuid.uuid4())
+        turn_variant = 0
+        if edit_user_message_id is not None:
+            previous = await get_message(
+                self._session,
+                conversation_id=conversation.id,
+                message_id=edit_user_message_id,
+            )
+            if (
+                previous is None
+                or previous.role != "user"
+                or previous.chat_turn_id is None
+            ):
+                raise ValueError("Edited user message was not found")
+            turn_id = previous.chat_turn_id
+            turn_variant = previous.turn_variant + 1
+            await supersede_turn_messages(
+                self._session,
+                conversation_id=conversation.id,
+                chat_turn_id=turn_id,
+                at=user_message_at,
+            )
         user_message = await create_message(
             self._session,
             {
@@ -344,6 +370,7 @@ class ChatService:
                 "status": "completed",
                 "body": payload["body"],
                 "chat_turn_id": turn_id,
+                "turn_variant": turn_variant,
                 "created_at": user_message_at,
                 "updated_at": user_message_at,
             },
@@ -380,6 +407,16 @@ class ChatService:
         summary = str((result.result_json or {}).get("summary") or "").strip()
         if not summary:
             raise RuntimeError("Chat adapter returned no assistant reply")
+        result_json = result.result_json or {}
+        assistant_kind = _assistant_kind(result_json.get("kind"))
+        structured_payload = _assistant_structured_payload(result_json)
+        approval_id = await self._create_proposal_approval(
+            conversation,
+            kind=assistant_kind,
+            structured_payload=structured_payload,
+            requested_by_user_id=conversation.created_by_user_id,
+            replying_agent_id=agent.id,
+        )
         assistant_message_at = max(
             datetime.now(UTC), user_message_at + timedelta(microseconds=1)
         )
@@ -389,11 +426,14 @@ class ChatService:
                 "org_id": conversation.org_id,
                 "conversation_id": conversation.id,
                 "role": "assistant",
-                "kind": "message",
+                "kind": assistant_kind,
                 "status": "completed",
                 "body": summary,
+                "structured_payload": structured_payload,
+                "approval_id": approval_id,
                 "replying_agent_id": agent.id,
                 "chat_turn_id": turn_id,
+                "turn_variant": turn_variant,
                 "created_at": assistant_message_at,
                 "updated_at": assistant_message_at,
             },
@@ -407,6 +447,50 @@ class ChatService:
                 self._to_message(assistant_message),
             ]
         }
+
+    async def _create_proposal_approval(
+        self,
+        conversation: ChatConversationRow,
+        *,
+        kind: str,
+        structured_payload: dict[str, Any] | None,
+        requested_by_user_id: str | None,
+        replying_agent_id: str | None,
+    ) -> str | None:
+        if kind == "issue_proposal":
+            approval = await create_approval(
+                self._session,
+                {
+                    "org_id": conversation.org_id,
+                    "type": "chat_issue_creation",
+                    "requested_by_user_id": requested_by_user_id,
+                    "payload": {
+                        "chatConversationId": conversation.id,
+                        "proposedByAgentId": replying_agent_id,
+                        "proposedIssue": _proposal_payload(
+                            structured_payload, "issueProposal"
+                        ),
+                    },
+                },
+            )
+            return approval.id
+        if kind == "operation_proposal":
+            approval = await create_approval(
+                self._session,
+                {
+                    "org_id": conversation.org_id,
+                    "type": "chat_operation",
+                    "requested_by_user_id": requested_by_user_id,
+                    "payload": {
+                        "chatConversationId": conversation.id,
+                        "operationProposal": _proposal_payload(
+                            structured_payload, "operationProposal"
+                        ),
+                    },
+                },
+            )
+            return approval.id
+        return None
 
     async def _to_conversation(
         self,
@@ -576,6 +660,30 @@ async def _ignore_log(_: str, __: str) -> None:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _assistant_kind(value: object) -> str:
+    if isinstance(value, str) and value in CHAT_MESSAGE_KINDS:
+        return value
+    return "message"
+
+
+def _assistant_structured_payload(
+    result_json: dict[str, Any],
+) -> dict[str, Any] | None:
+    value = result_json.get("structuredPayload")
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _proposal_payload(
+    structured_payload: dict[str, Any] | None, key: str
+) -> dict[str, Any] | None:
+    if structured_payload is None:
+        return None
+    value = structured_payload.get(key)
+    return value if isinstance(value, dict) else structured_payload
 
 
 def _is_unread(
