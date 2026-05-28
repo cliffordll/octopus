@@ -68,6 +68,7 @@ class ProjectWorkspace(TypedDict):
     sharedWorkspaceKey: str | None
     metadata: dict[str, Any] | None
     isPrimary: bool
+    runtimeServices: NotRequired[list[WorkspaceRuntimeService]]
     createdAt: str
     updatedAt: str
 
@@ -182,3 +183,19 @@ class UpdateExecutionWorkspacePayload(TypedDict, total=False):
     cleanupReason: str | None
     metadata: dict[str, Any] | None
 
+
+class CreateProjectWorkspacePayload(TypedDict):
+    name: str
+    sourceType: NotRequired[str]
+    cwd: NotRequired[str | None]
+    repoUrl: NotRequired[str | None]
+    repoRef: NotRequired[str | None]
+    defaultRef: NotRequired[str | None]
+    visibility: NotRequired[str]
+    setupCommand: NotRequired[str | None]
+    cleanupCommand: NotRequired[str | None]
+    remoteProvider: NotRequired[str | None]
+    remoteWorkspaceRef: NotRequired[str | None]
+    sharedWorkspaceKey: NotRequired[str | None]
+    metadata: NotRequired[dict[str, Any] | None]
+    isPrimary: NotRequired[bool]

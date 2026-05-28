@@ -8,6 +8,7 @@ from ..constants.project import (
     ProjectResourceAttachmentRole,
     ProjectStatus,
 )
+from .workspace import ProjectExecutionWorkspacePolicy, ProjectWorkspace
 
 
 class OrganizationResource(TypedDict):
@@ -40,6 +41,20 @@ class ProjectGoalRef(TypedDict):
     title: str
 
 
+class ProjectCodebase(TypedDict):
+    configured: bool
+    scope: str
+    workspaceId: str | None
+    repoUrl: str | None
+    repoRef: str | None
+    defaultRef: str | None
+    repoName: str | None
+    localFolder: str | None
+    managedFolder: str
+    effectiveLocalFolder: str
+    origin: str
+
+
 class ProjectDetail(TypedDict):
     id: str
     orgId: str
@@ -55,8 +70,11 @@ class ProjectDetail(TypedDict):
     color: str | None
     pauseReason: PauseReason | None
     pausedAt: str | None
-    executionWorkspacePolicy: dict[str, Any] | None
+    executionWorkspacePolicy: ProjectExecutionWorkspacePolicy | None
+    codebase: ProjectCodebase
     resources: list[ProjectResourceAttachment]
+    workspaces: list[ProjectWorkspace]
+    primaryWorkspace: ProjectWorkspace | None
     archivedAt: str | None
     createdAt: str
     updatedAt: str
