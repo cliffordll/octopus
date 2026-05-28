@@ -301,9 +301,13 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
 
 async def test_agent_skills_enable_private_and_analytics_routes(
     app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     application, factory = app
     org_id = await _seed_org(factory)
+    codex_home = tmp_path / "codex-home"
     _, agent = await _request(
         application,
         "POST",
@@ -311,6 +315,7 @@ async def test_agent_skills_enable_private_and_analytics_routes(
         json={
             "name": "Skill Ops Agent",
             "agentRuntimeType": "codex_local",
+            "agentRuntimeConfig": {"env": {"CODEX_HOME": str(codex_home)}},
             "desiredSkills": ["review"],
         },
     )
@@ -342,9 +347,39 @@ async def test_agent_skills_enable_private_and_analytics_routes(
     assert enabled["desiredSkills"] == ["review", "debug"]
     assert private_code == 201
     assert private["key"] == "incident-notes"
-    assert private["selectionKey"] == "private:incident-notes"
+    assert private["selectionKey"] == "agent:incident-notes"
     assert private["sourceClass"] == "agent_home"
     assert private["desired"] is False
+    assert private["state"] == "external"
+    assert private["origin"] == "user_installed"
+    assert private["originLabel"] == "Agent skill"
+    assert private["locationLabel"] == "AGENT_HOME/skills"
+    assert isinstance(private["sourcePath"], str)
+    private_skill_file = Path(private["sourcePath"]) / "SKILL.md"
+    assert private_skill_file.read_text(encoding="utf-8") == "# Incident Notes\n"
+
+    snapshot_code, snapshot = await _request(
+        application, "GET", f"/api/agents/{agent['id']}/skills"
+    )
+    snapshot_entries = {entry["selectionKey"]: entry for entry in snapshot["entries"]}
+    assert snapshot_code == 200
+    assert snapshot_entries["agent:incident-notes"]["sourceClass"] == "agent_home"
+    assert snapshot_entries["agent:incident-notes"]["state"] == "external"
+
+    private_enable_code, private_enabled = await _request(
+        application,
+        "POST",
+        f"/api/agents/{agent['id']}/skills/enable",
+        json={"skills": ["agent:incident-notes"]},
+    )
+    private_target = codex_home / "skills" / "incident-notes" / "SKILL.md"
+    private_entries = {
+        entry["selectionKey"]: entry for entry in private_enabled["entries"]
+    }
+    assert private_enable_code == 200
+    assert private_target.is_file()
+    assert private_entries["agent:incident-notes"]["desired"] is True
+    assert private_entries["agent:incident-notes"]["state"] == "installed"
     assert analytics_code == 200
     assert analytics["agentId"] == agent["id"]
     assert analytics["orgId"] == org_id
@@ -356,7 +391,7 @@ async def test_agent_skills_enable_private_and_analytics_routes(
         application, "GET", f"/api/agents/{agent['id']}"
     )
     assert detail_code == 200
-    assert detail["desiredSkills"] == ["review", "debug"]
+    assert detail["desiredSkills"] == ["review", "debug", "agent:incident-notes"]
 
     async with factory() as session:
         actions = [
