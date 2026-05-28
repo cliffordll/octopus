@@ -44,6 +44,29 @@ class UnavailableRuntimeAdapter:
     ) -> dict[str, Any]:
         return _unsupported_skill_snapshot(self.type, desired_skills)
 
+    async def get_metadata(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "capabilities": {
+                "models": False,
+                "skills": False,
+                "environmentTest": True,
+                "quotaWindows": False,
+                "localAgentJwt": False,
+            },
+            "supportsLocalAgentJwt": False,
+            "agentConfigurationDoc": None,
+        }
+
+    async def get_quota_windows(self) -> dict[str, Any]:
+        return {
+            "provider": self.type,
+            "source": None,
+            "ok": False,
+            "error": f"Runtime adapter is not implemented: {self.type}",
+            "windows": [],
+        }
+
 
 def _unsupported_skill_snapshot(
     runtime_type: str, desired_skills: list[str]
@@ -60,6 +83,9 @@ def _unsupported_skill_snapshot(
 
 class RuntimeCapabilityMixin:
     type: str
+    supports_local_agent_jwt = False
+    agent_configuration_doc: str | None = None
+    quota_provider: str | None = None
 
     async def test_environment(
         self, config: dict[str, Any]
@@ -101,4 +127,35 @@ class RuntimeCapabilityMixin:
             "desiredSkills": desired_skills,
             "entries": [],
             "warnings": [],
+        }
+
+    async def get_metadata(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "capabilities": {
+                "models": True,
+                "skills": True,
+                "environmentTest": True,
+                "quotaWindows": self.quota_provider is not None,
+                "localAgentJwt": self.supports_local_agent_jwt,
+            },
+            "supportsLocalAgentJwt": self.supports_local_agent_jwt,
+            "agentConfigurationDoc": self.agent_configuration_doc,
+        }
+
+    async def get_quota_windows(self) -> dict[str, Any]:
+        if self.quota_provider is None:
+            return {
+                "provider": self.type,
+                "source": None,
+                "ok": False,
+                "error": "This runtime adapter does not expose quota windows.",
+                "windows": [],
+            }
+        return {
+            "provider": self.quota_provider,
+            "source": self.type,
+            "ok": False,
+            "error": "Quota window probe is not configured in this environment.",
+            "windows": [],
         }

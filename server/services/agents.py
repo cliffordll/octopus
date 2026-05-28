@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import re
 from collections.abc import Sequence
@@ -17,6 +17,7 @@ from packages.database.queries.agents import (
     update_agent,
 )
 from packages.database.queries.agent_skills import (
+    add_enabled_skill_keys,
     list_enabled_skill_keys,
     list_enabled_skill_keys_by_agent_ids,
     replace_enabled_skill_keys,
@@ -55,6 +56,7 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentDetail,
     AgentRuntimeState,
+    AgentSkillAnalytics,
     AgentSkillSnapshot,
     AgentTaskSession,
     CreateAgentPayload,
@@ -402,6 +404,114 @@ class AgentService:
             existing.agent_runtime_config, desired_skills
         )
         return cast(AgentSkillSnapshot, snapshot)
+
+    async def enable_skills(
+        self,
+        agent_id: str,
+        skills: list[str],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> AgentSkillSnapshot | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        desired_skills = await add_enabled_skill_keys(
+            self._session,
+            org_id=existing.org_id,
+            agent_id=existing.id,
+            skill_keys=skills,
+        )
+        snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
+            existing.agent_runtime_config, desired_skills
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=existing.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.skills_enabled",
+            entity_type="agent",
+            entity_id=existing.id,
+            details={
+                "requestedSkills": skills,
+                "desiredSkills": snapshot["desiredSkills"],
+                "mode": snapshot["mode"],
+                "supported": snapshot["supported"],
+                "entryCount": len(snapshot["entries"]),
+                "warningCount": len(snapshot["warnings"]),
+            },
+        )
+        return cast(AgentSkillSnapshot, snapshot)
+
+    async def create_private_skill(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        slug = _derive_url_key(payload.get("slug") or payload["name"])
+        entry = {
+            "key": slug,
+            "selectionKey": f"private:{slug}",
+            "runtimeName": payload["name"],
+            "description": payload.get("description"),
+            "desired": False,
+            "configurable": True,
+            "alwaysEnabled": False,
+            "managed": True,
+            "state": "available",
+            "sourceClass": "agent_home",
+            "origin": "organization_managed",
+            "originLabel": "Agent private skill",
+            "locationLabel": "AGENT_HOME/skills",
+            "readOnly": False,
+            "sourcePath": None,
+            "targetPath": None,
+            "workspaceEditPath": None,
+            "detail": payload.get("markdown"),
+        }
+        await insert_activity_log(
+            self._session,
+            org_id=existing.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.private_skill_created",
+            entity_type="agent",
+            entity_id=existing.id,
+            details={
+                "slug": entry["key"],
+                "selectionKey": entry["selectionKey"],
+                "sourcePath": entry["sourcePath"],
+            },
+        )
+        return entry
+
+    async def get_skill_analytics(
+        self, agent_id: str, *, window_days: int = 30
+    ) -> AgentSkillAnalytics | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        end_date = datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=max(window_days, 1) - 1)
+        return {
+            "agentId": existing.id,
+            "orgId": existing.org_id,
+            "windowDays": window_days,
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "totalCount": 0,
+            "totalRunsWithSkills": 0,
+            "evidenceCounts": {"used": 0, "requested": 0, "loaded": 0},
+            "skills": [],
+            "days": [],
+        }
 
     async def get_configuration(self, agent_id: str) -> AgentConfiguration | None:
         row = await get_agent_by_id(self._session, agent_id)

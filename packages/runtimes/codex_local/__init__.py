@@ -13,6 +13,11 @@ from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
 class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
     type = "codex_local"
+    supports_local_agent_jwt = True
+    agent_configuration_doc = (
+        "Configure cwd, model, promptTemplate, env, timeoutSec and Codex CLI options."
+    )
+    quota_provider = "openai"
 
     async def list_models(self) -> list[dict[str, str]]:
         return [
