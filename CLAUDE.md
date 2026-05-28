@@ -29,7 +29,7 @@
 - `packages/shared/` 负责 API 路径、枚举、契约模型、validator、共享常量
 - `packages/runtimes/` 负责各 runtime 的适配实现和共享 runtime contract
 - `packages/runtimes/` 的 Python 目录名使用下划线，例如 `claude_local/`；但对外兼容的 runtime id、配置值和持久化语义保持横杠命名，例如 `claude-local`
-- `server/resources/skills/bundled/` 这类资源目录不是 Python 包；其中具体 skill 目录名和 skill id 继续保持上游横杠命名，例如 `conversation-to-skill`
+- `server/skills/bundled/` 这类资源目录不是 Python 包；其中具体 skill 目录名和 skill id 继续保持上游横杠命名，例如 `conversation-to-skill`
 - `tests/` 以兼容测试、工作流测试、scope 与并发测试为主
 - `docs/` 只保留与架构、兼容性、迁移计划相关的文档
 - `docs/` 下的规划类文档保留在根目录；步骤文档使用 `docs/step-NN-<scope>/` 目录，`<scope>` 为简短英文功能后缀，例如 `docs/step-06-orgs/`、`docs/step-13-runs/`

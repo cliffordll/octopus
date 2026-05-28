@@ -239,7 +239,7 @@ octopus/
     background/
     storage/
     observability/
-    resources/
+    skills/
   packages/
     database/
       schema/
@@ -256,6 +256,8 @@ octopus/
 ```
 
 `ui/` 仅在兼容验证或后续明确迁移需求下使用，不是当前 server 实现的优先路径。
+
+本地运行产生的 agent home 位于当前服务启动目录下的 `.octopus/workspaces/org_<orgId>/agents/<agentWorkspaceKey>/`。其中 agent-private skills 按上游 `AGENT_HOME/skills/<slug>/SKILL.md` 语义落盘到 `.octopus/workspaces/org_<orgId>/agents/<agentWorkspaceKey>/skills/<slug>/SKILL.md`，并通过 runtime skills snapshot 暴露为 `sourceClass=agent_home`、`selectionKey=agent:<slug>`。
 
 ## 6.1 `server/`
 
