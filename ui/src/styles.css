@@ -2080,6 +2080,241 @@ pre {
   min-height: 488px;
 }
 
+.agent-skills-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.agent-skills-page h2 {
+  color: #e8edf5;
+  font-size: 24px;
+  margin: 0 0 6px;
+}
+
+.agent-skills-page-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.agent-skills-library {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-skills-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skills-table-card,
+.agent-skill-detail-card,
+.agent-skill-install-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.agent-skill-tags-card {
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px;
+}
+
+.agent-skill-source-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-skill-source-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skill-source-heading h3 {
+  color: #e8edf5;
+  font-size: 14px;
+  margin: 0;
+}
+
+.agent-skill-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.agent-skill-tag {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+}
+
+.agent-skill-tag.selected,
+.agent-skill-tag:hover {
+  background: rgba(56, 134, 232, 0.08);
+  border-color: #3886e8;
+}
+
+.agent-skill-tag-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #dce5f2;
+  display: inline-flex;
+  gap: 8px;
+  padding: 2px 6px;
+}
+
+.agent-skill-tag-main code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.agent-skill-tag-main span {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.agent-skills-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.agent-skills-table th {
+  background: #151c29;
+  color: #8792a6;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 10px 12px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.agent-skills-table td {
+  border-top: 1px solid #202a3b;
+  color: #dce5f2;
+  padding: 12px;
+  vertical-align: top;
+}
+
+.agent-skills-table code,
+.agent-skill-detail-card code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.agent-skills-table .right {
+  text-align: right;
+}
+
+.agent-skill-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.muted-cell {
+  color: #8792a6;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-table-cell {
+  color: #8792a6;
+  text-align: center;
+}
+
+.agent-skill-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-skill-detail-card > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.agent-skill-detail-card pre {
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 10px;
+  color: #dce5f2;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.agent-skill-install-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-skill-install-card h3 {
+  color: #e8edf5;
+  font-size: 15px;
+  margin: 0;
+}
+
+.agent-skill-install-card label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.agent-skill-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-skill-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.skill-yaml-textarea {
+  min-height: 180px;
+}
+
+.skill-create-dialog {
+  max-width: 680px;
+}
+
+.skill-create-dialog label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
+}
+
 .agent-run-detail-header {
   align-items: flex-start;
   display: flex;

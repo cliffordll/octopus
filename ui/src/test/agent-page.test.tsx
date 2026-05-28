@@ -236,6 +236,42 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
   );
 });
 
+it("shows an empty skill list without placeholder skills", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "codex_local",
+    agentRuntimeConfig: {},
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    desiredSkills: [],
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") return respond({});
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") {
+      return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: [], entries: [], warnings: [] });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/skills");
+
+  expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
+  expect(screen.getByText("组织技能")).toBeInTheDocument();
+  expect(screen.getByText("外部技能")).toBeInTheDocument();
+  expect(screen.queryByText("Review")).not.toBeInTheDocument();
+  expect(screen.queryByText("Debug")).not.toBeInTheDocument();
+  expect(screen.queryByText("Deploy")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
+});
+
 it("manages runtime adapter probes and skills from configuration", async () => {
   const agent = {
     id: "agent-1",
@@ -271,10 +307,45 @@ it("manages runtime adapter probes and skills from configuration", async () => {
       return respond({ agentRuntimeType: "codex_local", status: "pass", checks: [{ id: "cwd", label: "CWD", status: "pass", message: "ok" }] });
     }
     if (path === "/api/agents/agent-1/skills" && init?.method === "GET") {
-      return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: ["review"], entries: [{ key: "review", runtimeName: "Review" }], warnings: [] });
-    }
-    if (path === "/api/agents/agent-1/skills/analytics" && init?.method === "GET") {
-      return respond({ totalCount: 0, skills: [] });
+      return respond({
+        agentRuntimeType: "codex_local",
+        supported: true,
+        mode: "persistent",
+        desiredSkills: ["review", "deploy"],
+        entries: [
+          {
+            key: "review",
+            runtimeName: "Review",
+            source: "builtin",
+            version: "1.0",
+            enabled: true,
+            tags: ["quality"],
+            description: "Review code changes",
+            prompt: "Review carefully.",
+          },
+          {
+            key: "deploy",
+            runtimeName: "Deploy",
+            source: "db",
+            version: "1.0",
+            enabled: true,
+            tags: ["release"],
+            description: "Deploy safely",
+            prompt: "Deploy carefully.",
+          },
+          {
+            key: "debug",
+            runtimeName: "Debug",
+            source: "db",
+            version: "1.0",
+            enabled: false,
+            tags: ["ops"],
+            description: "Debug failures",
+            prompt: "Debug carefully.",
+          },
+        ],
+        warnings: [],
+      });
     }
     return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: ["review", "debug"], entries: [] });
   });
@@ -289,18 +360,19 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("CWD")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
-  expect(await screen.findByText("Agent Skills")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
-
-  await userEvent.clear(screen.getByLabelText("Desired Skills"));
-  await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
-  await userEvent.click(screen.getByRole("button", { name: "同步技能" }));
-  await userEvent.clear(screen.getByLabelText("Enable Skills"));
-  await userEvent.type(screen.getByLabelText("Enable Skills"), "debug");
-  await userEvent.click(screen.getByRole("button", { name: "启用技能" }));
-  await userEvent.type(screen.getByLabelText("Private Skill Name"), "Incident");
-  await userEvent.type(screen.getByLabelText("Private Skill Markdown"), "# Incident");
-  await userEvent.click(screen.getByRole("button", { name: "创建私有技能" }));
+  expect(screen.getAllByRole("button", { name: "Show" })).toHaveLength(3);
+  await userEvent.click(screen.getAllByRole("button", { name: "Show" })[0]);
+  expect(await screen.findByText("Deploy carefully.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+  await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+  await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
+  const dialog = screen.getByRole("dialog");
+  await userEvent.type(within(dialog).getByLabelText("Skill YAML"), "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it");
+  await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/adapters/codex_local/test-environment",
@@ -313,7 +385,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
     "/api/agents/agent-1/skills/sync",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ desiredSkills: ["review", "debug"] }),
+      body: JSON.stringify({ desiredSkills: ["review"] }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
@@ -327,7 +399,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
     "/api/agents/agent-1/skills/private",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ name: "Incident", markdown: "# Incident" }),
+      body: JSON.stringify({ name: "Incident", markdown: "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it" }),
     }),
   );
 });
