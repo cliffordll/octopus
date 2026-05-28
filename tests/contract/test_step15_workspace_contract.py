@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import sys
 from pathlib import Path
 
 from sqlalchemy import Table, text
@@ -11,6 +12,8 @@ from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import Base, Issue, Organization
+from server.services.agents import AgentService
+from server.services.heartbeat import HeartbeatService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
 
@@ -199,3 +202,78 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
     assert workspace["sourceIssueId"] == issue.id
     assert workspace["mode"] == "isolated_workspace"
     assert workspace["strategyType"] == "git_worktree"
+
+
+async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-preflight",
+                name="Step 15 Preflight",
+                issue_prefix="PFL",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Workspace Runtime",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/runtime-primary"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Run with workspace context",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Workspace Env Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {
+                        "command": sys.executable,
+                        "args": [
+                            "-c",
+                            "import os; print(os.environ['RUDDER_WORKSPACE_ID'])",
+                        ],
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert run["contextSnapshot"] is not None
+    workspace = run["contextSnapshot"]["workspace"]["rudderWorkspace"]
+    assert run["contextSnapshot"]["executionWorkspaceId"] == workspace["id"]
+    assert workspace["id"] in (run["resultJson"] or {})["stdout"]

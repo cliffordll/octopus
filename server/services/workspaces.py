@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 from sqlalchemy import update
@@ -249,6 +251,43 @@ class WorkspaceService:
         )
         return self._to_execution_workspace(row)
 
+    async def prepare_runtime_context_for_run(
+        self, run_id: str, context_snapshot: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        snapshot = dict(context_snapshot or {})
+        issue_id = snapshot.get("issueId") or snapshot.get("primaryIssueId")
+        if not isinstance(issue_id, str) or not issue_id:
+            return None
+        issue = await self._session.get(Issue, issue_id)
+        if issue is None:
+            return None
+        workspace = await self.resolve_for_issue(issue)
+        if workspace is None:
+            return None
+        workspace = await self._ensure_managed_workspace_paths(workspace)
+        org_root = self._org_workspace_root(issue.org_id)
+        artifacts_dir = org_root / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        workspace_env = self._workspace_env(
+            workspace=workspace,
+            org_root=org_root,
+            artifacts_dir=artifacts_dir,
+        )
+        runtime_context = {
+            "rudderWorkspace": workspace,
+            "rudderWorkspaces": [workspace],
+            "rudderRuntimeServiceIntents": [],
+            "rudderRuntimeServices": [],
+            "env": workspace_env,
+        }
+        return {
+            "issueId": issue.id,
+            "projectId": issue.project_id,
+            "projectWorkspaceId": workspace["projectWorkspaceId"],
+            "executionWorkspaceId": workspace["id"],
+            "workspace": runtime_context,
+        }
+
     async def _resolve_project_workspace_id(
         self,
         *,
@@ -266,6 +305,58 @@ class WorkspaceService:
         workspaces = await list_project_workspaces(self._session, project_id)
         primary = next((workspace for workspace in workspaces if workspace.is_primary), None)
         return (primary or (workspaces[0] if workspaces else None)).id if workspaces else None
+
+    async def _ensure_managed_workspace_paths(
+        self, workspace: ExecutionWorkspaceData
+    ) -> ExecutionWorkspaceData:
+        cwd = workspace["cwd"]
+        if cwd:
+            worktree = Path(cwd)
+        else:
+            worktree = (
+                self._org_workspace_root(workspace["orgId"])
+                / "executions"
+                / workspace["id"]
+                / "worktree"
+            )
+            row = await update_execution_workspace(
+                self._session, workspace["id"], {"cwd": str(worktree)}
+            )
+            if row is not None:
+                workspace = self._to_execution_workspace(row)
+        worktree.mkdir(parents=True, exist_ok=True)
+        log_dir = worktree.parent / "logs"
+        tmp_dir = worktree.parent / "tmp"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        return workspace
+
+    def _org_workspace_root(self, org_id: str) -> Path:
+        return (Path.cwd() / ".octopus" / "workspaces" / f"org_{org_id}").resolve()
+
+    def _workspace_env(
+        self,
+        *,
+        workspace: ExecutionWorkspaceData,
+        org_root: Path,
+        artifacts_dir: Path,
+    ) -> dict[str, str]:
+        workspaces_json = _json_dump([workspace])
+        services_json = _json_dump([])
+        return {
+            "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
+            "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
+            "RUDDER_WORKSPACE_ID": workspace["id"],
+            "RUDDER_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
+            "RUDDER_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
+            "RUDDER_WORKSPACE_BRANCH": workspace["branchName"] or "",
+            "RUDDER_WORKSPACE_WORKTREE_PATH": workspace["cwd"] or "",
+            "RUDDER_WORKSPACES_JSON": workspaces_json,
+            "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": "[]",
+            "RUDDER_RUNTIME_SERVICES_JSON": services_json,
+            "RUDDER_ORG_WORKSPACE_ROOT": str(org_root),
+            "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
+        }
 
     async def _find_reusable_execution_workspace(
         self,
@@ -320,3 +411,7 @@ def _parse_datetime(value: object) -> datetime | None:
     if value is None or isinstance(value, datetime):
         return cast(datetime | None, value)
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
