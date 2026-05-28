@@ -54,7 +54,9 @@ class RuntimeAdapter(Protocol):
 
     async def list_models(self) -> list[dict[str, str]]: ...
 
-    async def list_skills(self, config: dict[str, Any]) -> dict[str, Any]: ...
+    async def list_skills(
+        self, config: dict[str, Any], desired_skills: list[str] | None = None
+    ) -> dict[str, Any]: ...
 
     async def sync_skills(
         self, config: dict[str, Any], desired_skills: list[str]

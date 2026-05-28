@@ -164,6 +164,13 @@ def _apply_desired_skills_to_entries(
             entry["state"] = "configured"
 
 
+def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+    return {
+        **row.agent_runtime_config,
+        "_octopus": {"orgId": row.org_id, "agentId": row.id},
+    }
+
+
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -386,7 +393,7 @@ class AgentService:
             return None
         desired_skills = await list_enabled_skill_keys(self._session, row.id)
         snapshot = await get_runtime_adapter(row.agent_runtime_type).list_skills(
-            row.agent_runtime_config
+            _runtime_config_with_context(row), desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         _apply_desired_skills_to_entries(snapshot, desired_skills)
@@ -420,7 +427,7 @@ class AgentService:
             details={"desiredSkills": desired_skills},
         )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            existing.agent_runtime_config, desired_skills
+            _runtime_config_with_context(existing), desired_skills
         )
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
@@ -443,7 +450,7 @@ class AgentService:
             skill_keys=skills,
         )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            existing.agent_runtime_config, desired_skills
+            _runtime_config_with_context(existing), desired_skills
         )
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         await insert_activity_log(
