@@ -241,6 +241,13 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 organization resources、skills、plugins、automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。
 
+### Skills 后续拆分边界
+
+- Runtime skills 消费能力继续归 Step 14：本地 runtime adapter 如何发现、选择、materialize 或 mount skills。
+- Skills 使用统计真实归集归 Step 16：基于 run/event/activity 记录计算 loaded/requested/used 统计，不在 Step 14 伪造数据。
+- Organization skills 管理如果确认纳入，应拆成独立 skills 管理步骤，而不是塞进 Step 17 Chat。范围包括 organization skill 的数据库/文件来源、创建/更新/删除 API、权限与审计、以及与 `agentRuntimeConfig.skillsRootPath` 的迁移关系。
+- External skills 当前仅作为 runtime home 中的外部安装项检测；如后续要支持“导入/接管外部 skill”，应归独立 skills 管理步骤，并先确认上游是否存在对应服务端契约。
+
 ## 7. 验收与更新规则
 
 - 每个步骤开始前，在对应目录维护 `TASK.md` 中的任务范围、契约依据和验收标准；复杂步骤可同时拆分规格与执行计划。
