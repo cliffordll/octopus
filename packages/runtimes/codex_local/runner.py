@@ -5,11 +5,21 @@ import contextlib
 import json
 import os
 import re
+import shutil
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+
+
+@dataclass(frozen=True)
+class _RunAttempt:
+    result: RuntimeExecutionResult
+    stdout: str
+    stderr: str
+    raw_stderr: str
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
@@ -18,7 +28,6 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Codex adapter cwd must be a string")
     prompt = _string(context.config.get("promptTemplate")) or ""
-    args = _build_args(context.config)
     env = dict(os.environ)
     configured_env = context.config.get("env")
     if isinstance(configured_env, dict):
@@ -33,11 +42,72 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         env.update(context.env)
     if not _string(env.get("CODEX_HOME")):
         env["CODEX_HOME"] = str(_default_codex_home(context))
+    await _prepare_managed_home(env, context.on_log)
     billing_type = _billing_type(env)
     biller = _biller(env, billing_type)
     loaded_skills = _loaded_skills(env)
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
+    session_id = _runtime_session_id(context.config)
+
+    attempt = await _run_attempt(
+        context=context,
+        command=command,
+        args=_build_args(context.config, session_id),
+        cwd=cwd,
+        prompt=prompt,
+        env=env,
+        timeout_sec=timeout_sec,
+        loaded_skills=loaded_skills,
+        billing_type=billing_type,
+        biller=biller,
+    )
+    if (
+        session_id
+        and not attempt.result.timed_out
+        and (attempt.result.exit_code or 0) != 0
+        and _is_unknown_session_error(attempt.stdout, attempt.raw_stderr)
+    ):
+        await context.on_log(
+            "stdout",
+            (
+                f'[octopus] Codex resume session "{session_id}" is unavailable; '
+                "retrying with a fresh session.\n"
+            ),
+        )
+        retry = await _run_attempt(
+            context=context,
+            command=command,
+            args=_build_args(context.config, None),
+            cwd=cwd,
+            prompt=prompt,
+            env=env,
+            timeout_sec=timeout_sec,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
+        if retry.result.result_json is not None:
+            retry.result.result_json["clearSession"] = (
+                retry.result.session_id_after is None
+            )
+        return retry.result
+    return attempt.result
+
+
+async def _run_attempt(
+    *,
+    context: RuntimeExecutionContext,
+    command: str,
+    args: list[str],
+    cwd: str | None,
+    prompt: str,
+    env: dict[str, str],
+    timeout_sec: float,
+    loaded_skills: list[dict[str, str | None]],
+    billing_type: str,
+    biller: str,
+) -> _RunAttempt:
     process = await asyncio.create_subprocess_exec(
         command,
         *args,
@@ -68,7 +138,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                 stdout, stderr = await communication
                 await process.wait()
                 stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
-                return RuntimeExecutionResult(
+                result = RuntimeExecutionResult(
                     exit_code=process.returncode,
                     signal="SIGTERM",
                     error_message="Run cancelled",
@@ -79,6 +149,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                         "billingType": billing_type,
                         "biller": biller,
                     },
+                )
+                return _RunAttempt(
+                    result=result,
+                    stdout=stdout.decode(errors="replace"),
+                    stderr=stderr_text,
+                    raw_stderr=stderr.decode(errors="replace"),
                 )
             cancelled.cancel()
             if communication not in done:
@@ -96,7 +172,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         stdout, stderr = await process.communicate()
         await process.wait()
         stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
-        return RuntimeExecutionResult(
+        result = RuntimeExecutionResult(
             exit_code=process.returncode,
             timed_out=True,
             error_message=f"Timed out after {timeout_sec:g}s",
@@ -107,6 +183,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                 "billingType": billing_type,
                 "biller": biller,
             },
+        )
+        return _RunAttempt(
+            result=result,
+            stdout=stdout.decode(errors="replace"),
+            stderr=stderr_text,
+            raw_stderr=stderr.decode(errors="replace"),
         )
     except asyncio.CancelledError:
         communication.cancel()
@@ -133,7 +215,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         "billingType": billing_type,
         "biller": biller,
     }
-    return RuntimeExecutionResult(
+    result = RuntimeExecutionResult(
         exit_code=process.returncode,
         error_message=error,
         usage_json=usage,
@@ -147,9 +229,17 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             "biller": biller,
         },
     )
+    return _RunAttempt(
+        result=result,
+        stdout=stdout_text,
+        stderr=stderr_text,
+        raw_stderr=stderr.decode(errors="replace"),
+    )
 
 
-def _build_args(config: dict[str, Any]) -> list[str]:
+def _build_args(
+    config: dict[str, Any], resume_session_id: str | None = None
+) -> list[str]:
     args = ["exec", "--json", "--disable", "plugins"]
     if config.get("search") is True:
         args.insert(0, "--search")
@@ -168,7 +258,11 @@ def _build_args(config: dict[str, Any]) -> list[str]:
         isinstance(argument, str) for argument in extra_args
     ):
         args.extend(extra_args)
-    args.extend(["-c", "skills.bundled.enabled=false", "-"])
+    args.extend(["-c", "skills.bundled.enabled=false"])
+    if resume_session_id:
+        args.extend(["resume", resume_session_id, "-"])
+    else:
+        args.append("-")
     return args
 
 
@@ -297,6 +391,133 @@ def _default_codex_home(context: RuntimeExecutionContext) -> Path:
         / "codex_local"
         / context.org_id
         / context.agent_id
+    )
+
+
+async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
+    codex_home = _string(env.get("CODEX_HOME"))
+    if not codex_home:
+        return
+    managed_home = Path(codex_home).expanduser() / "home"
+    managed_home.mkdir(parents=True, exist_ok=True)
+    operator_home = _operator_home(env)
+    linked = _sync_local_cli_credential_home_entries(operator_home, managed_home)
+    env["HOME"] = str(managed_home)
+    env["USERPROFILE"] = str(managed_home)
+    env.setdefault("AGENT_HOME", str(managed_home))
+    env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
+    if linked:
+        await on_log(
+            "stdout",
+            (
+                f"[octopus] Shared {len(linked)} local CLI credential "
+                f"entr{'y' if len(linked) == 1 else 'ies'} into managed HOME "
+                f"{managed_home}: {', '.join(linked)}\n"
+            ),
+        )
+
+
+def _operator_home(env: dict[str, str]) -> Path:
+    return Path(
+        _string(env.get("RUDDER_OPERATOR_HOME"))
+        or _string(os.environ.get("RUDDER_OPERATOR_HOME"))
+        or _string(os.environ.get("HOME"))
+        or _string(env.get("HOME"))
+        or str(Path.home())
+    ).expanduser()
+
+
+_LOCAL_CLI_CREDENTIAL_HOME_ENTRIES = (
+    ".aws",
+    ".azure",
+    ".config/gh",
+    ".config/gcloud",
+    ".config/op",
+    ".config/vercel",
+    ".config/configstore",
+    ".docker",
+    ".fly",
+    ".git-credentials",
+    ".gnupg",
+    ".kube",
+    ".netrc",
+    ".npmrc",
+    ".ssh",
+    ".vercel",
+    "Library/Application Support/gh",
+    "Library/Application Support/com.heroku.cli",
+)
+
+
+def _sync_local_cli_credential_home_entries(
+    source_home: Path, target_home: Path
+) -> list[str]:
+    if _same_path(source_home, target_home):
+        return []
+    linked: list[str] = []
+    for relative_entry in _LOCAL_CLI_CREDENTIAL_HOME_ENTRIES:
+        source = source_home / Path(relative_entry)
+        if not source.exists():
+            continue
+        target = target_home / Path(relative_entry)
+        if _ensure_link_or_copy(source, target):
+            linked.append(relative_entry)
+    return linked
+
+
+def _ensure_link_or_copy(source: Path, target: Path) -> bool:
+    if target.exists() or target.is_symlink():
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.symlink_to(source, target_is_directory=source.is_dir())
+        return True
+    except OSError:
+        try:
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+            return True
+        except OSError:
+            return False
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(
+            str(right.resolve())
+        )
+    except OSError:
+        return os.path.normcase(os.path.abspath(str(left))) == os.path.normcase(
+            os.path.abspath(str(right))
+        )
+
+
+def _runtime_session_id(config: dict[str, Any]) -> str | None:
+    context = config.get("_octopus")
+    if isinstance(context, dict):
+        return _string(context.get("sessionIdBefore")) or _string(
+            context.get("sessionId")
+        )
+    return _string(config.get("sessionIdBefore")) or _string(config.get("sessionId"))
+
+
+def _is_unknown_session_error(stdout: str, stderr: str) -> bool:
+    haystack = "\n".join(
+        line.strip() for line in f"{stdout}\n{stderr}".splitlines() if line.strip()
+    )
+    return bool(
+        re.search(
+            (
+                r"unknown (session|thread)|session .* not found|"
+                r"thread .* not found|conversation .* not found|"
+                r"missing rollout path for thread|state db missing rollout path|"
+                r"no rollout found for thread id"
+            ),
+            haystack,
+            re.IGNORECASE,
+        )
     )
 
 
