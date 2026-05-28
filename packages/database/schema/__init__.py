@@ -20,6 +20,13 @@ from .organizations import Organization
 from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
+from .workspaces import (
+    ExecutionWorkspace,
+    IssueWorkProduct,
+    ProjectWorkspace,
+    WorkspaceOperation,
+    WorkspaceRuntimeService,
+)
 
 __all__ = [
     "Base",
@@ -45,4 +52,9 @@ __all__ = [
     "ProjectGoal",
     "OrganizationResource",
     "ProjectResourceAttachment",
+    "ProjectWorkspace",
+    "ExecutionWorkspace",
+    "WorkspaceRuntimeService",
+    "WorkspaceOperation",
+    "IssueWorkProduct",
 ]
