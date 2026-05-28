@@ -327,6 +327,7 @@ export interface Agent {
   role: AgentRole;
   title: string | null;
   status: AgentStatus;
+  desiredSkills?: string[];
   agentRuntimeType: AgentRuntimeType;
   agentRuntimeConfig: Record<string, unknown>;
   runtimeConfig?: Record<string, unknown>;
@@ -340,7 +341,18 @@ export interface AgentDetail extends Agent {
 }
 
 export interface AgentConfiguration {
-  agentId: string;
+  id?: string;
+  agentId?: string;
+  orgId?: string;
+  name?: string;
+  role?: AgentRole;
+  title?: string | null;
+  status?: AgentStatus;
+  reportsTo?: string | null;
+  capabilities?: string | null;
+  desiredSkills?: string[];
+  agentRuntimeType?: AgentRuntimeType;
+  agentRuntimeConfig?: Record<string, unknown>;
   runtimeConfig: Record<string, unknown>;
   permissions?: Record<string, boolean>;
   updatedAt?: string;
@@ -363,13 +375,19 @@ export interface CreateAgentPayload {
 export interface UpdateAgentPayload {
   name?: string;
   title?: string | null;
+  icon?: string | null;
   role?: AgentRole;
   reportsTo?: string | null;
   capabilities?: string | null;
+  desiredSkills?: string[];
   agentRuntimeType?: AgentRuntimeType;
   agentRuntimeConfig?: Record<string, unknown>;
   runtimeConfig?: Record<string, unknown>;
   budgetMonthlyCents?: number;
+  replaceAgentRuntimeConfig?: boolean;
+  status?: AgentStatus;
+  spentMonthlyCents?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface AgentRuntimeState {
@@ -395,7 +413,69 @@ export interface AgentTaskSession {
 
 export interface ResetAgentSessionPayload {
   taskKey?: string | null;
-  forceFreshSession?: boolean;
+}
+
+export interface AgentRuntimeModel {
+  id: string;
+  label: string;
+}
+
+export interface AgentRuntimeEnvironmentCheck {
+  id?: string;
+  label?: string;
+  status?: string;
+  message?: string;
+  hint?: string | null;
+}
+
+export interface AgentRuntimeEnvironmentTestResult {
+  agentRuntimeType: string;
+  status: string;
+  checks: AgentRuntimeEnvironmentCheck[];
+}
+
+export interface RuntimeAdapterMetadata {
+  type: string;
+  capabilities: Record<string, boolean>;
+  supportsLocalAgentJwt?: boolean;
+  agentConfigurationDoc?: string | null;
+}
+
+export interface ProviderQuotaResult {
+  provider?: string;
+  source?: string | null;
+  ok?: boolean;
+  error?: string;
+  windows?: Array<Record<string, unknown>>;
+}
+
+export interface AgentSkillSnapshot {
+  agentRuntimeType?: string;
+  supported?: boolean;
+  mode?: string;
+  desiredSkills: string[];
+  entries: Array<Record<string, unknown>>;
+  warnings?: string[];
+}
+
+export interface PrivateSkillPayload {
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  markdown?: string | null;
+}
+
+export interface AgentSkillAnalytics {
+  agentId?: string;
+  orgId?: string;
+  windowDays?: number;
+  startDate?: string;
+  endDate?: string;
+  totalCount?: number;
+  totalRunsWithSkills?: number;
+  evidenceCounts?: Record<string, number>;
+  skills: Array<Record<string, unknown>>;
+  days?: Array<Record<string, unknown>>;
 }
 
 export interface HeartbeatRun {

@@ -69,7 +69,8 @@ it("opens the first agent by default and creates one from the new agent flow", a
   );
   await userEvent.type(await screen.findByLabelText("智能体名称"), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "claude_local");
+  await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -79,8 +80,9 @@ it("opens the first agent by default and creates one from the new agent flow", a
       body: JSON.stringify({
         name: "Reviewer",
         role: "qa",
-        agentRuntimeType: "codex_local",
+        agentRuntimeType: "claude_local",
         agentRuntimeConfig: {},
+        desiredSkills: ["review", "debug"],
       }),
     }),
   );

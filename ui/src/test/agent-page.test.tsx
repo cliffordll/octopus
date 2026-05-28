@@ -164,6 +164,99 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
   );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/runtime-state/reset-session",
-    expect.objectContaining({ method: "POST", body: JSON.stringify({ forceFreshSession: true }) }),
+    expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
+  );
+});
+
+it("manages runtime adapter probes and skills from configuration", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "codex_local",
+    agentRuntimeConfig: { model: "gpt-5" },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    desiredSkills: ["review"],
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
+      return respond({ agentId: "agent-1", sessionDisplayId: "session-1", lastRunStatus: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0, lastError: null });
+    }
+    if (path === "/api/agents/agent-1/config-revisions" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/adapters/codex_local/models" && init?.method === "GET") {
+      return respond([{ id: "gpt-5", label: "GPT-5" }]);
+    }
+    if (path === "/api/orgs/org-1/adapters/codex_local" && init?.method === "GET") {
+      return respond({ type: "codex_local", capabilities: { models: true, skills: true, quotaWindows: true }, supportsLocalAgentJwt: true });
+    }
+    if (path === "/api/orgs/org-1/adapters/codex_local/quota-windows" && init?.method === "GET") {
+      return respond({ provider: "openai", ok: false, error: "not configured", windows: [] });
+    }
+    if (path === "/api/orgs/org-1/adapters/codex_local/test-environment" && init?.method === "POST") {
+      return respond({ agentRuntimeType: "codex_local", status: "pass", checks: [{ id: "cwd", label: "CWD", status: "pass", message: "ok" }] });
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") {
+      return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: ["review"], entries: [{ key: "review", runtimeName: "Review" }], warnings: [] });
+    }
+    if (path === "/api/agents/agent-1/skills/analytics" && init?.method === "GET") {
+      return respond({ totalCount: 0, skills: [] });
+    }
+    return respond({ agentRuntimeType: "codex_local", supported: true, mode: "persistent", desiredSkills: ["review", "debug"], entries: [] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
+  expect(await screen.findByText("GPT-5")).toBeInTheDocument();
+  expect(await screen.findByText("not configured")).toBeInTheDocument();
+  expect(await screen.findByText("Review")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
+  expect(await screen.findByText("CWD")).toBeInTheDocument();
+
+  await userEvent.clear(screen.getByLabelText("Desired Skills"));
+  await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
+  await userEvent.click(screen.getByRole("button", { name: "同步技能" }));
+  await userEvent.clear(screen.getByLabelText("Enable Skills"));
+  await userEvent.type(screen.getByLabelText("Enable Skills"), "debug");
+  await userEvent.click(screen.getByRole("button", { name: "启用技能" }));
+  await userEvent.type(screen.getByLabelText("Private Skill Name"), "Incident");
+  await userEvent.type(screen.getByLabelText("Private Skill Markdown"), "# Incident");
+  await userEvent.click(screen.getByRole("button", { name: "创建私有技能" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/adapters/codex_local/test-environment",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/skills/sync",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ desiredSkills: ["review", "debug"] }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/skills/enable",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ skills: ["debug"] }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/skills/private",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ name: "Incident", markdown: "# Incident" }),
+    }),
   );
 });

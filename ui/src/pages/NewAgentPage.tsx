@@ -7,13 +7,21 @@ import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const ROLES: AgentRole[] = ["ceo", "engineer", "qa", "pm", "designer", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = ["process", "codex_local"];
+const RUNTIMES: AgentRuntimeType[] = ["process", "http", "codex_local", "claude_local", "opencode_local"];
+
+function parseCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 export function NewAgentPage() {
   const { orgId = "" } = useParams();
   const [name, setName] = useState("");
   const [role, setRole] = useState<AgentRole>("engineer");
   const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
+  const [desiredSkills, setDesiredSkills] = useState("");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
@@ -26,6 +34,7 @@ export function NewAgentPage() {
         role: effectiveRole,
         agentRuntimeType: runtime,
         agentRuntimeConfig: {},
+        ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
       }),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
@@ -58,6 +67,10 @@ export function NewAgentPage() {
           <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
             {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
           </select>
+        </label>
+        <label>
+          Desired Skills
+          <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
         </label>
         {create.error && <ErrorNotice error={create.error} />}
         <button disabled={!agents.isSuccess || create.isPending} type="submit">
