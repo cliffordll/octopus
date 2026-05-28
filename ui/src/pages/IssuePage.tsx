@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { issuesApi } from "../api/issues";
 import type { IssueReviewDecision } from "../api/types";
 import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { writeRecentIssue } from "../utils/recentIssues";
 
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
@@ -27,6 +28,15 @@ export function IssuePage() {
     mutationFn: (decision: IssueReviewDecision) => issuesApi.review(issueId, { decision }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
   });
+  useEffect(() => {
+    if (!issue.data) return;
+    writeRecentIssue(orgId, {
+      id: issue.data.id,
+      title: issue.data.title,
+      identifier: issue.data.identifier,
+      status: issue.data.status,
+    });
+  }, [issue.data, orgId]);
   function submitComment(event: FormEvent) {
     event.preventDefault();
     if (comment.trim()) addComment.mutate();

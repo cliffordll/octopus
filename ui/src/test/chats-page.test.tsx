@@ -206,6 +206,9 @@ it("lists conversations without sidebar filters and identifies their selected ag
 
   renderApp("/orgs/org-1/chats");
   const messageNavigation = screen.getByRole("navigation", { name: "消息导航" });
+  expect(within(messageNavigation).getByRole("heading", { name: "消息" })).toBeInTheDocument();
+  expect(within(messageNavigation).getByRole("heading", { name: "对话" })).toBeInTheDocument();
+  expect(within(messageNavigation).getByRole("link", { name: /新建对话/ })).toHaveClass("context-action-entry");
   expect(await within(messageNavigation).findByText("Builder")).toBeInTheDocument();
   expect(messageNavigation).toHaveTextContent("发布计划");
   expect(messageNavigation).toHaveTextContent("归档调研");

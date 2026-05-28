@@ -46,8 +46,12 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(primaryNavigation.getByRole("link", { name: "智能体" })).toHaveAttribute("href", "/orgs/org-1/agents");
   expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/orgs/org-1/structure");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
+  const agentNavigation = within(screen.getByRole("navigation", { name: "智能体导航" }));
+  expect(agentNavigation.getByRole("heading", { name: "智能体" })).toBeInTheDocument();
+  expect(agentNavigation.getByRole("heading", { name: "团队" })).toBeInTheDocument();
+  expect(agentNavigation.getByRole("link", { name: /新建智能体/ })).toHaveClass("context-action-entry");
   expect(
-    within(screen.getByRole("navigation", { name: "智能体导航" })).getByRole("link", { name: /Builder/ }),
+    agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
   await userEvent.click(screen.getByRole("button", { name: "切换组织" }));
   const organizationMenu = within(screen.getByRole("navigation", { name: "组织切换菜单" }));

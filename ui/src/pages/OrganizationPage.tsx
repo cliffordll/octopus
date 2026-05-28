@@ -119,11 +119,16 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
         </section>
         <section className="local-nav-section">
           <h2>项目</h2>
-          <NavLink className="local-nav-primary" end to={`/orgs/${orgId}/projects`}>全部项目</NavLink>
           {projects.error && <ErrorNotice error={projects.error} />}
           <div className="local-project-list">
             {projectList.map((project) => (
-              <NavLink className="local-nav-project" key={project.id} to={`/orgs/${orgId}/projects/${project.id}`}>{project.name}</NavLink>
+              <NavLink
+                className="local-nav-project local-nav-project-prominent"
+                key={project.id}
+                to={`/orgs/${orgId}/projects/${project.id}`}
+              >
+                {project.name}
+              </NavLink>
             ))}
             {projects.isSuccess && projectList.length === 0 && <p className="context-empty">暂无项目</p>}
           </div>
