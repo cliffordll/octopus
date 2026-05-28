@@ -1712,8 +1712,122 @@ pre {
   padding: 16px;
 }
 
-.narrow, .approval-detail {
+.narrow {
   max-width: 720px;
+}
+
+.approval-management {
+  display: grid;
+  gap: 16px;
+}
+
+.approval-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-toolbar button {
+  background: #111827;
+  border: 1px solid #223047;
+  color: #9aa7bc;
+  padding: 7px 12px;
+}
+
+.approval-toolbar button.active,
+.approval-toolbar button:hover {
+  background: #172235;
+  border-color: #3d8bfd;
+  color: #e8f2ff;
+}
+
+.approval-thread {
+  display: grid;
+  gap: 14px;
+  max-width: 860px;
+}
+
+.approval-card {
+  background: linear-gradient(180deg, #101722, #0c121b);
+  border: 1px solid #223047;
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .22);
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.approval-card-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.approval-card-header h2 {
+  font-size: 18px;
+  margin: 2px 0 0;
+}
+
+.approval-card-payload {
+  background: #0a1018;
+  border: 1px solid #1d293b;
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.approval-card-payload span,
+.approval-note span {
+  color: #778397;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.approval-actions {
+  align-items: center;
+  border-top: 1px solid #202938;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.approval-empty-state {
+  max-width: 640px;
+}
+
+.approval-detail-layout {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  max-width: 1040px;
+}
+
+.approval-detail,
+.approval-decision-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.approval-note {
+  background: #0a1018;
+  border: 1px solid #1d293b;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.approval-note p {
+  margin: 6px 0 0;
+}
+
+.approval-decision-panel textarea {
+  min-height: 120px;
 }
 
 .resource-form {
