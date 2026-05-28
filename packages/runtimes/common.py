@@ -94,20 +94,39 @@ def skill_snapshot_from_root(
     desired = set(desired_skills)
     entries: list[dict[str, Any]] = []
     warnings: list[str] = []
+    seen_keys: set[str] = set()
     if isinstance(root, str) and root.strip():
         root_path = Path(root)
         if root_path.exists() and root_path.is_dir():
-            entries = [
-                _skill_entry(
-                    skill_dir,
-                    desired=skill_dir.name in desired,
-                    location_label=location_label,
+            for skill_dir in _skill_dirs(root_path):
+                entries.append(
+                    _skill_entry(
+                        skill_dir,
+                        desired=skill_dir.name in desired,
+                        location_label=location_label,
+                        source_class="organization",
+                        origin="organization_managed",
+                        origin_label="Organization skill",
+                        read_only=False,
+                    )
                 )
-                for skill_dir in sorted(root_path.iterdir(), key=lambda item: item.name)
-                if skill_dir.is_dir() and skill_dir.joinpath("SKILL.md").is_file()
-            ]
+                seen_keys.add(skill_dir.name)
         else:
             warnings.append(f"skillsRootPath does not exist: {root}")
+    for skill_dir in _skill_dirs(_bundled_skills_root()):
+        if skill_dir.name in seen_keys:
+            continue
+        entries.append(
+            _skill_entry(
+                skill_dir,
+                desired=skill_dir.name in desired,
+                location_label="bundled skills",
+                source_class="bundled",
+                origin="bundled",
+                origin_label="Bundled skill",
+                read_only=True,
+            )
+        )
     return {
         "agentRuntimeType": runtime_type,
         "supported": True,
@@ -118,8 +137,29 @@ def skill_snapshot_from_root(
     }
 
 
+def _bundled_skills_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "server" / "skills" / "bundled"
+
+
+def _skill_dirs(root_path: Path) -> list[Path]:
+    if not root_path.exists() or not root_path.is_dir():
+        return []
+    return [
+        skill_dir
+        for skill_dir in sorted(root_path.iterdir(), key=lambda item: item.name)
+        if skill_dir.is_dir() and skill_dir.joinpath("SKILL.md").is_file()
+    ]
+
+
 def _skill_entry(
-    skill_dir: Path, *, desired: bool, location_label: str
+    skill_dir: Path,
+    *,
+    desired: bool,
+    location_label: str,
+    source_class: str,
+    origin: str,
+    origin_label: str,
+    read_only: bool,
 ) -> dict[str, Any]:
     description = _skill_description(skill_dir.joinpath("SKILL.md"))
     return {
@@ -132,11 +172,11 @@ def _skill_entry(
         "alwaysEnabled": False,
         "managed": True,
         "state": "configured" if desired else "available",
-        "sourceClass": "organization",
-        "origin": "organization_managed",
-        "originLabel": "Organization skill",
+        "sourceClass": source_class,
+        "origin": origin,
+        "originLabel": origin_label,
         "locationLabel": location_label,
-        "readOnly": False,
+        "readOnly": read_only,
         "sourcePath": str(skill_dir),
         "targetPath": None,
         "workspaceEditPath": str(skill_dir.joinpath("SKILL.md")),

@@ -221,6 +221,43 @@ async def test_agent_skills_snapshot_and_sync_routes(
     assert skill_keys == ["review", "debug"]
 
 
+async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_root(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Bundled Skill Agent",
+            "agentRuntimeType": "codex_local",
+            "desiredSkills": ["conversation-to-skill"],
+        },
+    )
+
+    snapshot_code, snapshot = await _request(
+        application, "GET", f"/api/agents/{agent['id']}/skills"
+    )
+
+    assert snapshot_code == 200
+    entries = {entry["key"]: entry for entry in snapshot["entries"]}
+    assert {
+        "control-plane",
+        "conversation-to-skill",
+        "create-agent",
+        "create-plugin",
+        "para-memory-files",
+        "skill-creator",
+        "skill-optimizer",
+    }.issubset(entries)
+    assert entries["conversation-to-skill"]["desired"] is True
+    assert entries["conversation-to-skill"]["state"] == "configured"
+    assert entries["conversation-to-skill"]["sourceClass"] == "bundled"
+    assert entries["conversation-to-skill"]["readOnly"] is True
+
+
 async def test_agent_skills_enable_private_and_analytics_routes(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:

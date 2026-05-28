@@ -239,7 +239,7 @@ octopus/
     background/
     storage/
     observability/
-    resources/
+    skills/
   packages/
     database/
       schema/
