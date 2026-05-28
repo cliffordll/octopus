@@ -192,13 +192,12 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
                 actor_type="user",
                 actor_id="dev",
             )
+            assert project_workspace is not None
             issue = Issue(
                 org_id=org.id,
                 project_id=project["id"],
                 title="Implement workspace resolution",
-                project_workspace_id=project_workspace["id"]
-                if project_workspace
-                else None,
+                project_workspace_id=project_workspace["id"],
             )
             session.add(issue)
             await session.flush()
@@ -286,9 +285,11 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env() -> Non
     assert run is not None
     assert run["status"] == "succeeded"
     assert run["contextSnapshot"] is not None
-    workspace = run["contextSnapshot"]["workspace"]["rudderWorkspace"]
-    assert run["contextSnapshot"]["executionWorkspaceId"] == workspace["id"]
-    assert workspace["id"] in (run["resultJson"] or {})["stdout"]
+    context_snapshot = run["contextSnapshot"]
+    workspace = context_snapshot["workspace"]["rudderWorkspace"]
+    assert context_snapshot["executionWorkspaceId"] == workspace["id"]
+    result_json = run["resultJson"] or {}
+    assert workspace["id"] in result_json["stdout"]
 
 
 async def test_adapter_runtime_services_are_persisted_and_released(
@@ -430,21 +431,21 @@ async def test_adapter_runtime_services_are_persisted_and_released(
     assert rows == [("svc-report-1",)]
     assert service is not None
     assert service.service_name == "preview"
-    assert (
-        service.execution_workspace_id == run["contextSnapshot"]["executionWorkspaceId"]
-    )
+    context_snapshot = run["contextSnapshot"]
+    assert context_snapshot is not None
+    assert service.execution_workspace_id == context_snapshot["executionWorkspaceId"]
     assert service.status == "stopped"
     assert service.health_status == "unknown"
-    assert (run["resultJson"] or {})["runtimeServices"][0]["id"] == "svc-report-1"
+    result_json = run["resultJson"] or {}
+    assert result_json["runtimeServices"][0]["id"] == "svc-report-1"
     assert detail is not None
     assert product_row is not None
     assert product_row.issue_id == detail["id"]
     assert (
-        product_row.execution_workspace_id
-        == run["contextSnapshot"]["executionWorkspaceId"]
+        product_row.execution_workspace_id == context_snapshot["executionWorkspaceId"]
     )
     assert product_row.created_by_run_id == run["id"]
-    assert (run["resultJson"] or {})["workProducts"][0]["id"] == product_row.id
+    assert result_json["workProducts"][0]["id"] == product_row.id
     assert detail["workProducts"][0]["id"] == product_row.id
 
 
@@ -507,6 +508,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
                 actor_type="user",
                 actor_id="dev",
             )
+            assert run is not None
             operations = await list_workspace_operations_for_run(session, run["id"])
             await session.commit()
     finally:
@@ -517,8 +519,12 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
     assert len(operations) == 2
     assert {operation.status for operation in operations} == {"succeeded"}
     assert all(operation.execution_workspace_id for operation in operations)
-    assert operations[0].metadata_json["preflight"] is True
-    assert operations[1].metadata_json["adapterExecution"] is True
+    preflight_metadata = operations[0].metadata_json
+    adapter_metadata = operations[1].metadata_json
+    assert preflight_metadata is not None
+    assert adapter_metadata is not None
+    assert preflight_metadata["preflight"] is True
+    assert adapter_metadata["adapterExecution"] is True
     assert (
         operations[1].stdout_excerpt == "operation-ok\r\n"
         or operations[1].stdout_excerpt == "operation-ok\n"
@@ -632,8 +638,10 @@ async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
     assert operation.status == "failed"
     assert operation.finished_at is not None
     assert operation.stderr_excerpt == "run cancelled"
-    assert operation.metadata_json["interrupted"] is True
-    assert operation.metadata_json["reason"] == "cancelled"
+    operation_metadata = operation.metadata_json
+    assert operation_metadata is not None
+    assert operation_metadata["interrupted"] is True
+    assert operation_metadata["reason"] == "cancelled"
 
 
 async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None:
@@ -742,5 +750,7 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None
     assert operation.status == "failed"
     assert operation.finished_at is not None
     assert operation.stderr_excerpt == "Run interrupted before server recovery"
-    assert operation.metadata_json["interrupted"] is True
-    assert operation.metadata_json["reason"] == "process_lost"
+    operation_metadata = operation.metadata_json
+    assert operation_metadata is not None
+    assert operation_metadata["interrupted"] is True
+    assert operation_metadata["reason"] == "process_lost"
