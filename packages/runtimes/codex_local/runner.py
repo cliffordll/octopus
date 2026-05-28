@@ -373,6 +373,8 @@ def _billing_type(env: dict[str, str]) -> str:
 
 
 def _biller(env: dict[str, str], billing_type: str) -> str:
+    if _string(env.get("OPENROUTER_API_KEY")):
+        return "openrouter"
     base_url = (
         _string(env.get("OPENAI_BASE_URL"))
         or _string(env.get("OPENAI_API_BASE"))
