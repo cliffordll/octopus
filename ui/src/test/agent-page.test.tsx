@@ -317,7 +317,12 @@ it("manages runtime adapter probes and skills from configuration", async () => {
       return respond([{ id: "gpt-5", label: "GPT-5" }]);
     }
     if (path === "/api/orgs/org-1/adapters/codex_local" && init?.method === "GET") {
-      return respond({ type: "codex_local", capabilities: { models: true, skills: true, quotaWindows: true }, supportsLocalAgentJwt: true });
+      return respond({
+        type: "codex_local",
+        capabilities: { models: true, skills: true, quotaWindows: true },
+        supportsLocalAgentJwt: true,
+        agentConfigurationDoc: "Set model and cwd before running.",
+      });
     }
     if (path === "/api/orgs/org-1/adapters/codex_local/quota-windows" && init?.method === "GET") {
       return respond({ provider: "openai", ok: false, error: "not configured", windows: [] });
@@ -334,8 +339,11 @@ it("manages runtime adapter probes and skills from configuration", async () => {
         entries: [
           {
             key: "review",
+            selectionKey: "bundled:review",
             runtimeName: "Review",
-            source: "builtin",
+            sourceClass: "bundled",
+            origin: "bundled",
+            state: "installed",
             version: "1.0",
             enabled: true,
             tags: ["quality"],
@@ -344,8 +352,11 @@ it("manages runtime adapter probes and skills from configuration", async () => {
           },
           {
             key: "deploy",
+            selectionKey: "agent:deploy",
             runtimeName: "Deploy",
-            source: "db",
+            sourceClass: "agent_home",
+            origin: "user_installed",
+            state: "external",
             version: "1.0",
             enabled: true,
             tags: ["release"],
@@ -354,8 +365,11 @@ it("manages runtime adapter probes and skills from configuration", async () => {
           },
           {
             key: "debug",
+            selectionKey: "external:debug",
             runtimeName: "Debug",
-            source: "db",
+            sourceClass: "external",
+            origin: "external",
+            state: "missing",
             version: "1.0",
             enabled: false,
             tags: ["ops"],
@@ -363,7 +377,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             prompt: "Debug carefully.",
           },
         ],
-        warnings: [],
+        warnings: ["debug missing from managed home"],
       });
     }
     if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
@@ -377,6 +391,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
   expect(await screen.findByText("GPT-5")).toBeInTheDocument();
   expect(await screen.findByText("not configured")).toBeInTheDocument();
+  expect(await screen.findByText("Set model and cwd before running.")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
   expect(await screen.findByText("CWD")).toBeInTheDocument();
@@ -386,11 +401,18 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
+  expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
+  expect(await screen.findByText("installed")).toBeInTheDocument();
+  expect(await screen.findByText("external")).toBeInTheDocument();
+  expect(await screen.findByText("missing")).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "Show" })).toHaveLength(3);
-  await userEvent.click(screen.getAllByRole("button", { name: "Show" })[0]);
-  expect(await screen.findByText("Deploy carefully.")).toBeInTheDocument();
+  await userEvent.click(screen.getByText("Review"));
+  expect(await screen.findByText("Review carefully.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+  await userEvent.click(screen.getByText("Deploy"));
+  expect(await screen.findByText("Deploy carefully.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+  await userEvent.click(screen.getByText("Debug"));
   await userEvent.click(screen.getByRole("button", { name: "Enable" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
@@ -415,7 +437,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
     "/api/agents/agent-1/skills/enable",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ skills: ["debug"] }),
+      body: JSON.stringify({ skills: ["external:debug"] }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(

@@ -459,6 +459,12 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
                 "once",
                 "--reason",
                 "manual",
+                "--source",
+                "on_demand",
+                "--trigger-detail",
+                "manual",
+                "--payload",
+                '{"requestedBy":"cli"}',
                 "--force-fresh-session",
             ],
             client=client,
@@ -474,7 +480,9 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
     assert requests[2].method == "POST"
     assert requests[2].url.path == "/api/agents/agent-1/wakeup"
     assert requests[2].read() == (
-        b'{"idempotencyKey":"once","reason":"manual","forceFreshSession":true}'
+        b'{"idempotencyKey":"once","reason":"manual","source":"on_demand",'
+        b'"triggerDetail":"manual","payload":{"requestedBy":"cli"},'
+        b'"forceFreshSession":true}'
     )
     assert requests[3].method == "POST"
     assert requests[3].url.path == "/api/heartbeat-runs/run-1/cancel"
