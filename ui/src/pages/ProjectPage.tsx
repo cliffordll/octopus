@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
-import type { ProjectResourceRole, ProjectStatus } from "../api/types";
+import type { ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
@@ -19,6 +19,63 @@ const ROLES: ProjectResourceRole[] = [
   "background",
 ];
 
+function formatJson(value: Record<string, unknown> | null | undefined): string {
+  return value ? JSON.stringify(value, null, 2) : "";
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  if (!value.trim()) return null;
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("执行工作区策略必须是 JSON 对象。");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function nullableText(value: string | null | undefined): string {
+  return value && value.trim() ? value : "未设置";
+}
+
+function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCodebase; workspaces: ProjectWorkspace[] }) {
+  return (
+    <section className="project-workspace-grid" aria-label="项目工作区">
+      <article className="project-workspace-card">
+        <div className="project-workspace-card-heading">
+          <h3>代码库</h3>
+          {codebase?.configured ? <Badge>已配置</Badge> : <Badge>未配置</Badge>}
+        </div>
+        <dl className="project-workspace-properties">
+          <div><dt>来源</dt><dd>{codebase?.origin ?? "未设置"}</dd></div>
+          <div><dt>仓库</dt><dd>{nullableText(codebase?.repoUrl)}</dd></div>
+          <div><dt>分支</dt><dd>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
+          <div><dt>本地目录</dt><dd>{nullableText(codebase?.effectiveLocalFolder ?? codebase?.localFolder)}</dd></div>
+        </dl>
+      </article>
+      <article className="project-workspace-card">
+        <div className="project-workspace-card-heading">
+          <h3>工作区</h3>
+          <Badge>{workspaces.length}</Badge>
+        </div>
+        <div className="project-workspace-list">
+          {workspaces.map((workspace) => (
+            <div className="project-workspace-item" key={workspace.id}>
+              <div>
+                <strong>{workspace.name}</strong>
+                <span>{nullableText(workspace.cwd)}</span>
+              </div>
+              <div className="project-workspace-badges">
+                {workspace.isPrimary && <Badge>主工作区</Badge>}
+                <Badge>{workspace.sourceType}</Badge>
+                {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </article>
+    </section>
+  );
+}
+
 export function ProjectPage() {
   const { orgId = "", projectId = "", tab = "configuration" } = useParams();
   const activeTab = ["configuration", "resources", "issues"].includes(tab) ? tab : "configuration";
@@ -28,6 +85,8 @@ export function ProjectPage() {
   const [leadAgentId, setLeadAgentId] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const [goalIds, setGoalIds] = useState("");
+  const [workspacePolicy, setWorkspacePolicy] = useState("");
+  const [workspacePolicyError, setWorkspacePolicyError] = useState("");
   const [resourceId, setResourceId] = useState("");
   const [role, setRole] = useState<ProjectResourceRole>("working_set");
   const [sortOrder, setSortOrder] = useState("");
@@ -64,21 +123,30 @@ export function ProjectPage() {
       setLeadAgentId(project.data.leadAgentId ?? "");
       setTargetDate(project.data.targetDate ?? "");
       setGoalIds((project.data.goalIds ?? (project.data.goalId ? [project.data.goalId] : [])).join(","));
+      setWorkspacePolicy(formatJson(project.data.executionWorkspacePolicy));
+      setWorkspacePolicyError("");
     }
   }, [project.data]);
   const update = useMutation({
-    mutationFn: () => projectsApi.update(projectId, {
-      description: description.trim() || null,
-      name: projectName.trim() || project.data?.name,
-      status,
-      leadAgentId: leadAgentId || null,
-      targetDate: targetDate || null,
-      goalIds: goalIds
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-    }),
+    mutationFn: () => {
+      const executionWorkspacePolicy = parseJsonObject(workspacePolicy);
+      return projectsApi.update(projectId, {
+        description: description.trim() || null,
+        name: projectName.trim() || project.data?.name,
+        status,
+        leadAgentId: leadAgentId || null,
+        targetDate: targetDate || null,
+        goalIds: goalIds
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        executionWorkspacePolicy,
+      });
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] }),
+    onError: (error) => {
+      if (error instanceof Error) setWorkspacePolicyError(error.message);
+    },
   });
   const addResource = useMutation({
     mutationFn: () =>
@@ -118,6 +186,7 @@ export function ProjectPage() {
   });
   function save(event: FormEvent) {
     event.preventDefault();
+    setWorkspacePolicyError("");
     update.mutate();
   }
   function attach(event: FormEvent) {
@@ -243,7 +312,18 @@ export function ProjectPage() {
                 <span>更新时间</span>
                 <strong>{project.data.updatedAt || "-"}</strong>
               </div>
+              <label className="project-property-row project-property-row-start">
+                <span>执行工作区策略 JSON</span>
+                <textarea
+                  className="config-editor"
+                  value={workspacePolicy}
+                  onChange={(event) => setWorkspacePolicy(event.target.value)}
+                  placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
+                />
+              </label>
             </div>
+            <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
+            {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
             {update.error && <ErrorNotice error={update.error} />}
             {removeProject.error && <ErrorNotice error={removeProject.error} />}
             <div className="project-property-actions">

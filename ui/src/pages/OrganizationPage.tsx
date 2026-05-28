@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
-import { Link, Navigate, NavLink, useParams } from "react-router-dom";
+import { Link, Navigate, NavLink, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent } from "../api/types";
+import type { Agent, ProjectDetail, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -14,6 +14,8 @@ export function OrganizationPage() {
   const [description, setDescription] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [brandColor, setBrandColor] = useState("");
+  const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
   const queryClient = useQueryClient();
   const organization = useQuery({
     queryKey: ["organization", orgId],
@@ -25,6 +27,8 @@ export function OrganizationPage() {
       setDescription(organization.data.description ?? "");
       setBudgetMonthlyCents(String(organization.data.budgetMonthlyCents ?? ""));
       setBrandColor(organization.data.brandColor ?? "");
+      setRequireBoardApprovalForNewAgents(Boolean(organization.data.requireBoardApprovalForNewAgents));
+      setDefaultChatIssueCreationMode(organization.data.defaultChatIssueCreationMode ?? "disabled");
     }
   }, [organization.data]);
   const update = useMutation({
@@ -34,6 +38,8 @@ export function OrganizationPage() {
         description: description.trim() || null,
         budgetMonthlyCents: budgetMonthlyCents.trim() ? Number(budgetMonthlyCents) : undefined,
         brandColor: brandColor.trim() || null,
+        requireBoardApprovalForNewAgents,
+        defaultChatIssueCreationMode,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization", orgId] }),
   });
@@ -71,6 +77,25 @@ export function OrganizationPage() {
         <label>
           品牌色
           <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
+        </label>
+        <label className="checkbox-row">
+          <input
+            checked={requireBoardApprovalForNewAgents}
+            onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
+            type="checkbox"
+          />
+          新建智能体需要审批
+        </label>
+        <label>
+          默认聊天任务创建模式
+          <select
+            value={defaultChatIssueCreationMode}
+            onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
+          >
+            <option value="disabled">disabled</option>
+            <option value="manual">manual</option>
+            <option value="automatic">automatic</option>
+          </select>
         </label>
         {update.error && <ErrorNotice error={update.error} />}
         <button type="submit">保存组织</button>
@@ -291,6 +316,342 @@ export function OrganizationStructurePage() {
   );
 }
 
+interface WorkspaceTreeEntry {
+  children?: WorkspaceTreeEntry[];
+  content?: string | null;
+  detail?: string;
+  icon?: string;
+  isDirectory: boolean;
+  path: string;
+}
+
+function jsonFile(path: string, value: unknown, detail?: string, icon = "{}"): WorkspaceTreeEntry {
+  return {
+    content: formatJson(value),
+    detail,
+    icon,
+    isDirectory: false,
+    path,
+  };
+}
+
+function formatJson(value: unknown): string {
+  if (value === null || value === undefined) return "{}";
+  return JSON.stringify(value, null, 2);
+}
+
+function slugPath(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function projectWorkspaces(project: ProjectDetail): ProjectWorkspace[] {
+  if (project.workspaces && project.workspaces.length > 0) return project.workspaces;
+  if (!project.codebase) return [];
+  return [
+    {
+      id: `${project.id}-codebase-workspace`,
+      orgId: project.orgId,
+      projectId: project.id,
+      name: project.name,
+      sourceType: project.codebase.origin ?? "project",
+      cwd: project.codebase.effectiveLocalFolder ?? project.codebase.localFolder ?? null,
+      repoUrl: project.codebase.repoUrl ?? null,
+      repoRef: project.codebase.repoRef ?? null,
+      defaultRef: project.codebase.defaultRef ?? null,
+      visibility: "project",
+      setupCommand: null,
+      cleanupCommand: null,
+      remoteProvider: null,
+      remoteWorkspaceRef: null,
+      sharedWorkspaceKey: project.codebase.workspaceId ?? null,
+      metadata: null,
+      isPrimary: true,
+      runtimeServices: [],
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    },
+  ];
+}
+
+function buildWorkspaceTree(projects: ProjectDetail[], agents: Agent[], requestedPath: string | null): WorkspaceTreeEntry[] {
+  const projectChildren = projects.map((project) => ({
+    children: [
+      jsonFile(`projects/${slugPath(project.name)}/project.json`, project, "项目详情", "P"),
+      jsonFile(`projects/${slugPath(project.name)}/workspace-policy.json`, project.executionWorkspacePolicy ?? {}, "执行策略", "⚙"),
+      ...projectWorkspaces(project).map((workspace) =>
+        jsonFile(`projects/${slugPath(project.name)}/workspaces/${slugPath(workspace.name)}.json`, workspace, workspace.cwd ?? undefined, "W"),
+      ),
+    ],
+    detail: project.codebase?.effectiveLocalFolder ?? project.description ?? undefined,
+    icon: "P",
+    isDirectory: true,
+    path: `projects/${slugPath(project.name)}`,
+  }));
+  const agentChildren = agents.map((agent) => ({
+    children: [
+      jsonFile(`agents/${slugPath(agent.name)}/config.json`, agent.agentRuntimeConfig ?? {}, agent.agentRuntimeType, "⚙"),
+      jsonFile(`agents/${slugPath(agent.name)}/status.json`, {
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        status: agent.status,
+        reportsTo: agent.reportsTo ?? null,
+        lastHeartbeatAt: agent.lastHeartbeatAt,
+      }, "智能体状态", "S"),
+    ],
+    detail: `${agent.agentRuntimeType} · ${agent.status}`,
+    icon: "A",
+    isDirectory: true,
+    path: `agents/${slugPath(agent.name)}`,
+  }));
+  const skillFiles = agents
+    .filter((agent) => Array.isArray(agent.desiredSkills) && agent.desiredSkills.length > 0)
+    .map((agent) => jsonFile(`skills/${slugPath(agent.name)}.json`, agent.desiredSkills ?? [], agent.name, "K"));
+  const entries: WorkspaceTreeEntry[] = [
+    { children: [], detail: "运行产物", icon: "A", isDirectory: true, path: "artifacts" },
+    { children: [], detail: "构建输出", icon: "D", isDirectory: true, path: "dist" },
+    { children: [], detail: "上游兼容目录", icon: "M", isDirectory: true, path: "Microsoft" },
+    {
+      children: [
+        jsonFile("node_mode/runtime.json", {
+          agents: agents.map((agent) => ({ name: agent.name, runtime: agent.agentRuntimeType, status: agent.status })),
+        }, "runtime", "N"),
+      ],
+      detail: "Node runtime mode",
+      icon: "N",
+      isDirectory: true,
+      path: "node_mode",
+    },
+    { children: projectChildren, detail: `${projects.length} 个项目`, icon: "P", isDirectory: true, path: "plans" },
+    { children: skillFiles, detail: `${skillFiles.length} 个技能声明`, icon: "K", isDirectory: true, path: "skills" },
+    { children: projectChildren, detail: "项目源代码入口", icon: "S", isDirectory: true, path: "src" },
+    { children: agentChildren, detail: `${agents.length} 个智能体`, icon: "A", isDirectory: true, path: "agents" },
+  ];
+  if (requestedPath && !findWorkspaceEntry(entries, requestedPath)) {
+    entries.unshift({
+      content: "当前 server 未提供组织工作区文件读取接口，暂不能加载该文件内容。",
+      detail: "等待 server workspace file API",
+      icon: fileFormat(requestedPath).slice(0, 1).toUpperCase(),
+      isDirectory: false,
+      path: requestedPath,
+    });
+  }
+  return entries;
+}
+
+function findWorkspaceEntry(entries: WorkspaceTreeEntry[], path: string): WorkspaceTreeEntry | undefined {
+  for (const entry of entries) {
+    if (entry.path === path) return entry;
+    const child = entry.children ? findWorkspaceEntry(entry.children, path) : undefined;
+    if (child) return child;
+  }
+  return undefined;
+}
+
+function parentDirectories(path: string | null): Set<string> {
+  if (!path) return new Set();
+  const parts = path.split("/").filter(Boolean);
+  return new Set(parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/")));
+}
+
+function fileFormat(path: string | null): string {
+  if (!path) return "text";
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (!ext || ext === path) return "text";
+  return ext === "md" ? "markdown" : ext;
+}
+
+function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder"): string {
+  const normalized = icon?.toLowerCase();
+  if (normalized === "{}") return "workspace-tree-icon-json";
+  if (normalized === "⚙") return "workspace-tree-icon-config";
+  if (normalized && /^[a-z0-9_-]+$/.test(normalized)) return `workspace-tree-icon-${normalized}`;
+  return `workspace-tree-icon-${fallback}`;
+}
+
+function WorkspaceTreeNode({
+  entry,
+  expandedParents,
+  onSelect,
+  selectedPath,
+  depth = 0,
+}: {
+  entry: WorkspaceTreeEntry;
+  expandedParents: Set<string>;
+  onSelect: (path: string) => void;
+  selectedPath: string | null;
+  depth?: number;
+}) {
+  const [expanded, setExpanded] = useState(expandedParents.has(entry.path));
+  useEffect(() => {
+    if (expandedParents.has(entry.path)) setExpanded(true);
+  }, [entry.path, expandedParents]);
+  const label = entry.path.split("/").at(-1) ?? entry.path;
+  if (entry.isDirectory) {
+    return (
+      <li>
+        <button
+          aria-expanded={expanded}
+          className="workspace-tree-row workspace-tree-directory"
+          onClick={() => setExpanded((value) => !value)}
+          style={{ paddingLeft: `${depth * 14 + 8}px` }}
+          type="button"
+        >
+          <span aria-hidden="true" className="workspace-tree-chevron">{expanded ? "⌄" : "›"}</span>
+          <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(entry.icon, "folder")}`}>
+            {entry.icon ?? "F"}
+          </span>
+          <span className="workspace-tree-label">{label}</span>
+          {entry.detail && <small>{entry.detail}</small>}
+        </button>
+        {expanded && entry.children && entry.children.length > 0 && (
+          <ul className="workspace-tree-list">
+            {entry.children.map((child) => (
+              <WorkspaceTreeNode
+                depth={depth + 1}
+                entry={child}
+                expandedParents={expandedParents}
+                key={child.path}
+                onSelect={onSelect}
+                selectedPath={selectedPath}
+              />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+  return (
+    <li>
+      <button
+        className={`workspace-tree-row workspace-tree-file ${selectedPath === entry.path ? "selected" : ""}`}
+        onClick={() => onSelect(entry.path)}
+        style={{ paddingLeft: `${depth * 14 + 28}px` }}
+        type="button"
+      >
+        <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(entry.icon, "file")}`}>
+          {entry.icon ?? "·"}
+        </span>
+        <span className="workspace-tree-label">{label}</span>
+        {entry.detail && <small>{entry.detail}</small>}
+      </button>
+    </li>
+  );
+}
+
+export function OrganizationWorkspacesPage() {
+  const { orgId = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedPath = searchParams.get("path")?.trim() || null;
+  const [selectedPath, setSelectedPath] = useState<string | null>(requestedPath);
+  const projects = useQuery({
+    queryKey: ["projects", orgId],
+    queryFn: () => projectsApi.list(orgId),
+  });
+  const agents = useQuery({
+    queryKey: ["agents", orgId],
+    queryFn: () => agentsApi.list(orgId),
+  });
+  const projectList = Array.isArray(projects.data) ? projects.data : [];
+  const agentList = Array.isArray(agents.data) ? agents.data : [];
+  const workspaceTree = useMemo(
+    () => buildWorkspaceTree(projectList, agentList, requestedPath),
+    [agentList, projectList, requestedPath],
+  );
+  const selectedEntry = selectedPath ? findWorkspaceEntry(workspaceTree, selectedPath) : undefined;
+  const expandedParents = useMemo(() => parentDirectories(selectedPath), [selectedPath]);
+
+  useEffect(() => {
+    setSelectedPath(requestedPath);
+  }, [requestedPath]);
+
+  useEffect(() => {
+    if (selectedPath) return;
+    const firstFile = findWorkspaceEntry(workspaceTree, "package-lock.json")
+      ?? workspaceTree.flatMap((entry) => entry.children ?? [entry]).find((entry) => !entry.isDirectory);
+    if (firstFile && !firstFile.isDirectory) {
+      setSelectedPath(firstFile.path);
+      const next = new URLSearchParams(searchParams);
+      next.set("path", firstFile.path);
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, selectedPath, setSearchParams, workspaceTree]);
+
+  function selectFile(path: string) {
+    setSelectedPath(path);
+    const next = new URLSearchParams(searchParams);
+    next.set("path", path);
+    setSearchParams(next, { replace: true });
+  }
+
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Organization</p>
+          <h1>工作区</h1>
+          <p className="muted">按上游工作区布局展示文件树和编辑区。</p>
+        </div>
+        <button disabled type="button">Refresh</button>
+      </header>
+      {projects.error && <ErrorNotice error={projects.error} />}
+      {agents.error && <ErrorNotice error={agents.error} />}
+      <div className="workspace-shell-layout">
+        <section className="workspace-files-card" data-testid="org-workspaces-files-card">
+          <div className="workspace-card-header">
+            <div>
+              <h2>Files</h2>
+              <p>/</p>
+            </div>
+            <Badge>{workspaceTree.length}</Badge>
+          </div>
+          <div className="workspace-files-scroll">
+            <ul className="workspace-tree-list">
+              {workspaceTree.map((entry) => (
+                <WorkspaceTreeNode
+                  entry={entry}
+                  expandedParents={expandedParents}
+                  key={entry.path}
+                  onSelect={selectFile}
+                  selectedPath={selectedPath}
+                />
+              ))}
+            </ul>
+          </div>
+        </section>
+        <section className="workspace-editor-card" data-testid="org-workspaces-editor-card">
+          <div className="workspace-card-header workspace-editor-header">
+            <div>
+              <h2>Editor</h2>
+              <p>{selectedPath ?? "Select a file to edit"}</p>
+            </div>
+            <div className="workspace-editor-actions">
+              {selectedPath && <span className="workspace-format-pill">{fileFormat(selectedPath)}</span>}
+              <button disabled title="当前 server 未提供组织工作区文件保存接口" type="button">Save</button>
+            </div>
+          </div>
+          <div className="workspace-editor-body">
+            {!selectedPath ? (
+              <p className="muted">Choose a file from the workspace tree to edit it.</p>
+            ) : (
+              <>
+                {!selectedEntry && <p className="error-notice">未找到选中的工作区文件。</p>}
+                <textarea
+                  aria-label="工作区文件内容"
+                  className="workspace-text-editor"
+                  readOnly
+                  spellCheck={false}
+                  value={selectedEntry?.content ?? "当前 server 未提供组织工作区文件读取接口，暂不能加载该文件内容。"}
+                />
+              </>
+            )}
+          </div>
+        </section>
+      </div>
+    </OrgWorkspace>
+  );
+}
+
 export function OrgNavigation({ orgId }: { orgId: string }) {
   const projects = useQuery({
     queryKey: ["projects", orgId],
@@ -310,6 +671,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
             <span aria-hidden="true" className="context-entry-icon">H</span>
             <span>心跳</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/workspaces`}>
+            <span aria-hidden="true" className="context-entry-icon">W</span>
+            <span>工作区</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>
             <span aria-hidden="true" className="context-entry-icon">G</span>

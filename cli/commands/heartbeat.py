@@ -67,9 +67,7 @@ def run_heartbeat(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["reason"] = args.reason
     if args.force_fresh_session:
         payload["forceFreshSession"] = True
-    return client.request(
-        "POST", f"/api/agents/{args.agent_id}/heartbeat/invoke", json=payload
-    )
+    return client.request("POST", f"/api/agents/{args.agent_id}/wakeup", json=payload)
 
 
 def cancel_run(args: argparse.Namespace, client: ApiClient) -> Any:

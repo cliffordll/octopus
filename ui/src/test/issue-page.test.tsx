@@ -31,6 +31,30 @@ it("shows an issue and records comments and review decisions", async () => {
     requestDepth: 0,
     startedAt: null,
     completedAt: null,
+    workProducts: [
+      {
+        id: "wp-1",
+        orgId: "org-1",
+        projectId: "project-1",
+        issueId: "issue-1",
+        executionWorkspaceId: "exec-1",
+        runtimeServiceId: "svc-1",
+        type: "pull_request",
+        provider: "github",
+        externalId: "42",
+        title: "登录流程 PR",
+        url: "https://example.com/pr/42",
+        status: "open",
+        reviewState: "pending",
+        isPrimary: true,
+        healthStatus: "healthy",
+        summary: "实现登录流程并等待 review",
+        metadata: null,
+        createdByRunId: "run-1",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      },
+    ],
     createdAt: "",
     updatedAt: "",
   };
@@ -56,6 +80,9 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(properties).toHaveTextContent("Depth");
   expect(properties).toHaveTextContent("Started");
   expect(properties).toHaveTextContent("Completed");
+  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
+  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
+  expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: "实现登录流程", identifier: "OCT-1", status: "in_review" },

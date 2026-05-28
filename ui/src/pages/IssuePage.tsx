@@ -42,6 +42,42 @@ function IssuePropertiesPanel({ issue }: { issue: IssueDetail }) {
   );
 }
 
+function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
+  const workProducts = issue.workProducts ?? [];
+  return (
+    <section aria-label="工作产物" className="issue-section-card">
+      <div className="issue-section-heading">
+        <h2>工作产物</h2>
+        <span className="muted">{workProducts.length}</span>
+      </div>
+      {workProducts.length > 0 && (
+        <div className="issue-work-product-list">
+          {workProducts.map((product) => (
+            <article className="issue-work-product-card" key={product.id}>
+              <div>
+                <strong>{product.title}</strong>
+                <p>{product.summary ?? product.externalId ?? product.id}</p>
+              </div>
+              <div className="issue-work-product-meta">
+                <Badge>{product.type}</Badge>
+                <Badge>{product.status}</Badge>
+                <Badge>{product.reviewState}</Badge>
+                {product.isPrimary && <Badge>primary</Badge>}
+              </div>
+              <dl className="issue-work-product-details">
+                <div><dt>Workspace</dt><dd>{product.executionWorkspaceId ?? "None"}</dd></div>
+                <div><dt>Health</dt><dd>{product.healthStatus}</dd></div>
+                <div><dt>Run</dt><dd>{product.createdByRunId ?? "None"}</dd></div>
+              </dl>
+              {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
   const [comment, setComment] = useState("");
@@ -134,6 +170,8 @@ export function IssuePage() {
               {review.error && <ErrorNotice error={review.error} />}
               {updateIssue.error && <ErrorNotice error={updateIssue.error} />}
             </section>
+
+            <IssueWorkProductsPanel issue={issue.data} />
 
             <section aria-label="Activity" className="issue-section-card">
               <div className="issue-section-heading">

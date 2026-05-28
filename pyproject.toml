@@ -46,6 +46,8 @@ markers = [
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
 exclude = [
     "upstream-reference",
     "server/skills",
