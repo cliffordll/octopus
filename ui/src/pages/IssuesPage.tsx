@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { issuesApi } from "../api/issues";
 import type { IssueStatus } from "../api/types";
 import { Badge } from "../components/Badge";
@@ -20,12 +20,18 @@ const STATUSES: Array<IssueStatus | ""> = [
 
 export function IssuesPage() {
   const { orgId = "" } = useParams();
-  const [status, setStatus] = useState<IssueStatus | "">("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedStatus = searchParams.get("status");
+  const status = STATUSES.includes(requestedStatus as IssueStatus) ? requestedStatus as IssueStatus | "" : "";
+  const projectId = searchParams.get("projectId") ?? "";
   const [title, setTitle] = useState("");
   const queryClient = useQueryClient();
   const issues = useQuery({
-    queryKey: ["issues", orgId, status],
-    queryFn: () => issuesApi.list(orgId, status ? { status } : {}),
+    queryKey: ["issues", orgId, status, projectId],
+    queryFn: () => issuesApi.list(orgId, {
+      ...(status ? { status } : {}),
+      ...(projectId ? { projectId } : {}),
+    }),
   });
   const create = useMutation({
     mutationFn: issuesApi.create.bind(null, orgId),
@@ -49,7 +55,16 @@ export function IssuesPage() {
       <div className="toolbar">
         <label>
           状态筛选
-          <select value={status} onChange={(event) => setStatus(event.target.value as IssueStatus | "")}>
+          <select
+            value={status}
+            onChange={(event) => {
+              const nextStatus = event.target.value;
+              setSearchParams({
+                ...(nextStatus ? { status: nextStatus } : {}),
+                ...(projectId ? { projectId } : {}),
+              });
+            }}
+          >
             {STATUSES.map((item) => (
               <option key={item || "all"} value={item}>
                 {item || "全部"}

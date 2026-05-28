@@ -425,12 +425,11 @@ h1, h2, p {
 }
 
 .local-project-list {
-  border-left: 1px solid #222c3a;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 7px 0 0 11px;
-  padding-left: 8px;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding-left: 0;
 }
 
 .local-nav .local-nav-project {
@@ -439,20 +438,49 @@ h1, h2, p {
   padding: 7px 9px;
 }
 
+.local-nav .local-nav-project-prominent {
+  background: #101722;
+  border: 1px solid #202a3a;
+  color: #c5d0df;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 10px;
+}
+
 .local-nav a.active {
   background: #171e2b;
   color: #eff3f9;
 }
 
-.local-nav .local-nav-project.active {
-  background: #141c28;
-  color: #d6e3f6;
+.local-nav .local-nav-project.active, .local-nav .local-nav-project:hover {
+  background: #182233;
+  border-color: #2d3b51;
+  color: #eff3f9;
 }
 
 .context-nav {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.context-nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.context-nav-section + .context-nav-section {
+  margin-top: 14px;
+}
+
+.context-nav-section h3 {
+  color: #647086;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  margin: 0 10px 6px;
+  text-transform: uppercase;
 }
 
 .context-nav a {
@@ -477,11 +505,32 @@ h1, h2, p {
   white-space: nowrap;
 }
 
-.context-nav .new-chat-entry, .context-nav .new-context-entry {
+.context-nav .context-action-entry, .context-nav .new-chat-entry, .context-nav .new-context-entry {
+  background: #101722;
   border: 1px solid #263346;
   color: #b5d5fa;
+  font-weight: 500;
   justify-content: flex-start;
-  margin-bottom: 7px;
+}
+
+.context-project-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.context-project-name {
+  color: #b6c0d0;
+  font-size: 13px;
+  margin: 7px 0 2px;
+}
+
+.context-nav .context-sub-item {
+  color: #8792a6;
+  font-size: 12px;
+  padding: 7px 8px;
 }
 
 .context-item-copy {
@@ -977,7 +1026,6 @@ pre {
     flex-basis: 100%;
   }
   .local-project-list {
-    border-left: 0;
     border-top: 1px solid #222c3a;
     flex-basis: 100%;
     flex-direction: row;
