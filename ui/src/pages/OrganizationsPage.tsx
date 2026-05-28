@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -8,15 +8,17 @@ import { ErrorNotice } from "../components/ErrorNotice";
 export function OrganizationsPage() {
   const [name, setName] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const organizations = useQuery({
     queryKey: ["organizations"],
     queryFn: organizationsApi.list,
   });
   const create = useMutation({
     mutationFn: organizationsApi.create,
-    onSuccess: () => {
+    onSuccess: (organization) => {
       setName("");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      navigate(`/orgs/${organization.id}/agents/new`);
     },
   });
   function submit(event: FormEvent) {

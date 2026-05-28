@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { approvalsApi } from "../api/approvals";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
+import { OrgWorkspace } from "./OrganizationPage";
 
 export function ApprovalPage() {
   const { orgId = "", approvalId = "" } = useParams();
@@ -23,13 +23,12 @@ export function ApprovalPage() {
   });
   if (approval.error) return <ErrorNotice error={approval.error} />;
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/approvals`}>返回 Approvals</Link>
           <h1>{approval.data?.type ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       {approval.data && (
         <section className="panel approval-detail">
@@ -53,6 +52,6 @@ export function ApprovalPage() {
           {act.error && <ErrorNotice error={act.error} />}
         </section>
       )}
-    </>
+    </OrgWorkspace>
   );
 }

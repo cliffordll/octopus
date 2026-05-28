@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, NavLink, useParams } from "react-router-dom";
+import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import type { ProjectResourceRole, ProjectStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { OrgNavigation } from "./OrganizationPage";
+import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
 const ROLES: ProjectResourceRole[] = [
@@ -17,7 +18,8 @@ const ROLES: ProjectResourceRole[] = [
 ];
 
 export function ProjectPage() {
-  const { orgId = "", projectId = "" } = useParams();
+  const { orgId = "", projectId = "", tab = "configuration" } = useParams();
+  const activeTab = ["configuration", "resources", "issues"].includes(tab) ? tab : "configuration";
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
   const [resourceId, setResourceId] = useState("");
@@ -30,6 +32,12 @@ export function ProjectPage() {
   const resources = useQuery({
     queryKey: ["project-resources", projectId],
     queryFn: () => projectsApi.listResources(projectId),
+    enabled: activeTab === "resources",
+  });
+  const issues = useQuery({
+    queryKey: ["issues", orgId, "project", projectId],
+    queryFn: () => issuesApi.list(orgId, { projectId }),
+    enabled: activeTab === "issues",
   });
   useEffect(() => {
     if (project.data) {
@@ -62,17 +70,21 @@ export function ProjectPage() {
   }
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <>
+    <OrgWorkspace orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回 Projects</Link>
           <h1>{project.data?.name ?? "载入中..."}</h1>
         </div>
-        <OrgNavigation orgId={orgId} />
       </header>
       {project.data && (
-        <div className="grid-two detail-grid">
-          <form className="panel form" onSubmit={save}>
+        <>
+          <nav aria-label="项目详情导航" className="detail-tabs">
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
+          </nav>
+          {activeTab === "configuration" && <form className="panel form project-configuration" onSubmit={save}>
             <div className="meta-line"><Badge>{project.data.urlKey}</Badge><Badge>{project.data.status}</Badge></div>
             <label>
               描述
@@ -86,9 +98,9 @@ export function ProjectPage() {
             </label>
             {update.error && <ErrorNotice error={update.error} />}
             <button type="submit">保存 Project</button>
-          </form>
-          <section className="panel">
-            <h2>Resources</h2>
+          </form>}
+          {activeTab === "resources" && <section className="panel project-resources">
+            <h2>资源</h2>
             {resources.error && <ErrorNotice error={resources.error} />}
             <div className="list">
               {resources.data?.map((attachment) => (
@@ -119,9 +131,24 @@ export function ProjectPage() {
               {addResource.error && <ErrorNotice error={addResource.error} />}
               <button type="submit">添加 Resource</button>
             </form>
-          </section>
-        </div>
+          </section>}
+          {activeTab === "issues" && <section className="panel project-issues">
+            <h2>任务</h2>
+            {issues.error && <ErrorNotice error={issues.error} />}
+            {issues.isSuccess && issues.data.length === 0 && <p className="muted">暂无关联任务。</p>}
+            <div className="list">
+              {issues.data?.map((issue) => (
+                <article className="issue-row" key={issue.id}>
+                  <span className="identifier">{issue.identifier ?? "-"}</span>
+                  <Link to={`/orgs/${orgId}/issues/${issue.id}`}>{issue.title}</Link>
+                  <Badge>{issue.priority}</Badge>
+                  <Badge>{issue.status}</Badge>
+                </article>
+              ))}
+            </div>
+          </section>}
+        </>
       )}
-    </>
+    </OrgWorkspace>
   );
 }
