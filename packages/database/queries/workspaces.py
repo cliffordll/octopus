@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.schema import ProjectWorkspace
+from packages.database.schema import ExecutionWorkspace, ProjectWorkspace
 
 
 async def list_project_workspaces(
@@ -46,3 +46,73 @@ async def clear_primary_project_workspace(
         .values(is_primary=False, updated_at=datetime.now(UTC))
     )
 
+
+async def list_execution_workspaces(
+    session: AsyncSession,
+    org_id: str,
+    *,
+    project_id: str | None = None,
+    project_workspace_id: str | None = None,
+    issue_id: str | None = None,
+    status: str | None = None,
+    reuse_eligible: bool = False,
+) -> Sequence[ExecutionWorkspace]:
+    statement = select(ExecutionWorkspace).where(ExecutionWorkspace.org_id == org_id)
+    if project_id is not None:
+        statement = statement.where(ExecutionWorkspace.project_id == project_id)
+    if project_workspace_id is not None:
+        statement = statement.where(
+            ExecutionWorkspace.project_workspace_id == project_workspace_id
+        )
+    if issue_id is not None:
+        statement = statement.where(ExecutionWorkspace.source_issue_id == issue_id)
+    if status is not None:
+        statuses = [item.strip() for item in status.split(",") if item.strip()]
+        if len(statuses) == 1:
+            statement = statement.where(ExecutionWorkspace.status == statuses[0])
+        elif statuses:
+            statement = statement.where(ExecutionWorkspace.status.in_(statuses))
+    if reuse_eligible:
+        statement = statement.where(
+            ExecutionWorkspace.status.in_(("active", "idle", "in_review"))
+        )
+    result = await session.execute(
+        statement.order_by(
+            desc(ExecutionWorkspace.last_used_at), desc(ExecutionWorkspace.created_at)
+        )
+    )
+    return result.scalars().all()
+
+
+async def get_execution_workspace_by_id(
+    session: AsyncSession, workspace_id: str
+) -> ExecutionWorkspace | None:
+    result = await session.execute(
+        select(ExecutionWorkspace).where(ExecutionWorkspace.id == workspace_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_execution_workspace(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> ExecutionWorkspace:
+    row = ExecutionWorkspace(**dict(fields))
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def update_execution_workspace(
+    session: AsyncSession, workspace_id: str, fields: Mapping[str, Any]
+) -> ExecutionWorkspace | None:
+    if not fields:
+        return await get_execution_workspace_by_id(session, workspace_id)
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(ExecutionWorkspace)
+        .where(ExecutionWorkspace.id == workspace_id)
+        .values(**values)
+        .returning(ExecutionWorkspace)
+    )
+    return result.scalar_one_or_none()
