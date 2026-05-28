@@ -375,6 +375,27 @@ h1, h2, p {
   min-width: 0;
 }
 
+.project-header-identity {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+}
+
+.project-avatar-lg {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 14px;
+  color: #fff;
+  display: flex;
+  flex: 0 0 48px;
+  font-size: 20px;
+  font-weight: 700;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
 .project-heading-row {
   align-items: center;
   display: flex;
@@ -393,6 +414,16 @@ h1, h2, p {
   align-items: center;
   display: flex;
   gap: 8px;
+}
+
+.project-header-meta {
+  align-items: center;
+  color: #8792a6;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 7px;
+  margin-top: 7px;
 }
 
 .project-summary-grid {
@@ -643,6 +674,15 @@ h1, h2, p {
   color: #8792a6;
 }
 
+.run-summary-card {
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
 .heartbeat-events {
   display: flex;
   flex-direction: column;
@@ -690,10 +730,42 @@ h1, h2, p {
   gap: 20px;
 }
 
+.agent-header-identity {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+}
+
+.agent-avatar-lg {
+  align-items: center;
+  background: linear-gradient(145deg, #1c2d45, #172233);
+  border: 1px solid #2b3a52;
+  border-radius: 14px;
+  color: #d8eaff;
+  display: flex;
+  flex: 0 0 48px;
+  font-size: 20px;
+  font-weight: 700;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
 .agent-title-row {
   align-items: center;
   display: flex;
   gap: 10px;
+}
+
+.agent-header-meta {
+  align-items: center;
+  color: #8792a6;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 7px;
+  margin-top: 7px;
 }
 
 .agent-header-actions {
@@ -1308,8 +1380,169 @@ pre {
   grid-template-columns: minmax(280px, .86fr) minmax(380px, 1.14fr);
 }
 
-.agent-configuration, .agent-runs, .agent-create-form {
+.agent-latest-run-card {
+  grid-row: span 2;
+}
+
+.agent-summary-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-config-card,
+.agent-create-form {
   max-width: 720px;
+}
+
+.agent-property-list {
+  border-top: 1px solid #202a3b;
+}
+
+.agent-property-row {
+  align-items: center;
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  padding: 12px 0;
+}
+
+.agent-property-row-start {
+  align-items: start;
+}
+
+.agent-property-row > span:first-child {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.agent-property-row input,
+.agent-property-row select,
+.agent-property-row textarea {
+  width: 100%;
+}
+
+.agent-property-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-runs-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
+}
+
+.agent-run-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.agent-run-detail-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.agent-run-detail-header h2 {
+  color: #e8edf5;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 18px;
+  margin: 0 0 6px;
+}
+
+.agent-run-metrics {
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.agent-run-metrics div {
+  border-right: 1px solid #202a3b;
+  padding: 12px;
+}
+
+.agent-run-metrics div:last-child {
+  border-right: 0;
+}
+
+.agent-run-metrics span,
+.agent-run-session dt {
+  color: #8792a6;
+  display: block;
+  font-size: 12px;
+}
+
+.agent-run-metrics strong,
+.agent-run-session dd {
+  color: #e8edf5;
+  display: block;
+  font-size: 13px;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-run-session {
+  border-top: 1px solid #202a3b;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding-top: 12px;
+}
+
+.agent-run-rail {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 20px;
+}
+
+.agent-run-list-button {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  color: #e8edf5;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 11px;
+  text-align: left;
+  width: 100%;
+}
+
+.agent-run-list-button:hover,
+.agent-run-list-button.selected {
+  background: #152033;
+  border-color: #3886e8;
+}
+
+.agent-run-list-button span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-run-list-button strong {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.agent-run-list-button small {
+  color: #8792a6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-configuration, .project-resources, .project-issues {
@@ -1460,6 +1693,23 @@ pre {
   .agent-dashboard {
     display: flex;
     flex-direction: column;
+  }
+  .agent-runs-layout,
+  .agent-property-row,
+  .agent-run-metrics,
+  .agent-run-session,
+  .agent-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .agent-run-rail {
+    position: static;
+  }
+  .agent-run-metrics div {
+    border-bottom: 1px solid #202a3b;
+    border-right: 0;
+  }
+  .agent-run-metrics div:last-child {
+    border-bottom: 0;
   }
   .chat-composer-toolbar select {
     max-width: none;

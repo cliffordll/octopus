@@ -133,5 +133,6 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
-  expect(await screen.findByText("succeeded")).toBeInTheDocument();
+  expect(await within(screen.getByTestId("agent-runs-detail-pane")).findByText("succeeded")).toBeInTheDocument();
+  expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
