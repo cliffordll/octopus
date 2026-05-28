@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type PropsWithChildren, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
-import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import { readRecentIssues, RECENT_ISSUES_EVENT } from "../utils/recentIssues";
 import { Badge } from "./Badge";
@@ -51,6 +50,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
           <section className="context-nav-section">
             <h3>消息</h3>
             <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>+ 新建对话</NavLink>
+            <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>审批管理</NavLink>
           </section>
           <section className="context-nav-section">
             <h3>对话</h3>
@@ -77,14 +77,20 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
 }
 
 export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
-  const issues = useQuery({ queryKey: ["issues", orgId, ""], queryFn: () => issuesApi.list(orgId, {}) });
+  const location = useLocation();
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
-  const issueList = Array.isArray(issues.data) ? issues.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const [recentIssues, setRecentIssues] = useState(() => readRecentIssues(orgId));
+  const [recentExpanded, setRecentExpanded] = useState(false);
+  const currentSearch = new URLSearchParams(location.search);
+  const currentProjectId = currentSearch.get("projectId") ?? "";
+  const currentStatus = currentSearch.get("status") ?? "";
+  const currentView = currentSearch.get("view") ?? "";
+  const issuesRootPath = `/orgs/${orgId}/issues`;
 
   useEffect(() => {
     setRecentIssues(readRecentIssues(orgId));
+    setRecentExpanded(false);
   }, [orgId]);
 
   useEffect(() => {
@@ -96,6 +102,8 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
     return () => window.removeEventListener(RECENT_ISSUES_EVENT, refreshRecentIssues);
   }, [orgId]);
 
+  const visibleRecentIssues = recentExpanded ? recentIssues : recentIssues.slice(0, 5);
+
   return (
     <ContextWorkspace
       label="Tasks"
@@ -105,13 +113,29 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
         <>
           <section className="context-nav-section">
             <h3>任务</h3>
-            <NavLink className="context-all-link" end to={`/orgs/${orgId}/issues`}>全部任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/issues?status=backlog`}>草稿任务</NavLink>
-            <NavLink to={`/orgs/${orgId}/issues?view=following`}>关注中</NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && !location.search ? "active" : ""}
+              end
+              to={issuesRootPath}
+            >
+              全部任务
+            </NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && currentStatus === "backlog" ? "active" : ""}
+              to={`${issuesRootPath}?status=backlog`}
+            >
+              草稿任务
+            </NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && currentView === "following" ? "active" : ""}
+              to={`${issuesRootPath}?view=following`}
+            >
+              关注中
+            </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>最近查看</h3>
-            {recentIssues.map((issue) => (
+            {visibleRecentIssues.map((issue) => (
               <NavLink key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
                 <span className="context-item-copy">
                   <strong>{issue.title}</strong>
@@ -120,31 +144,25 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
                 <Badge>{issue.status}</Badge>
               </NavLink>
             ))}
+            {recentIssues.length > 5 && (
+              <button className="context-nav-toggle" onClick={() => setRecentExpanded((value) => !value)} type="button">
+                {recentExpanded ? "收起" : `展开全部 ${recentIssues.length}`}
+              </button>
+            )}
           </section>
           <section className="context-nav-section">
             <h3>项目</h3>
             {projects.error && <ErrorNotice error={projects.error} />}
-            {projectList.map((project) => {
-              const projectIssues = issueList.filter((issue) => issue.projectId === project.id);
-              return (
-                <div className="context-project-group" key={project.id}>
-                  <NavLink className="context-project-name" to={`/orgs/${orgId}/issues?projectId=${project.id}`}>
-                    {project.name}
-                  </NavLink>
-                  {projectIssues.map((issue) => (
-                    <NavLink className="context-sub-item" key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
-                      <span className="context-item-copy">
-                        <strong>{issue.title}</strong>
-                        <small>{issue.identifier ?? "未编号"}</small>
-                      </span>
-                      <Badge>{issue.status}</Badge>
-                    </NavLink>
-                  ))}
-                </div>
-              );
-            })}
+            {projectList.map((project) => (
+              <NavLink
+                className={() => currentProjectId === project.id ? "context-project-name active" : "context-project-name"}
+                key={project.id}
+                to={`${issuesRootPath}?projectId=${project.id}`}
+              >
+                {project.name}
+              </NavLink>
+            ))}
           </section>
-          {issues.error && <ErrorNotice error={issues.error} />}
         </>
       }
     >

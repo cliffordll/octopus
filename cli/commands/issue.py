@@ -26,6 +26,14 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     list_parser.add_argument("--org-id", required=True)
     list_parser.add_argument("--status", choices=STATUSES)
     list_parser.add_argument("--assignee-agent-id")
+    list_parser.add_argument("--assignee-user-id")
+    list_parser.add_argument("--reviewer-agent-id")
+    list_parser.add_argument("--reviewer-user-id")
+    list_parser.add_argument("--project-id")
+    list_parser.add_argument("--goal-id")
+    list_parser.add_argument("--parent-id")
+    list_parser.add_argument("--origin-kind")
+    list_parser.add_argument("--origin-id")
     list_parser.set_defaults(handler=list_issues)
 
     get_parser = actions.add_parser("get", help="Get issue details")
@@ -38,6 +46,16 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--description")
     create_parser.add_argument("--status", choices=STATUSES)
     create_parser.add_argument("--priority", choices=PRIORITIES)
+    create_parser.add_argument("--project-id")
+    create_parser.add_argument("--goal-id")
+    create_parser.add_argument("--parent-id")
+    create_parser.add_argument("--assignee-agent-id")
+    create_parser.add_argument("--assignee-user-id")
+    create_parser.add_argument("--reviewer-agent-id")
+    create_parser.add_argument("--reviewer-user-id")
+    create_parser.add_argument("--origin-kind")
+    create_parser.add_argument("--origin-id")
+    create_parser.add_argument("--request-depth", type=int)
     create_parser.set_defaults(handler=create_issue)
 
     update_parser = actions.add_parser("update", help="Update an issue")
@@ -46,6 +64,13 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     update_parser.add_argument("--description")
     update_parser.add_argument("--status", choices=STATUSES)
     update_parser.add_argument("--priority", choices=PRIORITIES)
+    update_parser.add_argument("--project-id")
+    update_parser.add_argument("--goal-id")
+    update_parser.add_argument("--parent-id")
+    update_parser.add_argument("--assignee-agent-id")
+    update_parser.add_argument("--assignee-user-id")
+    update_parser.add_argument("--reviewer-agent-id")
+    update_parser.add_argument("--reviewer-user-id")
     update_parser.set_defaults(handler=update_issue)
 
     comment_list = actions.add_parser("comment-list", help="List issue comments")
@@ -72,6 +97,14 @@ def list_issues(args: argparse.Namespace, client: ApiClient) -> Any:
         for key, value in {
             "status": args.status,
             "assigneeAgentId": args.assignee_agent_id,
+            "assigneeUserId": args.assignee_user_id,
+            "reviewerAgentId": args.reviewer_agent_id,
+            "reviewerUserId": args.reviewer_user_id,
+            "projectId": args.project_id,
+            "goalId": args.goal_id,
+            "parentId": args.parent_id,
+            "originKind": args.origin_kind,
+            "originId": args.origin_id,
         }.items()
         if value is not None
     }
@@ -90,6 +123,16 @@ def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
             "description": args.description,
             "status": args.status,
             "priority": args.priority,
+            "projectId": args.project_id,
+            "goalId": args.goal_id,
+            "parentId": args.parent_id,
+            "assigneeAgentId": args.assignee_agent_id,
+            "assigneeUserId": args.assignee_user_id,
+            "reviewerAgentId": args.reviewer_agent_id,
+            "reviewerUserId": args.reviewer_user_id,
+            "originKind": args.origin_kind,
+            "originId": args.origin_id,
+            "requestDepth": args.request_depth,
         }.items()
         if value is not None
     }
@@ -104,6 +147,13 @@ def update_issue(args: argparse.Namespace, client: ApiClient) -> Any:
             "description": args.description,
             "status": args.status,
             "priority": args.priority,
+            "projectId": args.project_id,
+            "goalId": args.goal_id,
+            "parentId": args.parent_id,
+            "assigneeAgentId": args.assignee_agent_id,
+            "assigneeUserId": args.assignee_user_id,
+            "reviewerAgentId": args.reviewer_agent_id,
+            "reviewerUserId": args.reviewer_user_id,
         }.items()
         if value is not None
     }
