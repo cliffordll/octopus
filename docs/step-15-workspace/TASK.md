@@ -69,6 +69,31 @@ Organization
 
 Runtime adapter 在执行时应通过统一 context/env 获取 workspace 信息，例如主 workspace、workspace 列表、worktree path、repo/ref/branch、organization workspace root、artifacts dir 和 runtime services JSON，而不是直接理解数据库表关系。
 
+## Preflight 的含义
+
+Preflight 是 run 正式调用 runtime adapter 之前的 workspace 预检与准备阶段。它不是独立执行模型，而是 Step 13 run 生命周期中的执行前检查点。
+
+Preflight 需要确认：
+
+- 当前 run 是否携带可解析的 `issueId` 或等价业务上下文。
+- issue 是否能解析到同一 organization 下的 project。
+- project 是否有可用的 project workspace 或 execution workspace 策略。
+- 是否能创建或复用 execution workspace。
+- 本地 managed workspace 目录、artifacts 目录、logs/tmp 目录是否可准备。
+- 注入给 adapter 的 workspace context/env 是否完整。
+
+正常执行顺序如下：
+
+```text
+queued run
+  -> claim as running
+  -> workspace preflight
+  -> runtime adapter execute
+  -> persist result
+```
+
+如果 preflight 失败，adapter 不应继续执行；run/event/operation 需要留下可解释失败信息。这样可以避免智能体在错误目录、空目录或未明确归属的 workspace 中执行任务。
+
 ## 15A：Workspace Contract 与 Schema
 
 - 对齐上游 `project_workspaces`、`execution_workspaces`、`workspace_runtime_services`、`workspace_operations` 和 work product 引用相关 schema。

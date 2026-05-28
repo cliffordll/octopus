@@ -12,6 +12,7 @@ from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import Base, Issue, Organization, WorkspaceRuntimeService
+from packages.database.queries.workspaces import list_workspace_operations_for_run
 from packages.runtimes.types import RuntimeExecutionResult
 import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
@@ -405,3 +406,77 @@ async def test_adapter_runtime_services_are_persisted_and_released(
     assert service.status == "stopped"
     assert service.health_status == "unknown"
     assert (run["resultJson"] or {})["runtimeServices"][0]["id"] == "svc-report-1"
+
+
+async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-ops",
+                name="Step 15 Operations",
+                issue_prefix="OPS",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Workspace Operations",
+                    "executionWorkspacePolicy": {"enabled": True},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/ops-primary"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Run with workspace operations",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Workspace Operation Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {
+                        "command": sys.executable,
+                        "args": ["-c", "print('operation-ok')"],
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            operations = await list_workspace_operations_for_run(session, run["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert len(operations) == 2
+    assert {operation.status for operation in operations} == {"succeeded"}
+    assert all(operation.execution_workspace_id for operation in operations)
+    assert operations[0].metadata_json["preflight"] is True
+    assert operations[1].metadata_json["adapterExecution"] is True
+    assert operations[1].stdout_excerpt == "operation-ok\r\n" or operations[
+        1
+    ].stdout_excerpt == "operation-ok\n"
