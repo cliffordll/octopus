@@ -219,6 +219,62 @@ async def test_claude_local_executes_stream_json_and_normalizes_result(
     assert any(stream == "stdout" for stream, _ in logs)
 
 
+async def test_claude_local_mounts_desired_skills_with_add_dir(tmp_path) -> None:
+    skills_root = tmp_path / "skills"
+    review_skill = skills_root / "review"
+    review_skill.mkdir(parents=True)
+    review_skill.joinpath("SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    capture_path = tmp_path / "claude-skills-capture.json"
+    fake_claude = tmp_path / "fake_claude.py"
+    fake_claude.write_text(
+        "\n".join(
+            [
+                "import json, os, pathlib, sys",
+                "argv = sys.argv[1:]",
+                "add_dir = argv[argv.index('--add-dir') + 1]",
+                "skill_file = pathlib.Path(add_dir) / '.claude' / 'skills' / 'review' / 'SKILL.md'",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'argv': argv, 'skillText': skill_file.read_text(encoding='utf-8')}, fh)",
+                "print(json.dumps({'type':'result','subtype':'success','session_id':'claude-session','result':'done','usage':{}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = ClaudeLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-claude-skills",
+            agent_id="agent-claude",
+            org_id="org-claude",
+            agent_name="Claude Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_claude)],
+                "skillsRootPath": str(skills_root),
+                "_octopus": {"desiredSkills": ["review"]},
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    assert "--add-dir" in capture["argv"]
+    assert capture["skillText"] == "# Review\n\nReview code changes."
+    assert result.result_json is not None
+    assert result.result_json["loadedSkills"] == [
+        {
+            "key": "review",
+            "runtimeName": "review",
+            "name": "review",
+            "description": "Review code changes.",
+        }
+    ]
+
+
 async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> None:
     capture_path = tmp_path / "opencode-capture.json"
     fake_opencode = tmp_path / "fake_opencode.py"
@@ -279,3 +335,66 @@ async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> 
     assert result.result_json["costUsd"] == 0.003
     assert result.result_json["provider"] == "openai"
     assert any(stream == "stdout" for stream, _ in logs)
+
+
+async def test_opencode_local_injects_desired_skills_into_managed_home(
+    tmp_path,
+) -> None:
+    skills_root = tmp_path / "skills"
+    review_skill = skills_root / "review"
+    review_skill.mkdir(parents=True)
+    review_skill.joinpath("SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    capture_path = tmp_path / "opencode-skills-capture.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os, pathlib, sys",
+                "skill_file = pathlib.Path(os.environ['HOME']) / '.claude' / 'skills' / 'review' / 'SKILL.md'",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'home': os.environ['HOME'], 'skillText': skill_file.read_text(encoding='utf-8')}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'opencode-session'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-skills",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "skillsRootPath": str(skills_root),
+                "_octopus": {"desiredSkills": ["review"]},
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    normalized_home = capture["home"].replace("\\", "/")
+    assert normalized_home.endswith(
+        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+    )
+    assert capture["skillText"] == "# Review\n\nReview code changes."
+    assert result.result_json is not None
+    assert result.result_json["loadedSkills"] == [
+        {
+            "key": "review",
+            "runtimeName": "review",
+            "name": "review",
+            "description": "Review code changes.",
+        }
+    ]
+
+
+async def _noop_log(stream: str, chunk: str) -> None:
+    return None

@@ -17,6 +17,7 @@ from packages.database.queries.agent_state import (
     get_runtime_state,
     update_runtime_state,
 )
+from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.heartbeat import (
     append_run_event,
     claim_queued_run,
@@ -638,6 +639,7 @@ class HeartbeatService:
             runtime_config["_octopus"] = {
                 **runtime_context,
                 "sessionIdBefore": running.session_id_before,
+                "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
             }
             workspace_env = None
             workspace_payload = None

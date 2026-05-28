@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shutil
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
+from ..local_skills import desired_skills_from_config, materialize_runtime_skills
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     build_args,
@@ -36,74 +40,90 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    skills_root = Path(tempfile.mkdtemp(prefix="octopus-claude-skills-"))
+    loaded_skills = materialize_runtime_skills(
+        runtime_type="claude_local",
+        config=context.config,
+        desired_skills=desired_skills_from_config(context.config),
+        skills_home=skills_root / ".claude" / "skills",
+        location_label="temporary Claude skills home",
+    )
+    args.extend(["--add-dir", str(skills_root)])
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
-    process = await asyncio.create_subprocess_exec(
-        command,
-        *args,
-        cwd=cwd,
-        env=env,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
     try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
+        process = await asyncio.create_subprocess_exec(
+            command,
+            *args,
+            cwd=cwd,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {communication, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
+        pid = getattr(process, "pid", None)
+        if context.on_process_started is not None and isinstance(pid, int):
+            await context.on_process_started(pid, datetime.now(UTC))
+        communication = asyncio.create_task(process.communicate(prompt.encode()))
+        try:
+            cancelled = (
+                asyncio.create_task(context.cancel_event.wait())
+                if context.cancel_event is not None
+                else None
             )
-            if cancelled in done:
-                process.kill()
-                stdout, stderr = await communication
-                await process.wait()
-                return _result(
-                    process.returncode,
-                    stdout,
-                    stderr,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
+            if cancelled is not None:
+                done, _ = await asyncio.wait(
+                    {communication, cancelled},
+                    timeout=timeout_sec if timeout_sec > 0 else None,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-            cancelled.cancel()
-            if communication not in done:
-                raise TimeoutError
-            stdout, stderr = communication.result()
-        elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
-        process.kill()
-        stdout, stderr = await process.communicate()
-        await process.wait()
-        return _result(
-            process.returncode,
-            stdout,
-            stderr,
-            timed_out=True,
-            error_message=f"Timed out after {timeout_sec:g}s",
-        )
-    except asyncio.CancelledError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
-        process.kill()
-        await process.communicate()
-        await process.wait()
-        raise
+                if cancelled in done:
+                    process.kill()
+                    stdout, stderr = await communication
+                    await process.wait()
+                    return _result(
+                        process.returncode,
+                        stdout,
+                        stderr,
+                        signal="SIGTERM",
+                        error_message="Run cancelled",
+                        loaded_skills=loaded_skills,
+                    )
+                cancelled.cancel()
+                if communication not in done:
+                    raise TimeoutError
+                stdout, stderr = communication.result()
+            elif timeout_sec > 0:
+                stdout, stderr = await asyncio.wait_for(
+                    communication, timeout=timeout_sec
+                )
+            else:
+                stdout, stderr = await communication
+        except TimeoutError:
+            communication.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await communication
+            process.kill()
+            stdout, stderr = await process.communicate()
+            await process.wait()
+            return _result(
+                process.returncode,
+                stdout,
+                stderr,
+                timed_out=True,
+                error_message=f"Timed out after {timeout_sec:g}s",
+                loaded_skills=loaded_skills,
+            )
+        except asyncio.CancelledError:
+            communication.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await communication
+                process.kill()
+                await process.communicate()
+                await process.wait()
+            raise
+    finally:
+        shutil.rmtree(skills_root, ignore_errors=True)
 
     stdout_text = stdout.decode(errors="replace")
     stderr_text = stderr.decode(errors="replace")
@@ -124,7 +144,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         error_message=error,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
-        result_json=_result_json(stdout_text, stderr_text, parsed),
+        result_json=_result_json(stdout_text, stderr_text, parsed, loaded_skills),
     )
 
 
@@ -136,6 +156,7 @@ def _result(
     signal: str | None = None,
     timed_out: bool = False,
     error_message: str | None = None,
+    loaded_skills: list[dict[str, str | None]] | None = None,
 ) -> RuntimeExecutionResult:
     stdout_text = stdout.decode(errors="replace")
     stderr_text = stderr.decode(errors="replace")
@@ -147,17 +168,23 @@ def _result(
         error_message=error_message,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
-        result_json=_result_json(stdout_text, stderr_text, parsed),
+        result_json=_result_json(stdout_text, stderr_text, parsed, loaded_skills or []),
     )
 
 
-def _result_json(stdout_text: str, stderr_text: str, parsed: dict) -> dict:
+def _result_json(
+    stdout_text: str,
+    stderr_text: str,
+    parsed: dict,
+    loaded_skills: list[dict[str, str | None]],
+) -> dict:
     return {
         "stdout": stdout_text,
         "stderr": stderr_text,
         "summary": parsed["summary"],
         "model": parsed["model"],
         "costUsd": parsed["costUsd"],
+        "loadedSkills": loaded_skills,
         "loginRequired": login_required(stdout_text, stderr_text, parsed["resultJson"]),
         "maxTurnsReached": max_turns(parsed["resultJson"]),
         "result": parsed["resultJson"],
