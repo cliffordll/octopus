@@ -112,67 +112,59 @@ export function ProjectPage() {
             {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
           </span>
           <div className="project-detail-title">
-            <Link className="back-link" to={`/orgs/${orgId}/projects`}>Back to Projects</Link>
+            <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回项目列表</Link>
             <div className="project-heading-row">
               <h1>{project.data?.name ?? "载入中..."}</h1>
             </div>
             {project.data && (
               <div className="project-header-meta">
-                <Badge>{project.data.status}</Badge>
                 <Badge>{project.data.urlKey}</Badge>
-                <span>{project.data.leadAgentId ?? "No lead"}</span>
               </div>
             )}
             {project.data?.description && <p className="muted">{project.data.description}</p>}
           </div>
         </div>
-        {project.data && <Link className="button secondary" to={`/orgs/${orgId}/chats`}>Chat</Link>}
+        {project.data && <Link className="button secondary" to={`/orgs/${orgId}/chats`}>聊天</Link>}
       </header>
       {project.data && (
         <>
           {project.data.pauseReason === "budget" && (
             <div className="project-budget-stop">
               <span />
-              Paused by budget hard stop
+              因预算硬限制暂停
             </div>
           )}
-          <div className="project-summary-grid">
-            <div className="summary-metric"><span>Status</span><strong>{project.data.status}</strong></div>
-            <div className="summary-metric"><span>Lead</span><strong>{project.data.leadAgentId ?? "None"}</strong></div>
-            <div className="summary-metric"><span>Target</span><strong>{project.data.targetDate ?? "None"}</strong></div>
-            <div className="summary-metric"><span>Updated</span><strong>{project.data.updatedAt || "-"}</strong></div>
-          </div>
-          <nav aria-label="Project detail navigation" className="detail-tabs">
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>Configuration</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>Resources</NavLink>
-            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>Issues</NavLink>
+          <nav aria-label="项目详情导航" className="detail-tabs">
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
           </nav>
           {activeTab === "configuration" && <form className="panel project-properties-card project-tab-panel" onSubmit={save}>
             <div className="panel-heading">
               <div>
-                <h2>Configuration</h2>
-                <p className="muted">Configure project properties inline, matching the upstream ProjectProperties layout.</p>
+                <h2>配置</h2>
+                <p className="muted">配置项目属性、负责人、目标日期和关联目标。</p>
               </div>
             </div>
             <div className="project-property-list">
               <label className="project-property-row">
-                <span>Name</span>
+                <span>项目名称</span>
                 <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
               </label>
               <label className="project-property-row project-property-row-start">
-                <span>Description</span>
+                <span>描述</span>
                 <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
               </label>
               <label className="project-property-row">
-                <span>Status</span>
+                <span>状态</span>
                 <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
                   {STATUSES.map((item) => <option key={item}>{item}</option>)}
                 </select>
               </label>
               <label className="project-property-row">
-                <span>Lead</span>
+                <span>负责人</span>
                 <select value={leadAgentId} onChange={(event) => setLeadAgentId(event.target.value)}>
-                  <option value="">None</option>
+                  <option value="">未设置</option>
                   {agentList.map((agent) => (
                     <option key={agent.id} value={agent.id}>
                       {agent.name}
@@ -181,49 +173,49 @@ export function ProjectPage() {
                 </select>
               </label>
               <label className="project-property-row">
-                <span>Target Date</span>
+                <span>目标日期</span>
                 <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
               </label>
               <label className="project-property-row">
-                <span>Goal IDs</span>
+                <span>目标 ID</span>
                 <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
               </label>
               <div className="project-property-row">
-                <span>URL Key</span>
+                <span>URL 标识</span>
                 <strong>{project.data.urlKey}</strong>
               </div>
               <div className="project-property-row">
-                <span>Lead</span>
-                <strong>{project.data.leadAgentId ?? "None"}</strong>
+                <span>负责人</span>
+                <strong>{project.data.leadAgentId ?? "未设置"}</strong>
               </div>
               <div className="project-property-row">
-                <span>Goals</span>
+                <span>目标</span>
                 <div className="project-goal-chips">
                   {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
                   {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
-                  {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">No linked goals</span>}
+                  {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">暂无关联目标</span>}
                 </div>
               </div>
               <div className="project-property-row">
-                <span>Created</span>
+                <span>创建时间</span>
                 <strong>{project.data.createdAt || "-"}</strong>
               </div>
               <div className="project-property-row">
-                <span>Updated</span>
+                <span>更新时间</span>
                 <strong>{project.data.updatedAt || "-"}</strong>
               </div>
             </div>
             {update.error && <ErrorNotice error={update.error} />}
             <div className="project-property-actions">
-              <button type="submit">Save Project</button>
+              <button type="submit">保存项目</button>
             </div>
           </form>}
           {activeTab === "resources" && <section className="panel project-resources project-tab-panel-wide">
             <div className="panel-heading">
               <div>
-                <p className="eyebrow">Project Context</p>
-                <h2>Resources</h2>
-                <p className="muted">Attach the resources agents need for this project while keeping the organization catalog centralized.</p>
+                <p className="eyebrow">项目上下文</p>
+                <h2>资源</h2>
+                <p className="muted">为项目关联智能体需要使用的资源，资源目录仍由组织统一维护。</p>
               </div>
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
@@ -249,25 +241,25 @@ export function ProjectPage() {
                     onClick={() => removeResource.mutate(attachment.id)}
                     type="button"
                   >
-                    Remove
+                    移除
                   </button>
                 </article>
               ))}
-              {resources.isSuccess && resources.data.length === 0 && <p className="muted">No resources attached.</p>}
+              {resources.isSuccess && resources.data.length === 0 && <p className="muted">暂无关联资源。</p>}
             </div>
             <form className="form resource-form" onSubmit={attach}>
               <label>
-                Resource ID
+                资源 ID
                 <input value={resourceId} onChange={(event) => setResourceId(event.target.value)} required />
               </label>
               <label>
-                Role
+                角色
                 <select value={role} onChange={(event) => setRole(event.target.value as ProjectResourceRole)}>
                   {ROLES.map((item) => <option key={item}>{item}</option>)}
                 </select>
               </label>
               <label>
-                Sort Order
+                排序
                 <input
                   min="0"
                   type="number"
@@ -276,19 +268,19 @@ export function ProjectPage() {
                 />
               </label>
               {addResource.error && <ErrorNotice error={addResource.error} />}
-              <button type="submit">Add Resource</button>
+              <button type="submit">添加资源</button>
             </form>
           </section>}
           {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
             <div className="panel-heading">
               <div>
-                <h2>Issues</h2>
-                <p className="muted">Linked project issues grouped by status.</p>
+                <h2>任务</h2>
+                <p className="muted">按状态展示当前项目关联的任务。</p>
               </div>
             </div>
             {issues.error && <ErrorNotice error={issues.error} />}
             {agents.error && <ErrorNotice error={agents.error} />}
-            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">No linked issues.</p>}
+            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
             <IssueStatusBoard
               agents={agentList}
               issues={projectIssues}
