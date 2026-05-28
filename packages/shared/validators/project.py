@@ -34,7 +34,7 @@ _PROJECT_FIELDS = {
     "resourceAttachments",
     "newResources",
     "archivedAt",
-    "workspace",  # Rudder ignores this legacy create input.
+    "workspace",  # Upstream ignores this legacy create input.
 }
 _RESOURCE_ATTACHMENT_FIELDS = {"resourceId", "role", "note", "sortOrder"}
 _INLINE_RESOURCE_FIELDS = {

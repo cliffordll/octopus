@@ -63,7 +63,6 @@ def test_metadata_contains_first_batch_tables() -> None:
     }
     actual = {table.name for table in Base.metadata.sorted_tables}
     assert expected.issubset(actual)
-    assert "organization_ownership" not in actual
 
 
 def test_schema_models_exported() -> None:

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Align the Python CLI with upstream Rudder command concepts wherever this repository already exposes matching server APIs.
+**Goal:** Align the Python CLI with upstream command concepts wherever this repository already exposes matching server APIs.
 
 **Architecture:** Preserve the existing argparse command modules and `ApiClient`; add only parser aliases and thin route handlers backed by existing endpoints. Keep commands without server support out of scope and document local-only extensions separately.
 

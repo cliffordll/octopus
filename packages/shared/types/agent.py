@@ -20,6 +20,7 @@ class Agent(TypedDict):
     status: AgentStatus
     reportsTo: str | None
     capabilities: str | None
+    desiredSkills: list[str]
     agentRuntimeType: AgentRuntimeType
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
@@ -95,6 +96,8 @@ class AgentConfiguration(TypedDict):
     title: str | None
     status: AgentStatus
     reportsTo: str | None
+    capabilities: str | None
+    desiredSkills: list[str]
     agentRuntimeType: AgentRuntimeType
     agentRuntimeConfig: dict[str, Any]
     runtimeConfig: dict[str, Any]
@@ -155,3 +158,59 @@ class ResetAgentSessionPayload(TypedDict, total=False):
 
 class ResetAgentSessionResult(AgentRuntimeState):
     clearedTaskSessions: int
+
+
+class AgentRuntimeModel(TypedDict):
+    id: str
+    label: str
+
+
+class AgentRuntimeEnvironmentCheck(TypedDict, total=False):
+    id: str
+    label: str
+    status: str
+    message: str
+    hint: str | None
+
+
+class AgentRuntimeEnvironmentTestResult(TypedDict):
+    agentRuntimeType: str
+    status: str
+    checks: list[AgentRuntimeEnvironmentCheck]
+
+
+class AgentSkillSnapshot(TypedDict):
+    agentRuntimeType: str
+    supported: bool
+    mode: str
+    desiredSkills: list[str]
+    entries: list[dict[str, Any]]
+    warnings: list[str]
+
+
+class AgentSkillAnalytics(TypedDict):
+    agentId: str
+    orgId: str
+    windowDays: int
+    startDate: str
+    endDate: str
+    totalCount: int
+    totalRunsWithSkills: int
+    evidenceCounts: dict[str, int]
+    skills: list[dict[str, Any]]
+    days: list[dict[str, Any]]
+
+
+class ProviderQuotaResult(TypedDict, total=False):
+    provider: str
+    source: str | None
+    ok: bool
+    error: str
+    windows: list[dict[str, Any]]
+
+
+class RuntimeAdapterMetadata(TypedDict):
+    type: str
+    capabilities: dict[str, bool]
+    supportsLocalAgentJwt: bool
+    agentConfigurationDoc: str | None

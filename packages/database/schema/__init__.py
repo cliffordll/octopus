@@ -3,6 +3,7 @@ from __future__ import annotations
 from ._base import Base, new_uuid
 from .activity_log import ActivityLog
 from .agents import Agent
+from .agent_skills import AgentEnabledSkill
 from .agent_state import (
     AgentConfigRevision,
     AgentRuntimeState,
@@ -25,6 +26,7 @@ __all__ = [
     "new_uuid",
     "ActivityLog",
     "Agent",
+    "AgentEnabledSkill",
     "AgentConfigRevision",
     "AgentRuntimeState",
     "AgentTaskSession",

@@ -179,29 +179,30 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：周期/队列触发、run claim 与幂等处理、取消/失败恢复及增强运行记录查询。
 - 验收：重复触发、竞争领取、中断恢复和取消流程符合上游行为，且不改变 Step 11 已建立的 run contract。
 
-### Step 14: 其他 Runtime Adapter 扩展
+### Step 14: Runtime Adapter 扩展
 
 目录：`docs/step-14-runtime/`
 
-- 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，扩展其余经确认需要支持的 runtime 种类和兼容能力。
-- 交付：除 `codex_local` 以外的新增 adapter 实现、session/environment/usage 深化及不同 runtime 的错误归一化。
-- 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务。
+- 目标：在 Step 11 已提供 `process` 与 `codex_local` 执行路径的基础上，补齐上游当前 server 已纳入的 runtime adapter、环境检查、模型发现、skills 管理、managed instructions 与 runtime quota window 能力边界。
+- 交付：`http`、`claude_local`、`opencode_local` adapter 的上游兼容执行行为；runtime environment test API；Codex/OpenCode 模型发现；Codex/Claude/OpenCode skills snapshot、sync、enable、private skill 和 analytics 路由；新建本地 runtime agent 的 managed instructions materialization；adapter quota window probe 能力；session/usage/错误的基础归一化。
+- 执行顺序：先完成 14R1 服务端契约闭环，包括 skills enable/private/analytics、runtime metadata/config doc 和 quota window probe API；再完成 14R2 本地 CLI adapter 深化，包括 Claude/OpenCode 独立 adapter、Codex managed home、真实 environment probe、model discovery、skills entries 和 managed instructions materialization。
+- 验收：新增 runtime 复用既有 run contract 与业务 API，adapter 差异不泄漏到控制面服务；模型发现、skills 管理、instructions materialization、环境探针、quota window probe 均可验证；`gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在本阶段返回明确未纳入或未实现结果。
 
 ### Step 15: Workspace 与执行产物
 
 目录：`docs/step-15-workspace/`
 
-- 目标：在 Step 11 最小执行上下文基础上，实现完整 workspace 建立、复用、清理和产物记录能力。
-- 交付：workspace 生命周期与产物引用。
-- 验收：执行上下文和产物可追踪，失败处理不留下不一致业务状态。
+- 目标：在 Step 11 最小执行上下文基础上，实现完整 workspace 建立、复用、清理、runtime service 管理和产物记录能力。
+- 交付：execution workspace 生命周期、workspace runtime service 建立/复用/释放、运行产物引用和失败清理。
+- 验收：执行上下文、runtime service 和产物可追踪；失败或取消后不留下不一致业务状态。
 
 ### Step 16: Cost、Budget 与 Activity
 
 目录：`docs/step-16-governance/`
 
-- 目标：在 Step 11 运行基线产生的必要记录基础上，实现完整成本、预算限制及关键活动治理闭环。
-- 交付：cost 记录、budget 校验、activity 扩展和查询。
-- 验收：run 消耗可归集，预算限制与 activity 副作用可测试。
+- 目标：在 Step 11/13/14 运行基线产生的必要记录基础上，实现完整成本、预算限制、quota window 及关键活动治理闭环。
+- 交付：cost 记录、budget 校验、Step 14 adapter quota window 输出的归集/查询与治理联动、activity 扩展和查询。
+- 验收：run 消耗可归集，预算和 quota 限制可解释，activity 副作用可测试。
 
 ### Step 17: Chat / Messenger 扩展
 
@@ -215,17 +216,17 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-18-storage/`
 
-- 目标：实现 attachment 元数据、对象存储边界与业务引用。
-- 交付：storage abstraction、attachment API 和关联验证。
-- 验收：上传/读取/关联行为可测试，存储实现不改变外部契约。
+- 目标：实现 attachment 元数据、对象存储边界、业务引用，以及 runtime/chat/workspace 产物需要的存储引用能力。
+- 交付：storage abstraction、attachment API、关联验证和产物/消息附件引用。
+- 验收：上传、读取、关联和产物引用行为可测试，存储实现不改变外部契约。
 
 ### Step 19: Auth / Actor / Access
 
 目录：`docs/step-19-access/`
 
-- 目标：按上游证据接入真实认证、actor 和授权行为，替代开发 actor 数据源。
-- 交付：身份上下文、访问检查和迁移策略。
-- 验收：真实 actor 与开发 actor 复用同一结构边界，业务 API 无需重构。
+- 目标：按上游证据接入真实认证、actor、授权行为和运行时 secret/env 解析边界，替代开发 actor 数据源。
+- 交付：身份上下文、访问检查、secret/env binding 解析和迁移策略。
+- 验收：真实 actor 与开发 actor 复用同一结构边界；runtime env/secret 不泄漏、不改变业务 API。
 
 ### Step 20: Recovery / Observability / Compatibility
 
