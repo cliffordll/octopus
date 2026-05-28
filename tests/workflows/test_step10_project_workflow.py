@@ -144,7 +144,11 @@ async def test_adding_existing_resource_updates_attachment_in_place(
             {
                 "name": "Attachment Target",
                 "newResources": [
-                    {"name": "Repo", "kind": "directory", "locator": "D:/coding/rudder"}
+                    {
+                        "name": "Repo",
+                        "kind": "directory",
+                        "locator": "D:/coding/upstream-reference",
+                    }
                 ],
             },
             actor_type="board",

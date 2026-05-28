@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import re
 from collections.abc import Sequence
@@ -15,6 +15,12 @@ from packages.database.queries.agents import (
     get_agent_by_id,
     list_org_agents,
     update_agent,
+)
+from packages.database.queries.agent_skills import (
+    add_enabled_skill_keys,
+    list_enabled_skill_keys,
+    list_enabled_skill_keys_by_agent_ids,
+    replace_enabled_skill_keys,
 )
 from packages.database.queries.agent_state import (
     create_config_revision,
@@ -50,12 +56,15 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentDetail,
     AgentRuntimeState,
+    AgentSkillAnalytics,
+    AgentSkillSnapshot,
     AgentTaskSession,
     CreateAgentPayload,
     ResetAgentSessionPayload,
     ResetAgentSessionResult,
     UpdateAgentPayload,
 )
+from packages.runtimes import get_runtime_adapter
 
 from .agent_names import pick_unique_agent_name
 
@@ -137,24 +146,48 @@ def _contains_redacted(value: Any) -> bool:
     return False
 
 
+def _apply_desired_skills_to_entries(
+    snapshot: dict[str, Any], desired_skills: list[str]
+) -> None:
+    desired = set(desired_skills)
+    entries = snapshot.get("entries")
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        selection_key = entry.get("selectionKey")
+        key = entry.get("key")
+        is_desired = selection_key in desired or key in desired
+        entry["desired"] = is_desired
+        if is_desired and entry.get("state") == "available":
+            entry["state"] = "configured"
+
+
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def list_for_org(self, org_id: str) -> list[Agent]:
         rows = await list_org_agents(self._session, org_id)
-        return [self._to_agent(row) for row in rows if row.status != "terminated"]
+        visible = [row for row in rows if row.status != "terminated"]
+        skills_by_agent = await list_enabled_skill_keys_by_agent_ids(
+            self._session, [row.id for row in visible]
+        )
+        return [self._to_agent(row, skills_by_agent.get(row.id, [])) for row in visible]
 
     async def get(self, agent_id: str) -> Agent | None:
         row = await get_agent_by_id(self._session, agent_id)
-        return self._to_agent(row) if row is not None else None
+        if row is None:
+            return None
+        return self._to_agent(row, await list_enabled_skill_keys(self._session, row.id))
 
     async def get_detail(self, agent_id: str) -> AgentDetail | None:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:
             return None
         detail: AgentDetail = {
-            **self._to_agent(row),
+            **self._to_agent(row, await list_enabled_skill_keys(self._session, row.id)),
             "chainOfCommand": await self._chain_of_command(row),
             "access": self._access_state(row),
         }
@@ -207,6 +240,14 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        desired_skills = list(payload.get("desiredSkills", []))
+        if desired_skills:
+            desired_skills = await replace_enabled_skill_keys(
+                self._session,
+                org_id=org_id,
+                agent_id=row.id,
+                skill_keys=desired_skills,
+            )
         await insert_activity_log(
             self._session,
             org_id=org_id,
@@ -217,7 +258,7 @@ class AgentService:
             entity_id=row.id,
             details={"name": row.name, "role": row.role},
         )
-        return self._to_agent(row)
+        return self._to_agent(row, desired_skills)
 
     async def update_agent(
         self,
@@ -262,6 +303,9 @@ class AgentService:
                         f"Agent shortname '{next_key}' is already in use in this organization"
                     )
         patch = dict(payload)
+        desired_skills: list[str] | None = None
+        if "desiredSkills" in patch:
+            desired_skills = cast(list[str], patch.pop("desiredSkills"))
         replace_runtime_config = patch.pop("replaceAgentRuntimeConfig", False)
         if "agentRuntimeConfig" in patch and not replace_runtime_config:
             patch["agentRuntimeConfig"] = {
@@ -290,6 +334,13 @@ class AgentService:
         row = await update_agent(self._session, agent_id, values)
         if row is None:
             return None
+        if desired_skills is not None:
+            desired_skills = await replace_enabled_skill_keys(
+                self._session,
+                org_id=row.org_id,
+                agent_id=row.id,
+                skill_keys=desired_skills,
+            )
         after_config = self._config_snapshot(row)
         changed_keys = [
             key
@@ -322,7 +373,166 @@ class AgentService:
                 entity_id=row.id,
                 details=patch,
             )
-        return self._to_agent(row)
+        return self._to_agent(
+            row,
+            desired_skills
+            if desired_skills is not None
+            else await list_enabled_skill_keys(self._session, row.id),
+        )
+
+    async def get_skill_snapshot(self, agent_id: str) -> AgentSkillSnapshot | None:
+        row = await get_agent_by_id(self._session, agent_id)
+        if row is None:
+            return None
+        desired_skills = await list_enabled_skill_keys(self._session, row.id)
+        snapshot = await get_runtime_adapter(row.agent_runtime_type).list_skills(
+            row.agent_runtime_config
+        )
+        snapshot["desiredSkills"] = desired_skills
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
+        return cast(AgentSkillSnapshot, snapshot)
+
+    async def sync_skills(
+        self,
+        agent_id: str,
+        desired_skills: list[str],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> AgentSkillSnapshot | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        desired_skills = await replace_enabled_skill_keys(
+            self._session,
+            org_id=existing.org_id,
+            agent_id=existing.id,
+            skill_keys=desired_skills,
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=existing.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.skills_synced",
+            entity_type="agent",
+            entity_id=existing.id,
+            details={"desiredSkills": desired_skills},
+        )
+        snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
+            existing.agent_runtime_config, desired_skills
+        )
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
+        return cast(AgentSkillSnapshot, snapshot)
+
+    async def enable_skills(
+        self,
+        agent_id: str,
+        skills: list[str],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> AgentSkillSnapshot | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        desired_skills = await add_enabled_skill_keys(
+            self._session,
+            org_id=existing.org_id,
+            agent_id=existing.id,
+            skill_keys=skills,
+        )
+        snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
+            existing.agent_runtime_config, desired_skills
+        )
+        _apply_desired_skills_to_entries(snapshot, desired_skills)
+        await insert_activity_log(
+            self._session,
+            org_id=existing.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.skills_enabled",
+            entity_type="agent",
+            entity_id=existing.id,
+            details={
+                "requestedSkills": skills,
+                "desiredSkills": snapshot["desiredSkills"],
+                "mode": snapshot["mode"],
+                "supported": snapshot["supported"],
+                "entryCount": len(snapshot["entries"]),
+                "warningCount": len(snapshot["warnings"]),
+            },
+        )
+        return cast(AgentSkillSnapshot, snapshot)
+
+    async def create_private_skill(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        slug = _derive_url_key(payload.get("slug") or payload["name"])
+        entry = {
+            "key": slug,
+            "selectionKey": f"private:{slug}",
+            "runtimeName": payload["name"],
+            "description": payload.get("description"),
+            "desired": False,
+            "configurable": True,
+            "alwaysEnabled": False,
+            "managed": True,
+            "state": "available",
+            "sourceClass": "agent_home",
+            "origin": "organization_managed",
+            "originLabel": "Agent private skill",
+            "locationLabel": "AGENT_HOME/skills",
+            "readOnly": False,
+            "sourcePath": None,
+            "targetPath": None,
+            "workspaceEditPath": None,
+            "detail": payload.get("markdown"),
+        }
+        await insert_activity_log(
+            self._session,
+            org_id=existing.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.private_skill_created",
+            entity_type="agent",
+            entity_id=existing.id,
+            details={
+                "slug": entry["key"],
+                "selectionKey": entry["selectionKey"],
+                "sourcePath": entry["sourcePath"],
+            },
+        )
+        return entry
+
+    async def get_skill_analytics(
+        self, agent_id: str, *, window_days: int = 30
+    ) -> AgentSkillAnalytics | None:
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        end_date = datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=max(window_days, 1) - 1)
+        return {
+            "agentId": existing.id,
+            "orgId": existing.org_id,
+            "windowDays": window_days,
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "totalCount": 0,
+            "totalRunsWithSkills": 0,
+            "evidenceCounts": {"used": 0, "requested": 0, "loaded": 0},
+            "skills": [],
+            "days": [],
+        }
 
     async def get_configuration(self, agent_id: str) -> AgentConfiguration | None:
         row = await get_agent_by_id(self._session, agent_id)
@@ -336,6 +546,8 @@ class AgentService:
             "title": row.title,
             "status": cast(AgentStatus, row.status),
             "reportsTo": row.reports_to,
+            "capabilities": row.capabilities,
+            "desiredSkills": await list_enabled_skill_keys(self._session, row.id),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": cast(
                 dict[str, Any], _sanitize_value(row.agent_runtime_config)
@@ -484,7 +696,11 @@ class AgentService:
         )
         if row is not None:
             await self._record_lifecycle(row, "agent.paused", actor_type, actor_id)
-        return self._to_agent(row) if row is not None else None
+        return (
+            self._to_agent(row, await list_enabled_skill_keys(self._session, row.id))
+            if row is not None
+            else None
+        )
 
     async def resume_agent(
         self, agent_id: str, *, actor_type: str, actor_id: str
@@ -503,7 +719,11 @@ class AgentService:
         )
         if row is not None:
             await self._record_lifecycle(row, "agent.resumed", actor_type, actor_id)
-        return self._to_agent(row) if row is not None else None
+        return (
+            self._to_agent(row, await list_enabled_skill_keys(self._session, row.id))
+            if row is not None
+            else None
+        )
 
     async def terminate_agent(
         self, agent_id: str, *, actor_type: str, actor_id: str
@@ -518,7 +738,11 @@ class AgentService:
         )
         if row is not None:
             await self._record_lifecycle(row, "agent.terminated", actor_type, actor_id)
-        return self._to_agent(row) if row is not None else None
+        return (
+            self._to_agent(row, await list_enabled_skill_keys(self._session, row.id))
+            if row is not None
+            else None
+        )
 
     async def _record_lifecycle(
         self, row: AgentRow, action: str, actor_type: str, actor_id: str
@@ -589,7 +813,9 @@ class AgentService:
             "grants": [],
         }
 
-    def _to_agent(self, row: AgentRow) -> Agent:
+    def _to_agent(
+        self, row: AgentRow, desired_skills: list[str] | None = None
+    ) -> Agent:
         return {
             "id": row.id,
             "orgId": row.org_id,
@@ -601,6 +827,7 @@ class AgentService:
             "status": cast(AgentStatus, row.status),
             "reportsTo": row.reports_to,
             "capabilities": row.capabilities,
+            "desiredSkills": list(desired_skills or []),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": row.agent_runtime_config,
             "runtimeConfig": row.runtime_config,

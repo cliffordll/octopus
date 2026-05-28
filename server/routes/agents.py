@@ -22,11 +22,26 @@ from packages.shared.api_paths.agents import (
     AGENT_RESET_SESSION_PATH,
     AGENT_RESUME_PATH,
     AGENT_RUNTIME_STATE_PATH,
+    AGENT_SKILLS_ANALYTICS_PATH,
+    AGENT_SKILLS_ENABLE_PATH,
+    AGENT_SKILLS_PATH,
+    AGENT_SKILLS_PRIVATE_PATH,
+    AGENT_SKILLS_SYNC_PATH,
     AGENT_TASK_SESSIONS_PATH,
     AGENT_TERMINATE_PATH,
     ORG_AGENT_CONFIGURATIONS_PATH,
     ORG_AGENT_LIST_PATH,
     ORG_AGENT_NAME_SUGGESTION_PATH,
+    ORG_ADAPTER_METADATA_PATH,
+    ORG_ADAPTER_MODELS_PATH,
+    ORG_ADAPTER_QUOTA_WINDOWS_PATH,
+    ORG_ADAPTER_TEST_ENVIRONMENT_PATH,
+)
+from packages.runtimes import (
+    get_runtime_adapter,
+    get_runtime_metadata,
+    get_runtime_quota_windows,
+    list_runtime_models,
 )
 from packages.shared.api_paths.heartbeat import (
     AGENT_HEARTBEAT_INVOKE_PATH,
@@ -43,13 +58,19 @@ from packages.shared.types.agent import (
     AgentConfigRevision,
     AgentDetail,
     AgentRuntimeState,
+    AgentSkillAnalytics,
+    AgentSkillSnapshot,
     AgentTaskSession,
     ResetAgentSessionResult,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, HeartbeatRunEvent
 from packages.shared.validators.agent import (
+    validate_agent_private_skill,
+    validate_agent_skills_enable,
+    validate_agent_skills_sync,
     validate_create_agent,
     validate_reset_agent_session,
+    validate_test_agent_runtime_environment,
     validate_update_agent,
 )
 from packages.shared.validators.heartbeat import validate_wake_agent
@@ -268,6 +289,66 @@ async def list_agent_configurations_route(
     return await service.list_configurations_for_org(orgId)
 
 
+@router.get(ORG_ADAPTER_MODELS_PATH)
+async def list_adapter_models_route(
+    orgId: str,
+    type: str,
+    _: None = Depends(require_organization_access),
+) -> list[dict[str, str]]:
+    return await list_runtime_models(type)
+
+
+@router.get(ORG_ADAPTER_METADATA_PATH)
+async def get_adapter_metadata_route(
+    orgId: str,
+    type: str,
+    _: None = Depends(require_organization_access),
+) -> dict[str, Any]:
+    try:
+        return await get_runtime_metadata(type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+@router.get(ORG_ADAPTER_QUOTA_WINDOWS_PATH)
+async def get_adapter_quota_windows_route(
+    orgId: str,
+    type: str,
+    _: None = Depends(require_organization_access),
+) -> dict[str, Any]:
+    try:
+        return await get_runtime_quota_windows(type)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+@router.post(ORG_ADAPTER_TEST_ENVIRONMENT_PATH)
+async def test_adapter_environment_route(
+    orgId: str,
+    type: str,
+    body: dict[str, Any] = Body(default={}),
+    _: None = Depends(require_board_access),
+) -> dict[str, Any]:
+    try:
+        payload = validate_test_agent_runtime_environment(body)
+        result = await get_runtime_adapter(type).test_environment(
+            payload["agentRuntimeConfig"]
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return {
+        "agentRuntimeType": result.agent_runtime_type,
+        "status": result.status,
+        "checks": result.checks,
+    }
+
+
 @router.get(AGENT_CONFIG_REVISIONS_PATH)
 async def list_agent_config_revisions_route(
     id: str,
@@ -372,6 +453,126 @@ async def reset_agent_runtime_session_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return result
+
+
+@router.get(AGENT_SKILLS_PATH)
+async def get_agent_skills_route(
+    id: str,
+    request: Request,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentSkillSnapshot:
+    await _get_agent_or_404(id, request=request, service=service)
+    snapshot = await service.get_skill_snapshot(id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return snapshot
+
+
+@router.post(AGENT_SKILLS_SYNC_PATH)
+async def sync_agent_skills_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentSkillSnapshot:
+    await _get_agent_or_404(id, request=request, service=service)
+    try:
+        payload = validate_agent_skills_sync(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    actor = require_actor_identity(request)
+    snapshot = await service.sync_skills(
+        id,
+        payload["desiredSkills"],
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return snapshot
+
+
+@router.post(AGENT_SKILLS_ENABLE_PATH)
+async def enable_agent_skills_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(default={}),
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentSkillSnapshot:
+    await _get_agent_or_404(id, request=request, service=service)
+    try:
+        payload = validate_agent_skills_enable(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    actor = require_actor_identity(request)
+    snapshot = await service.enable_skills(
+        id,
+        payload["skills"],
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return snapshot
+
+
+@router.post(AGENT_SKILLS_PRIVATE_PATH, status_code=status.HTTP_201_CREATED)
+async def create_agent_private_skill_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> dict[str, Any]:
+    await _get_agent_or_404(id, request=request, service=service)
+    try:
+        payload = validate_agent_private_skill(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    actor = require_actor_identity(request)
+    entry = await service.create_private_skill(
+        id,
+        payload,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return entry
+
+
+@router.get(AGENT_SKILLS_ANALYTICS_PATH)
+async def get_agent_skills_analytics_route(
+    id: str,
+    request: Request,
+    windowDays: int = 30,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentSkillAnalytics:
+    await _get_agent_or_404(id, request=request, service=service)
+    analytics = await service.get_skill_analytics(id, window_days=windowDays)
+    if analytics is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return analytics
 
 
 async def _invoke_agent(
