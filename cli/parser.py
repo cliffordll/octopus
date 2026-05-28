@@ -3,7 +3,16 @@ from __future__ import annotations
 import argparse
 
 from .client import DEFAULT_API_BASE
-from .commands import agent, approval, chat, goal, heartbeat, issue, organization, project
+from .commands import (
+    agent,
+    approval,
+    chat,
+    goal,
+    heartbeat,
+    issue,
+    organization,
+    project,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
