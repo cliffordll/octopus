@@ -81,9 +81,10 @@ WORKSPACE_RUNTIME_SERVICE_STATUSES: tuple[WorkspaceRuntimeServiceStatus, ...] = 
 )
 
 WorkspaceRuntimeServiceLifecycle = Literal["shared", "ephemeral"]
-WORKSPACE_RUNTIME_SERVICE_LIFECYCLES: tuple[
-    WorkspaceRuntimeServiceLifecycle, ...
-] = ("shared", "ephemeral")
+WORKSPACE_RUNTIME_SERVICE_LIFECYCLES: tuple[WorkspaceRuntimeServiceLifecycle, ...] = (
+    "shared",
+    "ephemeral",
+)
 
 WorkspaceRuntimeServiceProvider = Literal["local_process", "adapter_managed"]
 WORKSPACE_RUNTIME_SERVICE_PROVIDERS: tuple[WorkspaceRuntimeServiceProvider, ...] = (

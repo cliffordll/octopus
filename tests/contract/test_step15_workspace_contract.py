@@ -13,9 +13,11 @@ from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import (
     Base,
+    HeartbeatRun,
     Issue,
     IssueWorkProduct,
     Organization,
+    WorkspaceOperation,
     WorkspaceRuntimeService,
 )
 from packages.database.queries.workspaces import list_workspace_operations_for_run
@@ -428,24 +430,27 @@ async def test_adapter_runtime_services_are_persisted_and_released(
     assert rows == [("svc-report-1",)]
     assert service is not None
     assert service.service_name == "preview"
-    assert service.execution_workspace_id == run["contextSnapshot"][
-        "executionWorkspaceId"
-    ]
+    assert (
+        service.execution_workspace_id == run["contextSnapshot"]["executionWorkspaceId"]
+    )
     assert service.status == "stopped"
     assert service.health_status == "unknown"
     assert (run["resultJson"] or {})["runtimeServices"][0]["id"] == "svc-report-1"
     assert detail is not None
     assert product_row is not None
     assert product_row.issue_id == detail["id"]
-    assert product_row.execution_workspace_id == run["contextSnapshot"][
-        "executionWorkspaceId"
-    ]
+    assert (
+        product_row.execution_workspace_id
+        == run["contextSnapshot"]["executionWorkspaceId"]
+    )
     assert product_row.created_by_run_id == run["id"]
     assert (run["resultJson"] or {})["workProducts"][0]["id"] == product_row.id
     assert detail["workProducts"][0]["id"] == product_row.id
 
 
-async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> None:
+async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> (
+    None
+):
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -514,6 +519,228 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
     assert all(operation.execution_workspace_id for operation in operations)
     assert operations[0].metadata_json["preflight"] is True
     assert operations[1].metadata_json["adapterExecution"] is True
-    assert operations[1].stdout_excerpt == "operation-ok\r\n" or operations[
-        1
-    ].stdout_excerpt == "operation-ok\n"
+    assert (
+        operations[1].stdout_excerpt == "operation-ok\r\n"
+        or operations[1].stdout_excerpt == "operation-ok\n"
+    )
+
+
+async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-cancel-cleanup",
+                name="Step 15 Cancel Cleanup",
+                issue_prefix="CNL",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Cancel Cleanup",
+                    "executionWorkspacePolicy": {"enabled": True},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/cancel-cleanup"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Cancel cleanup issue",
+            )
+            session.add(issue)
+            await session.flush()
+            workspace = await WorkspaceService(session).resolve_for_issue(issue)
+            assert workspace is not None
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Cancel Cleanup Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent["id"],
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="running",
+                context_snapshot={
+                    "issueId": issue.id,
+                    "executionWorkspaceId": workspace["id"],
+                    "workspace": {"rudderWorkspace": workspace},
+                },
+            )
+            session.add(run)
+            await session.flush()
+            service = WorkspaceRuntimeService(
+                id="cancel-cleanup-service",
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=workspace["projectWorkspaceId"],
+                execution_workspace_id=workspace["id"],
+                issue_id=issue.id,
+                scope_type="run",
+                scope_id=run.id,
+                service_name="preview",
+                status="running",
+                lifecycle="ephemeral",
+                provider="adapter_managed",
+                started_by_run_id=run.id,
+                health_status="healthy",
+            )
+            operation = WorkspaceOperation(
+                org_id=org.id,
+                execution_workspace_id=workspace["id"],
+                heartbeat_run_id=run.id,
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                status="running",
+                metadata_json={"adapterExecution": True},
+            )
+            session.add_all([service, operation])
+            await session.flush()
+
+            cancelled = await HeartbeatService(session).cancel_run(run.id)
+            await session.refresh(service)
+            await session.refresh(operation)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+    assert service.status == "stopped"
+    assert service.health_status == "unknown"
+    assert service.stopped_at is not None
+    assert operation.status == "failed"
+    assert operation.finished_at is not None
+    assert operation.stderr_excerpt == "run cancelled"
+    assert operation.metadata_json["interrupted"] is True
+    assert operation.metadata_json["reason"] == "cancelled"
+
+
+async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-recovery-cleanup",
+                name="Step 15 Recovery Cleanup",
+                issue_prefix="RCV",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Recovery Cleanup",
+                    "executionWorkspacePolicy": {"enabled": True},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/recovery-cleanup"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Recovery cleanup issue",
+            )
+            session.add(issue)
+            await session.flush()
+            workspace = await WorkspaceService(session).resolve_for_issue(issue)
+            assert workspace is not None
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Recovery Cleanup Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent["id"],
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="running",
+                context_snapshot={
+                    "issueId": issue.id,
+                    "executionWorkspaceId": workspace["id"],
+                    "workspace": {"rudderWorkspace": workspace},
+                },
+            )
+            session.add(run)
+            await session.flush()
+            service = WorkspaceRuntimeService(
+                id="recovery-cleanup-service",
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=workspace["projectWorkspaceId"],
+                execution_workspace_id=workspace["id"],
+                issue_id=issue.id,
+                scope_type="run",
+                scope_id=run.id,
+                service_name="preview",
+                status="running",
+                lifecycle="ephemeral",
+                provider="adapter_managed",
+                started_by_run_id=run.id,
+                health_status="healthy",
+            )
+            operation = WorkspaceOperation(
+                org_id=org.id,
+                execution_workspace_id=workspace["id"],
+                heartbeat_run_id=run.id,
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                status="running",
+                metadata_json={"adapterExecution": True},
+            )
+            session.add_all([service, operation])
+            await session.flush()
+
+            recovery = await HeartbeatService(session).recover_orphaned_runs()
+            await session.refresh(service)
+            await session.refresh(operation)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert recovery and recovery[0]["retryOfRunId"] == run.id
+    assert service.status == "stopped"
+    assert service.health_status == "unknown"
+    assert service.stopped_at is not None
+    assert operation.status == "failed"
+    assert operation.finished_at is not None
+    assert operation.stderr_excerpt == "Run interrupted before server recovery"
+    assert operation.metadata_json["interrupted"] is True
+    assert operation.metadata_json["reason"] == "process_lost"

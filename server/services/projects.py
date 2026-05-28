@@ -613,10 +613,9 @@ class ProjectService:
             {"id": goal.id, "title": goal.title} for goal in goal_rows
         ]
         workspaces = await self.list_workspaces(row.id)
-        primary_workspace = (
-            next((workspace for workspace in workspaces if workspace["isPrimary"]), None)
-            or (workspaces[0] if workspaces else None)
-        )
+        primary_workspace = next(
+            (workspace for workspace in workspaces if workspace["isPrimary"]), None
+        ) or (workspaces[0] if workspaces else None)
         return {
             "id": row.id,
             "orgId": row.org_id,

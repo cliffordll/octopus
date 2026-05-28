@@ -166,9 +166,7 @@ async def list_workspace_runtime_services_for_workspace(
 ) -> Sequence[WorkspaceRuntimeService]:
     result = await session.execute(
         select(WorkspaceRuntimeService)
-        .where(
-            WorkspaceRuntimeService.execution_workspace_id == execution_workspace_id
-        )
+        .where(WorkspaceRuntimeService.execution_workspace_id == execution_workspace_id)
         .order_by(
             desc(WorkspaceRuntimeService.updated_at),
             desc(WorkspaceRuntimeService.created_at),
@@ -211,13 +209,29 @@ async def list_workspace_operations_for_run(
     return result.scalars().all()
 
 
+async def list_running_workspace_operations_for_run(
+    session: AsyncSession, run_id: str
+) -> Sequence[WorkspaceOperation]:
+    result = await session.execute(
+        select(WorkspaceOperation)
+        .where(
+            WorkspaceOperation.heartbeat_run_id == run_id,
+            WorkspaceOperation.status == "running",
+        )
+        .order_by(WorkspaceOperation.started_at, WorkspaceOperation.created_at)
+    )
+    return result.scalars().all()
+
+
 async def list_workspace_operations_for_execution_workspace(
     session: AsyncSession, execution_workspace_id: str
 ) -> Sequence[WorkspaceOperation]:
     result = await session.execute(
         select(WorkspaceOperation)
         .where(WorkspaceOperation.execution_workspace_id == execution_workspace_id)
-        .order_by(desc(WorkspaceOperation.started_at), desc(WorkspaceOperation.created_at))
+        .order_by(
+            desc(WorkspaceOperation.started_at), desc(WorkspaceOperation.created_at)
+        )
     )
     return result.scalars().all()
 
