@@ -66,10 +66,11 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 18 | Attachment / Storage | `docs/step-18-storage/` |
 | 19 | Auth / Actor / Access | `docs/step-19-access/` |
 | 20 | Recovery / Observability / Compatibility | `docs/step-20-hardening/` |
+| 21 | Plugin Framework | `docs/step-21-plugins/` |
 
 主依赖链为：
 
-`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> governance -> chat-expansion -> storage -> access -> hardening`
+`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> governance -> chat-expansion -> storage -> access -> hardening -> plugins`
 
 ## 5. Step 计划
 
@@ -243,9 +244,20 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：恢复策略、Claude/OpenCode session resume 与 cwd mismatch 处理、HTTP/CLI live hello probe、日志/指标边界、完整 contract/workflow 回归。
 - 验收：主要 server 场景可恢复、可定位，并通过兼容测试集。
 
+### Step 21: Plugin Framework
+
+目录：`docs/step-21-plugins/`
+
+- 目标：按上游 server 的 plugin framework 实现 Python 兼容子系统，覆盖插件注册、生命周期、配置、状态、工具、webhook、job、UI bridge 和运行时 worker 边界。
+- 交付：plugin 数据模型与迁移、manifest/schema 校验、registry/lifecycle service、管理 API、plugin state/config/entities/logs/jobs/webhooks 持久化、tool dispatcher、worker RPC 边界、插件 UI 静态资源和 bridge API、内置/示例插件目录约定。
+- 执行顺序：先实现只读 catalog/manifest/registry 和管理 API；再实现生命周期、配置、状态、日志；随后接入 worker、tools、jobs、webhooks、UI bridge；最后补齐 SDK/脚手架兼容和 Linear 等一方插件。
+- 验收：插件管理 API 与上游路径和 payload 对齐；ready/disabled/error/upgrade_pending/uninstalled 状态流转可测试；插件 worker、tool、webhook、job 和 UI bridge 在本地单实例部署可验证；明确不承诺上游尚未完成的云端多实例插件分发能力。
+
 ## 6. 可选扩展
 
-organization resources、skills、plugins、automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。
+organization resources、automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。
+
+Plugins 已确认属于上游 server 的独立子系统，纳入 Step 21，不再作为可选扩展悬置。其范围以 `D:\coding\rudder\doc\plugins\PLUGIN_SPEC.md`、`server/src/routes/plugins.ts`、`server/src/bootstrap/plugin-host-runtime.ts`、`server/src/services/plugin-*`、`packages/db/src/schema/plugin_*.ts` 和 `packages/plugins/*` 为证据来源。
 
 ### Skills 后续拆分边界
 
