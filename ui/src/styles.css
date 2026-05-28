@@ -477,17 +477,6 @@ h1, h2, p {
   white-space: nowrap;
 }
 
-.context-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0 2px 18px;
-}
-
-.context-filters input, .context-filters select {
-  padding: 8px 9px;
-}
-
 .context-nav .new-chat-entry, .context-nav .new-context-entry {
   border: 1px solid #263346;
   color: #b5d5fa;
