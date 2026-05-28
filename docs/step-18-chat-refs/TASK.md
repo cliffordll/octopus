@@ -1,4 +1,4 @@
-# Step 17: Chat Attachments 与基础运行可见性
+# Step 18: Chat Attachments 与基础运行可见性
 
 状态：待开发
 
@@ -17,8 +17,8 @@
 
 ## 边界
 
-- 不实现完整上传、下载、对象存储 lifecycle；完整 Attachment / Storage 归 Step 21。
-- 不实现生产级日志、指标、恢复矩阵；基础 Observability 归 Step 18，完整 Hardening 归 Step 23。
+- 不实现完整上传、下载、对象存储 lifecycle；完整 Attachment / Storage 归 Step 22。
+- 不实现生产级日志、指标、恢复矩阵；基础 Observability 归 Step 19，完整 Hardening 归 Step 24。
 - 不新增上游不存在的附件业务模型；若上游只有引用关系，本步骤只实现引用关系。
 
 ## 验收

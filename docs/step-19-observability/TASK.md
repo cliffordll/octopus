@@ -1,4 +1,4 @@
-# Step 18: Basic Observability / Debug Visibility
+# Step 19: Basic Observability / Debug Visibility
 
 状态：待开发
 
@@ -18,9 +18,9 @@
 
 ## 边界
 
-- 不实现真实 Auth / Actor / Access，归 Step 22。
-- 不实现完整 Recovery / Compatibility 矩阵，归 Step 23。
-- 不实现 budget/cost 治理，归 Step 19/20。
+- 不实现真实 Auth / Actor / Access，归 Step 23。
+- 不实现完整 Recovery / Compatibility 矩阵，归 Step 24。
+- 不实现 budget/cost 治理，归 Step 20/21。
 - 不新增外部观测系统依赖；本阶段以数据库记录和服务端响应可见性为主。
 
 ## 验收

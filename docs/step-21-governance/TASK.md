@@ -1,10 +1,10 @@
-# Step 20: Budget / Governance
+# Step 21: Budget / Governance
 
 状态：待开发
 
 ## 依赖边界
 
-Step 19 已提前实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
+Step 20 已提前实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
 
 ## 任务
 
