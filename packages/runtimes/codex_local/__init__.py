@@ -53,6 +53,8 @@ class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
                     if isinstance(key, str) and isinstance(value, str)
                 }
             )
+        if context.env:
+            env.update(context.env)
         timeout = context.config.get("timeoutSec", 0)
         timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
         process = await asyncio.create_subprocess_exec(

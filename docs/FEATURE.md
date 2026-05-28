@@ -192,9 +192,10 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-15-workspace/`
 
-- 目标：在 Step 11 最小执行上下文基础上，实现完整 workspace 建立、复用、清理、runtime service 管理和产物记录能力。
-- 交付：execution workspace 生命周期、workspace runtime service 建立/复用/释放、运行产物引用和失败清理。
-- 验收：执行上下文、runtime service 和产物可追踪；失败或取消后不留下不一致业务状态。
+- 目标：在 Step 11/13/14 已建立的执行、调度和 runtime adapter 基础上，实现上游兼容的 project workspace、execution workspace、workspace runtime service、workspace operation 和 work product 引用闭环。
+- 交付：workspace contract/schema、project workspace 聚合、execution workspace 策略解析、runtime context 注入、workspace runtime service 生命周期、workspace operation/run 关联、work product 引用和失败清理。
+- 执行顺序：先拆清 workspace 数据契约与 project 聚合，再补齐执行前 workspace 解析和 runtime context 注入，随后实现 runtime service、operation 记录、work product 引用与恢复清理。
+- 验收：project/issue/run 能稳定关联 workspace；adapter 收到兼容 workspace context；runtime service 和 operation 可追踪；失败、取消或恢复后不留下不一致业务状态。
 
 ### Step 16: Cost、Budget 与 Activity
 

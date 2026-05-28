@@ -16,6 +16,11 @@ from packages.database.queries.projects import (
     list_org_projects,
     update_project,
 )
+from packages.database.queries.workspaces import (
+    clear_primary_project_workspace,
+    create_project_workspace,
+    list_project_workspaces,
+)
 from packages.database.queries.resources import (
     create_organization_resource,
     create_project_resource_attachment,
@@ -31,6 +36,7 @@ from packages.database.schema import (
     OrganizationResource,
     Project,
     ProjectResourceAttachment,
+    ProjectWorkspace,
 )
 from packages.shared.constants.project import (
     DEFAULT_PROJECT_STATUS,
@@ -45,6 +51,7 @@ from packages.shared.types.project import (
     CreateProjectInlineResourceInput,
     OrganizationResource as OrganizationResourceData,
     ProjectDetail,
+    ProjectWorkspace as ProjectWorkspaceData,
     ProjectGoalRef,
     ProjectResourceAttachment as ProjectResourceAttachmentData,
     ProjectResourceAttachmentInput,
@@ -94,6 +101,37 @@ def _parse_datetime(value: object) -> datetime | None:
 
 def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _derive_project_codebase(
+    org_id: str, primary_workspace: ProjectWorkspaceData | None
+) -> dict[str, Any]:
+    managed_folder = f".octopus/workspaces/{org_id}"
+    local_folder = primary_workspace["cwd"] if primary_workspace else None
+    repo_ref = primary_workspace["repoRef"] if primary_workspace else None
+    default_ref = primary_workspace["defaultRef"] if primary_workspace else None
+    repo_url = primary_workspace["repoUrl"] if primary_workspace else None
+    return {
+        "configured": primary_workspace is not None,
+        "scope": "project" if primary_workspace is not None else "none",
+        "workspaceId": primary_workspace["id"] if primary_workspace else None,
+        "repoUrl": repo_url,
+        "repoRef": repo_ref,
+        "defaultRef": default_ref,
+        "repoName": _derive_repo_name(repo_url),
+        "localFolder": local_folder,
+        "managedFolder": managed_folder,
+        "effectiveLocalFolder": local_folder or managed_folder,
+        "origin": "local_folder" if local_folder else "managed_checkout",
+    }
+
+
+def _derive_repo_name(repo_url: str | None) -> str | None:
+    if not repo_url:
+        return None
+    cleaned = repo_url.rstrip("/")
+    name = cleaned.rsplit("/", 1)[-1].removesuffix(".git")
+    return name or None
 
 
 def _resolve_goal_ids(
@@ -276,6 +314,60 @@ class ProjectService:
     ) -> list[ProjectResourceAttachmentData]:
         rows = await list_project_resource_attachments(self._session, project_id)
         return [await self._to_attachment(row) for row in rows]
+
+    async def list_workspaces(self, project_id: str) -> list[ProjectWorkspaceData]:
+        rows = await list_project_workspaces(self._session, project_id)
+        return [self._to_workspace(row) for row in rows]
+
+    async def create_workspace(
+        self,
+        project_id: str,
+        payload: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ProjectWorkspaceData | None:
+        project = await get_project_by_id(self._session, project_id)
+        if project is None:
+            return None
+        existing = await list_project_workspaces(self._session, project_id)
+        is_primary = bool(payload.get("isPrimary")) or len(existing) == 0
+        if is_primary:
+            await clear_primary_project_workspace(
+                self._session, org_id=project.org_id, project_id=project.id
+            )
+        row = await create_project_workspace(
+            self._session,
+            {
+                "org_id": project.org_id,
+                "project_id": project.id,
+                "name": str(payload.get("name") or "Workspace").strip(),
+                "source_type": str(payload.get("sourceType") or "local_path"),
+                "cwd": payload.get("cwd"),
+                "repo_url": payload.get("repoUrl"),
+                "repo_ref": payload.get("repoRef"),
+                "default_ref": payload.get("defaultRef") or payload.get("repoRef"),
+                "visibility": payload.get("visibility") or "default",
+                "setup_command": payload.get("setupCommand"),
+                "cleanup_command": payload.get("cleanupCommand"),
+                "remote_provider": payload.get("remoteProvider"),
+                "remote_workspace_ref": payload.get("remoteWorkspaceRef"),
+                "shared_workspace_key": payload.get("sharedWorkspaceKey"),
+                "metadata_json": payload.get("metadata"),
+                "is_primary": is_primary,
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=project.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="project.workspace.created",
+            entity_type="project_workspace",
+            entity_id=row.id,
+            details={"projectId": project.id, "name": row.name},
+        )
+        return self._to_workspace(row)
 
     async def add_resource_attachment(
         self,
@@ -491,11 +583,39 @@ class ProjectService:
             "updatedAt": row.updated_at.isoformat(),
         }
 
+    def _to_workspace(self, row: ProjectWorkspace) -> ProjectWorkspaceData:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "projectId": row.project_id,
+            "name": row.name,
+            "sourceType": row.source_type,
+            "cwd": row.cwd,
+            "repoUrl": row.repo_url,
+            "repoRef": row.repo_ref,
+            "defaultRef": row.default_ref or row.repo_ref,
+            "visibility": row.visibility,
+            "setupCommand": row.setup_command,
+            "cleanupCommand": row.cleanup_command,
+            "remoteProvider": row.remote_provider,
+            "remoteWorkspaceRef": row.remote_workspace_ref,
+            "sharedWorkspaceKey": row.shared_workspace_key,
+            "metadata": row.metadata_json,
+            "isPrimary": row.is_primary,
+            "runtimeServices": [],
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
     async def _to_detail(self, row: Project) -> ProjectDetail:
         goal_rows = await list_project_goals(self._session, row.id)
         goal_refs: list[ProjectGoalRef] = [
             {"id": goal.id, "title": goal.title} for goal in goal_rows
         ]
+        workspaces = await self.list_workspaces(row.id)
+        primary_workspace = next(
+            (workspace for workspace in workspaces if workspace["isPrimary"]), None
+        ) or (workspaces[0] if workspaces else None)
         return {
             "id": row.id,
             "orgId": row.org_id,
@@ -511,8 +631,13 @@ class ProjectService:
             "color": row.color,
             "pauseReason": cast(PauseReason | None, row.pause_reason),
             "pausedAt": _iso(row.paused_at),
-            "executionWorkspacePolicy": row.execution_workspace_policy,
+            "executionWorkspacePolicy": cast(Any, row.execution_workspace_policy),
+            "codebase": cast(
+                Any, _derive_project_codebase(row.org_id, primary_workspace)
+            ),
             "resources": await self.list_resources(row.id),
+            "workspaces": workspaces,
+            "primaryWorkspace": primary_workspace,
             "archivedAt": _iso(row.archived_at),
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),

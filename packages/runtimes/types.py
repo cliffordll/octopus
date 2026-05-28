@@ -15,6 +15,8 @@ class RuntimeExecutionContext:
     agent_name: str
     config: dict[str, Any]
     on_log: Callable[[str, str], Awaitable[None]]
+    env: dict[str, str] | None = None
+    workspace: dict[str, Any] | None = None
     cancel_event: asyncio.Event | None = None
     on_process_started: Callable[[int, datetime], Awaitable[None]] | None = None
 
@@ -28,6 +30,8 @@ class RuntimeExecutionResult:
     usage_json: dict[str, Any] | None = None
     session_id_after: str | None = None
     result_json: dict[str, Any] | None = None
+    runtime_services: list[dict[str, Any]] | None = None
+    work_products: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
