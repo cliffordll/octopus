@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -75,7 +75,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.clear(screen.getByLabelText("智能体名称"));
   await userEvent.type(await screen.findByLabelText("智能体名称"), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "claude_local");
+  await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
+  await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
+  await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
+  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "5000");
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
+  fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
   await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
@@ -85,9 +91,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
       method: "POST",
       body: JSON.stringify({
         name: "Reviewer",
-        role: "qa",
-        agentRuntimeType: "claude_local",
-        agentRuntimeConfig: {},
+        role: "cto",
+        title: "Runtime owner",
+        capabilities: "Own runtime rollout",
+        agentRuntimeType: "hermes_local",
+        agentRuntimeConfig: { model: "provider/model" },
+        budgetMonthlyCents: 5000,
+        metadata: { team: "runtime" },
         desiredSkills: ["review", "debug"],
       }),
     }),

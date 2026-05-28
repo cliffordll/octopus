@@ -142,6 +142,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     wakeup_parser.add_argument("agent_id")
     wakeup_parser.add_argument("--idempotency-key")
     wakeup_parser.add_argument("--reason")
+    wakeup_parser.add_argument("--source")
+    wakeup_parser.add_argument("--trigger-detail")
+    wakeup_parser.add_argument("--payload")
     wakeup_parser.add_argument("--force-fresh-session", action="store_true")
     wakeup_parser.set_defaults(handler=wakeup_agent)
     bootstrap_parser = actions.add_parser("bootstrap-ceo")
@@ -350,6 +353,15 @@ def _wake_payload(args: argparse.Namespace) -> dict[str, Any]:
         payload["idempotencyKey"] = args.idempotency_key
     if args.reason:
         payload["reason"] = args.reason
+    if getattr(args, "source", None):
+        payload["source"] = args.source
+    if getattr(args, "trigger_detail", None):
+        payload["triggerDetail"] = args.trigger_detail
+    if getattr(args, "payload", None):
+        parsed = json.loads(args.payload)
+        if not isinstance(parsed, dict):
+            raise ValueError("payload must be a JSON object.")
+        payload["payload"] = parsed
     if args.force_fresh_session:
         payload["forceFreshSession"] = True
     return payload
