@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin, skill_snapshot_from_root
+from ..common import RuntimeCapabilityMixin
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -11,6 +10,7 @@ from ..types import (
 )
 from .environment import test_environment as test_claude_environment
 from .runner import execute as execute_claude
+from .skills import skill_snapshot
 
 
 class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
@@ -40,22 +40,9 @@ class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
         *,
         materialize: bool,
     ) -> dict[str, Any]:
-        return skill_snapshot_from_root(
+        return skill_snapshot(
             runtime_type=self.type,
             config=config,
             desired_skills=desired_skills,
-            mode="ephemeral",
-            location_label="~/.claude/skills",
-            skills_home=_claude_skills_home(config),
-            materialize=False,
-            external_detail="Installed outside this project's management in the Claude skills home.",
+            materialize=materialize,
         )
-
-
-def _claude_skills_home(config: dict[str, Any]) -> Path:
-    env = config.get("env")
-    if isinstance(env, dict):
-        home = env.get("HOME")
-        if isinstance(home, str) and home.strip():
-            return Path(home).expanduser().resolve() / ".claude" / "skills"
-    return Path.home() / ".claude" / "skills"

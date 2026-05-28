@@ -4,7 +4,6 @@ from dataclasses import replace
 from typing import Any
 
 from .common import RuntimeCapabilityMixin
-from .codex_local import _string
 from .process import ProcessRuntimeAdapter
 from .types import RuntimeEnvironmentTestResult, RuntimeExecutionContext
 
@@ -50,3 +49,7 @@ class LocalCliRuntimeAdapter(RuntimeCapabilityMixin):
 
     async def list_models(self) -> list[dict[str, str]]:
         return self._models
+
+
+def _string(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
