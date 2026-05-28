@@ -21,7 +21,7 @@ Step 10 已实现 Project 管理，并保留 project 的 execution workspace 策
 
 Step 11 已建立 agent 执行、对话触发和最小 runtime context；Step 13 已补齐 run 调度、取消和恢复；Step 14 已补齐 runtime adapter、环境检查、模型发现、skills 与 instructions 能力。本步骤必须复用这些既有执行链路，只在运行前后加入 workspace 解析、注入、记录和清理。
 
-Step 16 仍负责 cost、budget、activity 治理联动；Step 18 仍负责 attachment/object storage；Step 19 仍负责真实 auth、secret/env binding。Step 15 可以保留这些能力需要的引用结构，但不得提前实现其治理或存储后端。
+Step 19 负责 cost/activity 查询；Step 20 负责 budget 治理联动；Step 21 负责 attachment/object storage；Step 22 负责真实 auth、secret/env binding。Step 15 可以保留这些能力需要的引用结构，但不得提前实现其治理或存储后端。
 
 ## Workspace 在项目中的作用
 
@@ -161,7 +161,7 @@ queued run
 - 实现 workspace operation 创建、状态更新、日志记录和查询边界。
 - 将 heartbeat run、execution workspace、workspace runtime service 和 operation 关联起来，方便恢复和审计。
 - 取消、timeout、preflight failure、adapter failure 和 recovery run 都需要有可解释 operation 状态。
-- operation 日志只记录控制面可追踪信息，不替代 Step 18 的附件或对象存储。
+- operation 日志只记录控制面可追踪信息，不替代 Step 21 的附件或对象存储。
 
 实施记录：
 
@@ -172,7 +172,7 @@ queued run
 ## 15G：Work Product / Artifact 引用
 
 - 实现上游已包含的 work product 引用结构，记录 issue/run/workspace 产生的产物引用。
-- 本步骤只持久化引用、类型、来源和关联关系；真实文件上传、对象存储、下载权限和 attachment body 归 Step 18。
+- 本步骤只持久化引用、类型、来源和关联关系；真实文件上传、对象存储、下载权限和 attachment body 归 Step 21。
 - Runtime adapter 输出中若包含产物引用，应通过统一 service 写入，不能由 adapter 直接操作业务表。
 - 产物引用必须受 organization/issue/workspace scope 约束。
 
@@ -216,10 +216,10 @@ curl.exe -s -X POST "$base/api/agents/$($agent.id)/wakeup" -H "Content-Type: app
 
 ## 不包含
 
-- Cost、budget、quota window 聚合与治理联动，归 Step 16。
-- Chat/Messenger 扩展，归 Step 17。
-- Attachment body、对象存储、文件上传下载和存储权限，归 Step 18。
-- 真实认证、secret/env binding 和访问策略替换，归 Step 19。
+- Cost/activity 查询归 Step 19；budget、quota window 聚合与治理联动归 Step 20。
+- Chat/Messenger 扩展归 Step 16；消息附件/产物引用归 Step 17。
+- Attachment body、对象存储、文件上传下载和存储权限，归 Step 21。
+- 真实认证、secret/env binding 和访问策略替换，归 Step 22。
 - Desktop/Tauri workspace UI。
 - 没有上游证据的 workspace provider、远程基础设施编排或新业务对象。
 

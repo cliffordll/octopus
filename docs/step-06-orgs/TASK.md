@@ -87,5 +87,5 @@ curl.exe -s -X PATCH "http://127.0.0.1:8000/api/orgs/$env:ORG_ID" `
 
 ## 未纳入
 
-- 真实身份系统和授权策略定义，归 Step 19。
+- 真实身份系统和授权策略定义，归 Step 22。
 - project、goal、agent 等组织下其它业务资源管理，归其各自步骤。

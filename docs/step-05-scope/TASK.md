@@ -26,7 +26,7 @@
 - activity 写入从统一 actor identity 取得主体，不在 route 中写死身份。
 - tests 通过 middleware 注入例如 `{"type": "board", "id": "test-board"}` 的调试 actor。
 
-当前实现没有引入真实登录会话、token 验证或正式用户模型；这些能力归 Step 19。
+当前实现没有引入真实登录会话、token 验证或正式用户模型；这些能力归 Step 22。
 
 ## 首批读取接口
 
@@ -58,7 +58,7 @@
 - seed/fixture 只为测试提供数据和 actor 来源，不改变 payload、枚举、状态或数据库关系。
 - `GET /api/issues` 与误写的 `GET /api/orgs/issues` 不作为无作用域列表接口；均返回提示必须使用 `/api/orgs/{orgId}/issues`。
 - Issue 与 approval 已实现的读取和 mutation 在统一 access 边界校验 organization scope。
-- Step 19 只替换真实认证/授权数据来源，不再改变当前 service 使用的 actor 结构。
+- Step 22 只替换真实认证/授权数据来源，不再改变当前 service 使用的 actor 结构。
 
 ## 验收证据
 
@@ -97,5 +97,5 @@ curl.exe -i http://127.0.0.1:8000/api/orgs
 
 ## 未纳入
 
-- 配置化的生产身份来源与完整认证/授权；真实来源在 Step 19 替换开发 actor。
+- 配置化的生产身份来源与完整认证/授权；真实来源在 Step 22 替换开发 actor。
 - run、runtime 与后台执行中的 scope 传递，归后续运行步骤。
