@@ -7,6 +7,8 @@ import { ErrorNotice } from "../components/ErrorNotice";
 
 export function OrganizationsPage() {
   const [name, setName] = useState("");
+  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
+  const [brandColor, setBrandColor] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const organizations = useQuery({
@@ -17,6 +19,8 @@ export function OrganizationsPage() {
     mutationFn: organizationsApi.create,
     onSuccess: (organization) => {
       setName("");
+      setBudgetMonthlyCents("");
+      setBrandColor("");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
       navigate(`/orgs/${organization.id}/agents/new`);
     },
@@ -24,7 +28,13 @@ export function OrganizationsPage() {
   function submit(event: FormEvent) {
     event.preventDefault();
     const value = name.trim();
-    if (value) create.mutate({ name: value });
+    if (value) {
+      create.mutate({
+        name: value,
+        ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
+        ...(brandColor.trim() ? { brandColor: brandColor.trim() } : {}),
+      });
+    }
   }
   return (
     <>
@@ -53,6 +63,19 @@ export function OrganizationsPage() {
           <label>
             组织名称
             <input value={name} onChange={(event) => setName(event.target.value)} required />
+          </label>
+          <label>
+            月度预算（cents）
+            <input
+              min="0"
+              type="number"
+              value={budgetMonthlyCents}
+              onChange={(event) => setBudgetMonthlyCents(event.target.value)}
+            />
+          </label>
+          <label>
+            品牌色
+            <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
           </label>
           {create.error && <ErrorNotice error={create.error} />}
           <button disabled={create.isPending} type="submit">

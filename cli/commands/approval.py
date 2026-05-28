@@ -35,6 +35,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--type", dest="approval_type", required=True, choices=TYPES
     )
     create_parser.add_argument("--payload", required=True)
+    create_parser.add_argument("--requested-by-agent-id")
+    create_parser.add_argument("--issue-id", action="append", dest="issue_ids")
     create_parser.set_defaults(handler=create_approval)
 
     for name, handler in (
@@ -45,11 +47,13 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         decision = actions.add_parser(name)
         decision.add_argument("approval_id")
         decision.add_argument("--note")
+        decision.add_argument("--payload")
         decision.set_defaults(handler=handler)
 
     resubmit_parser = actions.add_parser("resubmit")
     resubmit_parser.add_argument("approval_id")
     resubmit_parser.add_argument("--payload")
+    resubmit_parser.add_argument("--issue-id", action="append", dest="issue_ids")
     resubmit_parser.set_defaults(handler=resubmit)
 
 
@@ -70,15 +74,25 @@ def get_approval(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def create_approval(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload: dict[str, Any] = {
+        "type": args.approval_type,
+        "payload": _json_object(args.payload),
+    }
+    if args.requested_by_agent_id:
+        payload["requestedByAgentId"] = args.requested_by_agent_id
+    if args.issue_ids:
+        payload["issueIds"] = args.issue_ids
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/approvals",
-        json={"type": args.approval_type, "payload": _json_object(args.payload)},
+        json=payload,
     )
 
 
 def _decision(args: argparse.Namespace, client: ApiClient, action: str) -> Any:
     payload = {"decisionNote": args.note} if args.note else {}
+    if args.payload:
+        payload["payload"] = _json_object(args.payload)
     return client.request(
         "POST", f"/api/approvals/{args.approval_id}/{action}", json=payload
     )
@@ -98,6 +112,8 @@ def request_revision(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def resubmit(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {"payload": _json_object(args.payload)} if args.payload else {}
+    if args.issue_ids:
+        payload["issueIds"] = args.issue_ids
     return client.request(
         "POST", f"/api/approvals/{args.approval_id}/resubmit", json=payload
     )
