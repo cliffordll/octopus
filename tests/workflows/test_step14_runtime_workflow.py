@@ -275,6 +275,58 @@ async def test_claude_local_mounts_desired_skills_with_add_dir(tmp_path) -> None
     ]
 
 
+async def test_claude_local_uses_managed_home_and_syncs_credentials(
+    tmp_path,
+) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_home.joinpath(".config", "gh").mkdir(parents=True)
+    operator_home.joinpath(".config", "gh", "hosts.yml").write_text(
+        "github.com: {}\n", encoding="utf-8"
+    )
+    capture_path = tmp_path / "claude-home-capture.json"
+    fake_claude = tmp_path / "fake_claude.py"
+    fake_claude.write_text(
+        "\n".join(
+            [
+                "import json, os, pathlib, sys",
+                "credential = pathlib.Path(os.environ['HOME']) / '.config' / 'gh' / 'hosts.yml'",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'home': os.environ['HOME'], 'userProfile': os.environ.get('USERPROFILE'), 'agentHome': os.environ.get('AGENT_HOME'), 'credential': credential.read_text(encoding='utf-8')}, fh)",
+                "print(json.dumps({'type':'result','subtype':'success','session_id':'claude-session','result':'done','usage':{}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = ClaudeLocalRuntimeAdapter()
+    await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-claude-home",
+            agent_id="agent-claude",
+            org_id="org-claude",
+            agent_name="Claude Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_claude)],
+                "env": {
+                    "OCTOPUS_TEST_CAPTURE": str(capture_path),
+                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                },
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    normalized_home = capture["home"].replace("\\", "/")
+    assert normalized_home.endswith(
+        ".octopus/runtime-homes/claude_local/org-claude/agent-claude/home"
+    )
+    assert capture["userProfile"] == capture["home"]
+    assert capture["agentHome"] == capture["home"]
+    assert capture["credential"] == "github.com: {}\n"
+
+
 async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> None:
     capture_path = tmp_path / "opencode-capture.json"
     fake_opencode = tmp_path / "fake_opencode.py"
@@ -394,6 +446,54 @@ async def test_opencode_local_injects_desired_skills_into_managed_home(
             "description": "Review code changes.",
         }
     ]
+
+
+async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_home.mkdir()
+    operator_home.joinpath(".npmrc").write_text("token=test\n", encoding="utf-8")
+    capture_path = tmp_path / "opencode-home-capture.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os, pathlib, sys",
+                "credential = pathlib.Path(os.environ['HOME']) / '.npmrc'",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'home': os.environ['HOME'], 'userProfile': os.environ.get('USERPROFILE'), 'agentHome': os.environ.get('AGENT_HOME'), 'credential': credential.read_text(encoding='utf-8')}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'opencode-session'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-home",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "env": {
+                    "OCTOPUS_TEST_CAPTURE": str(capture_path),
+                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                },
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    normalized_home = capture["home"].replace("\\", "/")
+    assert normalized_home.endswith(
+        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+    )
+    assert capture["userProfile"] == capture["home"]
+    assert capture["agentHome"] == capture["home"]
+    assert capture["credential"] == "token=test\n"
 
 
 async def _noop_log(stream: str, chunk: str) -> None:

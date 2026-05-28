@@ -4,9 +4,12 @@ import asyncio
 import contextlib
 import os
 from datetime import UTC, datetime
-from pathlib import Path
 
-from ..local_skills import desired_skills_from_config, materialize_runtime_skills
+from ..local_skills import (
+    desired_skills_from_config,
+    materialize_runtime_skills,
+    prepare_managed_home,
+)
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     auth_required,
@@ -38,14 +41,16 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
-    if not string(env.get("HOME")):
-        env["HOME"] = str(_default_home(context))
-    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    home = await prepare_managed_home(
+        runtime_type="opencode_local",
+        context=context,
+        env=env,
+    )
     loaded_skills = materialize_runtime_skills(
         runtime_type="opencode_local",
         config=context.config,
         desired_skills=desired_skills_from_config(context.config),
-        skills_home=Path(env["HOME"]).expanduser() / ".claude" / "skills",
+        skills_home=home / ".claude" / "skills",
         location_label="managed Claude-compatible skills home",
     )
     timeout = context.config.get("timeoutSec", 0)
@@ -192,15 +197,3 @@ def _result_json(
         "modelUnavailable": model_unavailable(stdout_text, stderr_text, error),
         "authRequired": auth_required(stdout_text, stderr_text, error),
     }
-
-
-def _default_home(context: RuntimeExecutionContext) -> Path:
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "runtime-homes"
-        / "opencode_local"
-        / context.org_id
-        / context.agent_id
-        / "home"
-    )

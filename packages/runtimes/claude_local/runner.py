@@ -8,7 +8,11 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..local_skills import desired_skills_from_config, materialize_runtime_skills
+from ..local_skills import (
+    desired_skills_from_config,
+    materialize_runtime_skills,
+    prepare_managed_home,
+)
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     build_args,
@@ -40,6 +44,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    await prepare_managed_home(
+        runtime_type="claude_local",
+        context=context,
+        env=env,
+    )
     skills_root = Path(tempfile.mkdtemp(prefix="octopus-claude-skills-"))
     loaded_skills = materialize_runtime_skills(
         runtime_type="claude_local",
