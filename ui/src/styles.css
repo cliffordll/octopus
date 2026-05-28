@@ -360,6 +360,148 @@ h1, h2, p {
   font-size: 11px;
 }
 
+.project-empty-state {
+  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-create-dialog {
+  max-width: 520px;
+}
+
+.project-detail-title {
+  min-width: 0;
+}
+
+.project-heading-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.project-color-dot {
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 7px;
+  display: inline-block;
+  height: 22px;
+  width: 22px;
+}
+
+.project-header-badges {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.project-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.project-properties-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 860px;
+}
+
+.project-property-list {
+  border-top: 1px solid #202a3b;
+}
+
+.project-property-row {
+  align-items: center;
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 140px minmax(0, 1fr);
+  padding: 12px 0;
+}
+
+.project-property-row-start {
+  align-items: start;
+}
+
+.project-property-row > span:first-child {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.project-property-row strong {
+  color: #e8edf5;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-property-row input,
+.project-property-row select,
+.project-property-row textarea {
+  width: 100%;
+}
+
+.project-property-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.project-goal-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-resource-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.project-resource-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.project-resource-card {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 14px;
+}
+
+.project-resource-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.project-resource-card strong {
+  color: #e8edf5;
+  font-size: 14px;
+}
+
+.project-resource-card span,
+.project-resource-card p {
+  color: #8792a6;
+  font-size: 12px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .heartbeat-filter {
   display: block;
   max-width: 260px;
@@ -1377,8 +1519,15 @@ pre {
   }
   .heartbeat-summary-grid,
   .heartbeat-agent-row,
-  .heartbeat-inspection-layout {
+  .heartbeat-inspection-layout,
+  .project-summary-grid,
+  .project-property-row,
+  .project-resource-summary,
+  .project-resource-card {
     grid-template-columns: 1fr;
+  }
+  .project-property-actions {
+    justify-content: stretch;
   }
   .heartbeat-page-header {
     align-items: stretch;

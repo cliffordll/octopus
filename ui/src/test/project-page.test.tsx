@@ -57,15 +57,15 @@ it("updates a project and manages its resource attachments", async () => {
   renderApp("/orgs/org-1/projects/project-1");
   expect(await screen.findByRole("heading", { name: "控制台" })).toBeInTheDocument();
   const tabs = screen.getByRole("navigation", { name: "项目详情导航" });
-  expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute(
+  expect(within(tabs).getByRole("link", { name: "Configuration" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/configuration",
   );
-  expect(within(tabs).getByRole("link", { name: "资源" })).toHaveAttribute(
+  expect(within(tabs).getByRole("link", { name: "Resources" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/resources",
   );
-  expect(within(tabs).getByRole("link", { name: "任务" })).toHaveAttribute(
+  expect(within(tabs).getByRole("link", { name: "Issues" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/issues",
   );
@@ -78,7 +78,7 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "PATCH" }),
   );
 
-  await userEvent.click(within(tabs).getByRole("link", { name: "资源" }));
+  await userEvent.click(within(tabs).getByRole("link", { name: "Resources" }));
   expect(await screen.findByText("Repository")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Resource ID"), "resource-2");
   await userEvent.click(screen.getByRole("button", { name: "添加 Resource" }));
@@ -87,7 +87,7 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "任务" }));
+  await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "Issues" }));
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
