@@ -1,0 +1,48 @@
+﻿{
+  "skill_name": "mock-data-maintainer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "给 Octopus 准备一个 landing 截图用 demo org，不用帮我截图，我想自己打开本地页面拍。数据要看起来像真实 agent team 正在推进 launch。",
+      "expected_output": "Uses the Octopus landing demo org scenario, gives the seed-only command, explains the seeded org shape, and lists routes worth opening for screenshots.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我想给 approvals + budget auto-pause 补 E2E，帮我设计 deterministic mock 数据，不要做漂亮 demo，重点是能测边界状态。",
+      "expected_output": "Classifies the request as testing data, proposes deterministic Octopus fixtures for approvals and budget control, includes edge states, assertions, and reset/setup guidance.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "帮我造一组数据，让第一次看 Octopus 的用户能理解 founder 怎么用它管理 agent 团队。可以是故事化的，不一定要数据库脚本。",
+      "expected_output": "Classifies the request as user-scenario data, produces a persona-driven Octopus scenario with entities, workflow, conflict, and outcome rather than random records.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "做一个 SaaS billing dashboard 的 mock JSON，要包含 trial、failed payment、overage、enterprise security review 和 churn risk。",
+      "expected_output": "Uses the generic SaaS dashboard scenario, produces realistic JSON-ready entities and metrics with mixed states and clear usage notes.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "我想构建一个真实的 Octopus Studio org，也就是用 Octopus 开发和运营 Octopus。Calendar 不要单独造 QA 场景，应该自然看到一个月 agent 运行历史。",
+      "expected_output": "Uses the Octopus Studio scenario, treats Calendar as downstream of issues and heartbeat runs, points to the reusable JSON fixture and seed command, and avoids creating a Calendar-only component fixture.",
+      "files": [
+        "references/octopus-studio-scenario.md",
+        "data/octopus-studio/scenario.json",
+        "scripts/seed-octopus-studio.ts"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "mkt project 里放一些真正推进 Octopus 增长的 issue，比如发推文、运营推广、具体计划和落实。以后这套数据要能复用。",
+      "expected_output": "Keeps the Octopus Studio scenario as the spine, adds concrete Marketing & Growth execution issues instead of positioning-only rows, and stores them in durable fixture data rather than a one-off live seed.",
+      "files": [
+        "data/octopus-studio/issues.json",
+        "references/octopus-studio-scenario.md"
+      ]
+    }
+  ]
+}
