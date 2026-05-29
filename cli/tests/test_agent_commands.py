@@ -461,6 +461,50 @@ def test_agent_skills_commands_cover_step14_routes() -> None:
     assert "windowDays=14" in str(requests[4].url)
 
 
+def test_agent_instruction_commands_cover_step17_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "ok"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+
+    assert main(["agent", "instructions", "agent-1"], client=client) == 0
+    assert main(["agent", "instruction-file", "agent-1", "--path", "SOUL.md"], client=client) == 0
+    assert main([
+        "agent",
+        "instruction-file-update",
+        "agent-1",
+        "--path",
+        "SOUL.md",
+        "--content",
+        "# Soul",
+        "--clear-legacy-prompt-template",
+    ], client=client) == 0
+    assert main([
+        "agent",
+        "instructions-update",
+        "agent-1",
+        "--mode",
+        "managed",
+        "--entry-file",
+        "SOUL.md",
+    ], client=client) == 0
+
+    assert [request.url.path for request in requests] == [
+        "/api/agents/agent-1/instructions-bundle",
+        "/api/agents/agent-1/instructions-bundle/file",
+        "/api/agents/agent-1/instructions-bundle/file",
+        "/api/agents/agent-1/instructions-bundle",
+    ]
+    assert requests[1].url.params["path"] == "SOUL.md"
+    assert requests[2].read() == (
+        b'{"path":"SOUL.md","content":"# Soul","clearLegacyPromptTemplate":true}'
+    )
+    assert requests[3].read() == b'{"mode":"managed","entryFile":"SOUL.md"}'
+
+
 def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
     requests: list[httpx.Request] = []
 

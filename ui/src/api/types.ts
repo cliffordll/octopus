@@ -232,6 +232,94 @@ export interface OrganizationResource {
   updatedAt: string;
 }
 
+export interface CreateOrganizationResourcePayload {
+  name: string;
+  kind: OrganizationResource["kind"];
+  locator: string;
+  description?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export type UpdateOrganizationResourcePayload = Partial<CreateOrganizationResourcePayload>;
+
+export interface OrganizationSkillFileInventoryEntry {
+  path: string;
+  kind: string;
+}
+
+export interface OrganizationSkill {
+  id: string;
+  orgId: string;
+  key: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  markdown: string;
+  sourceType: string;
+  sourceLocator: string | null;
+  sourceRef: string | null;
+  trustLevel: string;
+  compatibility: string;
+  fileInventory: OrganizationSkillFileInventoryEntry[];
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationSkillListItem extends OrganizationSkill {
+  attachedAgentCount: number;
+  editable: boolean;
+  editableReason: string | null;
+  sourceLabel: string | null;
+  sourceBadge: string;
+  sourcePath: string | null;
+  workspaceEditPath: string | null;
+}
+
+export interface OrganizationSkillUsageAgent {
+  id: string;
+  name: string;
+  urlKey: string;
+  agentRuntimeType: string;
+  desired: boolean;
+  actualState: string | null;
+}
+
+export interface OrganizationSkillDetail extends OrganizationSkillListItem {
+  usedByAgents: OrganizationSkillUsageAgent[];
+}
+
+export interface OrganizationSkillFileDetail {
+  skillId: string;
+  path: string;
+  kind: string;
+  content: string;
+  language: string | null;
+  markdown: boolean;
+  editable: boolean;
+}
+
+export interface OrganizationSkillUpdateStatus {
+  supported: boolean;
+  reason: string | null;
+  trackingRef: string | null;
+  currentRef: string | null;
+  latestRef: string | null;
+  hasUpdate: boolean;
+}
+
+export interface CreateOrganizationSkillPayload {
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  markdown?: string | null;
+}
+
+export interface UpdateOrganizationSkillFilePayload {
+  path: string;
+  content: string;
+}
+
 export interface ProjectResourceAttachment {
   id: string;
   orgId: string;
@@ -624,6 +712,49 @@ export interface AgentSkillAnalytics {
   evidenceCounts?: Record<string, number>;
   skills: Array<Record<string, unknown>>;
   days?: Array<Record<string, unknown>>;
+}
+
+export interface AgentInstructionsFileSummary {
+  path: string;
+  size: number;
+  language: string;
+  markdown: boolean;
+  isEntryFile: boolean;
+  editable: boolean;
+  deprecated: boolean;
+  virtual: boolean;
+}
+
+export interface AgentInstructionsFileDetail extends AgentInstructionsFileSummary {
+  content: string;
+}
+
+export interface AgentInstructionsBundle {
+  agentId: string;
+  orgId: string;
+  mode: string | null;
+  rootPath: string | null;
+  managedRootPath: string;
+  entryFile: string;
+  resolvedEntryPath: string | null;
+  editable: boolean;
+  warnings: string[];
+  legacyPromptTemplateActive: boolean;
+  legacyBootstrapPromptTemplateActive: boolean;
+  files: AgentInstructionsFileSummary[];
+}
+
+export interface UpdateAgentInstructionsBundlePayload {
+  mode?: "managed" | "external";
+  rootPath?: string | null;
+  entryFile?: string;
+  clearLegacyPromptTemplate?: boolean;
+}
+
+export interface UpdateAgentInstructionsFilePayload {
+  path: string;
+  content: string;
+  clearLegacyPromptTemplate?: boolean;
 }
 
 export interface HeartbeatRun {
