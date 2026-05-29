@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 from typing import Any
 
 from ..client import ApiClient
@@ -103,6 +104,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     skill_create_parser.add_argument("--slug")
     skill_create_parser.add_argument("--description")
     skill_create_parser.add_argument("--markdown")
+    skill_create_parser.add_argument("--markdown-file")
     skill_create_parser.set_defaults(handler=create_skill)
     skill_file_parser = actions.add_parser(
         "skill-file", help="Read an organization skill file"
@@ -117,7 +119,11 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     skill_file_update_parser.add_argument("--org-id", required=True)
     skill_file_update_parser.add_argument("skill_id")
     skill_file_update_parser.add_argument("--path", default="SKILL.md")
-    skill_file_update_parser.add_argument("--content", required=True)
+    content_source = skill_file_update_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    content_source.add_argument("--content")
+    content_source.add_argument("--content-file")
     skill_file_update_parser.set_defaults(handler=update_skill_file)
     skill_status_parser = actions.add_parser(
         "skill-update-status", help="Get organization skill update status"
@@ -185,6 +191,10 @@ def _json_object_or_none(value: str | None) -> dict[str, Any] | None:
     return parsed
 
 
+def _read_text_file(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def list_resources(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/orgs/{args.org_id}/resources")
 
@@ -239,13 +249,16 @@ def get_skill(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def create_skill(args: argparse.Namespace, client: ApiClient) -> Any:
+    markdown = args.markdown
+    if args.markdown_file is not None:
+        markdown = _read_text_file(args.markdown_file)
     payload = {
         key: value
         for key, value in {
             "name": args.name,
             "slug": args.slug,
             "description": args.description,
-            "markdown": args.markdown,
+            "markdown": markdown,
         }.items()
         if value is not None
     }
@@ -261,10 +274,13 @@ def read_skill_file(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def update_skill_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    content = args.content
+    if args.content_file is not None:
+        content = _read_text_file(args.content_file)
     return client.request(
         "PATCH",
         f"/api/orgs/{args.org_id}/skills/{args.skill_id}/files",
-        json={"path": args.path, "content": args.content},
+        json={"path": args.path, "content": content},
     )
 
 

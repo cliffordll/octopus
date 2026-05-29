@@ -46,34 +46,84 @@ it("shows organization skills and edits the selected skill file", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/skills" && init?.method === "GET") {
-      return respond([{
-        id: "skill-1",
-        orgId: "org-1",
-        key: "review",
-        slug: "review",
-        name: "Review",
-        description: "Review code changes",
-        markdown: "# Review",
-        sourceType: "local",
-        sourceLocator: null,
-        sourceRef: null,
-        trustLevel: "trusted",
-        compatibility: "compatible",
-        fileInventory: [{ path: "SKILL.md", kind: "markdown" }],
-        metadata: null,
-        createdAt: "",
-        updatedAt: "",
-        attachedAgentCount: 1,
-        editable: true,
-        editableReason: null,
-        sourceLabel: "Organization skill",
-        sourceBadge: "local",
-        sourcePath: null,
-        workspaceEditPath: null,
-      }]);
+      return respond([
+        {
+          id: "skill-bundled",
+          orgId: "org-1",
+          key: "rudder/skill-creator",
+          slug: "skill-creator",
+          name: "Skill Creator",
+          description: "Create durable agent skills",
+          markdown: "# Skill Creator",
+          sourceType: "local_path",
+          sourceLocator: "server/skills/bundled/skill-creator",
+          sourceRef: null,
+          trustLevel: "markdown_only",
+          compatibility: "compatible",
+          fileInventory: [{ path: "SKILL.md", kind: "skill" }],
+          metadata: { sourceKind: "rudder_bundled" },
+          createdAt: "",
+          updatedAt: "",
+          attachedAgentCount: 2,
+          editable: false,
+          editableReason: "Bundled by Rudder",
+          sourceLabel: "Bundled by Rudder",
+          sourceBadge: "rudder",
+          sourcePath: "server/skills/bundled/skill-creator",
+          workspaceEditPath: null,
+        },
+        {
+          id: "skill-1",
+          orgId: "org-1",
+          key: "review",
+          slug: "review",
+          name: "Review",
+          description: "Review code changes",
+          markdown: "# Review",
+          sourceType: "local_path",
+          sourceLocator: ".octopus/workspaces/org_org-1/skills/review",
+          sourceRef: null,
+          trustLevel: "markdown_only",
+          compatibility: "compatible",
+          fileInventory: [
+            { path: "SKILL.md", kind: "skill" },
+            { path: "references/checklist.md", kind: "other" },
+          ],
+          metadata: null,
+          createdAt: "",
+          updatedAt: "",
+          attachedAgentCount: 1,
+          editable: true,
+          editableReason: null,
+          sourceLabel: "Local organization skill",
+          sourceBadge: "local",
+          sourcePath: ".octopus/workspaces/org_org-1/skills/review",
+          workspaceEditPath: ".octopus/workspaces/org_org-1/skills/review/SKILL.md",
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/skills/skill-bundled" && init?.method === "GET") {
+      return respond({
+        id: "skill-bundled",
+        name: "Skill Creator",
+        usedByAgents: [
+          { id: "agent-1", name: "Builder", urlKey: "builder", agentRuntimeType: "codex_local", desired: true, actualState: "enabled" },
+          { id: "agent-2", name: "Reviewer", urlKey: "reviewer", agentRuntimeType: "codex_local", desired: false, actualState: "available" },
+        ],
+      });
+    }
+    if (path === "/api/orgs/org-1/skills/skill-bundled/update-status" && init?.method === "GET") {
+      return respond({ supported: false, reason: "Local organization skills do not support upstream update checks.", trackingRef: null, currentRef: null, latestRef: null, hasUpdate: false });
+    }
+    if (path === "/api/orgs/org-1/skills/skill-bundled/files?path=SKILL.md" && init?.method === "GET") {
+      return respond({ skillId: "skill-bundled", path: "SKILL.md", kind: "skill", content: "# Skill Creator", language: "markdown", markdown: true, editable: false });
     }
     if (path === "/api/orgs/org-1/skills/skill-1" && init?.method === "GET") {
-      return respond({ id: "skill-1", name: "Review", usedByAgents: [] });
+      return respond({
+        id: "skill-1",
+        name: "Review",
+        usedByAgents: [{ id: "agent-1", name: "Builder", urlKey: "builder", agentRuntimeType: "codex_local", desired: true, actualState: "enabled" }],
+      });
     }
     if (path === "/api/orgs/org-1/skills/skill-1/update-status" && init?.method === "GET") {
       return respond({ supported: false, reason: null, trackingRef: null, currentRef: null, latestRef: null, hasUpdate: false });
@@ -90,9 +140,24 @@ it("shows organization skills and edits the selected skill file", async () => {
 
   renderApp("/orgs/org-1/skills");
   expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "本地组织技能" })).toBeInTheDocument();
+  expect((await screen.findAllByText("Create durable agent skills")).length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText("Bundled by Rudder").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getByText("2 智能体")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
+  expect(screen.getByText("只读：Bundled by Rudder")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
+  expect(screen.getByText("Builder")).toBeInTheDocument();
+  expect(screen.getByText("Reviewer")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: /Review/ }));
   expect((await screen.findAllByText("Review code changes")).length).toBeGreaterThanOrEqual(1);
   expect(screen.getByRole("button", { name: /Review/ })).toHaveClass("selected");
+  expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review")).toBeInTheDocument();
+  expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review/SKILL.md")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /references\/checklist.md/ })).toBeInTheDocument();
   const editor = await screen.findByLabelText("SKILL.md");
   await userEvent.type(editor, "{End}{Enter}Updated");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
