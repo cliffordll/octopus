@@ -10,6 +10,7 @@ REQUIRED_SKILL_ENTRY_FIELDS = {
     "key",
     "selectionKey",
     "runtimeName",
+    "sourceRole",
     "description",
     "sourceClass",
     "origin",

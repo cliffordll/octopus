@@ -344,6 +344,7 @@ async def test_agent_skills_snapshot_and_sync_routes(
     assert snapshot["desiredSkills"] == ["review"]
     snapshot_entries = {entry["key"]: entry for entry in snapshot["entries"]}
     assert snapshot_entries["review"]["selectionKey"] == "review"
+    assert snapshot_entries["review"]["sourceRole"] == "review"
     assert snapshot_entries["review"]["runtimeName"] == "review"
     assert snapshot_entries["review"]["desired"] is True
     assert snapshot_entries["review"]["state"] == "configured"
