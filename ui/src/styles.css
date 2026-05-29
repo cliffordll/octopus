@@ -60,7 +60,7 @@ small {
 .shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 204px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -72,9 +72,10 @@ small {
 
 .product {
   color: #edf2fa;
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   font-weight: 600;
-  margin: 16px 8px 0;
+  margin: 10px 0 0;
+  text-align: center;
 }
 
 .product-mark {
@@ -87,7 +88,7 @@ small {
   font-weight: 700;
   height: 36px;
   justify-content: center;
-  margin: 4px 8px 0;
+  margin: 4px auto 0;
   width: 36px;
 }
 
@@ -96,8 +97,9 @@ small {
 }
 
 .product-subtitle {
-  margin: 3px 8px 30px;
-  font-size: var(--text-base);
+  font-size: var(--text-xs);
+  margin: 2px 0 24px;
+  text-align: center;
 }
 
 .global-nav {
@@ -111,16 +113,24 @@ small {
   border-radius: 8px;
   color: #aab2c2;
   display: flex;
-  gap: 10px;
-  padding: 9px 10px;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  min-height: 58px;
+  padding: 8px 6px;
+  text-align: center;
 }
 
 .global-nav .nav-disabled {
   align-items: center;
   color: #556175;
   display: flex;
-  gap: 10px;
-  padding: 9px 10px;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  min-height: 58px;
+  padding: 8px 6px;
+  text-align: center;
 }
 
 .global-nav a.active {
@@ -134,19 +144,19 @@ small {
   border-radius: 5px;
   color: #8ebbf1;
   display: inline-flex;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  height: 22px;
+  height: 28px;
   justify-content: center;
-  width: 22px;
+  width: 28px;
 }
 
 .organization-switcher {
   bottom: 22px;
-  left: 20px;
+  left: 12px;
   padding-top: 16px;
   position: absolute;
-  right: 20px;
+  right: 12px;
 }
 
 .organization-trigger {
@@ -156,9 +166,10 @@ small {
   border-radius: 10px;
   color: #e6ebf3;
   display: flex;
-  gap: 10px;
-  padding: 9px;
-  text-align: left;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  text-align: center;
   width: 100%;
 }
 
@@ -181,10 +192,11 @@ small {
 }
 
 .organization-trigger-label {
-  font-size: 13px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  width: 100%;
 }
 
 .organization-trigger-label small {
