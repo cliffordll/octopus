@@ -64,6 +64,28 @@ async def create_organization(
     return row
 
 
+async def increment_issue_counter(
+    session: AsyncSession, organization_id: str
+) -> tuple[int, str] | None:
+    """Atomically bump ``organizations.issue_counter`` and return ``(new_counter, prefix)``.
+
+    Mirrors upstream ``services/issues.ts:797-804``: the UPDATE ... RETURNING
+    bumps the counter and the caller composes ``f"{prefix}-{counter}"`` as the
+    issue identifier. Returns ``None`` when the organization is missing.
+    """
+
+    result = await session.execute(
+        update(Organization)
+        .where(Organization.id == organization_id)
+        .values(issue_counter=Organization.issue_counter + 1)
+        .returning(Organization.issue_counter, Organization.issue_prefix)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    return int(row[0]), str(row[1])
+
+
 async def update_organization(
     session: AsyncSession,
     organization_id: str,

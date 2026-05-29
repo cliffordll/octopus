@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..context_env import apply_runtime_context_env
+from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
@@ -25,7 +26,9 @@ class _RunAttempt:
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
-    command = _string(context.config.get("command")) or "codex"
+    command = resolve_runtime_executable(
+        _string(context.config.get("command")) or "codex"
+    )
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Codex adapter cwd must be a string")
