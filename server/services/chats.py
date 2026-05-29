@@ -46,6 +46,7 @@ from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
 from packages.shared.constants.chat import (
     ChatConversationStatus,
     ChatIssueCreationMode,
+    CHAT_ISSUE_CREATION_MODES,
     ChatMessageKind,
     CHAT_MESSAGE_KINDS,
     ChatMessageRole,
@@ -59,6 +60,7 @@ from packages.shared.types.chat import (
     ChatLinkedEntity,
     ChatMessage,
     ChatPrimaryIssueSummary,
+    ChatRuntimeDescriptor,
     ChatStreamTranscriptEntry,
     ConvertChatToIssuePayload,
     CreateChatAttachmentPayload,
@@ -136,7 +138,8 @@ class ChatService:
                 "summary": payload.get("summary"),
                 "preferred_agent_id": preferred_agent_id,
                 "issue_creation_mode": payload.get(
-                    "issueCreationMode", org.default_chat_issue_creation_mode
+                    "issueCreationMode",
+                    _chat_issue_creation_mode(org.default_chat_issue_creation_mode),
                 ),
                 "plan_mode": payload.get("planMode", False),
                 "created_by_user_id": actor_id if actor_type == "board" else None,
@@ -817,7 +820,7 @@ class ChatService:
             "routedAgentId": row.routed_agent_id,
             "primaryIssueId": row.primary_issue_id,
             "primaryIssue": primary_issue,
-            "issueCreationMode": cast(ChatIssueCreationMode, row.issue_creation_mode),
+            "issueCreationMode": _chat_issue_creation_mode(row.issue_creation_mode),
             "planMode": row.plan_mode,
             "createdByUserId": row.created_by_user_id,
             "lastMessageAt": _iso(row.last_message_at),
@@ -830,17 +833,45 @@ class ChatService:
             "needsAttention": is_unread,
             "resolvedAt": _iso(row.resolved_at),
             "contextLinks": context_links,
-            "chatRuntime": {
+            "chatRuntime": await self._chat_runtime_descriptor(row),
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    async def _chat_runtime_descriptor(
+        self, row: ChatConversationRow
+    ) -> ChatRuntimeDescriptor:
+        agent_id = row.routed_agent_id or row.preferred_agent_id
+        if agent_id is None:
+            return {
                 "sourceType": "none",
                 "sourceLabel": "No runtime selected",
-                "runtimeAgentId": row.preferred_agent_id,
+                "runtimeAgentId": None,
                 "agentRuntimeType": None,
                 "model": None,
                 "available": False,
                 "error": None,
-            },
-            "createdAt": row.created_at.isoformat(),
-            "updatedAt": row.updated_at.isoformat(),
+            }
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None or agent.org_id != row.org_id:
+            return {
+                "sourceType": "agent",
+                "sourceLabel": "Missing chat agent",
+                "runtimeAgentId": agent_id,
+                "agentRuntimeType": None,
+                "model": None,
+                "available": False,
+                "error": "Selected chat agent was not found.",
+            }
+        available = agent.status != "terminated"
+        return {
+            "sourceType": "agent",
+            "sourceLabel": agent.name,
+            "runtimeAgentId": agent.id,
+            "agentRuntimeType": agent.agent_runtime_type,
+            "model": _string(agent.agent_runtime_config.get("model")),
+            "available": available,
+            "error": None if available else "Selected chat agent is terminated.",
         }
 
     async def _context_links_for_conversation(
@@ -997,6 +1028,18 @@ async def _ignore_log(_: str, __: str) -> None:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _string(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _chat_issue_creation_mode(value: object) -> ChatIssueCreationMode:
+    if value == "manual":
+        return "manual_approval"
+    if isinstance(value, str) and value in CHAT_ISSUE_CREATION_MODES:
+        return cast(ChatIssueCreationMode, value)
+    return "manual_approval"
 
 
 def _assistant_kind(value: object) -> str:
