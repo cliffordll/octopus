@@ -37,6 +37,7 @@
 | BUG-21-014 | fixed | P1 | 否 | chat detail `latestReplyPreview` 永远为空，与 messenger threads preview 不一致；UI 列表预览失效 | Step 21 | `pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed |
 | BUG-21-015 | fixed | P2 | 否 | 组织技能列表向 UI 暴露旧品牌 key 和展示文案 | Step 21 | `test_org_skill_list_seeds_bundled_skills` 期望已改为 `skills/<slug>` 与 `built-in` |
 | BUG-21-016 | fixed | P2 | 否 | 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates | Step 21 | contract 测试已覆盖递归 inventory |
+| BUG-21-017 | fixed | P2 | 否 | approval comments / approval-issue 关联 3 个端点 + `approval_comments` 表 + `addApprovalCommentSchema` validator 全部缺失，上游 `approvals.ts:306,645,657` 有 | Step 21 | `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed |
 
 ## 记录模板
 
@@ -293,6 +294,35 @@
   - `packages/database/queries/chats.py` 新增 `get_latest_incoming_message_preview(session, conversation_id) -> str | None`，对齐上游 `incomingMessagePreviewSql` filter：`role != 'user'`、`superseded_at IS NULL`，按 `created_at desc` 取首条；返回 trim 后值。
   - `server/services/chats.py::_to_conversation` 调用此 helper，截到 140 字符。
 - 验证证据：`pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed（覆盖最新 assistant body / 忽略 user role / 140 截断 / 无 incoming message 时 null）；chat 套件 `pytest tests/contract/test_step11_chat_loop.py tests/contract/test_step16_chat_routes.py -q` 回归 8 passed；ruff / pyright 全绿。
+
+### BUG-21-017: approval comments + approval-issue 关联端点/表全部缺失
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但 approval 协作中评论沟通 + approval-与-issue 关联查询完全用不了，UI 审批协作流程无法跑通。
+- 影响范围：`approval_comments` 表、validator、3 个 HTTP 路由（`GET /api/approvals/{id}/issues`、`GET /api/approvals/{id}/comments`、`POST /api/approvals/{id}/comments`）、service 层、shared type 与 api_paths。
+- 复现步骤：
+  1. `GET /api/approvals/{id}/issues` → 404 (修复前 router 未注册)
+  2. `GET /api/approvals/{id}/comments` → 404
+  3. `POST /api/approvals/{id}/comments {body:"hi"}` → 404
+- 预期行为：与上游 `upstream-reference/rudder/server/src/routes/approvals.ts:306,645,657` 三个路由 + `services/approvals.ts:241-278` (`listComments`/`addComment`) + `services/issue-approvals.ts:115-144` (`listIssuesForApproval`) + `packages/db/src/schema/approval_comments.ts` 表对齐。
+- 实际行为（修复前）：路由未注册 → 404；service 无对应方法；DB 无 `approval_comments` 表；validator 无 `validate_add_approval_comment`。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/schema/approval_comments.py` 新表 `ApprovalComment`（id PK、org_id/approval_id/author_agent_id FK、author_user_id text、body text、created_at/updated_at），与上游 3 个 index 对齐。
+  - `packages/database/migrations/versions/20260529_000014_approval_comments.py` Alembic 迁移。
+  - `packages/database/schema/__init__.py` 导出 `ApprovalComment`。
+  - `packages/database/queries/approvals.py` 新增 `list_approval_comments` / `create_approval_comment` / `list_issues_for_approval`（后者通过 `IssueApproval` join `Issue`，按 link 创建时间排序，对齐上游）。
+  - `packages/shared/types/approval.py` 新增 `ApprovalComment` / `AddApprovalCommentPayload` TypedDict。
+  - `packages/shared/validators/approval.py` 新增 `validate_add_approval_comment`（body 非空），对齐上游 `addApprovalCommentSchema = z.object({ body: z.string().min(1) })`。
+  - `packages/shared/api_paths/approvals.py` 新增 `APPROVAL_ISSUES_PATH` 和 `APPROVAL_COMMENTS_PATH`。
+  - `server/services/approvals.py` 新增 `list_issues_for_approval` / `list_comments` / `add_comment`；后者根据 actor_type 设 author_agent_id 或 author_user_id 并写 `approval.comment_added` activity，与上游一致。
+  - `server/routes/approvals.py` 注册 3 个新路由；comments POST 走 actor identity，issues GET 走 organization scope（继承 `_get_approval_detail` 的 `assert_organization_access`）。
+- 验证证据：
+  - `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed（空 list / 创建+列出 / 空 body 422 / linked issues / approval missing 404）；
+  - `pytest tests/contract/ -q` 全套 287 passed 回归；
+  - ruff / pyright 全绿。
+- 已知边界：上游 `services/approvals.ts:254` 在 list/create 时通过 `instanceSettings.censorUsernameInLogs` 做 username redaction；Octopus 当前没 instance_settings 子系统，所以暂不复制 redaction 行为。需要时另起 hotfix。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 

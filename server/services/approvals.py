@@ -7,8 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.approvals import (
     create_approval,
+    create_approval_comment,
     get_approval_by_id,
     link_issues_to_approval,
+    list_approval_comments,
+    list_issues_for_approval,
     list_org_approvals,
     update_approval,
 )
@@ -18,12 +21,21 @@ from packages.database.queries.issues import (
     recover_blocked_linked_issues_for_approval,
 )
 from packages.database.schema import Approval
+from packages.database.schema import ApprovalComment as ApprovalCommentRow
+from packages.database.schema import Issue as IssueRow
 from packages.shared.constants.approval import (
     ApprovalStatus,
     ApprovalType,
     DEFAULT_APPROVAL_STATUS,
 )
+from packages.shared.constants.issue import (
+    IssueOriginKind,
+    IssuePriority,
+    IssueStatus,
+)
 from packages.shared.types.approval import (
+    AddApprovalCommentPayload,
+    ApprovalComment,
     ApprovalDetail,
     ApprovalListItem,
     CreateApprovalPayload,
@@ -31,6 +43,7 @@ from packages.shared.types.approval import (
     ResolveApprovalPayload,
     ResubmitApprovalPayload,
 )
+from packages.shared.types.issue import IssueListItem
 
 APPROVAL_CREATE_TO_COLUMN: dict[str, str] = {
     "type": "type",
@@ -243,6 +256,55 @@ class ApprovalService:
         )
         return _to_detail(row)
 
+    async def list_issues_for_approval(
+        self, approval_id: str
+    ) -> list[IssueListItem] | None:
+        approval = await get_approval_by_id(self._session, approval_id)
+        if approval is None:
+            return None
+        rows = await list_issues_for_approval(self._session, approval_id)
+        return [_to_issue_list_item(row) for row in rows]
+
+    async def list_comments(self, approval_id: str) -> list[ApprovalComment] | None:
+        approval = await get_approval_by_id(self._session, approval_id)
+        if approval is None:
+            return None
+        rows = await list_approval_comments(self._session, approval_id)
+        return [_to_approval_comment(row) for row in rows]
+
+    async def add_comment(
+        self,
+        approval_id: str,
+        payload: AddApprovalCommentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ApprovalComment | None:
+        approval = await get_approval_by_id(self._session, approval_id)
+        if approval is None:
+            return None
+        author_agent_id = actor_id if actor_type == "agent" else None
+        author_user_id = actor_id if actor_type != "agent" else None
+        row = await create_approval_comment(
+            self._session,
+            org_id=approval.org_id,
+            approval_id=approval_id,
+            body=payload["body"],
+            author_agent_id=author_agent_id,
+            author_user_id=author_user_id,
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=approval.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="approval.comment_added",
+            entity_type="approval",
+            entity_id=approval_id,
+            details={"commentId": row.id},
+        )
+        return _to_approval_comment(row)
+
     async def _resolve_approval(
         self,
         approval_id: str,
@@ -317,6 +379,37 @@ def _to_detail(row: Approval) -> ApprovalDetail:
         decisionNote=row.decision_note,
         decidedByUserId=row.decided_by_user_id,
         decidedAt=row.decided_at.isoformat() if row.decided_at else None,
+        updatedAt=row.updated_at.isoformat(),
+    )
+
+
+def _to_approval_comment(row: ApprovalCommentRow) -> ApprovalComment:
+    return ApprovalComment(
+        id=row.id,
+        orgId=row.org_id,
+        approvalId=row.approval_id,
+        authorAgentId=row.author_agent_id,
+        authorUserId=row.author_user_id,
+        body=row.body,
+        createdAt=row.created_at.isoformat(),
+        updatedAt=row.updated_at.isoformat(),
+    )
+
+
+def _to_issue_list_item(row: IssueRow) -> IssueListItem:
+    return IssueListItem(
+        id=row.id,
+        orgId=row.org_id,
+        identifier=row.identifier,
+        title=row.title,
+        status=cast(IssueStatus, row.status),
+        priority=cast(IssuePriority, row.priority),
+        projectId=row.project_id,
+        goalId=row.goal_id,
+        assigneeAgentId=row.assignee_agent_id,
+        assigneeUserId=row.assignee_user_id,
+        originKind=cast(IssueOriginKind, row.origin_kind),
+        originId=row.origin_id,
         updatedAt=row.updated_at.isoformat(),
     )
 
