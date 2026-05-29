@@ -11,6 +11,7 @@ from fastapi import (
     Request,
     status,
 )
+from fastapi.responses import JSONResponse
 
 from packages.shared.api_paths.agents import (
     AGENT_CONFIGURATION_PATH,
@@ -51,8 +52,10 @@ from packages.shared.api_paths.heartbeat import (
     AGENT_WAKEUP_PATH,
     HEARTBEAT_RUN_CANCEL_PATH,
     HEARTBEAT_RUN_EVENTS_PATH,
+    HEARTBEAT_RUN_LOG_PATH,
     HEARTBEAT_RUN_PATH,
     HEARTBEAT_RUN_RETRY_PATH,
+    HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH,
     ORG_HEARTBEAT_RUNS_PATH,
 )
 from packages.shared.types.agent import (
@@ -70,6 +73,7 @@ from packages.shared.types.agent import (
     ResetAgentSessionResult,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, HeartbeatRunEvent
+from packages.shared.types.workspace import WorkspaceOperation
 from packages.shared.validators.agent import (
     validate_agent_private_skill,
     validate_agent_skills_enable,
@@ -93,9 +97,11 @@ from ..dependencies.access import (
 from ..dependencies.agent_instructions import get_agent_instructions_service
 from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
+from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
 from ..services.agent_instructions import AgentInstructionsService
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["agents"])
 
@@ -893,6 +899,44 @@ async def list_heartbeat_run_events_route(
         )
     assert_organization_access(request, run["orgId"])
     return await heartbeat.list_events(runId, after_seq=afterSeq, limit=limit)
+
+
+@router.get(HEARTBEAT_RUN_LOG_PATH)
+async def get_heartbeat_run_log_route(
+    runId: str,
+    request: Request,
+    offset: int = 0,
+    limitBytes: int = 256_000,
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> JSONResponse:
+    run = await heartbeat.get(runId)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
+        )
+    assert_organization_access(request, run["orgId"])
+    log = await heartbeat.read_log(runId, offset=offset, limit_bytes=limitBytes)
+    assert log is not None
+    return JSONResponse(
+        log,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@router.get(HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH)
+async def list_heartbeat_run_workspace_operations_route(
+    runId: str,
+    request: Request,
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    workspaces: WorkspaceService = Depends(get_workspace_service),
+) -> list[WorkspaceOperation]:
+    run = await heartbeat.get(runId)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
+        )
+    assert_organization_access(request, run["orgId"])
+    return await workspaces.list_operations_for_run(runId)
 
 
 @router.post(HEARTBEAT_RUN_CANCEL_PATH)
