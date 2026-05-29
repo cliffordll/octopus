@@ -86,6 +86,7 @@ uv run python -m cli heartbeat run --agent-id <agent-id>
 uv run python -m cli heartbeat list --org-id <org-id> --agent-id <agent-id>
 uv run python -m cli heartbeat get <run-id>
 uv run python -m cli heartbeat events <run-id>
+uv run python -m cli heartbeat debug <run-id>
 ```
 
 ## 本项目已有扩展
