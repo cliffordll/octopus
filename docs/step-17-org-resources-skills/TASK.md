@@ -46,6 +46,15 @@ Step 14 已负责本地 runtime agent 的默认 instructions bundle 初始化、
 
 Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时只记录兼容边界，不实现自定义业务模型。
 
+已确认的 Step 17B organization skills 上游证据：
+
+- `D:\coding\rudder\packages\db\src\schema\organization_skills.ts`：定义 `organization_skills` 表，字段为 `id`、`orgId`、`key`、`slug`、`name`、`description`、`markdown`、`sourceType`、`sourceLocator`、`sourceRef`、`trustLevel`、`compatibility`、`fileInventory`、`metadata`、`createdAt`、`updatedAt`。
+- `D:\coding\rudder\packages\shared\src\types\organization-skill.ts`：定义 list/detail/file/update-status/import/scan 相关 response shape。
+- `D:\coding\rudder\packages\shared\src\validators\organization-skill.ts`：定义 create、file update、import、scan-local、scan-projects validators。
+- `D:\coding\rudder\server\src\routes\organization-skills.ts`：暴露 `/api/orgs/:orgId/skills`、`/:skillId`、`/:skillId/files`、`/:skillId/update-status`、`/import`、`/scan-local`、`/scan-projects`、`/:skillId/install-update`。
+- `D:\coding\rudder\server\src\services\knowledge-portability\organization-skills.ts`：实现 organization skill library、agent skill catalog、file read/update、runtime materialization、import/scan/delete。
+- `D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts`：运行时语义包含 shared organization skills 目录。
+
 ## 任务拆分
 
 ### 17A: Organization Resources CRUD
@@ -112,11 +121,39 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 
 开发前先确认上游 schema/routes/services/shared types/validators/tests，再落地。不能直接把 Step 14 runtime home skills 当成 organization skills 数据库模型。
 
-- 明确 organization skill 的数据库来源与文件来源。
-- 实现 create/update/delete/list/detail API。
-- 记录 skill 创建、更新、删除 activity。
-- 明确与 `agentRuntimeConfig.skillsRootPath`、bundled skills、agent-home skills 的优先级关系。
-- 增加 contract/workflow tests。
+已完成基础闭环：
+
+- 新增 `organization_skills` schema/migration/query，字段对齐上游核心表。
+- 新增 shared path/type/validator：
+  - `GET /api/orgs/{orgId}/skills`
+  - `POST /api/orgs/{orgId}/skills`
+  - `GET /api/orgs/{orgId}/skills/{skillId}`
+  - `GET /api/orgs/{orgId}/skills/{skillId}/files?path=SKILL.md`
+  - `PATCH /api/orgs/{orgId}/skills/{skillId}/files`
+  - `GET /api/orgs/{orgId}/skills/{skillId}/update-status`
+  - `DELETE /api/orgs/{orgId}/skills/{skillId}`
+- 本地 organization skill 文件落盘到 `.octopus/workspaces/org_<orgId>/skills/<slug>/SKILL.md`。
+- Agent runtime config 默认把 `skillsRootPath` 指向组织 skills 根目录，使 Step 14 已实现的 runtime skills snapshot/sync/enable 能发现 organization skill。
+- 记录 activity：
+  - `organization.skill_created`
+  - `organization.skill_file_updated`
+  - `organization.skill_deleted`
+- 增加 contract tests 覆盖 path/validator、CRUD/file、activity、scope guard、path guard、agent skills snapshot 消费。
+
+本步骤后续子项：
+
+- `POST /api/orgs/{orgId}/skills/import`：导入 skills.sh/GitHub/url/local source。
+- `POST /api/orgs/{orgId}/skills/scan-local`：扫描本地 roots 并导入。
+- `POST /api/orgs/{orgId}/skills/scan-projects`：扫描组织 workspace/project workspace 中的 skill packages。
+- `POST /api/orgs/{orgId}/skills/{skillId}/install-update`：对可更新来源执行 update install。
+- organization skill reference 解析：支持 id、key、slug、public ref 等多种 selection reference。
+- organization skills 与 bundled/community preset seeding 的完整上游兼容。
+
+不做：
+
+- 不修改 UI/CLI。
+- 不在本阶段实现真实远程下载、registry 查询或 GitHub clone；这些需要独立网络/安全边界。
+- 不把 organization skills 写入 agent-private `AGENT_HOME/skills`；agent-private skill 仍归 Step 14 已有能力。
 
 ### 17C: Agent Skills Snapshot 元数据兼容
 
