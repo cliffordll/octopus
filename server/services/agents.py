@@ -249,12 +249,15 @@ def _apply_desired_skills_to_entries(
 
 
 def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+    organization_root = str(organization_skills_root(row.org_id))
+    config = dict(row.agent_runtime_config)
+    config.setdefault("skillsRootPath", organization_root)
     return {
-        **row.agent_runtime_config,
-        "skillsRootPath": str(organization_skills_root(row.org_id)),
+        **config,
         "_octopus": {
             "orgId": row.org_id,
             "agentId": row.id,
+            "organizationSkillsRootPath": organization_root,
             "agentSkillsRootPath": str(_agent_skills_root(row)),
         },
     }
