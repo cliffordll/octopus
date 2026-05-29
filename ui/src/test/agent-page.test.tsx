@@ -211,6 +211,36 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
+it("validates opencode local model before saving agent configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, agentRuntimeType: "opencode_local" });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({ method: "PATCH" }),
+  );
+
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"model":"openai/gpt-5"'),
+    }),
+  );
+});
+
 it("shows configuration revisions, rolls back, and resets runtime session", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

@@ -274,6 +274,41 @@ def test_agent_create_and_update_cover_step14_fields() -> None:
     )
 
 
+def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-1"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "OpenCode Agent",
+                "--role",
+                "engineer",
+                "--runtime",
+                "opencode_local",
+                "--model",
+                "openai/gpt-5",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert requests[0].read() == (
+        b'{"name":"OpenCode Agent","role":"engineer",'
+        b'"agentRuntimeType":"opencode_local",'
+        b'"agentRuntimeConfig":{"model":"openai/gpt-5"}}'
+    )
+
+
 def test_agent_adapter_commands_cover_step14_routes() -> None:
     requests: list[httpx.Request] = []
 

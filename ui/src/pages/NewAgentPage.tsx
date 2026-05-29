@@ -28,6 +28,16 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntimeType, model: string): Record<string, unknown> {
+  if (runtime !== "opencode_local") return config;
+  const trimmed = model.trim() || (typeof config.model === "string" ? config.model.trim() : "");
+  const [provider, modelName] = trimmed.split("/", 2);
+  if (!trimmed || !provider?.trim() || !modelName?.trim()) {
+    throw new Error("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。");
+  }
+  return { ...config, model: trimmed };
+}
+
 function parseCsv(value: string): string[] {
   return value
     .split(",")
@@ -44,6 +54,7 @@ export function NewAgentPage() {
   const [capabilities, setCapabilities] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
+  const [opencodeModel, setOpencodeModel] = useState("");
   const [metadata, setMetadata] = useState("{}");
   const [configurationError, setConfigurationError] = useState("");
   const [desiredSkills, setDesiredSkills] = useState("");
@@ -64,7 +75,7 @@ export function NewAgentPage() {
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
         agentRuntimeType: runtime,
-        agentRuntimeConfig: readJsonObject(agentRuntimeConfig, "Agent runtime config"),
+        agentRuntimeConfig: mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, opencodeModel),
         ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
         ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
@@ -79,7 +90,7 @@ export function NewAgentPage() {
     if (!name.trim()) return;
     try {
       setConfigurationError("");
-      readJsonObject(agentRuntimeConfig, "Agent runtime config");
+      mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, opencodeModel);
       if (metadata.trim() && metadata.trim() !== "{}") readJsonObject(metadata, "Metadata");
       create.mutate();
     } catch (error) {
@@ -131,6 +142,16 @@ export function NewAgentPage() {
             {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
+        {runtime === "opencode_local" && (
+          <label>
+            OpenCode model
+            <input
+              placeholder="openai/gpt-5"
+              value={opencodeModel}
+              onChange={(event) => setOpencodeModel(event.target.value)}
+            />
+          </label>
+        )}
         <label>
           月度预算（cents）
           <input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} />
