@@ -66,7 +66,7 @@ export function ChatsPage() {
     event.currentTarget.form?.requestSubmit();
   }
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Messages</p><h1>新对话</h1></div>
       </header>

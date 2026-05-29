@@ -165,7 +165,7 @@ export function HeartbeatRunsPage() {
   const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       {agents.error && <ErrorNotice error={agents.error} />}
       {runs.error && <ErrorNotice error={runs.error} />}
       {setHeartbeatEnabled.error && <ErrorNotice error={setHeartbeatEnabled.error} />}

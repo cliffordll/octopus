@@ -148,7 +148,7 @@ export function IssuePage() {
   }
   if (issue.error) return <ErrorNotice error={issue.error} />;
   return (
-    <IssuesWorkspace orgId={orgId}>
+    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {issue.data && (
         <div className="issue-detail-layout">
           <main className="issue-detail-main">

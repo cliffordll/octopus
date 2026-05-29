@@ -25,7 +25,7 @@ export function MessengerPage() {
   });
 
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Messenger</p>
