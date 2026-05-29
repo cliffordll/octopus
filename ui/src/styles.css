@@ -110,6 +110,7 @@ small {
 
 .global-nav a {
   align-items: center;
+  border: 1px solid transparent;
   border-radius: 8px;
   color: #aab2c2;
   display: flex;
@@ -119,6 +120,7 @@ small {
   min-height: 58px;
   padding: 8px 6px;
   text-align: center;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 
 .global-nav .nav-disabled {
@@ -134,8 +136,27 @@ small {
 }
 
 .global-nav a.active {
-  background: #151b26;
+  background: linear-gradient(180deg, #182235, #111a29);
+  border-color: #2f7bd6;
+  box-shadow: inset 3px 0 0 #63b3ff;
   color: #f2f5fb;
+}
+
+.global-nav a:hover {
+  background: #111722;
+  border-color: #253247;
+  color: #d8e2f1;
+}
+
+.global-nav a.active:hover {
+  background: linear-gradient(180deg, #182235, #111a29);
+  border-color: #2f7bd6;
+  color: #f2f5fb;
+}
+
+.global-nav a.active .nav-icon {
+  background: #1f69b9;
+  color: #f6fbff;
 }
 
 .nav-icon {
@@ -148,6 +169,7 @@ small {
   font-weight: 600;
   height: 28px;
   justify-content: center;
+  transition: background .14s ease, color .14s ease;
   width: 28px;
 }
 
@@ -282,7 +304,7 @@ small {
 .org-content {
   min-width: 0;
   overflow: auto;
-  padding: 32px 36px 42px;
+  padding: 0;
   width: 100%;
 }
 
@@ -293,6 +315,13 @@ small {
 
 .organization-settings {
   margin: 0 auto;
+  padding: 32px 36px 42px;
+}
+
+.tertiary-detail-frame {
+  min-height: 100%;
+  padding: 32px 36px 42px;
+  width: 100%;
 }
 
 .organization-empty-state {
@@ -521,14 +550,15 @@ small {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  max-width: 860px;
 }
 
 .project-tab-panel {
-  width: 100%;
+  max-width: 896px;
 }
 
 .project-tab-panel-wide {
-  width: 100%;
+  max-width: 1040px;
 }
 
 .project-property-list {
@@ -1865,6 +1895,8 @@ small {
   gap: 8px;
   justify-content: flex-start;
   padding: 9px 11px;
+  position: relative;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 
 .local-nav .local-nav-primary {
@@ -1895,15 +1927,39 @@ small {
   font-weight: 500;
 }
 
-.local-nav a.active, .local-nav a:hover {
-  background: #171e2b;
-  color: #eff3f9;
+.local-nav a:hover {
+  background: #121a27;
+  border-color: #253247;
+  color: #d9e3f1;
 }
 
-.local-nav .local-nav-project.active, .local-nav .local-nav-project:hover {
-  background: #171e2b;
-  border-color: transparent;
-  color: #eff3f9;
+.local-nav a.active {
+  background: linear-gradient(90deg, rgba(47, 123, 214, .24), rgba(23, 30, 43, .86));
+  border-color: #2f7bd6;
+  color: #f5f8fd;
+}
+
+.local-nav a.active::before {
+  background: #63b3ff;
+  border-radius: 999px;
+  bottom: 8px;
+  content: "";
+  left: 5px;
+  position: absolute;
+  top: 8px;
+  width: 3px;
+}
+
+.local-nav .local-nav-project:hover {
+  background: #121a27;
+  border-color: #253247;
+  color: #d9e3f1;
+}
+
+.local-nav .local-nav-project.active {
+  background: rgba(47, 123, 214, .2);
+  border-color: #2f7bd6;
+  color: #f5f8fd;
 }
 
 .context-nav {
@@ -1941,16 +1997,35 @@ small {
   gap: 8px;
   justify-content: flex-start;
   padding: 9px 10px;
+  position: relative;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 
 .context-nav a .badge {
   margin-left: auto;
 }
 
-.context-nav a.active, .context-nav a:hover {
-  background: #171e2b;
-  border-color: transparent;
-  color: #eff3f9;
+.context-nav a:hover {
+  background: #121a27;
+  border-color: #253247;
+  color: #d9e3f1;
+}
+
+.context-nav a.active {
+  background: linear-gradient(90deg, rgba(47, 123, 214, .24), rgba(23, 30, 43, .86));
+  border-color: #2f7bd6;
+  color: #f5f8fd;
+}
+
+.context-nav a.active::before {
+  background: #63b3ff;
+  border-radius: 999px;
+  bottom: 8px;
+  content: "";
+  left: 5px;
+  position: absolute;
+  top: 8px;
+  width: 3px;
 }
 
 .context-nav a span:first-child {
@@ -1978,7 +2053,14 @@ small {
   font-weight: 600;
   height: 22px;
   justify-content: center;
+  transition: background .14s ease, color .14s ease;
   width: 22px;
+}
+
+.local-nav a.active .context-entry-icon,
+.context-nav a.active .context-entry-icon {
+  background: #1f69b9;
+  color: #f6fbff;
 }
 
 .project-entry-icon {
@@ -2333,7 +2415,8 @@ button.danger {
   display: grid;
   gap: 24px;
   grid-template-columns: minmax(0, 1fr) 280px;
-  width: 100%;
+  margin: 0 auto;
+  max-width: 1180px;
 }
 
 .issue-detail-main {
@@ -2664,6 +2747,7 @@ pre {
 .approval-thread {
   display: grid;
   gap: 14px;
+  max-width: 860px;
 }
 
 .approval-card {
@@ -2724,7 +2808,7 @@ pre {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) 320px;
-  width: 100%;
+  max-width: 1040px;
 }
 
 .approval-detail,
@@ -2772,27 +2856,43 @@ pre {
 .detail-tabs {
   border-bottom: 1px solid #202938;
   display: flex;
-  gap: 20px;
+  gap: 8px;
   margin-bottom: 20px;
 }
 
 .detail-tabs a {
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
   color: #8c96a9;
   font-size: 13px;
-  padding: 11px 2px;
+  padding: 10px 13px;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 
 .detail-tabs button {
   background: transparent;
-  border-radius: 0;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
   color: #8c96a9;
   font-size: 13px;
-  padding: 11px 2px;
+  padding: 10px 13px;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+}
+
+.detail-tabs a:hover, .detail-tabs button:hover {
+  background: #111827;
+  border-color: #253247;
+  border-bottom-color: #3b82d6;
+  color: #cfe3ff;
 }
 
 .detail-tabs a.active, .detail-tabs button.active {
-  border-bottom: 2px solid #73b6ff;
-  color: #dce9fb;
+  background: rgba(47, 123, 214, .18);
+  border-color: #2f7bd6;
+  border-bottom-color: #73b6ff;
+  color: #f5f9ff;
 }
 
 .agent-dashboard {
@@ -2813,7 +2913,7 @@ pre {
 
 .agent-config-card,
 .agent-create-form {
-  width: 100%;
+  max-width: 720px;
 }
 
 .agent-property-list {
@@ -4262,7 +4362,7 @@ pre {
 }
 
 .project-configuration, .project-resources, .project-issues {
-  width: 100%;
+  max-width: 760px;
 }
 
 .agent-empty-state {
@@ -4305,7 +4405,7 @@ pre {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 145px);
-  width: 100%;
+  max-width: 860px;
 }
 
 .chat-thread-shell {

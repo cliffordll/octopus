@@ -1401,10 +1401,13 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
 }
 
 export function OrgWorkspace({ children, contentClassName = "", orgId }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
+  const isFullBleed = contentClassName.split(" ").includes("org-content-full");
   return (
     <div className="org-workspace">
       <OrgNavigation orgId={orgId} />
-      <div className={`org-content ${contentClassName}`}>{children}</div>
+      <div className={`org-content ${contentClassName}`}>
+        {isFullBleed ? children : <div className="tertiary-detail-frame">{children}</div>}
+      </div>
     </div>
   );
 }
