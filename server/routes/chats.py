@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import StreamingResponse
 
 from packages.shared.api_paths.chats import (
@@ -26,6 +27,7 @@ from packages.shared.types.chat import (
     ChatContextLink,
     ChatConversation,
     ChatMessage,
+    CreateChatAttachmentPayload,
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
@@ -46,6 +48,7 @@ from ..dependencies.access import (
 )
 from ..dependencies.chats import get_chat_service
 from ..services.chats import ChatAvailabilityError, ChatService
+from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["chats"])
 _ACTIVE_STREAM_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
@@ -241,7 +244,6 @@ async def create_chat_attachment_route(
     orgId: str,
     chatId: str,
     request: Request,
-    body: dict[str, Any] = Body(...),
     _: None = Depends(require_organization_access),
     service: ChatService = Depends(get_chat_service),
 ) -> ChatAttachment:
@@ -254,7 +256,7 @@ async def create_chat_attachment_route(
             detail="Chat conversation does not belong to organization",
         )
     try:
-        payload = validate_create_chat_attachment_metadata(body)
+        payload = await _attachment_payload_from_request(request, orgId)
         actor = require_actor_identity(request)
         attachment = await service.create_attachment(
             orgId,
@@ -275,6 +277,59 @@ async def create_chat_attachment_route(
             detail="Chat conversation not found",
         )
     return attachment
+
+
+async def _attachment_payload_from_request(
+    request: Request, org_id: str
+) -> CreateChatAttachmentPayload:
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("multipart/form-data"):
+        return await _multipart_attachment_payload(request, org_id)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise ValueError("Attachment metadata must be an object")
+    return validate_create_chat_attachment_metadata(body)
+
+
+async def _multipart_attachment_payload(
+    request: Request, org_id: str
+) -> CreateChatAttachmentPayload:
+    form = await request.form()
+    message_id = form.get("messageId")
+    upload = form.get("file")
+    if not isinstance(message_id, str) or not message_id.strip():
+        raise ValueError("'messageId' is required")
+    if not isinstance(upload, StarletteUploadFile):
+        raise ValueError("'file' is required")
+    body = await upload.read()
+    if not body:
+        raise ValueError("'file' must not be empty")
+    storage = _storage_for_request(request)
+    stored = await storage.put_file(
+        org_id=org_id,
+        namespace="chat/attachments",
+        original_filename=upload.filename,
+        content_type=upload.content_type or "application/octet-stream",
+        body=body,
+    )
+    return validate_create_chat_attachment_metadata(
+        {
+            "messageId": message_id,
+            "provider": stored["provider"],
+            "objectKey": stored["objectKey"],
+            "contentType": stored["contentType"],
+            "byteSize": stored["byteSize"],
+            "sha256": stored["sha256"],
+            "originalFilename": stored["originalFilename"],
+        }
+    )
+
+
+def _storage_for_request(request: Request) -> StorageService:
+    storage = getattr(request.app.state, "storage_service", None)
+    if storage is not None:
+        return storage
+    return get_storage_service()
 
 
 @router.post(CHAT_CONVERT_TO_ISSUE_PATH, status_code=status.HTTP_201_CREATED)

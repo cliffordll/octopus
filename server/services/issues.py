@@ -10,13 +10,18 @@ from packages.database.queries.issue_comments import (
     insert_issue_comment,
     list_issue_comments,
 )
+from packages.database.queries.issue_attachments import (
+    create_issue_attachment,
+    delete_issue_attachment,
+    list_issue_attachments,
+)
 from packages.database.queries.issues import (
     create_issue,
     get_issue_by_id,
     list_org_issues,
     update_issue,
 )
-from packages.database.schema import Issue, IssueComment
+from packages.database.schema import Asset, Issue, IssueAttachment, IssueComment
 from packages.shared.constants.issue import (
     IssueOriginKind,
     IssuePriority,
@@ -33,6 +38,9 @@ from packages.shared.types.issue import (
     IssueDetail,
     IssueListItem,
     UpdateIssuePayload,
+)
+from packages.shared.types.issue_attachment import (
+    IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
 from .goals import GoalService
@@ -114,6 +122,22 @@ class IssueService:
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
         rows = await list_issue_comments(self._session, issue_id)
         return list(rows)
+
+    async def list_attachments(self, issue_id: str) -> list[IssueAttachmentType]:
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            raise ValueError("Issue not found")
+        rows = await list_issue_attachments(self._session, issue_id)
+        return [_to_attachment(row, asset) for row, asset in rows]
+
+    async def get_attachment(self, attachment_id: str) -> IssueAttachmentType | None:
+        from packages.database.queries.issue_attachments import get_issue_attachment
+
+        current = await get_issue_attachment(self._session, attachment_id)
+        if current is None:
+            return None
+        attachment, asset = current
+        return _to_attachment(attachment, asset)
 
     async def create_issue(
         self,
@@ -264,6 +288,82 @@ class IssueService:
         )
         return comment
 
+    async def create_attachment(
+        self,
+        issue_id: str,
+        payload: Mapping[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> IssueAttachmentType:
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            raise ValueError("Issue not found")
+        comment_id = payload.get("issueCommentId")
+        if isinstance(comment_id, str) and comment_id:
+            comment = await self._session.get(IssueComment, comment_id)
+            if comment is None or comment.issue_id != issue.id:
+                raise ValueError("Issue comment not found")
+        attachment, asset = await create_issue_attachment(
+            self._session,
+            asset_fields={
+                "org_id": issue.org_id,
+                "provider": payload["provider"],
+                "object_key": payload["objectKey"],
+                "content_type": payload["contentType"],
+                "byte_size": payload["byteSize"],
+                "sha256": payload["sha256"],
+                "original_filename": payload.get("originalFilename"),
+                "created_by_agent_id": actor_id if actor_type == "agent" else None,
+                "created_by_user_id": actor_id if actor_type != "agent" else None,
+            },
+            attachment_fields={
+                "org_id": issue.org_id,
+                "issue_id": issue.id,
+                "issue_comment_id": comment_id,
+                "usage": payload.get("usage", "attachment"),
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.attachment_added",
+            entity_type="issue",
+            entity_id=issue.id,
+            details={
+                "attachmentId": attachment.id,
+                "issueCommentId": comment_id,
+                "originalFilename": asset.original_filename,
+                "contentType": asset.content_type,
+            },
+        )
+        return _to_attachment(attachment, asset)
+
+    async def delete_attachment(
+        self,
+        attachment_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> tuple[IssueAttachmentType, Asset, bool] | None:
+        deleted = await delete_issue_attachment(self._session, attachment_id)
+        if deleted is None:
+            return None
+        attachment, asset, should_delete_asset = deleted
+        await insert_activity_log(
+            self._session,
+            org_id=attachment.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.attachment_deleted",
+            entity_type="issue",
+            entity_id=attachment.issue_id,
+            details={"attachmentId": attachment.id, "assetId": asset.id},
+        )
+        return _to_attachment(attachment, asset), asset, should_delete_asset
+
     async def _to_detail(self, row: Issue) -> IssueDetail:
         detail = _to_detail(row)
         detail["workProducts"] = await WorkspaceService(
@@ -316,3 +416,23 @@ def _to_detail(row: Issue) -> IssueDetail:
         createdAt=row.created_at.isoformat(),
         workProducts=[],
     )
+
+
+def _to_attachment(row: IssueAttachment, asset: Asset) -> IssueAttachmentType:
+    return {
+        "id": row.id,
+        "orgId": row.org_id,
+        "issueId": row.issue_id,
+        "issueCommentId": row.issue_comment_id,
+        "assetId": row.asset_id,
+        "usage": row.usage,
+        "provider": asset.provider,
+        "objectKey": asset.object_key,
+        "contentType": asset.content_type,
+        "byteSize": asset.byte_size,
+        "sha256": asset.sha256,
+        "originalFilename": asset.original_filename,
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+        "contentPath": f"/api/assets/{row.asset_id}/content",
+    }

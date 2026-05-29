@@ -10,7 +10,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Asset, Base, Organization
+from packages.database.schema import (
+    Asset,
+    Base,
+    ChatConversation,
+    ChatMessage,
+    Issue,
+    Organization,
+)
 from server.app import create_app
 
 
@@ -57,6 +64,50 @@ async def _seed_org(factory: async_sessionmaker) -> str:
         )
         await session.commit()
     return org_id
+
+
+async def _seed_chat(factory: async_sessionmaker) -> tuple[str, str, str]:
+    org_id = await _seed_org(factory)
+    conversation_id = str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            ChatConversation(
+                id=conversation_id,
+                org_id=org_id,
+                title="Storage chat",
+            )
+        )
+        session.add(
+            ChatMessage(
+                id=message_id,
+                org_id=org_id,
+                conversation_id=conversation_id,
+                role="user",
+                kind="message",
+                status="completed",
+                body="attach this",
+            )
+        )
+        await session.commit()
+    return org_id, conversation_id, message_id
+
+
+async def _seed_issue(factory: async_sessionmaker) -> tuple[str, str]:
+    org_id = await _seed_org(factory)
+    issue_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Storage issue",
+                status="todo",
+                priority="medium",
+            )
+        )
+        await session.commit()
+    return org_id, issue_id
 
 
 async def test_local_storage_service_put_get_head_delete(tmp_path: Path) -> None:
@@ -146,3 +197,138 @@ async def test_asset_content_route_rejects_missing_asset(
 
     assert code == 404
     assert b"Asset not found" in body
+
+
+async def test_chat_attachment_multipart_upload_persists_asset_and_hydrates_message(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _ = app
+    org_id, conversation_id, message_id = await _seed_chat(factory)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        upload_response = await client.post(
+            f"/api/orgs/{org_id}/chats/{conversation_id}/attachments",
+            data={"messageId": message_id},
+            files={"file": ("note.txt", b"chat attachment", "text/plain")},
+        )
+        messages_response = await client.get(f"/api/chats/{conversation_id}/messages")
+
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+    assert attachment["messageId"] == message_id
+    assert attachment["contentType"] == "text/plain"
+    assert attachment["byteSize"] == len(b"chat attachment")
+    assert attachment["originalFilename"] == "note.txt"
+    assert attachment["contentPath"] == f"/api/assets/{attachment['assetId']}/content"
+
+    assert messages_response.status_code == 200
+    messages = messages_response.json()
+    assert messages[0]["attachments"][0]["assetId"] == attachment["assetId"]
+
+    code, headers, body = await _request(application, "GET", attachment["contentPath"])
+    assert code == 200
+    assert headers["content-type"].startswith("text/plain")
+    assert body == b"chat attachment"
+
+
+async def test_chat_attachment_multipart_upload_rejects_empty_file(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _ = app
+    org_id, conversation_id, message_id = await _seed_chat(factory)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/api/orgs/{org_id}/chats/{conversation_id}/attachments",
+            data={"messageId": message_id},
+            files={"file": ("empty.txt", b"", "text/plain")},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "'file' must not be empty"
+
+
+async def test_issue_attachment_upload_list_download_and_delete(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _ = app
+    org_id, issue_id = await _seed_issue(factory)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        upload_response = await client.post(
+            f"/api/orgs/{org_id}/issues/{issue_id}/attachments",
+            data={"usage": "evidence"},
+            files={"file": ("evidence.txt", b"issue evidence", "text/plain")},
+        )
+        list_response = await client.get(f"/api/issues/{issue_id}/attachments")
+
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+    assert attachment["issueId"] == issue_id
+    assert attachment["usage"] == "evidence"
+    assert attachment["contentPath"] == f"/api/assets/{attachment['assetId']}/content"
+    assert list_response.status_code == 200
+    assert list_response.json() == [attachment]
+
+    code, _, body = await _request(application, "GET", attachment["contentPath"])
+    assert code == 200
+    assert body == b"issue evidence"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        delete_response = await client.delete(f"/api/attachments/{attachment['id']}")
+    assert delete_response.status_code == 204
+
+    missing_code, _, missing_body = await _request(
+        application, "GET", attachment["contentPath"]
+    )
+    assert missing_code == 404
+    assert b"Asset not found" in missing_body
+
+
+async def test_runtime_work_product_content_is_archived_as_asset(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    from server.services.workspaces import WorkspaceService
+
+    application, factory, _ = app
+    org_id, issue_id = await _seed_issue(factory)
+    async with factory() as session:
+        products = await WorkspaceService(session).persist_run_work_products(
+            run_id=str(uuid.uuid4()),
+            context_snapshot={"issueId": issue_id},
+            products=[
+                {
+                    "title": "Runtime report",
+                    "type": "artifact",
+                    "provider": "rudder",
+                    "content": "runtime report body",
+                    "contentType": "text/plain",
+                    "filename": "runtime-report.txt",
+                }
+            ],
+        )
+        await session.commit()
+
+    assert len(products) == 1
+    product = products[0]
+    assert product["orgId"] == org_id
+    asset_id = product.get("assetId")
+    content_path = product.get("contentPath")
+    metadata = product.get("metadata") or {}
+    assert asset_id is not None
+    assert content_path is not None
+    assert content_path == f"/api/assets/{asset_id}/content"
+    assert metadata["contentType"] == "text/plain"
+
+    code, headers, body = await _request(application, "GET", content_path)
+    assert code == 200
+    assert headers["content-type"].startswith("text/plain")
+    assert body == b"runtime report body"
