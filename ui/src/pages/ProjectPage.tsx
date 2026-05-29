@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
-import type { ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
+import type { OrganizationResource, ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
@@ -18,6 +18,7 @@ const ROLES: ProjectResourceRole[] = [
   "deliverable",
   "background",
 ];
+const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 
 function formatJson(value: Record<string, unknown> | null | undefined): string {
   return value ? JSON.stringify(value, null, 2) : "";
@@ -94,6 +95,13 @@ export function ProjectPage() {
   const [editingRole, setEditingRole] = useState<ProjectResourceRole>("working_set");
   const [editingNote, setEditingNote] = useState("");
   const [editingSortOrder, setEditingSortOrder] = useState("");
+  const [newResourceName, setNewResourceName] = useState("");
+  const [newResourceKind, setNewResourceKind] = useState<OrganizationResource["kind"]>("url");
+  const [newResourceLocator, setNewResourceLocator] = useState("");
+  const [newResourceDescription, setNewResourceDescription] = useState("");
+  const [newResourceRole, setNewResourceRole] = useState<ProjectResourceRole>("reference");
+  const [newResourceNote, setNewResourceNote] = useState("");
+  const [newResourceSortOrder, setNewResourceSortOrder] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const project = useQuery({
@@ -177,6 +185,31 @@ export function ProjectPage() {
       void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
     },
   });
+  const createInlineResource = useMutation({
+    mutationFn: () =>
+      projectsApi.update(projectId, {
+        newResources: [
+          {
+            name: newResourceName.trim(),
+            kind: newResourceKind,
+            locator: newResourceLocator.trim(),
+            description: newResourceDescription.trim() || null,
+            role: newResourceRole,
+            note: newResourceNote.trim() || null,
+            ...(newResourceSortOrder.trim() ? { sortOrder: Number(newResourceSortOrder) } : {}),
+          },
+        ],
+      }),
+    onSuccess: () => {
+      setNewResourceName("");
+      setNewResourceLocator("");
+      setNewResourceDescription("");
+      setNewResourceNote("");
+      setNewResourceSortOrder("");
+      void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
+    },
+  });
   const removeProject = useMutation({
     mutationFn: () => projectsApi.remove(projectId),
     onSuccess: () => {
@@ -202,6 +235,10 @@ export function ProjectPage() {
   function submitResourceEdit(event: FormEvent) {
     event.preventDefault();
     if (editingResourceId) updateResource.mutate();
+  }
+  function submitInlineResource(event: FormEvent) {
+    event.preventDefault();
+    if (newResourceName.trim() && newResourceLocator.trim()) createInlineResource.mutate();
   }
   const projectIssues = issues.data ?? [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
@@ -340,6 +377,7 @@ export function ProjectPage() {
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
             {updateResource.error && <ErrorNotice error={updateResource.error} />}
+            {createInlineResource.error && <ErrorNotice error={createInlineResource.error} />}
             <div className="project-resource-summary">
               {ROLES.map((item) => (
                 <div className="summary-metric" key={item}>
@@ -422,6 +460,46 @@ export function ProjectPage() {
               </label>
               {addResource.error && <ErrorNotice error={addResource.error} />}
               <button type="submit">添加资源</button>
+            </form>
+            <form className="form resource-form project-inline-resource-form" onSubmit={submitInlineResource}>
+              <label>
+                资源名称
+                <input value={newResourceName} onChange={(event) => setNewResourceName(event.target.value)} required />
+              </label>
+              <label>
+                资源类型
+                <select value={newResourceKind} onChange={(event) => setNewResourceKind(event.target.value as OrganizationResource["kind"])}>
+                  {RESOURCE_KINDS.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label>
+                资源定位
+                <input value={newResourceLocator} onChange={(event) => setNewResourceLocator(event.target.value)} required />
+              </label>
+              <label>
+                资源说明
+                <input value={newResourceDescription} onChange={(event) => setNewResourceDescription(event.target.value)} />
+              </label>
+              <label>
+                新增资源角色
+                <select value={newResourceRole} onChange={(event) => setNewResourceRole(event.target.value as ProjectResourceRole)}>
+                  {ROLES.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label>
+                新增资源备注
+                <input value={newResourceNote} onChange={(event) => setNewResourceNote(event.target.value)} />
+              </label>
+              <label>
+                新增资源排序
+                <input
+                  min="0"
+                  type="number"
+                  value={newResourceSortOrder}
+                  onChange={(event) => setNewResourceSortOrder(event.target.value)}
+                />
+              </label>
+              <button disabled={createInlineResource.isPending} type="submit">新增并关联资源</button>
             </form>
           </section>}
           {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">

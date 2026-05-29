@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from typing import Any
 
 from ..client import ApiClient
@@ -25,6 +26,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     run_parser.add_argument("--agent-id", required=True)
     run_parser.add_argument("--idempotency-key")
     run_parser.add_argument("--reason")
+    run_parser.add_argument("--source")
+    run_parser.add_argument("--trigger-detail")
+    run_parser.add_argument("--payload")
     run_parser.add_argument("--force-fresh-session", action="store_true")
     run_parser.set_defaults(handler=run_heartbeat)
     cancel_parser = actions.add_parser("cancel")
@@ -65,6 +69,15 @@ def run_heartbeat(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["idempotencyKey"] = args.idempotency_key
     if args.reason:
         payload["reason"] = args.reason
+    if args.source:
+        payload["source"] = args.source
+    if args.trigger_detail:
+        payload["triggerDetail"] = args.trigger_detail
+    if args.payload:
+        parsed = json.loads(args.payload)
+        if not isinstance(parsed, dict):
+            raise ValueError("payload must be a JSON object.")
+        payload["payload"] = parsed
     if args.force_fresh_session:
         payload["forceFreshSession"] = True
     return client.request("POST", f"/api/agents/{args.agent_id}/wakeup", json=payload)

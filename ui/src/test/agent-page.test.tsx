@@ -211,6 +211,36 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
+it("validates opencode local model before saving agent configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, agentRuntimeType: "opencode_local" });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({ method: "PATCH" }),
+  );
+
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"model":"openai/gpt-5"'),
+    }),
+  );
+});
+
 it("shows configuration revisions, rolls back, and resets runtime session", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -317,7 +347,12 @@ it("manages runtime adapter probes and skills from configuration", async () => {
       return respond([{ id: "gpt-5", label: "GPT-5" }]);
     }
     if (path === "/api/orgs/org-1/adapters/codex_local" && init?.method === "GET") {
-      return respond({ type: "codex_local", capabilities: { models: true, skills: true, quotaWindows: true }, supportsLocalAgentJwt: true });
+      return respond({
+        type: "codex_local",
+        capabilities: { models: true, skills: true, quotaWindows: true },
+        supportsLocalAgentJwt: true,
+        agentConfigurationDoc: "Set model and cwd before running.",
+      });
     }
     if (path === "/api/orgs/org-1/adapters/codex_local/quota-windows" && init?.method === "GET") {
       return respond({ provider: "openai", ok: false, error: "not configured", windows: [] });
@@ -334,28 +369,40 @@ it("manages runtime adapter probes and skills from configuration", async () => {
         entries: [
           {
             key: "review",
+            selectionKey: "bundled:review",
             runtimeName: "Review",
-            source: "builtin",
+            sourceClass: "bundled",
+            origin: "bundled",
+            state: "installed",
+            alwaysEnabled: true,
+            originLabel: "Rudder",
+            locationLabel: "bundled skills",
             version: "1.0",
             enabled: true,
             tags: ["quality"],
-            description: "Review code changes",
+            description:
+              "Turn the current conversation's workflow into a reusable agent skill. Use this whenever the user wants to make a workflow reusable.",
             prompt: "Review carefully.",
           },
           {
             key: "deploy",
+            selectionKey: "agent:deploy",
             runtimeName: "Deploy",
-            source: "db",
+            sourceClass: "agent_home",
+            origin: "user_installed",
+            state: "external",
             version: "1.0",
             enabled: true,
             tags: ["release"],
-            description: "Deploy safely",
-            prompt: "Deploy carefully.",
+            markdown: "---\ndescription: Deploy safely from frontmatter\n---\n\nDeploy carefully.",
           },
           {
             key: "debug",
+            selectionKey: "external:debug",
             runtimeName: "Debug",
-            source: "db",
+            sourceClass: "external",
+            origin: "external",
+            state: "missing",
             version: "1.0",
             enabled: false,
             tags: ["ops"],
@@ -363,7 +410,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             prompt: "Debug carefully.",
           },
         ],
-        warnings: [],
+        warnings: ["debug missing from managed home"],
       });
     }
     if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
@@ -377,6 +424,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
   expect(await screen.findByText("GPT-5")).toBeInTheDocument();
   expect(await screen.findByText("not configured")).toBeInTheDocument();
+  expect(await screen.findByText("Set model and cwd before running.")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
   expect(await screen.findByText("CWD")).toBeInTheDocument();
@@ -386,15 +434,29 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Show" })).toHaveLength(3);
-  await userEvent.click(screen.getAllByRole("button", { name: "Show" })[0]);
-  expect(await screen.findByText("Deploy carefully.")).toBeInTheDocument();
+  expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
+  expect(await screen.findByText("installed")).toBeInTheDocument();
+  expect(await screen.findByText("external")).toBeInTheDocument();
+  expect(await screen.findByText("missing")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
+  expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByText("Review"));
+  expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
+  expect(screen.getByText("Always loaded by Rudder for every agent run.")).toBeInTheDocument();
+  expect(screen.getByText("Rudder")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+  await userEvent.click(screen.getByText("Deploy"));
+  expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+  await userEvent.click(screen.getByText("Debug"));
   await userEvent.click(screen.getByRole("button", { name: "Enable" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
-  await userEvent.type(within(dialog).getByLabelText("Skill YAML"), "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it");
+  await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
+  await userEvent.type(within(dialog).getByLabelText("Short name"), "incident-response");
+  await userEvent.type(within(dialog).getByLabelText("描述"), "Handle incidents");
+  await userEvent.type(within(dialog).getByLabelText("Skill 内容"), "schema_version: 1\nprompt: handle it");
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -415,14 +477,19 @@ it("manages runtime adapter probes and skills from configuration", async () => {
     "/api/agents/agent-1/skills/enable",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ skills: ["debug"] }),
+      body: JSON.stringify({ skills: ["external:debug"] }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/skills/private",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ name: "Incident", markdown: "schema_version: 1\nname: Incident\ndescription: incident\nprompt: handle it" }),
+      body: JSON.stringify({
+        name: "Incident Response",
+        slug: "incident-response",
+        description: "Handle incidents",
+        markdown: "schema_version: 1\nprompt: handle it",
+      }),
     }),
   );
 });

@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -75,7 +75,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.clear(screen.getByLabelText("智能体名称"));
   await userEvent.type(await screen.findByLabelText("智能体名称"), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "claude_local");
+  await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
+  await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
+  await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
+  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "5000");
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
+  fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
   await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
@@ -85,9 +91,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
       method: "POST",
       body: JSON.stringify({
         name: "Reviewer",
-        role: "qa",
-        agentRuntimeType: "claude_local",
-        agentRuntimeConfig: {},
+        role: "cto",
+        title: "Runtime owner",
+        capabilities: "Own runtime rollout",
+        agentRuntimeType: "hermes_local",
+        agentRuntimeConfig: { model: "provider/model" },
+        budgetMonthlyCents: 5000,
+        metadata: { team: "runtime" },
         desiredSkills: ["review", "debug"],
       }),
     }),
@@ -123,6 +133,44 @@ it("creates the first agent as the organization CEO", async () => {
         role: "ceo",
         agentRuntimeType: "codex_local",
         agentRuntimeConfig: {},
+      }),
+    }),
+  );
+});
+
+it("requires provider/model when creating an opencode local agent", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Suggested Agent" });
+    }
+    return respond({ id: "agent-2", name: "OpenCode Agent", role: "engineer", status: "idle" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  await userEvent.type(await screen.findByLabelText("智能体名称"), "OpenCode Agent");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "opencode_local");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/orgs/org-1/agents",
+    expect.objectContaining({ method: "POST" }),
+  );
+
+  await userEvent.type(screen.getByLabelText("OpenCode model"), "openai/gpt-5");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/agents",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "OpenCode Agent",
+        role: "engineer",
+        agentRuntimeType: "opencode_local",
+        agentRuntimeConfig: { model: "openai/gpt-5" },
       }),
     }),
   );

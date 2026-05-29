@@ -17,9 +17,7 @@ export function ChatPage() {
   const navigate = useNavigate();
   const chat = useQuery({ queryKey: ["chat", chatId], queryFn: () => chatsApi.get(chatId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
-  const chatAgentList = (agents.data ?? []).filter(
-    (agent) => agent.agentRuntimeType === "codex_local" && agent.status !== "terminated",
-  );
+  const chatAgentList = (agents.data ?? []).filter((agent) => agent.status !== "terminated");
   const boundChatAgent = useQuery({
     queryKey: ["agent", chat.data?.preferredAgentId ?? ""],
     queryFn: () => agentsApi.get(chat.data!.preferredAgentId!),
@@ -41,7 +39,7 @@ export function ChatPage() {
   const boundChatAgentName = typeof boundChatAgent.data?.name === "string" ? boundChatAgent.data.name : null;
   const selectedChatAgentName = typeof selectedChatAgent.data?.name === "string" ? selectedChatAgent.data.name : null;
   const selectedChatAgentUnavailable = selectedChatAgent.isSuccess
-    && (selectedChatAgent.data.agentRuntimeType !== "codex_local" || selectedChatAgent.data.status === "terminated");
+    && selectedChatAgent.data.status === "terminated";
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const send = useMutation({
     mutationFn: async () => {
@@ -130,7 +128,7 @@ export function ChatPage() {
             </label>
             {selectedChatAgentUnavailable && (
               <div className="error-notice">
-                当前对话绑定的智能体不能用于消息回复，请新建对话并选择 codex_local 智能体。
+                当前对话绑定的智能体不能用于消息回复，请新建对话并选择可运行智能体。
               </div>
             )}
             {sendError && <ErrorNotice error={sendError} />}

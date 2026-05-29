@@ -115,7 +115,7 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
   );
 });
 
-it("only offers chat-capable agents for a new conversation", async () => {
+it("offers non-terminated runtime agents for a new conversation", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([]);
@@ -124,6 +124,7 @@ it("only offers chat-capable agents for a new conversation", async () => {
       return respond([
         { id: "agent-1", name: "Runner", role: "engineer", status: "idle", agentRuntimeType: "process" },
         { id: "agent-2", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local" },
+        { id: "agent-3", name: "Stopped", role: "qa", status: "terminated", agentRuntimeType: "claude_local" },
       ]);
     }
     return respond([]);
@@ -132,7 +133,8 @@ it("only offers chat-capable agents for a new conversation", async () => {
 
   renderApp("/orgs/org-1/chats");
   expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: "Runner (engineer)" })).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Runner (engineer)" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Stopped (qa)" })).not.toBeInTheDocument();
 });
 
 it("preselects the agent provided by an agent detail chat entry", async () => {
@@ -439,7 +441,7 @@ it("explains a failed reply without discarding the message draft", async () => {
   expect(screen.getByLabelText("消息")).toHaveValue("你好");
 });
 
-it("does not send from a conversation bound to a non-chat runtime", async () => {
+it("does not send from a conversation bound to a terminated agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([{ id: "chat-1", title: "旧会话", status: "active", preferredAgentId: "agent-1" }]);
@@ -448,7 +450,7 @@ it("does not send from a conversation bound to a non-chat runtime", async () => 
       return respond([{ id: "agent-1", name: "Runner", role: "engineer" }]);
     }
     if (path === "/api/agents/agent-1" && init?.method === "GET") {
-      return respond({ id: "agent-1", name: "Runner", role: "engineer", status: "idle", agentRuntimeType: "process" });
+      return respond({ id: "agent-1", name: "Runner", role: "engineer", status: "terminated", agentRuntimeType: "process" });
     }
     if (path === "/api/chats/chat-1" && init?.method === "GET") {
       return respond({ id: "chat-1", title: "旧会话", status: "active", preferredAgentId: "agent-1" });
@@ -461,6 +463,6 @@ it("does not send from a conversation bound to a non-chat runtime", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  expect(await screen.findByText("当前对话绑定的智能体不能用于消息回复，请新建对话并选择 codex_local 智能体。")).toBeInTheDocument();
+  expect(await screen.findByText("当前对话绑定的智能体不能用于消息回复，请新建对话并选择可运行智能体。")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
 });

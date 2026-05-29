@@ -2527,19 +2527,21 @@ pre {
 }
 
 .agent-skill-tag-list {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
 .agent-skill-tag {
-  align-items: center;
+  align-items: flex-start;
   background: #111722;
   border: 1px solid #202a3b;
-  border-radius: 999px;
-  display: inline-flex;
-  gap: 8px;
-  padding: 6px;
+  border-radius: 14px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 12px;
 }
 
 .agent-skill-tag.selected,
@@ -2549,23 +2551,114 @@ pre {
 }
 
 .agent-skill-tag-main {
-  align-items: center;
+  align-items: stretch;
   background: transparent;
   border: 0;
   color: #dce5f2;
-  display: inline-flex;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.agent-skill-tag-title-row {
+  align-items: center;
+  display: flex;
   gap: 8px;
-  padding: 2px 6px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
 .agent-skill-tag-main code {
+  color: #e8edf5;
   font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-skill-tag-main span {
   color: #8792a6;
   font-size: 12px;
+}
+
+.agent-skill-tag-description {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  color: #aab6c8;
+  display: -webkit-box;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.agent-skill-tag-note {
+  background: rgba(56, 134, 232, 0.08);
+  border: 1px solid rgba(56, 134, 232, 0.22);
+  border-radius: 10px;
+  color: #bfd7ff;
+  line-height: 1.45;
+  padding: 8px 9px;
+}
+
+.agent-skill-enabled-pill {
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid #2b3548;
+  border-radius: 999px;
+  color: #aab6c8;
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
+.agent-skill-enabled-pill.enabled {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.36);
+  color: #86efac;
+}
+
+.agent-skill-tag-facts {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-skill-tag-facts > span {
+  background: rgba(15, 20, 29, 0.9);
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  color: #dce5f2;
+  min-width: 0;
+  overflow: hidden;
+  padding: 7px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-skill-tag-facts small {
+  color: #6f7b90;
+  display: block;
+  font-size: 10px;
+  line-height: 1.2;
+  margin-bottom: 3px;
+}
+
+.agent-skill-row-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .agent-skill-tag-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .agent-skills-table {
