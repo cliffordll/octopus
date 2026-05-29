@@ -22,7 +22,7 @@ from .chats import (
 from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
-from .issues import Issue
+from .issues import Issue, IssueAttachment
 from .messenger import MessengerThreadUserState
 from .organizations import Organization
 from .organization_skills import OrganizationSkill
@@ -59,6 +59,7 @@ __all__ = [
     "IssueApproval",
     "IssueComment",
     "Issue",
+    "IssueAttachment",
     "MessengerThreadUserState",
     "Organization",
     "OrganizationSkill",

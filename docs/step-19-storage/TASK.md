@@ -1,6 +1,6 @@
 # Step 19: Attachment / Storage
 
-状态：待开发
+状态：已完成
 
 ## 目标
 
@@ -43,6 +43,8 @@
 
 ### 19A: Storage provider 与 asset content 基线
 
+状态：已完成
+
 作用：建立上游式 `StorageService` 抽象和本地磁盘 provider，让 server 能写入、读取、head、delete 受 organization scope 约束的对象。
 
 修改范围：
@@ -65,6 +67,8 @@
 
 ### 19B: Chat attachment multipart upload
 
+状态：已完成
+
 作用：把 Step 18 的 chat attachment metadata route 升级为完整上传入口，同时保留 metadata-only 兼容能力。
 
 修改范围：
@@ -81,6 +85,8 @@
 - 文件内容不存入数据库，只存 storage backend。
 
 ### 19C: Issue attachment upload 与读取
+
+状态：已完成
 
 作用：补齐上游控制面常用的 issue attachment API，使 agent/CLI 能把截图、报告、图片等文件挂到 issue/comment 上。
 
@@ -99,6 +105,8 @@
 - issue/comment scope 必须属于同一 organization。
 
 ### 19D: Runtime/workspace work product storage reference
+
+状态：已完成
 
 作用：让 runtime 产物可以引用稳定 storage object，为 Step 20 Observability 复用。
 
@@ -129,6 +137,14 @@
 - Tests 覆盖对象关联、内容缺失与 organization scope。
 - Tests 覆盖 chat attachment 从 Step 18 metadata 升级到可上传/读取内容的生命周期。
 - Tests 覆盖 runtime/workspace 产物引用不会跨 organization 泄漏。
+
+## 实现记录
+
+- 19A 已建立 `StorageService` / `local_disk` provider、asset 查询与 `GET /api/assets/{assetId}/content`。
+- 19B 已支持 chat attachment multipart 文件上传，同时保留 JSON metadata-only 兼容入口。
+- 19C 已支持 issue attachment 上传、列表、删除和 content 下载，并新增 `issue_attachments` migration。
+- 19D 已支持 runtime/workspace work product `content` 归档为 asset，并返回 `assetId` / `contentPath`。
+- multipart 解析依赖 `python-multipart`，已写入 `pyproject.toml` 与 `uv.lock`。
 
 ## 验证命令
 

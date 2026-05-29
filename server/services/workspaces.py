@@ -24,6 +24,7 @@ from packages.database.queries.workspaces import (
     update_workspace_operation,
     update_workspace_runtime_service,
 )
+from packages.database.queries.assets import create_asset
 from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
@@ -38,6 +39,7 @@ from packages.shared.constants.workspace import (
 )
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
 from packages.shared.types.workspace import IssueWorkProduct as IssueWorkProductData
+from server.storage import get_storage_service
 from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
 from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
@@ -465,6 +467,7 @@ class WorkspaceService:
             provider = _string(product.get("provider")) or "rudder"
             if not title or not product_type:
                 continue
+            product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
                 self._session,
                 {
@@ -490,6 +493,61 @@ class WorkspaceService:
             )
             stored.append(self._to_work_product(row))
         return stored
+
+    async def _archive_work_product_content(
+        self, org_id: str, product: dict[str, Any]
+    ) -> dict[str, Any]:
+        body = product.get("content")
+        if body is None:
+            return product
+        if isinstance(body, str):
+            content = body.encode("utf-8")
+            content_type = _string(product.get("contentType")) or "text/plain"
+        elif isinstance(body, bytes):
+            content = body
+            content_type = (
+                _string(product.get("contentType")) or "application/octet-stream"
+            )
+        else:
+            return product
+        if not content:
+            return product
+        storage = get_storage_service()
+        stored = await storage.put_file(
+            org_id=org_id,
+            namespace="work-products",
+            original_filename=_string(product.get("filename"))
+            or f"{_string(product.get('title')) or 'work-product'}.txt",
+            content_type=content_type,
+            body=content,
+        )
+        asset = await create_asset(
+            self._session,
+            {
+                "org_id": org_id,
+                "provider": stored["provider"],
+                "object_key": stored["objectKey"],
+                "content_type": stored["contentType"],
+                "byte_size": stored["byteSize"],
+                "sha256": stored["sha256"],
+                "original_filename": stored["originalFilename"],
+            },
+        )
+        metadata = dict(product.get("metadata") or {})
+        metadata.update(
+            {
+                "assetId": asset.id,
+                "contentPath": f"/api/assets/{asset.id}/content",
+                "contentType": asset.content_type,
+                "byteSize": asset.byte_size,
+                "sha256": asset.sha256,
+            }
+        )
+        archived = dict(product)
+        archived.pop("content", None)
+        archived["metadata"] = metadata
+        archived.setdefault("url", f"/api/assets/{asset.id}/content")
+        return archived
 
     async def begin_operation(
         self,
@@ -737,6 +795,16 @@ class WorkspaceService:
             "externalId": row.external_id,
             "title": row.title,
             "url": row.url,
+            "assetId": (
+                row.metadata_json.get("assetId")
+                if isinstance(row.metadata_json, dict)
+                else None
+            ),
+            "contentPath": (
+                row.metadata_json.get("contentPath")
+                if isinstance(row.metadata_json, dict)
+                else None
+            ),
             "status": cast(Any, row.status),
             "reviewState": cast(Any, row.review_state),
             "isPrimary": row.is_primary,
