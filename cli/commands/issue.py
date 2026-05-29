@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import mimetypes
+from pathlib import Path
 from typing import Any
 
 from ..client import ApiClient
@@ -85,6 +87,26 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     review_parser.add_argument("--decision", required=True, choices=DECISIONS)
     review_parser.add_argument("--note")
     review_parser.set_defaults(handler=review_issue)
+
+    attachment_list = actions.add_parser("attachments", help="List issue attachments")
+    attachment_list.add_argument("issue_id")
+    attachment_list.set_defaults(handler=list_attachments)
+
+    attachment_upload = actions.add_parser(
+        "attachment-upload", help="Upload an issue attachment"
+    )
+    attachment_upload.add_argument("--org-id", required=True)
+    attachment_upload.add_argument("issue_id")
+    attachment_upload.add_argument("--file", required=True)
+    attachment_upload.add_argument("--usage", default="attachment")
+    attachment_upload.add_argument("--issue-comment-id")
+    attachment_upload.set_defaults(handler=upload_attachment)
+
+    attachment_delete = actions.add_parser(
+        "attachment-delete", help="Delete an attachment"
+    )
+    attachment_delete.add_argument("attachment_id")
+    attachment_delete.set_defaults(handler=delete_attachment)
 
 
 def list_issues(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -171,3 +193,26 @@ def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request(
         "POST", f"/api/issues/{args.issue_id}/review-decision", json=payload
     )
+
+
+def list_attachments(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/issues/{args.issue_id}/attachments")
+
+
+def upload_attachment(args: argparse.Namespace, client: ApiClient) -> Any:
+    file_path = Path(args.file)
+    content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+    data = {"usage": args.usage}
+    if args.issue_comment_id is not None:
+        data["issueCommentId"] = args.issue_comment_id
+    with file_path.open("rb") as handle:
+        return client.request(
+            "POST",
+            f"/api/orgs/{args.org_id}/issues/{args.issue_id}/attachments",
+            data=data,
+            files={"file": (file_path.name, handle, content_type)},
+        )
+
+
+def delete_attachment(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("DELETE", f"/api/attachments/{args.attachment_id}")

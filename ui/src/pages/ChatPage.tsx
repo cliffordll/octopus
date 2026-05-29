@@ -177,6 +177,16 @@ export function ChatPage() {
                   {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
                 </div>
                 <p>{message.body}</p>
+                {message.attachments && message.attachments.length > 0 && (
+                  <div className="chat-attachment-list">
+                    {message.attachments.map((attachment) => (
+                      <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
+                        {attachment.originalFilename ?? attachment.id}
+                        <span>{attachment.byteSize} bytes</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {message.structuredPayload && (
                   <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
                 )}

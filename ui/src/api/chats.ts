@@ -1,5 +1,5 @@
 import { jsonRequest, request } from "./client";
-import type { ChatContextLink, ChatConversation, ChatMessage } from "./types";
+import type { ChatAttachment, ChatContextLink, ChatConversation, ChatMessage } from "./types";
 
 export interface ChatListFilters {
   status?: ChatConversation["status"];
@@ -53,6 +53,19 @@ export const chatsApi = {
       "POST",
       payload,
     ),
+  uploadAttachment: (
+    orgId: string,
+    chatId: string,
+    payload: { file: File; messageId: string },
+  ): Promise<ChatAttachment> => {
+    const form = new FormData();
+    form.set("messageId", payload.messageId);
+    form.set("file", payload.file);
+    return request<ChatAttachment>(
+      `/api/orgs/${encodeURIComponent(orgId)}/chats/${encodeURIComponent(chatId)}/attachments`,
+      { method: "POST", body: form },
+    );
+  },
   convertToIssue: (
     chatId: string,
     payload: { messageId?: string | null; proposal?: Record<string, unknown> | null },

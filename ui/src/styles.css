@@ -2435,6 +2435,36 @@ button.danger {
   padding-top: 14px;
 }
 
+.issue-attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.issue-attachment-item {
+  align-items: center;
+  background: #111722;
+  border: 1px solid #263246;
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.issue-attachment-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.issue-attachment-form {
+  border-top: 1px solid #202a3b;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
+  padding-top: 14px;
+}
+
 .issue-work-product-card {
   background: #111722;
   border: 1px solid #263246;
@@ -4219,6 +4249,30 @@ pre {
 .chat-message p {
   margin: 6px 0 0;
   white-space: pre-wrap;
+}
+
+.chat-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-attachment-chip {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid #2a3850;
+  border-radius: 999px;
+  color: #dce7f7;
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px 10px;
+  text-decoration: none;
+}
+
+.chat-attachment-chip span {
+  color: #8f9bad;
+  font-size: 11px;
 }
 
 .chat-empty-thread {

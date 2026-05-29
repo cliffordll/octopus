@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, BinaryIO
 
 import httpx
 
@@ -27,10 +27,19 @@ class ApiClient:
         method: str,
         path: str,
         *,
+        data: dict[str, str] | None = None,
+        files: dict[str, tuple[str, BinaryIO, str]] | None = None,
         params: dict[str, str] | None = None,
         json: object | None = None,
     ) -> Any:
-        response = self._client.request(method, path, params=params, json=json)
+        response = self._client.request(
+            method,
+            path,
+            data=data,
+            files=files,
+            params=params,
+            json=json,
+        )
         if response.is_error:
             message = f"Request failed ({response.status_code})"
             try:
@@ -40,4 +49,19 @@ class ApiClient:
             except (ValueError, AttributeError):
                 pass
             raise ApiError(response.status_code, message)
+        if response.status_code == 204 or not response.content:
+            return {}
         return response.json()
+
+    def request_bytes(self, method: str, path: str) -> bytes:
+        response = self._client.request(method, path)
+        if response.is_error:
+            message = f"Request failed ({response.status_code})"
+            try:
+                detail = response.json().get("detail")
+                if isinstance(detail, str):
+                    message = detail
+            except (ValueError, AttributeError):
+                pass
+            raise ApiError(response.status_code, message)
+        return response.content

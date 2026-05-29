@@ -6,6 +6,7 @@ from .client import DEFAULT_API_BASE
 from .commands import (
     agent,
     approval,
+    asset,
     chat,
     goal,
     heartbeat,
@@ -13,6 +14,7 @@ from .commands import (
     messenger,
     organization,
     project,
+    run_intelligence,
 )
 
 
@@ -29,7 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     project.configure(resources)
     goal.configure(resources)
     agent.configure(resources)
+    asset.configure(resources)
     heartbeat.configure(resources)
+    run_intelligence.configure(resources)
     chat.configure(resources)
     messenger.configure(resources)
     return parser
