@@ -115,6 +115,41 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
   );
 });
 
+it("opens a new conversation with an error notice when no assistant reply is returned", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
+    }
+    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+      return respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201);
+    }
+    if (path === "/api/chats/chat-2" && init?.method === "GET") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-2/messages" && init?.method === "GET") {
+      return respond([{ id: "message-1", role: "user", body: "你好", status: "completed" }]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats");
+  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.type(screen.getByLabelText("消息"), "你好{Enter}");
+
+  expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
+  expect(
+    await screen.findByText("首条消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
+  ).toBeInTheDocument();
+});
+
 it("offers non-terminated runtime agents for a new conversation", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
@@ -457,10 +492,15 @@ it("shows the user's message immediately after clicking send", async () => {
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
   expect(await screen.findByText("你好")).toBeInTheDocument();
+  const messageThread = screen.getByTestId("chat-message-thread");
+  expect(await within(messageThread).findByText("Thinking", { exact: false })).toBeInTheDocument();
+  expect(within(messageThread).getByText("Builder")).toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toHaveValue("");
 
   resolvePost(respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201));
-  expect(await screen.findByText("你好")).toBeInTheDocument();
+  expect(
+    await within(messageThread).findByText("消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
+  ).toBeInTheDocument();
 });
 
 it("shows an empty thread prompt for a conversation without messages", async () => {

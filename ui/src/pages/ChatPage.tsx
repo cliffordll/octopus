@@ -21,12 +21,23 @@ function sendNoticeMessage(value: string) {
   return value.startsWith("首条消息发送失败：") ? value : `消息发送失败：${value}`;
 }
 
+function agentAvatarLabel(name: string | null | undefined) {
+  return (name?.trim() || "智能体").slice(0, 1).toUpperCase();
+}
+
+function hasAssistantReply(messages: ChatMessage[]) {
+  return messages.some((message) => message.role === "assistant");
+}
+
+const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
+
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const [body, setBody] = useState("");
   const [agentId, setAgentId] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
+  const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,15 +86,17 @@ export function ChatPage() {
   const agentNameById = useMemo(() => new Map(agentList.map((agent) => [agent.id, agent.name])), [agentList]);
   const boundChatAgentName = chat.data?.preferredAgentId ? agentNameById.get(chat.data.preferredAgentId) ?? null : null;
   const selectedAgent = agentList.find((agent) => agent.id === agentId);
+  const selectedAgentName = selectedAgent?.name ?? boundChatAgentName ?? "智能体";
   const selectedChatAgentUnavailable = selectedAgent?.status === "terminated";
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const send = useMutation({
     mutationFn: async () => {
       const draft = body.trim();
+      const targetChatId = startsNewConversation ? null : chatId;
       const optimisticMessage: ChatMessage = {
         id: `pending-${Date.now()}`,
         orgId,
-        conversationId: startsNewConversation ? undefined : chatId,
+        conversationId: targetChatId ?? undefined,
         role: "user",
         kind: "message",
         body: draft,
@@ -91,6 +104,7 @@ export function ChatPage() {
         createdAt: new Date().toISOString(),
       };
       setOptimisticMessages((current) => [...current, optimisticMessage]);
+      setThinkingChatId(targetChatId);
       setBody("");
       setSendNotice(null);
       if (startsNewConversation) {
@@ -106,12 +120,16 @@ export function ChatPage() {
       return { chat: null, messages: created.messages };
     },
     onSuccess: (created) => {
+      setThinkingChatId(null);
       setSendNotice(null);
+      const missingAssistantReply = !hasAssistantReply(created.messages);
       if (created.chat) {
         queryClient.setQueryData(["chat", created.chat.id], created.chat);
         queryClient.setQueryData(["chat-messages", created.chat.id], created.messages);
         void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-        navigate(`/orgs/${orgId}/chats/${created.chat.id}`);
+        navigate(`/orgs/${orgId}/chats/${created.chat.id}`, {
+          state: missingAssistantReply ? { sendError: `首条消息发送失败：${missingAssistantReplyMessage}` } : undefined,
+        });
         return;
       }
       queryClient.setQueryData<ChatMessage[]>(["chat-messages", chatId], (current = []) => {
@@ -119,8 +137,12 @@ export function ChatPage() {
         created.messages.forEach((message) => next.set(message.id, message));
         return Array.from(next.values());
       });
+      if (missingAssistantReply) setSendNotice(missingAssistantReplyMessage);
     },
-    onError: (error) => setSendNotice(displayError(error)),
+    onError: (error) => {
+      setThinkingChatId(null);
+      setSendNotice(displayError(error));
+    },
   });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -163,35 +185,53 @@ export function ChatPage() {
             )}
             {visibleMessages.map((message) => (
               <article className={`chat-message ${message.role}`} key={message.id}>
-                <strong>
-                  {message.role === "user"
-                    ? "你"
-                    : message.role === "assistant"
-                      ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
-                      : "系统"}
-                </strong>
-                <div className="meta-line">
-                  <Badge>{message.kind ?? "message"}</Badge>
-                  <Badge>{message.status}</Badge>
-                  {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
-                  {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
-                </div>
-                <p>{message.body}</p>
-                {message.attachments && message.attachments.length > 0 && (
-                  <div className="chat-attachment-list">
-                    {message.attachments.map((attachment) => (
-                      <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
-                        {attachment.originalFilename ?? attachment.id}
-                        <span>{attachment.byteSize} bytes</span>
-                      </a>
-                    ))}
+                {message.role === "assistant" && (
+                  <span aria-hidden="true" className="chat-agent-avatar">
+                    {agentAvatarLabel(message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName)}
+                  </span>
+                )}
+                <div className="chat-message-body">
+                  <strong>
+                    {message.role === "user"
+                      ? "你"
+                      : message.role === "assistant"
+                        ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
+                        : "系统"}
+                  </strong>
+                  <div className="meta-line">
+                    <Badge>{message.kind ?? "message"}</Badge>
+                    <Badge>{message.status}</Badge>
+                    {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
+                    {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
                   </div>
-                )}
-                {message.structuredPayload && (
-                  <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
-                )}
+                  <p>{message.body}</p>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className="chat-attachment-list">
+                      {message.attachments.map((attachment) => (
+                        <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
+                          {attachment.originalFilename ?? attachment.id}
+                          <span>{attachment.byteSize} bytes</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {message.structuredPayload && (
+                    <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
+                  )}
+                </div>
               </article>
             ))}
+            {send.isPending && thinkingChatId === chatId && (
+              <article aria-live="polite" className="chat-message assistant thinking">
+                <span aria-hidden="true" className="chat-agent-avatar">{agentAvatarLabel(selectedAgentName)}</span>
+                <div className="chat-message-body">
+                  <strong>{selectedAgentName}</strong>
+                  <p className="chat-thinking-text">
+                    Thinking<span aria-hidden="true" className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+                  </p>
+                </div>
+              </article>
+            )}
             {sendNotice && (
               <article className="chat-message system">
                 <strong>系统</strong>

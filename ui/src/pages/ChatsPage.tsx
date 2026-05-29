@@ -10,6 +10,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "请求失败";
 }
 
+function hasAssistantReply(messages: Array<{ role: string }>) {
+  return messages.some((message) => message.role === "assistant");
+}
+
+const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
+
 export function ChatsPage() {
   const { orgId = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -37,7 +43,12 @@ export function ChatsPage() {
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
       try {
         const created = await chatsApi.addMessage(chat.id, { body: draft });
-        return { chat, messages: created.messages, draft, firstMessageError: null };
+        return {
+          chat,
+          messages: created.messages,
+          draft,
+          firstMessageError: hasAssistantReply(created.messages) ? null : missingAssistantReplyMessage,
+        };
       } catch (error) {
         queryClient.setQueryData(["chat-messages", chat.id], []);
         return { chat, messages: null, draft, firstMessageError: errorMessage(error) };
