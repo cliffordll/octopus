@@ -19,6 +19,29 @@ async def get_organization_resource_by_id(
     return result.scalar_one_or_none()
 
 
+async def list_organization_resources(
+    session: AsyncSession, org_id: str
+) -> Sequence[OrganizationResource]:
+    result = await session.execute(
+        select(OrganizationResource)
+        .where(OrganizationResource.org_id == org_id)
+        .order_by(OrganizationResource.created_at, OrganizationResource.id)
+    )
+    return result.scalars().all()
+
+
+async def get_organization_resource_by_org(
+    session: AsyncSession, org_id: str, resource_id: str
+) -> OrganizationResource | None:
+    result = await session.execute(
+        select(OrganizationResource).where(
+            OrganizationResource.org_id == org_id,
+            OrganizationResource.id == resource_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_organization_resource(
     session: AsyncSession, fields: Mapping[str, Any]
 ) -> OrganizationResource:
@@ -26,6 +49,40 @@ async def create_organization_resource(
     session.add(row)
     await session.flush()
     return row
+
+
+async def update_organization_resource(
+    session: AsyncSession,
+    org_id: str,
+    resource_id: str,
+    fields: Mapping[str, Any],
+) -> OrganizationResource | None:
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(OrganizationResource)
+        .where(
+            OrganizationResource.org_id == org_id,
+            OrganizationResource.id == resource_id,
+        )
+        .values(**values)
+        .returning(OrganizationResource)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_organization_resource(
+    session: AsyncSession, org_id: str, resource_id: str
+) -> OrganizationResource | None:
+    result = await session.execute(
+        delete(OrganizationResource)
+        .where(
+            OrganizationResource.org_id == org_id,
+            OrganizationResource.id == resource_id,
+        )
+        .returning(OrganizationResource)
+    )
+    return result.scalar_one_or_none()
 
 
 async def list_project_resource_attachments(
