@@ -5,9 +5,11 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from packages.shared.api_paths.chats import (
+    CHAT_CONVERT_TO_ISSUE_PATH,
     CHAT_CONTEXT_LINKS_PATH,
     CHAT_DETAIL_PATH,
     CHAT_MESSAGES_PATH,
+    CHAT_OPERATION_PROPOSAL_RESOLVE_PATH,
     CHAT_PROJECT_CONTEXT_PATH,
     CHAT_USER_STATE_PATH,
     ORG_CHAT_LIST_PATH,
@@ -20,8 +22,10 @@ from packages.shared.types.chat import (
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
+    validate_convert_chat_to_issue,
     validate_create_chat_context_link,
     validate_create_chat_conversation,
+    validate_resolve_chat_operation_proposal,
     validate_set_chat_project_context,
     validate_update_chat_conversation,
     validate_update_chat_conversation_user_state,
@@ -221,6 +225,66 @@ async def list_chat_messages_route(
 ) -> list[ChatMessage]:
     await _get_conversation_or_404(id, request=request, service=service)
     return await service.list_messages(id)
+
+
+@router.post(CHAT_CONVERT_TO_ISSUE_PATH, status_code=status.HTTP_201_CREATED)
+async def convert_chat_to_issue_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> dict[str, Any]:
+    await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_convert_chat_to_issue(body)
+        actor = require_actor_identity(request)
+        result = await service.convert_to_issue(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return result
+
+
+@router.post(CHAT_OPERATION_PROPOSAL_RESOLVE_PATH, status_code=status.HTTP_201_CREATED)
+async def resolve_chat_operation_proposal_route(
+    id: str,
+    messageId: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: ChatService = Depends(get_chat_service),
+) -> dict[str, Any]:
+    await _get_conversation_or_404(id, request=request, service=service)
+    try:
+        payload = validate_resolve_chat_operation_proposal(body)
+        actor = require_actor_identity(request)
+        result = await service.resolve_operation_proposal(
+            id,
+            messageId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return result
 
 
 @router.post(CHAT_MESSAGES_PATH, status_code=status.HTTP_201_CREATED)

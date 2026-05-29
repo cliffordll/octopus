@@ -24,6 +24,7 @@ from packages.database.queries.chats import (
     supersede_turn_messages,
     touch_conversation,
     update_conversation,
+    update_message,
     upsert_conversation_user_state,
 )
 from packages.database.queries.issues import get_issue_by_id
@@ -52,13 +53,16 @@ from packages.shared.types.chat import (
     ChatLinkedEntity,
     ChatMessage,
     ChatPrimaryIssueSummary,
+    ConvertChatToIssuePayload,
     CreateChatContextLinkPayload,
     CreateChatConversationPayload,
     CreatedChatMessages,
+    ResolveChatOperationProposalPayload,
     SetChatProjectContextPayload,
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
+from .issues import IssueService
 
 
 class ChatAvailabilityError(ValueError):
@@ -318,6 +322,201 @@ class ChatService:
             self._to_message(row)
             for row in await list_messages(self._session, conversation_id)
         ]
+
+    async def convert_to_issue(
+        self,
+        conversation_id: str,
+        payload: ConvertChatToIssuePayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        conversation = await get_conversation(self._session, conversation_id)
+        if conversation is None:
+            return None
+        proposal = await self._issue_proposal_for_conversion(conversation, payload)
+        issue = await IssueService(self._session).create_issue(
+            conversation.org_id,
+            {
+                "title": proposal["title"],
+                "description": proposal.get("description"),
+                "priority": proposal.get("priority", "medium"),
+                "projectId": proposal.get("projectId"),
+                "goalId": proposal.get("goalId"),
+                "parentId": proposal.get("parentId"),
+                "assigneeAgentId": proposal.get("assigneeAgentId"),
+                "assigneeUserId": proposal.get("assigneeUserId"),
+                "reviewerAgentId": proposal.get("reviewerAgentId"),
+                "reviewerUserId": proposal.get("reviewerUserId"),
+                "originKind": "manual",
+                "originId": conversation.id,
+            },
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        row = await update_conversation(
+            self._session,
+            conversation.id,
+            {"primary_issue_id": issue["id"]},
+        )
+        if row is not None:
+            await create_context_link(
+                self._session,
+                {
+                    "org_id": conversation.org_id,
+                    "conversation_id": conversation.id,
+                    "entity_type": "issue",
+                    "entity_id": issue["id"],
+                    "metadata_json": {"sourceMessageId": payload.get("messageId")},
+                },
+            )
+        system_message = await create_message(
+            self._session,
+            {
+                "org_id": conversation.org_id,
+                "conversation_id": conversation.id,
+                "role": "system",
+                "kind": "system_event",
+                "status": "completed",
+                "body": f"Created issue {issue['identifier'] or issue['id']} from this chat conversation.",
+                "structured_payload": {
+                    "eventType": "issue_created",
+                    "issueId": issue["id"],
+                    "issueIdentifier": issue["identifier"],
+                },
+            },
+        )
+        await touch_conversation(
+            self._session, conversation.id, system_message.created_at
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=conversation.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="chat.issue_converted",
+            entity_type="chat",
+            entity_id=conversation.id,
+            details={
+                "issueId": issue["id"],
+                "issueIdentifier": issue["identifier"],
+                "messageId": payload.get("messageId"),
+                "systemMessageId": system_message.id,
+            },
+        )
+        return {"issue": issue, "systemMessage": self._to_message(system_message)}
+
+    async def resolve_operation_proposal(
+        self,
+        conversation_id: str,
+        message_id: str,
+        payload: ResolveChatOperationProposalPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> dict[str, Any] | None:
+        conversation = await get_conversation(self._session, conversation_id)
+        if conversation is None:
+            return None
+        message = await get_message(
+            self._session, conversation_id=conversation.id, message_id=message_id
+        )
+        if message is None or message.kind != "operation_proposal":
+            raise ValueError("Operation proposal not found")
+        current_payload = dict(message.structured_payload or {})
+        current_state = current_payload.get("operationProposalState")
+        if isinstance(current_state, dict) and current_state.get("status") not in {
+            None,
+            "pending",
+        }:
+            raise ValueError("Only pending operation proposals can be resolved")
+        status = _operation_decision_status(str(payload["action"]))
+        current_payload["operationProposalState"] = {
+            "status": status,
+            "decisionNote": payload.get("decisionNote"),
+            "decidedByUserId": actor_id if actor_type == "board" else None,
+            "decidedAt": datetime.now(UTC).isoformat(),
+        }
+        updated = await update_message(
+            self._session,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            fields={"structured_payload": current_payload},
+        )
+        if updated is None:
+            raise ValueError("Operation proposal not found")
+        proposal = _proposal_payload(current_payload, "operationProposal") or {}
+        summary = str(proposal.get("summary") or "operation proposal")
+        event_type = (
+            "operation_revision_requested"
+            if payload["action"] == "requestRevision"
+            else f"operation_{status}"
+        )
+        system_message = await create_message(
+            self._session,
+            {
+                "org_id": conversation.org_id,
+                "conversation_id": conversation.id,
+                "role": "system",
+                "kind": "system_event",
+                "status": "completed",
+                "body": _operation_decision_body(str(payload["action"]), summary),
+                "structured_payload": {
+                    "eventType": event_type,
+                    "source": "chat",
+                    "sourceMessageId": message.id,
+                    "targetType": proposal.get("targetType"),
+                    "targetId": proposal.get("targetId"),
+                    "decisionNote": payload.get("decisionNote"),
+                },
+            },
+        )
+        await touch_conversation(
+            self._session, conversation.id, system_message.created_at
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=conversation.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="chat.operation_proposal_resolved",
+            entity_type="chat",
+            entity_id=conversation.id,
+            details={
+                "messageId": message.id,
+                "systemMessageId": system_message.id,
+                "action": payload["action"],
+                "decisionNote": payload.get("decisionNote"),
+            },
+        )
+        return {
+            "message": self._to_message(updated),
+            "systemMessage": self._to_message(system_message),
+        }
+
+    async def _issue_proposal_for_conversion(
+        self,
+        conversation: ChatConversationRow,
+        payload: ConvertChatToIssuePayload,
+    ) -> dict[str, Any]:
+        direct = payload.get("proposal")
+        if isinstance(direct, dict):
+            return _issue_proposal_from_payload(direct)
+        message_id = payload.get("messageId")
+        message: ChatMessageRow | None = None
+        if message_id is not None:
+            message = await get_message(
+                self._session, conversation_id=conversation.id, message_id=message_id
+            )
+        if message is None:
+            messages = await list_messages(self._session, conversation.id)
+            message = next(
+                (row for row in reversed(messages) if row.kind == "issue_proposal"),
+                None,
+            )
+        if message is None or message.kind != "issue_proposal":
+            raise ValueError("No issue proposal found for this conversation")
+        return _issue_proposal_from_payload(message.structured_payload)
 
     async def add_message_and_reply(
         self, conversation_id: str, payload: AddChatMessagePayload
@@ -684,6 +883,35 @@ def _proposal_payload(
         return None
     value = structured_payload.get(key)
     return value if isinstance(value, dict) else structured_payload
+
+
+def _issue_proposal_from_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    proposal = _proposal_payload(payload, "issueProposal")
+    if proposal is None:
+        raise ValueError("Issue proposal payload was incomplete")
+    title = proposal.get("title")
+    description = proposal.get("description")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Issue proposal payload was incomplete")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("Issue proposal payload was incomplete")
+    return proposal
+
+
+def _operation_decision_status(action: str) -> str:
+    if action == "approve":
+        return "approved"
+    if action == "requestRevision":
+        return "revision_requested"
+    return "rejected"
+
+
+def _operation_decision_body(action: str, summary: str) -> str:
+    if action == "approve":
+        return f"Applied lightweight change: {summary}."
+    if action == "requestRevision":
+        return f"Requested changes before applying lightweight change: {summary}."
+    return f"Rejected lightweight change: {summary}."
 
 
 def _is_unread(

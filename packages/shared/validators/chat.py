@@ -11,8 +11,10 @@ from ..constants.chat import (
 )
 from ..types.chat import (
     AddChatMessagePayload,
+    ConvertChatToIssuePayload,
     CreateChatContextLinkPayload,
     CreateChatConversationPayload,
+    ResolveChatOperationProposalPayload,
     SetChatProjectContextPayload,
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
@@ -33,6 +35,27 @@ _UPDATE_FIELDS = _CREATE_FIELDS | {
     "primaryIssueId",
     "resolvedAt",
 }
+
+_CONVERT_ISSUE_FIELDS = {
+    "messageId",
+    "proposal",
+}
+
+_ISSUE_PROPOSAL_FIELDS = {
+    "title",
+    "description",
+    "priority",
+    "projectId",
+    "goalId",
+    "parentId",
+    "assigneeAgentId",
+    "assigneeUserId",
+    "reviewerAgentId",
+    "reviewerUserId",
+    "labelIds",
+}
+
+_OPERATION_DECISION_ACTIONS = {"approve", "reject", "requestRevision"}
 
 
 def validate_create_chat_conversation(
@@ -77,6 +100,74 @@ def validate_set_chat_project_context(
     if "projectId" in result and result["projectId"] is not None:
         _validate_uuid(result["projectId"], "projectId")
     return cast(SetChatProjectContextPayload, result)
+
+
+def validate_convert_chat_to_issue(
+    payload: Mapping[str, Any],
+) -> ConvertChatToIssuePayload:
+    _reject_unknown_fields(payload, _CONVERT_ISSUE_FIELDS)
+    result = dict(payload)
+    if "messageId" in result and result["messageId"] is not None:
+        _validate_uuid(result["messageId"], "messageId")
+    if "proposal" in result and result["proposal"] is not None:
+        if not isinstance(result["proposal"], Mapping):
+            raise ValueError("'proposal' must be an object or null")
+        proposal = dict(result["proposal"])
+        _reject_unknown_fields(proposal, _ISSUE_PROPOSAL_FIELDS)
+        proposal["title"] = _trimmed_text(proposal.get("title"), "title", maximum=200)
+        proposal["description"] = _trimmed_text(
+            proposal.get("description"), "description", maximum=20000
+        )
+        if "priority" in proposal and proposal["priority"] not in {
+            "critical",
+            "high",
+            "medium",
+            "low",
+        }:
+            raise ValueError(
+                "'priority' must be one of ['critical', 'high', 'medium', 'low']"
+            )
+        for field in (
+            "projectId",
+            "goalId",
+            "parentId",
+            "assigneeAgentId",
+            "reviewerAgentId",
+        ):
+            if field in proposal and proposal[field] is not None:
+                _validate_uuid(proposal[field], field)
+        for field in ("assigneeUserId", "reviewerUserId"):
+            if field in proposal and proposal[field] is not None:
+                proposal[field] = _trimmed_text(
+                    proposal[field], field, maximum=200, allow_empty=False
+                )
+        if "labelIds" in proposal:
+            label_ids = proposal["labelIds"]
+            if not isinstance(label_ids, list):
+                raise ValueError("'labelIds' must be an array")
+            for value in label_ids:
+                _validate_uuid(value, "labelIds")
+        result["proposal"] = proposal
+    return cast(ConvertChatToIssuePayload, result)
+
+
+def validate_resolve_chat_operation_proposal(
+    payload: Mapping[str, Any],
+) -> ResolveChatOperationProposalPayload:
+    _reject_unknown_fields(payload, {"action", "decisionNote"})
+    result = dict(payload)
+    if result.get("action") not in _OPERATION_DECISION_ACTIONS:
+        raise ValueError(
+            f"'action' must be one of {sorted(_OPERATION_DECISION_ACTIONS)}"
+        )
+    if "decisionNote" in result and result["decisionNote"] is not None:
+        result["decisionNote"] = _trimmed_text(
+            result["decisionNote"],
+            "decisionNote",
+            maximum=5000,
+            allow_empty=True,
+        )
+    return cast(ResolveChatOperationProposalPayload, result)
 
 
 def validate_update_chat_conversation(

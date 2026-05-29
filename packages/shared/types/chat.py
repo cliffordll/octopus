@@ -134,6 +134,21 @@ class SetChatProjectContextPayload(TypedDict, total=False):
     projectId: NotRequired[str | None]
 
 
+class ConvertChatToIssuePayload(TypedDict, total=False):
+    messageId: NotRequired[str | None]
+    proposal: NotRequired[dict[str, Any] | None]
+
+
+class ResolveChatOperationProposalPayloadBase(TypedDict):
+    action: str
+
+
+class ResolveChatOperationProposalPayload(
+    ResolveChatOperationProposalPayloadBase, total=False
+):
+    decisionNote: NotRequired[str | None]
+
+
 class AddChatMessagePayloadBase(TypedDict):
     body: str
 
