@@ -9,17 +9,20 @@ import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
 function ContextWorkspace({
+  contentClassName = "",
   label,
   title,
   navigationLabel,
   sidebar,
   children,
 }: PropsWithChildren<{
+  contentClassName?: string;
   label: string;
   title: string;
   navigationLabel: string;
   sidebar: ReactNode;
 }>) {
+  const isFullBleed = contentClassName.split(" ").includes("org-content-full");
   return (
     <div className="org-workspace context-workspace">
       <aside className="org-sidebar context-sidebar">
@@ -29,14 +32,14 @@ function ContextWorkspace({
           {sidebar}
         </nav>
       </aside>
-      <div className="org-content">
-        <div className="tertiary-detail-frame">{children}</div>
+      <div className={`org-content ${contentClassName}`}>
+        {isFullBleed ? children : <div className="tertiary-detail-frame">{children}</div>}
       </div>
     </div>
   );
 }
 
-export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+export function ChatsWorkspace({ contentClassName = "", orgId, children }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
   const chats = useQuery({ queryKey: ["chats", orgId], queryFn: () => chatsApi.list(orgId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
@@ -44,6 +47,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
   const conversations = Array.isArray(chats.data) ? chats.data : [];
   return (
     <ContextWorkspace
+      contentClassName={contentClassName}
       label="Messages"
       navigationLabel="消息导航"
       title="会话"
@@ -53,7 +57,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
             <h3>消息</h3>
             <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>
               <span aria-hidden="true" className="context-entry-icon">+</span>
-              <span>新建对话</span>
+              <span>新建聊天</span>
             </NavLink>
             <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>
               <span aria-hidden="true" className="context-entry-icon">T</span>
@@ -90,7 +94,7 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
   );
 }
 
-export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+export function IssuesWorkspace({ contentClassName = "", orgId, children }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
   const location = useLocation();
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const projectList = Array.isArray(projects.data) ? projects.data : [];
@@ -120,6 +124,7 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
 
   return (
     <ContextWorkspace
+      contentClassName={contentClassName}
       label="Tasks"
       navigationLabel="任务导航"
       title="任务"
@@ -196,23 +201,17 @@ export function IssuesWorkspace({ orgId, children }: PropsWithChildren<{ orgId: 
   );
 }
 
-export function AgentsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+export function AgentsWorkspace({ contentClassName = "", orgId, children }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   return (
     <ContextWorkspace
+      contentClassName={contentClassName}
       label="Agents"
       navigationLabel="智能体导航"
       title="团队"
       sidebar={
         <>
-          <section className="context-nav-section">
-            <h3>智能体</h3>
-            <NavLink className="context-action-entry new-context-entry" to={`/orgs/${orgId}/agents/new`}>
-              <span aria-hidden="true" className="context-entry-icon">+</span>
-              <span>新建智能体</span>
-            </NavLink>
-          </section>
           <section className="context-nav-section">
             <h3>团队</h3>
             {agents.error && <ErrorNotice error={agents.error} />}

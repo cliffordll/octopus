@@ -133,7 +133,7 @@ export function ChatPage() {
   }
   if (chat.error && !chat.data) return <ErrorNotice error={chat.error} />;
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       {chat.data && (
         <section className="chat-thread-shell">
           <header className="chat-thread-header">

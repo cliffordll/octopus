@@ -123,6 +123,85 @@ small {
   transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
 
+.quick-create {
+  position: relative;
+}
+
+.quick-create-trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #aab2c2;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 6px;
+  justify-content: center;
+  min-height: 58px;
+  padding: 8px 6px;
+  text-align: center;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
+  width: 100%;
+}
+
+.quick-create-trigger:hover,
+.quick-create-trigger[aria-expanded="true"] {
+  background: #111722;
+  border-color: #2f7bd6;
+  color: #f2f5fb;
+}
+
+.quick-create-trigger[aria-expanded="true"] .nav-icon {
+  background: #1f69b9;
+  color: #f6fbff;
+}
+
+.quick-create-menu {
+  background: #111722;
+  border: 1px solid #273142;
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 38%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  left: calc(100% + 10px);
+  min-width: 172px;
+  padding: 8px;
+  position: absolute;
+  top: 0;
+  z-index: 30;
+}
+
+.quick-create-menu a,
+.quick-create-menu button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #c6d0df;
+  cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  font-size: 13px;
+  font: inherit;
+  gap: 9px;
+  justify-content: flex-start;
+  min-height: auto;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.quick-create-menu a:hover,
+.quick-create-menu button:hover {
+  background: #182235;
+  border-color: #2f7bd6;
+  color: #f4f8ff;
+}
+
 .global-nav .nav-disabled {
   align-items: center;
   color: #556175;
@@ -310,7 +389,7 @@ small {
 
 .org-content-full {
   max-width: none;
-  padding: 0;
+  padding: 24px;
 }
 
 .organization-settings {
@@ -321,6 +400,90 @@ small {
 .tertiary-detail-frame {
   min-height: 100%;
   padding: 32px 36px 42px;
+  width: 100%;
+}
+
+.tertiary-detail-frame > .page-header {
+  border-bottom: 1px solid #202938;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+}
+
+.org-content-full > .page-header {
+  border-bottom: 1px solid #202938;
+  margin: 0 0 18px;
+  padding: 0 0 16px;
+}
+
+.org-content-full > .error-notice {
+  margin: 0 0 12px;
+}
+
+.org-content-full > .organization-chart,
+.org-content-full > .organization-empty-state,
+.org-content-full > .workspace-shell-layout {
+  width: 100%;
+}
+
+.org-content-full > .workspace-shell-layout {
+  height: calc(100vh - 136px);
+}
+
+.org-content-full > .org-resource-hero,
+.org-content-full > .org-resource-catalog-card,
+.org-content-full > .organization-skills-shell,
+.org-content-full > .approval-management,
+.org-content-full > .approval-detail-layout,
+.org-content-full > .agent-dashboard,
+.org-content-full > .agent-empty-state,
+.org-content-full > .agent-instructions-page,
+.org-content-full > .agent-runs-layout,
+.org-content-full > .agent-skills-page,
+.org-content-full > .chat-panel,
+.org-content-full > .chat-thread-shell,
+.org-content-full > .issue-detail-layout,
+.org-content-full > .issue-status-board,
+.org-content-full > .project-detail-shell,
+.org-content-full > .project-empty-state {
+  width: 100%;
+}
+
+.org-content-full > .approval-detail-layout,
+.org-content-full > .issue-detail-layout,
+.org-content-full .approval-thread {
+  max-width: none;
+}
+
+.org-content-full > .issue-detail-layout {
+  margin: 0;
+}
+
+.org-content-full > .chat-panel {
+  max-width: none;
+}
+
+.org-content-full .agent-config-card,
+.org-content-full .agent-create-form,
+.org-content-full > .agent-empty-state {
+  max-width: none;
+}
+
+.org-content-full .project-properties-card,
+.org-content-full .project-tab-panel,
+.org-content-full .project-tab-panel-wide,
+.org-content-full .project-configuration,
+.org-content-full .project-resources,
+.org-content-full .project-issues {
+  max-width: none;
+}
+
+.org-content-full > .chat-panel .chat-empty-state,
+.org-content-full > .chat-panel .chat-composer {
+  width: 100%;
+}
+
+.org-content-full > .chat-thread-shell .chat-messages,
+.org-content-full > .chat-thread-shell .chat-composer {
   width: 100%;
 }
 
@@ -460,7 +623,7 @@ small {
 }
 
 .project-create-dialog {
-  max-width: 520px;
+  max-width: 560px;
 }
 
 .project-detail-title {
@@ -2916,6 +3079,16 @@ pre {
   max-width: 720px;
 }
 
+.agent-create-dialog {
+  max-height: calc(100vh - 48px);
+  max-width: 820px;
+  overflow: auto;
+}
+
+.agent-create-dialog .agent-create-form {
+  max-width: none;
+}
+
 .agent-property-list {
   border-top: 1px solid #202a3b;
 }
@@ -3020,10 +3193,7 @@ pre {
 }
 
 .org-resource-hero {
-  background:
-    radial-gradient(circle at 16% 18%, rgba(115, 182, 255, .18), transparent 30%),
-    radial-gradient(circle at 86% 0%, rgba(117, 94, 255, .14), transparent 34%),
-    linear-gradient(135deg, #111827, #0b111a 72%);
+  background: #0f141d;
   border: 1px solid #223047;
   border-radius: 18px;
   box-shadow: 0 16px 44px rgba(0, 0, 0, .22);

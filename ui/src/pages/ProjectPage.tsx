@@ -277,7 +277,7 @@ export function ProjectPage() {
   );
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <div className="project-detail-shell">
       <header className="page-header project-detail-header">
         <div className="project-header-identity">

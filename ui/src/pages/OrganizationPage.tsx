@@ -243,7 +243,7 @@ export function OrganizationStructurePage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>
@@ -798,7 +798,7 @@ export function OrganizationSkillsPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       {skills.error && <ErrorNotice error={skills.error} />}
       <div className="organization-skills-shell">
         <aside className="organization-skills-sidebar">
@@ -1268,7 +1268,7 @@ export function OrganizationWorkspacesPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>

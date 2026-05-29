@@ -692,7 +692,7 @@ export function AgentPage() {
   }
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
-    <AgentsWorkspace orgId={orgId}>
+    <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header agent-page-header">
         <div className="agent-header-identity">
           <div className="agent-avatar-lg">{agent.data?.name?.slice(0, 1).toUpperCase() ?? "A"}</div>
