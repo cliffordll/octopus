@@ -159,6 +159,8 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 
 本节只修 server response 的字段稳定性，不改 UI/CLI 展示逻辑。
 
+已完成：
+
 - 确保 `/api/agents/{id}/skills` 的每个可展示 entry 稳定返回：
   - `key`
   - `selectionKey`
@@ -171,7 +173,11 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
   - `state`
   - `desired`
   - `managed`
-- 修正服务端字段兼容问题，保证组织技能、外部技能、bundled skill、agent-home skill 都有可解释的来源字段。
+- 修正 adapter home 外部安装项缺少 `sourceClass` 的兼容问题，统一返回 `sourceClass=adapter_home`。
+- 增加 contract test 覆盖 organization、external、missing entry 的字段稳定性，保证 description/source/origin/location 元数据不丢失。
+
+不做：
+
 - 不修改 UI/CLI；只保证服务端 response 足够支持后续显示。
 
 ### 17D: Agent Instructions 文件管理边界
