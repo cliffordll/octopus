@@ -90,10 +90,12 @@ it("shows organization skills and edits the selected skill file", async () => {
 
   renderApp("/orgs/org-1/skills");
   expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
-  expect(await screen.findByText("Review code changes")).toBeInTheDocument();
+  expect((await screen.findAllByText("Review code changes")).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByRole("button", { name: /Review/ })).toHaveClass("selected");
+  expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
   const editor = await screen.findByLabelText("SKILL.md");
   await userEvent.type(editor, "{End}{Enter}Updated");
-  await userEvent.click(screen.getByRole("button", { name: "保存文件" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/skills/skill-1/files",
