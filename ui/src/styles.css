@@ -4151,6 +4151,17 @@ pre {
   padding: 16px;
 }
 
+.agent-skill-analytics-card {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+}
+
+.agent-skill-analytics-card .agent-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .agent-skill-source-group {
   display: flex;
   flex-direction: column;
@@ -4248,14 +4259,19 @@ pre {
 }
 
 .agent-skill-enabled-pill {
+  align-items: center;
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid #2b3548;
   border-radius: 999px;
   color: #aab6c8;
+  display: inline-flex;
   flex-shrink: 0;
   font-size: 11px;
+  height: 26px;
+  justify-content: center;
   line-height: 1;
-  padding: 5px 8px;
+  min-width: 52px;
+  padding: 0 10px;
 }
 
 .agent-skill-enabled-pill.enabled {
@@ -4266,8 +4282,8 @@ pre {
 
 .agent-skill-tag-facts {
   display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .agent-skill-tag-facts > span {
@@ -4277,17 +4293,9 @@ pre {
   color: #dce5f2;
   min-width: 0;
   overflow: hidden;
-  padding: 7px 8px;
+  padding: 6px 7px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.agent-skill-tag-facts small {
-  color: #6f7b90;
-  display: block;
-  font-size: 10px;
-  line-height: 1.2;
-  margin-bottom: 3px;
 }
 
 .agent-skill-row-actions {
@@ -4296,6 +4304,28 @@ pre {
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.agent-skill-row-actions .small-button {
+  align-items: center;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid #2b3548;
+  border-radius: 999px;
+  color: #aab6c8;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 500;
+  height: 26px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 26px;
+  min-width: 52px;
+  padding: 0 10px;
+}
+
+.agent-skill-row-actions .small-button:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: #3a465a;
 }
 
 @media (max-width: 760px) {
@@ -4759,7 +4789,7 @@ pre {
 .chat-context-controls-readonly label::after {
   color: #66748a;
   content: "只读";
-  font-size: 10px;
+  font-size: 9px;
   pointer-events: none;
   position: absolute;
   right: 10px;
@@ -5006,6 +5036,13 @@ pre {
   .agent-run-metrics,
   .agent-run-session,
   .agent-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .agent-skill-analytics-card {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+  .agent-skill-analytics-card .agent-summary-grid {
     grid-template-columns: 1fr;
   }
   .agent-run-rail {

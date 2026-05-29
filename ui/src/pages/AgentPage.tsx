@@ -196,6 +196,42 @@ function skillField(entry: Record<string, unknown>, keys: string[], fallback = "
   return fallback;
 }
 
+function skillNestedString(entry: Record<string, unknown>, path: string[]): string {
+  let current: unknown = entry;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return "";
+    current = (current as Record<string, unknown>)[key];
+  }
+  return typeof current === "string" && current.trim() ? current.trim() : "";
+}
+
+function normalizeSkillSource(value: string): string {
+  return value.trim().toLowerCase().replaceAll("-", "_");
+}
+
+function skillSourceCandidates(entry: Record<string, unknown>): string[] {
+  const keys = ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "locationLabel", "selectionKey"];
+  return [
+    skillNestedString(entry, ["metadata", "sourceKind"]),
+    ...keys.map((key) => skillField(entry, [key], "")),
+  ]
+    .map(normalizeSkillSource)
+    .filter(Boolean);
+}
+
+function skillSourceKind(entry: Record<string, unknown>): string {
+  return skillSourceCandidates(entry)[0] ?? "";
+}
+
+function isCommunitySkillEntry(entry: Record<string, unknown>): boolean {
+  return skillSourceCandidates(entry).some((sourceKind) => (
+    sourceKind === "community"
+    || sourceKind === "community_preset"
+    || sourceKind.includes("/community/")
+    || sourceKind.includes("\\community\\")
+  ));
+}
+
 function nestedSkillField(entry: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const direct = entry[key];
@@ -243,7 +279,7 @@ function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string
   if (explicit) return explicit;
   if (booleanSkillField(entry, "alwaysEnabled")) return "每次智能体运行都会自动加载。";
   if (enabled) return "当前智能体已使用该技能，后续运行可加载。";
-  return "已安装，当前智能体尚未使用。";
+  return "";
 }
 
 function hasJsonObject(value: Record<string, unknown> | null | undefined): value is Record<string, unknown> {
@@ -283,8 +319,12 @@ function skillAliases(entry: Record<string, unknown>): string[] {
 }
 
 function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
-  const sourceClass = skillField(entry, ["sourceClass", "source", "scope", "kind"], "runtime").toLowerCase();
-  return sourceClass === "bundled" || sourceClass === "organization" ? "组织技能" : "外部技能";
+  const sourceClass = skillSourceKind(entry);
+  return ["bundled", "built_in", "organization", "community", "community_preset"].includes(sourceClass)
+    || sourceClass.includes("bundled")
+    || isCommunitySkillEntry(entry)
+    ? "组织技能"
+    : "外部技能";
 }
 
 function skillState(entry: Record<string, unknown>): string {
@@ -292,13 +332,26 @@ function skillState(entry: Record<string, unknown>): string {
 }
 
 function skillSourceLabel(entry: Record<string, unknown>): string {
-  return skillField(entry, ["selectionKey", "sourceClass", "source", "origin", "scope", "kind"], "runtime");
+  if (isCommunitySkillEntry(entry)) return "community";
+  return skillNestedString(entry, ["metadata", "sourceKind"])
+    || skillField(entry, ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "selectionKey"], "runtime");
 }
 
 function skillDisplaySourceText(value: string | null | undefined, bundled: boolean): string {
-  if (bundled) return "bundled";
+  if (bundled) return "built-in";
   if (!value) return "-";
+  const normalized = normalizeSkillSource(value);
+  if (normalized === "community_preset") return "community";
   return value;
+}
+
+function isBuiltInSkillEntry(entry: Record<string, unknown>): boolean {
+  const sourceClass = skillSourceKind(entry);
+  return ["bundled", "built_in", "octopus_bundled", "system_bundled", "rudder_bundled"].includes(sourceClass);
+}
+
+function visibleSkillWarning(warning: string): boolean {
+  return !/^skillsRootPath does not exist:/i.test(warning.trim());
 }
 
 function AgentRunDetail({
@@ -736,8 +789,10 @@ export function AgentPage() {
   const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
-  const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
+  const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
+  const communitySkillEntries = skillEntries.filter((entry) => !isBuiltInSkillEntry(entry) && isCommunitySkillEntry(entry));
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
+  const skillWarnings = (skills.data?.warnings ?? []).filter(visibleSkillWarning);
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
   const instructionDocs: InstructionDoc[] = instructionsBundle.data
     ? bundleFiles.map((file) => ({
@@ -1233,7 +1288,7 @@ export function AgentPage() {
             {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
             <div className="agent-skills-library">
               {skillsAnalytics.data && (
-                <section className="agent-skill-tags-card">
+                <section className="agent-skill-tags-card agent-skill-analytics-card">
                   <div className="agent-skill-source-heading">
                     <h3>使用分析</h3>
                     <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
@@ -1246,7 +1301,8 @@ export function AgentPage() {
                 </section>
               )}
               {[
-                { label: "组织技能", rows: organizationSkillEntries },
+                { label: "built-in", rows: builtInSkillEntries },
+                { label: "community", rows: communitySkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },
               ].map((group) => (
                 <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>
@@ -1261,7 +1317,7 @@ export function AgentPage() {
                       const name = skillEntryName(entry);
                       const actionName = skillActionName(entry);
                       const enabled = skillEnabled(entry, desiredSkillRows);
-                      const isBundled = skillField(entry, ["sourceClass", "source", "origin"], "").toLowerCase() === "bundled";
+                      const isBundled = isBuiltInSkillEntry(entry);
                       const description = skillDescription(entry) || skillField(entry, ["detail"], "");
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
@@ -1276,11 +1332,11 @@ export function AgentPage() {
                               <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
-                            <span className="agent-skill-tag-note">{loadNote}</span>
+                            {loadNote && <span className="agent-skill-tag-note">{loadNote}</span>}
                             <span className="agent-skill-tag-facts">
-                              <span><small>来源</small>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
-                              <span><small>状态</small>{state}</span>
-                              <span><small>版本</small>{version ? `v${version}` : "-"}</span>
+                              <span>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
+                              <span>{state}</span>
+                              <span>{version ? `v${version}` : "-"}</span>
                             </span>
                           </button>
                           <div className="agent-skill-row-actions">
@@ -1307,7 +1363,7 @@ export function AgentPage() {
                 </section>
               ))}
             </div>
-            {skills.data?.warnings?.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
+            {skillWarnings.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             {skillDialogOpen && (
               <div aria-modal="true" className="modal-backdrop" role="dialog">
                 <section className="panel task-modal skill-create-dialog">

@@ -446,7 +446,8 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
-  expect(screen.getByText("组织技能")).toBeInTheDocument();
+  expect(screen.getByText("built-in")).toBeInTheDocument();
+  expect(screen.getByText("community")).toBeInTheDocument();
   expect(screen.getByText("外部技能")).toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
@@ -542,8 +543,20 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             description: "Debug failures",
             prompt: "Debug carefully.",
           },
+          {
+            key: "deep-research",
+            selectionKey: "skills/deep-research",
+            runtimeName: "Deep Research",
+            sourceLocator: "server/skills/community/deep-research",
+            state: "available",
+            enabled: false,
+            description: "Research deeply",
+          },
         ],
-        warnings: ["debug missing from managed home"],
+        warnings: [
+          "skillsRootPath does not exist: D:\\coding\\octopus\\.octopus\\workspaces\\org_16793a83-0fdd-4e35-84d7-7204f7f23663\\skills",
+          "debug missing from managed home",
+        ],
       });
     }
     if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
@@ -565,11 +578,15 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
   expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
+  expect(screen.queryByText(/skillsRootPath does not exist/)).not.toBeInTheDocument();
   expect(await screen.findByText("installed")).toBeInTheDocument();
-  expect(await screen.findByText("external")).toBeInTheDocument();
+  expect((await screen.findAllByText("external")).length).toBeGreaterThanOrEqual(1);
   expect(await screen.findByText("missing")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
@@ -577,13 +594,17 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
   expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
-  expect(screen.getByText("bundled")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByText("Deep Research")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "取消使用" }));
   await userEvent.click(screen.getByText("Debug"));
-  await userEvent.click(screen.getByRole("button", { name: "使用" }));
+  const debugSkill = screen.getByText("Debug").closest("article");
+  expect(debugSkill).not.toBeNull();
+  await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
   await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
