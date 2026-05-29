@@ -235,7 +235,7 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 - Skills analytics 真实使用统计，该能力仍归 Step 22。
 - Runtime adapter materialization 重写；只接入 Step 14 已有消费边界。
 - Step 14 已实现的 instructions 初始化和 runtime 读取重写。
-- Step 23 的真实 actor/access、secret/env binding。
+- Step 24 的真实 actor/access、secret/env binding。
 
 ## 执行暂停点
 
