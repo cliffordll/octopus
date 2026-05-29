@@ -53,9 +53,13 @@ def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> Non
 
 @pytest.fixture
 async def app(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> AsyncIterator[tuple[FastAPI, async_sessionmaker]]:
-    monkeypatch.chdir(tmp_path)
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[tuple[FastAPI, async_sessionmaker, Path]]:
+    root = (
+        Path.cwd() / ".octopus" / "test-tmp" / f"step17-{uuid.uuid4().hex}"
+    ).resolve()
+    root.mkdir(parents=True)
+    monkeypatch.chdir(root)
     monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
@@ -64,7 +68,7 @@ async def app(
     application = create_app()
     application.state.session_factory = factory
     try:
-        yield application, factory
+        yield application, factory, root
     finally:
         await engine.dispose()
 
@@ -86,11 +90,11 @@ async def _request(
     return response.status_code, None
 
 
-async def _seed_agent(factory: async_sessionmaker, tmp_path: Path) -> tuple[str, str]:
+async def _seed_agent(factory: async_sessionmaker, root_path: Path) -> tuple[str, str]:
     org_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
     root = (
-        tmp_path
+        root_path
         / ".octopus"
         / "workspaces"
         / f"org_{org_id}"
@@ -131,10 +135,10 @@ async def _seed_agent(factory: async_sessionmaker, tmp_path: Path) -> tuple[str,
 
 
 async def test_agent_instructions_bundle_read_write_delete_and_activity(
-    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+    app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
-    application, factory = app
-    org_id, agent_id = await _seed_agent(factory, tmp_path)
+    application, factory, root_path = app
+    org_id, agent_id = await _seed_agent(factory, root_path)
 
     bundle_code, bundle = await _request(
         application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
@@ -191,12 +195,60 @@ async def test_agent_instructions_bundle_read_write_delete_and_activity(
     ]
 
 
-async def test_agent_instructions_path_update_and_path_guard(
-    app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
+async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
+    app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
-    application, factory = app
-    _, agent_id = await _seed_agent(factory, tmp_path)
-    cwd = tmp_path / "workspace"
+    application, factory, _ = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="legacy-instructions-org",
+                name="Legacy Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Legacy Instructions Agent",
+                workspace_key="legacy-agent",
+                role="individual_contributor",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "promptTemplate": "# Legacy Soul\nKeep context durable.",
+                },
+            )
+        )
+        await session.commit()
+
+    file_code, file_detail = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent_id}/instructions-bundle/file",
+        params={"path": "SOUL.md"},
+    )
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+
+    assert file_code == 200
+    assert file_detail["content"] == "# Legacy Soul\nKeep context durable."
+    assert bundle_code == 200
+    assert bundle["mode"] == "managed"
+    assert [file["path"] for file in bundle["files"]] == ["SOUL.md"]
+
+
+async def test_agent_instructions_path_update_and_path_guard(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root_path = app
+    _, agent_id = await _seed_agent(factory, root_path)
+    cwd = root_path / "workspace"
     cwd.mkdir()
     cwd.joinpath("AGENTS.md").write_text("# Agents", encoding="utf-8")
 
