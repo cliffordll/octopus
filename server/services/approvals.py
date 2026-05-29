@@ -38,6 +38,10 @@ APPROVAL_CREATE_TO_COLUMN: dict[str, str] = {
     "requestedByAgentId": "requested_by_agent_id",
 }
 
+_RESOLVABLE_APPROVAL_STATUSES: frozenset[str] = frozenset(
+    {"pending", "revision_requested"}
+)
+
 
 class ApprovalService:
     def __init__(self, session: AsyncSession) -> None:
@@ -252,6 +256,16 @@ class ApprovalService:
         current = await get_approval_by_id(self._session, approval_id)
         if current is None:
             return None
+
+        # Mirror upstream `services/approvals.ts:15,45-52`: only approvals in
+        # the resolvable states may transition; same-status calls are
+        # idempotent, different terminal states raise an explanatory error.
+        if current.status not in _RESOLVABLE_APPROVAL_STATUSES:
+            if current.status == status:
+                return _to_detail(current)
+            raise ValueError(
+                f"Only pending or revision requested approvals can be {status}"
+            )
 
         values = {"status": status}
         if "decisionNote" in payload:
