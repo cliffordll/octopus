@@ -52,6 +52,53 @@ class ChatRuntimeDescriptor(TypedDict):
     error: str | None
 
 
+class ChatAttachment(TypedDict):
+    id: str
+    orgId: str
+    conversationId: str
+    messageId: str
+    assetId: str
+    provider: str
+    objectKey: str
+    contentType: str
+    byteSize: int
+    sha256: str
+    originalFilename: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    createdAt: str
+    updatedAt: str
+    contentPath: str
+
+
+class ChatStreamTranscriptTodoItem(TypedDict):
+    text: str
+    status: str
+
+
+class ChatStreamTranscriptEntry(TypedDict, total=False):
+    kind: str
+    ts: str
+    text: str
+    delta: NotRequired[bool]
+    name: NotRequired[str]
+    input: NotRequired[Any]
+    toolUseId: NotRequired[str]
+    toolName: NotRequired[str]
+    content: NotRequired[str]
+    isError: NotRequired[bool]
+    todoListId: NotRequired[str]
+    items: NotRequired[list[ChatStreamTranscriptTodoItem]]
+    model: NotRequired[str]
+    sessionId: NotRequired[str]
+    inputTokens: NotRequired[int]
+    outputTokens: NotRequired[int]
+    cachedTokens: NotRequired[int]
+    costUsd: NotRequired[float]
+    subtype: NotRequired[str]
+    errors: NotRequired[list[str]]
+
+
 class ChatConversation(TypedDict):
     id: str
     orgId: str
@@ -90,6 +137,8 @@ class ChatMessage(TypedDict):
     body: str
     structuredPayload: dict[str, Any] | None
     approvalId: str | None
+    attachments: list[ChatAttachment]
+    transcript: list[ChatStreamTranscriptEntry]
     replyingAgentId: str | None
     chatTurnId: str | None
     turnVariant: int
@@ -157,6 +206,16 @@ class AddChatMessagePayload(AddChatMessagePayloadBase, total=False):
     editUserMessageId: NotRequired[str | None]
 
 
+class CreateChatAttachmentPayload(TypedDict):
+    messageId: str
+    provider: str
+    objectKey: str
+    contentType: str
+    byteSize: int
+    sha256: str
+    originalFilename: NotRequired[str | None]
+
+
 class CreatedChatMessages(TypedDict):
     messages: list[ChatMessage]
 
@@ -173,7 +232,7 @@ class ChatStreamEvent(TypedDict, total=False):
     userMessage: NotRequired[ChatMessage]
     delta: NotRequired[str]
     state: NotRequired[dict[str, Any]]
-    entry: NotRequired[dict[str, Any]]
+    entry: NotRequired[ChatStreamTranscriptEntry]
     messages: NotRequired[list[ChatMessage]]
     error: NotRequired[str]
     messageId: NotRequired[str | None]
