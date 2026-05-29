@@ -674,13 +674,115 @@ export interface ChatConversation {
   id: string;
   orgId: string;
   title: string;
+  summary?: string | null;
+  latestReplyPreview?: string | null;
+  searchPreview?: string | null;
   status: "active" | "resolved" | "archived";
   preferredAgentId?: string | null;
+  routedAgentId?: string | null;
+  primaryIssueId?: string | null;
+  primaryIssue?: {
+    id: string;
+    identifier: string | null;
+    title: string;
+    status: string;
+    priority: string;
+  } | null;
+  issueCreationMode?: "manual_approval" | "auto_create";
+  planMode?: boolean;
+  lastMessageAt?: string | null;
+  lastReadAt?: string | null;
+  isPinned?: boolean;
+  isUnread?: boolean;
+  unreadCount?: number;
+  needsAttention?: boolean;
+  resolvedAt?: string | null;
+  contextLinks?: ChatContextLink[];
+  chatRuntime?: {
+    sourceType: string;
+    sourceLabel: string;
+    runtimeAgentId: string | null;
+    agentRuntimeType: string | null;
+    model: string | null;
+    available: boolean;
+    error: string | null;
+  };
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ChatMessage {
   id: string;
+  orgId?: string;
+  conversationId?: string;
   role: "user" | "assistant" | "system";
+  kind?: "message" | "ask_user" | "issue_proposal" | "operation_proposal" | "system_event";
   body: string;
   status: "streaming" | "completed" | "stopped" | "failed" | "interrupted";
+  structuredPayload?: Record<string, unknown> | null;
+  approvalId?: string | null;
+  replyingAgentId?: string | null;
+  chatTurnId?: string | null;
+  turnVariant?: number;
+  supersededAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChatContextLink {
+  id: string;
+  orgId: string;
+  conversationId: string;
+  entityType: "issue" | "project" | "agent" | "approval" | "goal";
+  entityId: string;
+  metadata: Record<string, unknown> | null;
+  entity: {
+    type: string;
+    id: string;
+    label: string;
+    subtitle: string | null;
+    identifier: string | null;
+    status: string | null;
+    href: string;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessengerThreadSummary {
+  threadKey: string;
+  kind: "chat" | "issues" | "approvals" | "failed-runs" | "budget-alerts" | "join-requests";
+  title: string;
+  subtitle: string | null;
+  preview: string | null;
+  latestActivityAt: string | null;
+  lastReadAt: string | null;
+  unreadCount: number;
+  needsAttention: boolean;
+  isPinned: boolean;
+  href: string;
+}
+
+export interface MessengerThreadBundle {
+  summary: MessengerThreadSummary;
+  detail: {
+    threadKey: string;
+    kind: MessengerThreadSummary["kind"];
+    title: string;
+    subtitle: string | null;
+    preview: string | null;
+    latestActivityAt: string | null;
+    lastReadAt: string | null;
+    unreadCount: number;
+    needsAttention: boolean;
+    isPinned: boolean;
+    href: string;
+    description: string | null;
+    items: Array<Record<string, unknown>>;
+  };
+}
+
+export interface MessengerChatThreadDetail {
+  conversation: ChatConversation;
+  messages: ChatMessage[];
 }

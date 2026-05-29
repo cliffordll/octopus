@@ -1217,6 +1217,62 @@ h1, h2, p {
   padding: 14px;
 }
 
+.card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary-card {
+  background: #111722;
+  border: 1px solid #202a3b;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 1rem;
+}
+
+.button-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.chat-context-panel {
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  margin: 1rem 0;
+  padding: 0.75rem;
+}
+
+.chat-context-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.context-link-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.json-block {
+  background: #0d121b;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
 .heartbeat-events {
   display: flex;
   flex-direction: column;
@@ -2938,6 +2994,35 @@ pre {
   max-width: 860px;
 }
 
+.chat-thread-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: calc(100vh - 56px);
+}
+
+.chat-thread-header {
+  align-items: center;
+  border-bottom: 1px solid #202938;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 18px 4px 14px;
+}
+
+.chat-thread-header h1 {
+  color: #f4f7fb;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.chat-thread-header p {
+  color: #7d889a;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
 .chat-empty-state {
   align-items: center;
   display: flex;
@@ -2953,8 +3038,11 @@ pre {
 }
 
 .chat-composer {
-  border-top: 1px solid #202938;
-  padding-top: 18px;
+  background: #101722;
+  border: 1px solid #263346;
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+  padding: 14px;
 }
 
 .chat-composer-toolbar {
@@ -2975,7 +3063,14 @@ pre {
 }
 
 .chat-composer textarea {
+  background: transparent;
+  border: 0;
   min-height: 90px;
+  resize: vertical;
+}
+
+.chat-composer textarea:focus {
+  box-shadow: none;
 }
 
 .chat-compose-actions {
@@ -2991,6 +3086,7 @@ pre {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 22px;
+  overflow-y: auto;
   min-height: 230px;
 }
 
