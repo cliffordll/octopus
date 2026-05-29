@@ -198,6 +198,12 @@ async def update_workspace_operation(
     return result.scalar_one_or_none()
 
 
+async def get_workspace_operation(
+    session: AsyncSession, operation_id: str
+) -> WorkspaceOperation | None:
+    return await session.get(WorkspaceOperation, operation_id)
+
+
 async def list_workspace_operations_for_run(
     session: AsyncSession, run_id: str
 ) -> Sequence[WorkspaceOperation]:
