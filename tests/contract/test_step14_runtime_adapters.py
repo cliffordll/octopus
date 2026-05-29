@@ -405,6 +405,14 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert entries["conversation-to-skill"]["state"] == "missing"
     assert entries["conversation-to-skill"]["sourceClass"] == "bundled"
     assert entries["conversation-to-skill"]["readOnly"] is True
+    assert entries["conversation-to-skill"]["description"]
+    assert entries["conversation-to-skill"]["description"] != "---"
+    assert entries["control-plane"]["description"]
+    assert entries["control-plane"]["description"] != "\ufeff---"
+    assert entries["create-agent"]["description"]
+    assert entries["create-agent"]["description"] != "\ufeff---"
+    assert entries["create-plugin"]["description"]
+    assert entries["create-plugin"]["description"] != "\ufeff---"
 
 
 async def test_local_runtime_agent_resolves_explicit_relative_instructions_path(
