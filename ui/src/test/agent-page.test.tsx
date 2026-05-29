@@ -315,7 +315,7 @@ it("shows an empty skill list without placeholder skills", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1/skills");
 
-  expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
   expect(screen.getByText("组织技能")).toBeInTheDocument();
@@ -380,7 +380,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             origin: "bundled",
             state: "installed",
             alwaysEnabled: true,
-            originLabel: "Rudder",
+            originLabel: "Bundled reference",
             locationLabel: "bundled skills",
             version: "1.0",
             enabled: true,
@@ -435,7 +435,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("CWD")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
-  expect(await screen.findByRole("heading", { name: "Skill 管理" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
@@ -448,20 +448,20 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
-  expect(screen.getByText("Always loaded by Rudder for every agent run.")).toBeInTheDocument();
-  expect(screen.getByText("Rudder")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Fork" })).toBeInTheDocument();
+  expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
+  expect(screen.getByText("系统内置")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+  await userEvent.click(screen.getByRole("button", { name: "取消使用" }));
   await userEvent.click(screen.getByText("Debug"));
-  await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+  await userEvent.click(screen.getByRole("button", { name: "使用" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
   await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
   await userEvent.type(within(dialog).getByLabelText("Short name"), "incident-response");
   await userEvent.type(within(dialog).getByLabelText("描述"), "Handle incidents");
-  await userEvent.type(within(dialog).getByLabelText("Skill 内容"), "schema_version: 1\nprompt: handle it");
+  await userEvent.type(within(dialog).getByLabelText("技能内容"), "schema_version: 1\nprompt: handle it");
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(

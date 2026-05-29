@@ -17,6 +17,8 @@ import { MessengerPage } from "../pages/MessengerPage";
 import {
   OrganizationIndexPage,
   OrganizationPage,
+  OrganizationResourcesPage,
+  OrganizationSkillsPage,
   OrganizationStructurePage,
   OrganizationWorkspacesPage,
 } from "../pages/OrganizationPage";
@@ -32,6 +34,9 @@ export function App() {
         <Route path="organizations" element={<OrganizationsPage />} />
         <Route path="orgs/:orgId" element={<OrganizationIndexPage />} />
         <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />
+        <Route path="orgs/:orgId/resources" element={<OrganizationResourcesPage />} />
+        <Route path="orgs/:orgId/skills" element={<OrganizationSkillsPage />} />
+        <Route path="orgs/:orgId/skills/:skillId" element={<OrganizationSkillsPage />} />
         <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
         <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
         <Route path="orgs/:orgId/workspaces" element={<OrganizationWorkspacesPage />} />

@@ -3,6 +3,8 @@ import type {
   Agent,
   AgentConfigRevision,
   AgentConfiguration,
+  AgentInstructionsBundle,
+  AgentInstructionsFileDetail,
   AgentDetail,
   AgentRuntimeEnvironmentTestResult,
   AgentRuntimeModel,
@@ -15,6 +17,8 @@ import type {
   ProviderQuotaResult,
   ResetAgentSessionPayload,
   RuntimeAdapterMetadata,
+  UpdateAgentInstructionsBundlePayload,
+  UpdateAgentInstructionsFilePayload,
   UpdateAgentPayload,
 } from "./types";
 
@@ -93,6 +97,31 @@ export const agentsApi = {
     request<AgentSkillAnalytics>(
       `${agentRoot(agentId)}/skills/analytics?windowDays=${encodeURIComponent(String(windowDays))}`,
       { method: "GET" },
+    ),
+  instructionsBundle: (agentId: string): Promise<AgentInstructionsBundle> =>
+    request<AgentInstructionsBundle>(`${agentRoot(agentId)}/instructions-bundle`, { method: "GET" }),
+  updateInstructionsBundle: (
+    agentId: string,
+    payload: UpdateAgentInstructionsBundlePayload,
+  ): Promise<AgentInstructionsBundle> =>
+    jsonRequest<AgentInstructionsBundle>(`${agentRoot(agentId)}/instructions-bundle`, "PATCH", payload),
+  readInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsFileDetail> =>
+    request<AgentInstructionsFileDetail>(
+      `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
+      { method: "GET" },
+    ),
+  upsertInstructionFile: (
+    agentId: string,
+    payload: UpdateAgentInstructionsFilePayload,
+  ): Promise<AgentInstructionsFileDetail> =>
+    request<AgentInstructionsFileDetail>(`${agentRoot(agentId)}/instructions-bundle/file`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsFileDetail> =>
+    request<AgentInstructionsFileDetail>(
+      `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
     ),
   pause: (agentId: string): Promise<Agent> =>
     jsonRequest<Agent>(`${agentRoot(agentId)}/pause`, "POST", {}),
