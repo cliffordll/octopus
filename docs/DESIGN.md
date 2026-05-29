@@ -179,7 +179,21 @@ Workspace 是执行上下文的一部分。若上游在对应阶段包含 projec
 
 Workspace 不应被简化为任意本地目录字段，也不应在尚未核对上游行为前自行扩展。
 
-## 5.5 Actor 与访问语义
+## 5.5 Chat 消息、执行与引用边界
+
+Chat 是用户触发 agent 交互的业务对象，不只是 runtime 调用包装。服务端必须分别处理三个层次：
+
+- 用户消息和会话状态的持久化
+- assistant/runtime invocation 的执行结果
+- 附件、workspace work product、run/runtime result 等引用可见性
+
+用户消息一旦被服务端接受并形成 message，就应成为数据库中的可查询事实。Runtime 失败、超时、取消或返回无效结果，不应导致已接受的用户消息随同回滚；失败应以兼容的错误响应、message 状态或 execution visibility 字段表达。UI optimistic state 可以改善交互体验，但不能替代服务端持久化语义。
+
+Chat assistant invocation 仍不应被伪装为 heartbeat run。若上游没有把 chat assistant 调用持久化为 heartbeat run，Octopus 也不能为了可见性创建虚假的 run 记录。Step 18 只补齐 chat message 与 runtime result 的最小可见性字段；完整日志、指标、恢复矩阵和生产级 observability 仍按后续步骤实现。
+
+Chat 附件和 artifact reference 必须是对已有受控对象的引用关系，而不是提前实现完整对象存储。消息可以引用已存在的 workspace work product、run/runtime result 或文件/附件元数据，但引用必须保持 organization scope，不能跨 organization 泄漏数据。完整上传、下载、对象存储生命周期和权限细节归 Storage 阶段。
+
+## 5.6 Actor 与访问语义
 
 Actor、认证和授权相关能力只按上游 API 与服务端行为实施：
 
@@ -198,7 +212,7 @@ Actor、认证和授权相关能力只按上游 API 与服务端行为实施：
 
 本地开发 actor 不是新身份模型，也不构成对上游权限体系的替代；它是未实施 auth 子系统前，为保持已实现 server 流程可运行、可审计、可测试而设置的阶段性接入边界。
 
-## 5.6 调试数据与兼容数据形态
+## 5.7 调试数据与兼容数据形态
 
 在功能尚未完整接入真实用户、runtime 或外围资源的开发阶段，可以提供模拟数据，以支持 API 调试、界面联调和工作流验证。但模拟数据只能替代数据来源，不能改变数据结构或业务语义。
 
