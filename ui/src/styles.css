@@ -81,6 +81,7 @@ small {
 .product-mark {
   align-items: center;
   background: #2366b4;
+  border: 0;
   border-radius: 9px;
   color: #f5f8ff;
   display: flex;
@@ -90,6 +91,20 @@ small {
   justify-content: center;
   margin: 4px auto 0;
   width: 36px;
+}
+
+.product-menu {
+  position: relative;
+}
+
+.product-menu-trigger {
+  cursor: pointer;
+  padding: 0;
+}
+
+.product-menu-trigger:hover,
+.product-menu-trigger[aria-expanded="true"] {
+  background: #1f69b9;
 }
 
 .product-subtitle, .muted {
@@ -252,7 +267,7 @@ small {
   width: 28px;
 }
 
-.organization-switcher {
+.sidebar-settings {
   bottom: 22px;
   left: 12px;
   padding-top: 16px;
@@ -260,22 +275,30 @@ small {
   right: 12px;
 }
 
+.sidebar-settings button,
 .organization-trigger {
   align-items: center;
   background: transparent;
   border: 1px solid #1d2430;
   border-radius: 10px;
   color: #e6ebf3;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
+  font: inherit;
   gap: 6px;
   padding: 8px 6px;
   text-align: center;
   width: 100%;
 }
 
+.sidebar-settings button:hover,
 .organization-trigger:hover {
   background: #111722;
+}
+
+.settings-dialog {
+  max-width: 420px;
 }
 
 .organization-avatar {
@@ -318,6 +341,7 @@ small {
   padding: 8px;
   position: absolute;
   width: 232px;
+  z-index: 80;
 }
 
 .organization-menu p {
@@ -385,6 +409,13 @@ small {
   overflow: auto;
   padding: 0;
   width: 100%;
+}
+
+.product-organization-menu {
+  bottom: auto;
+  left: calc(100% + 12px);
+  top: 0;
+  z-index: 120;
 }
 
 .org-content-full {

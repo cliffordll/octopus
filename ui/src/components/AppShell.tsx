@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
@@ -18,6 +18,9 @@ export function AppShell() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const productMenuRef = useRef<HTMLDivElement>(null);
+  const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
   const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
   const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|resources|workspaces|goals|skills|settings)/.test(location.pathname);
@@ -31,16 +34,84 @@ export function AppShell() {
     organizationList.find((organization) => organization.id === activeOrganizationId) ?? organizationList[0];
   const selectedOrganizationId = activeOrganizationId ?? selectedOrganization?.id;
 
+  useEffect(() => {
+    function closeMenusOnOutsideInteraction(event: MouseEvent | FocusEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (productMenuRef.current && !productMenuRef.current.contains(target)) {
+        setOrganizationMenuOpen(false);
+      }
+      if (quickCreateRef.current && !quickCreateRef.current.contains(target)) {
+        setQuickCreateOpen(false);
+      }
+    }
+
+    function closeMenusOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOrganizationMenuOpen(false);
+        setQuickCreateOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeMenusOnOutsideInteraction);
+    document.addEventListener("focusin", closeMenusOnOutsideInteraction);
+    document.addEventListener("keydown", closeMenusOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenusOnOutsideInteraction);
+      document.removeEventListener("focusin", closeMenusOnOutsideInteraction);
+      document.removeEventListener("keydown", closeMenusOnEscape);
+    };
+  }, []);
+
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="product-mark">O</div>
+        <div className="product-menu" ref={productMenuRef}>
+          <button
+            aria-expanded={organizationMenuOpen}
+            aria-label="组织菜单"
+            className="product-mark product-menu-trigger"
+            onClick={() => {
+              setOrganizationMenuOpen((open) => !open);
+              setQuickCreateOpen(false);
+            }}
+            type="button"
+          >
+            {(selectedOrganization?.name ?? activeOrganizationId ?? "O").slice(0, 1).toUpperCase()}
+          </button>
+          {organizationMenuOpen && (
+            <nav aria-label="组织切换菜单" className="organization-menu product-organization-menu">
+              <p>切换组织</p>
+              {organizationList.map((organization) => (
+                <Link
+                  className={organization.id === selectedOrganizationId ? "selected" : undefined}
+                  key={organization.id}
+                  onClick={() => setOrganizationMenuOpen(false)}
+                  to={organizationTarget(location.pathname, organization.id)}
+                >
+                  <span className="organization-avatar">{organization.name.slice(0, 1).toUpperCase()}</span>
+                  {organization.name}
+                </Link>
+              ))}
+              {selectedOrganizationId && (
+                <NavLink onClick={() => setOrganizationMenuOpen(false)} to={`/orgs/${selectedOrganizationId}/settings`}>
+                  组织设置
+                </NavLink>
+              )}
+              <NavLink onClick={() => setOrganizationMenuOpen(false)} to="/organizations">
+                创建组织
+              </NavLink>
+            </nav>
+          )}
+        </div>
         <div className="product">Octopus</div>
         <div className="product-subtitle">Control plane</div>
         <nav className="global-nav" aria-label="主导航">
           {selectedOrganizationId ? (
             <>
-              <div className="quick-create">
+              <div className="quick-create" ref={quickCreateRef}>
                 <button
                   aria-expanded={quickCreateOpen}
                   aria-label="快速创建"
@@ -117,49 +188,19 @@ export function AppShell() {
             <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">O</span>组织</span>
           )}
         </nav>
-        <div className="organization-switcher">
+        <div className="sidebar-settings">
           <button
-            aria-expanded={organizationMenuOpen}
-            aria-label="切换组织"
-            className="organization-trigger"
+            aria-label="设置"
             onClick={() => {
-              setOrganizationMenuOpen((open) => !open);
+              setOrganizationMenuOpen(false);
               setQuickCreateOpen(false);
+              setSettingsOpen(true);
             }}
             type="button"
           >
-            <span className="organization-avatar">
-              {(selectedOrganization?.name ?? activeOrganizationId ?? "-").slice(0, 1).toUpperCase()}
-            </span>
-            <span className="organization-trigger-label">
-              <small>Organization</small>
-              {selectedOrganization?.name ?? activeOrganizationId ?? "选择组织"}
-            </span>
+            <span aria-hidden="true" className="nav-icon">S</span>
+            <span>设置</span>
           </button>
-          {organizationMenuOpen && (
-            <nav aria-label="组织切换菜单" className="organization-menu">
-              <p>切换组织</p>
-              {organizationList.map((organization) => (
-                <Link
-                  className={organization.id === selectedOrganizationId ? "selected" : undefined}
-                  key={organization.id}
-                  onClick={() => setOrganizationMenuOpen(false)}
-                  to={organizationTarget(location.pathname, organization.id)}
-                >
-                  <span className="organization-avatar">{organization.name.slice(0, 1).toUpperCase()}</span>
-                  {organization.name}
-                </Link>
-              ))}
-              {selectedOrganizationId && (
-                <NavLink onClick={() => setOrganizationMenuOpen(false)} to={`/orgs/${selectedOrganizationId}/settings`}>
-                  组织设置
-                </NavLink>
-              )}
-              <NavLink onClick={() => setOrganizationMenuOpen(false)} to="/organizations">
-                管理组织
-              </NavLink>
-            </nav>
-          )}
         </div>
       </aside>
       <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`}>
@@ -170,6 +211,21 @@ export function AppShell() {
       )}
       {projectCreateOpen && selectedOrganizationId && (
         <ProjectCreateDialog onClose={() => setProjectCreateOpen(false)} orgId={selectedOrganizationId} />
+      )}
+      {settingsOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <div aria-modal="true" className="panel settings-dialog" role="dialog">
+            <div className="modal-header">
+              <div>
+                <h2>设置</h2>
+                <p className="muted">设置功能暂未接入。</p>
+              </div>
+              <button aria-label="关闭设置" className="ghost" onClick={() => setSettingsOpen(false)} type="button">
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
