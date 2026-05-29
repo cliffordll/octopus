@@ -3090,18 +3090,22 @@ pre {
 }
 
 .agent-dashboard {
+  align-items: stretch;
   display: grid;
-  gap: 20px;
+  gap: 14px;
   grid-template-columns: minmax(280px, .86fr) minmax(380px, 1.14fr);
+  min-height: calc(100vh - 224px);
 }
 
 .agent-latest-run-card {
+  display: flex;
+  flex-direction: column;
   grid-row: span 2;
 }
 
 .agent-summary-grid {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -3874,13 +3878,17 @@ pre {
 .agent-instructions-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+  min-height: calc(100vh - 224px);
 }
 
 .agent-instructions-grid {
+  align-items: stretch;
   display: grid;
-  gap: 24px;
+  gap: 14px;
   grid-template-columns: 180px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
 }
 
 .instruction-files-card,
@@ -3888,14 +3896,15 @@ pre {
   background: #0f141d;
   border: 1px solid #202a3b;
   border-radius: 12px;
-  padding: 16px;
+  padding: 12px;
 }
 
 .instruction-files-card {
-  align-self: start;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -3934,49 +3943,103 @@ pre {
   border-color: #3886e8;
 }
 
-.instruction-file-list {
+.instruction-file-tree {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
 }
 
-.instruction-file-list li {
-  border: 1px solid #202a3b;
-  border-radius: 10px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+.instruction-directory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.instruction-file-list li:hover {
-  background: #151c29;
+.instruction-directory-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.instruction-file-list li.selected {
-  background: rgba(56, 134, 232, 0.08);
-  border-color: #3886e8;
-}
-
-.instruction-file-list button {
+.instruction-file-tree button {
+  align-items: flex-start;
   background: transparent;
-  border: 0;
-  color: #e8edf5;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #c9d4e5;
   cursor: pointer;
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 8px 8px calc(8px + (var(--instruction-file-depth, 0) * 16px));
   text-align: left;
   width: 100%;
 }
 
-.instruction-file-list code {
+.instruction-file-tree .instruction-directory-button {
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.instruction-file-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.instruction-file-icon,
+.instruction-directory-icon {
+  align-items: center;
+  border-radius: 5px;
+  display: inline-flex;
+  flex: 0 0 18px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 10px;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.instruction-file-icon {
+  background: #172133;
+  color: #91b7ff;
+}
+
+.instruction-directory-icon {
+  background: #211b32;
+  color: #c6a8ff;
+}
+
+.instruction-directory-toggle {
+  color: #7f8da3;
+  font-family: var(--font-mono);
+  margin-left: auto;
+}
+
+.instruction-file-tree button:hover,
+.instruction-file-tree button.selected {
+  background: #141d2b;
+  border-color: #2a3950;
+}
+
+.instruction-file-tree button span {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.instruction-file-tree button small {
+  color: #8792a6;
+  font-size: 10px;
 }
 
 .instruction-create-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .instruction-create-form label {
@@ -3989,12 +4052,14 @@ pre {
 
 .instruction-create-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   justify-content: flex-end;
 }
 
 .instruction-content-card {
-  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -4006,7 +4071,8 @@ pre {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
-  min-height: 488px;
+  flex: 1;
+  min-height: 320px;
   padding: 16px;
   resize: vertical;
   width: 100%;
@@ -4573,8 +4639,8 @@ pre {
 .agent-properties {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin: 22px 0;
+  gap: 10px;
+  margin: 14px 0 0;
 }
 
 .agent-properties div {

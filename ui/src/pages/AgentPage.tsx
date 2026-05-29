@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
@@ -47,6 +47,126 @@ function parseCsv(value: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+type InstructionDoc = {
+  content: string;
+  editable: boolean;
+  isEntryFile: boolean;
+  key: string;
+  name: string;
+  path: string;
+  source: string;
+  virtual: boolean;
+};
+
+type InstructionFileTreeNode = {
+  children: Map<string, InstructionFileTreeNode>;
+  files: InstructionDoc[];
+  name: string;
+  path: string;
+};
+
+function createInstructionFileTreeNode(name: string, path: string): InstructionFileTreeNode {
+  return { children: new Map(), files: [], name, path };
+}
+
+function buildInstructionFileTree(files: InstructionDoc[]): InstructionFileTreeNode {
+  const root = createInstructionFileTreeNode("", "");
+  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    const parts = file.path.split("/").filter(Boolean);
+    if (parts.length <= 1) {
+      root.files.push(file);
+      continue;
+    }
+    let node = root;
+    for (const segment of parts.slice(0, -1)) {
+      const path = node.path ? `${node.path}/${segment}` : segment;
+      let child = node.children.get(segment);
+      if (!child) {
+        child = createInstructionFileTreeNode(segment, path);
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
+    node.files.push(file);
+  }
+  return root;
+}
+
+function instructionFileDirectoryAncestors(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return [];
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function instructionFileTreeCount(node: InstructionFileTreeNode): number {
+  let count = node.files.length;
+  for (const child of node.children.values()) count += instructionFileTreeCount(child);
+  return count;
+}
+
+function InstructionFileTree({
+  expandedDirs,
+  files,
+  onSelect,
+  onToggle,
+  selectedPath,
+}: {
+  expandedDirs: Set<string>;
+  files: InstructionDoc[];
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+  selectedPath: string;
+}) {
+  const tree = buildInstructionFileTree(files);
+  function renderFile(file: InstructionDoc, level: number) {
+    return (
+      <button
+        className={`instruction-file-button ${selectedPath === file.path ? "selected" : ""}`}
+        key={file.path}
+        onClick={() => onSelect(file.path)}
+        style={{ "--instruction-file-depth": level } as CSSProperties}
+        type="button"
+      >
+        <span className="instruction-file-label">
+          <span className="instruction-file-icon" aria-hidden="true">F</span>
+          <span>{file.path.split("/").at(-1) ?? file.path}</span>
+        </span>
+      </button>
+    );
+  }
+  function renderNode(node: InstructionFileTreeNode, level = 0) {
+    const directories = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      <>
+        {node.files.map((file) => renderFile(file, level))}
+        {directories.map((directory) => {
+          const expanded = expandedDirs.has(directory.path);
+          return (
+            <div className="instruction-directory" key={directory.path}>
+              <button
+                aria-expanded={expanded}
+                className="instruction-directory-button"
+                onClick={() => onToggle(directory.path)}
+                style={{ "--instruction-file-depth": level } as CSSProperties}
+                type="button"
+              >
+                <span className="instruction-file-label">
+                  <span className="instruction-directory-icon" aria-hidden="true">D</span>
+                  <span>{directory.name}</span>
+                </span>
+                <small>{instructionFileTreeCount(directory)}</small>
+                <span className="instruction-directory-toggle" aria-hidden="true">{expanded ? "v" : ">"}</span>
+              </button>
+              {expanded && <div className="instruction-directory-children">{renderNode(directory, level + 1)}</div>}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+  return <div className="instruction-file-tree">{renderNode(tree)}</div>;
 }
 
 function formatRunTime(value?: string | null): string {
@@ -384,6 +504,7 @@ export function AgentPage() {
   const [taskTitle, setTaskTitle] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
+  const [expandedInstructionDirs, setExpandedInstructionDirs] = useState<Set<string>>(new Set());
   const [showInstructionForm, setShowInstructionForm] = useState(false);
   const [newInstructionName, setNewInstructionName] = useState("");
   const [instructionDraft, setInstructionDraft] = useState("");
@@ -620,7 +741,7 @@ export function AgentPage() {
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
-  const instructionDocs = instructionsBundle.data
+  const instructionDocs: InstructionDoc[] = instructionsBundle.data
     ? bundleFiles.map((file) => ({
       content: "",
       editable: file.editable,
@@ -640,8 +761,26 @@ export function AgentPage() {
   });
   const selectedInstructionContent = selectedBundleFile.data?.content ?? selectedInstruction?.content ?? "";
   useEffect(() => {
+    if (!selectedInstruction?.path) return;
+    const ancestors = instructionFileDirectoryAncestors(selectedInstruction.path);
+    if (ancestors.length === 0) return;
+    setExpandedInstructionDirs((current) => {
+      const next = new Set(current);
+      for (const ancestor of ancestors) next.add(ancestor);
+      return next.size === current.size ? current : next;
+    });
+  }, [selectedInstruction?.path]);
+  useEffect(() => {
     setInstructionDraft(selectedInstructionContent);
   }, [selectedInstructionContent]);
+  function toggleInstructionDir(path: string) {
+    setExpandedInstructionDirs((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
   function defaultInstructionName() {
     const names = new Set(instructionDocs.map((doc) => doc.name.toLowerCase()));
     if (!names.has("NEW.md".toLowerCase())) return "NEW.md";
@@ -795,9 +934,9 @@ export function AgentPage() {
             {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
             {deleteInstruction.error && <ErrorNotice error={deleteInstruction.error} />}
             <div className="agent-instructions-grid">
-              <aside aria-label="Instruction files" className="instruction-files-card">
+              <aside aria-label="说明文件列表" className="instruction-files-card">
                 <div className="instruction-card-header">
-                  <h2>Files</h2>
+                  <h2>文件</h2>
                   <button
                     aria-expanded={showInstructionForm}
                     aria-label="新增文件"
@@ -820,20 +959,15 @@ export function AgentPage() {
                     </div>
                   </form>
                 )}
-                <ul className="instruction-file-list">
-                  {instructionDocs.map((doc) => (
-                    <li
-                      className={selectedInstruction?.key === doc.key ? "selected" : undefined}
-                      key={doc.key}
-                    >
-                      <button onClick={() => setSelectedInstructionKey(doc.key)} type="button">
-                        <code>{doc.name}</code>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <InstructionFileTree
+                  expandedDirs={expandedInstructionDirs}
+                  files={instructionDocs}
+                  onSelect={setSelectedInstructionKey}
+                  onToggle={toggleInstructionDir}
+                  selectedPath={selectedInstruction?.path ?? ""}
+                />
               </aside>
-              <article aria-label="Instruction content" className="instruction-content-card">
+              <article aria-label="说明文件内容" className="instruction-content-card">
                 {selectedInstruction ? (
                   <>
                     <textarea
