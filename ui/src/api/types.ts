@@ -801,6 +801,37 @@ export interface HeartbeatRunEvent {
   createdAt: string;
 }
 
+export interface LogReadResult {
+  content: string;
+  endOffset?: number;
+  eof?: boolean;
+  nextOffset?: number;
+}
+
+export interface WorkspaceOperation {
+  id: string;
+  orgId: string;
+  executionWorkspaceId?: string | null;
+  heartbeatRunId?: string | null;
+  phase: string;
+  command?: string | null;
+  cwd?: string | null;
+  status: string;
+  exitCode?: number | null;
+  logStore?: string | null;
+  logRef?: string | null;
+  logBytes?: number | null;
+  logSha256?: string | null;
+  logCompressed?: boolean;
+  stdoutExcerpt?: string | null;
+  stderrExcerpt?: string | null;
+  metadata?: Record<string, unknown> | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ChatConversation {
   id: string;
   orgId: string;
