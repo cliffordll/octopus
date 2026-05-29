@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
 import { Link, Navigate, NavLink, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
+import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent, ProjectDetail, ProjectWorkspace } from "../api/types";
+import type { Agent, OrganizationResource, OrganizationSkillListItem, ProjectDetail, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -312,6 +313,381 @@ export function OrganizationStructurePage() {
           </div>
         </section>
       )}
+    </OrgWorkspace>
+  );
+}
+
+const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
+
+function organizationResourceKindLabel(kind: OrganizationResource["kind"]): string {
+  if (kind === "directory") return "目录";
+  if (kind === "file") return "文件";
+  if (kind === "connector_object") return "连接器对象";
+  return "链接";
+}
+
+function organizationResourceKindIcon(kind: OrganizationResource["kind"]): string {
+  if (kind === "directory") return "D";
+  if (kind === "file") return "F";
+  if (kind === "connector_object") return "C";
+  return "U";
+}
+
+export function OrganizationResourcesPage() {
+  const { orgId = "" } = useParams();
+  const queryClient = useQueryClient();
+  const resources = useQuery({
+    queryKey: ["organization-resources", orgId],
+    queryFn: () => organizationsApi.resources(orgId),
+  });
+  const [editing, setEditing] = useState<OrganizationResource | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState<OrganizationResource["kind"]>("url");
+  const [locator, setLocator] = useState("");
+  const [description, setDescription] = useState("");
+  const [formError, setFormError] = useState("");
+  const resourceRows = Array.isArray(resources.data) ? resources.data : [];
+
+  function resetForm() {
+    setEditing(null);
+    setName("");
+    setKind("url");
+    setLocator("");
+    setDescription("");
+    setFormError("");
+  }
+
+  function openCreateResourceDialog() {
+    resetForm();
+    setDialogOpen(true);
+  }
+
+  function editResource(resource: OrganizationResource) {
+    setEditing(resource);
+    setName(resource.name);
+    setKind(resource.kind);
+    setLocator(resource.locator);
+    setDescription(resource.description ?? "");
+    setFormError("");
+    setDialogOpen(true);
+  }
+
+  function closeResourceDialog() {
+    setDialogOpen(false);
+    resetForm();
+  }
+
+  const saveResource = useMutation({
+    mutationFn: () => {
+      const payload = {
+        name: name.trim(),
+        kind,
+        locator: locator.trim(),
+        description: description.trim() || null,
+      };
+      return editing
+        ? organizationsApi.updateResource(orgId, editing.id, payload)
+        : organizationsApi.createResource(orgId, payload);
+    },
+    onSuccess: () => {
+      closeResourceDialog();
+      void queryClient.invalidateQueries({ queryKey: ["organization-resources", orgId] });
+    },
+    onError: (error) => setFormError(error instanceof Error ? error.message : "保存资源失败"),
+  });
+  const deleteResource = useMutation({
+    mutationFn: (resourceId: string) => organizationsApi.deleteResource(orgId, resourceId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization-resources", orgId] }),
+  });
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    setFormError("");
+    if (name.trim() && locator.trim()) saveResource.mutate();
+  }
+
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <section className="org-resource-hero">
+        <div className="org-resource-hero-copy">
+          <p className="org-resource-eyebrow">
+            <span aria-hidden="true">R</span>
+            组织资源目录
+          </p>
+          <h1>资源</h1>
+          <p>
+            维护组织内可复用的代码库、文件、链接和连接器对象。资源在这里统一登记，再由项目按角色说明进行引用。
+          </p>
+          <div className="org-resource-chip-row">
+            <span>{resourceRows.length} 个目录项</span>
+            <span>项目引用时补充角色和说明</span>
+          </div>
+          <div className="org-resource-actions">
+            <button type="button" onClick={openCreateResourceDialog}>添加资源</button>
+            <Link className="button secondary" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
+          </div>
+        </div>
+        <aside className="org-resource-context-card">
+          <p className="eyebrow">智能体运行上下文</p>
+          <h2>先建目录，再按项目引用。</h2>
+          <p>
+            组织资源保持可复用。项目级引用只负责指向这些资源，并说明该项目希望智能体如何使用。
+          </p>
+        </aside>
+      </section>
+      {resources.error && <ErrorNotice error={resources.error} />}
+      <section className="panel org-resource-catalog-card">
+        <div className="panel-heading">
+          <div>
+            <h2>目录</h2>
+            <p className="muted">使用稳定名称和明确定位符，便于智能体可靠引用资源。</p>
+          </div>
+          <Badge>{resourceRows.length}</Badge>
+        </div>
+        {resources.isSuccess && resourceRows.length === 0 ? (
+          <div className="org-resource-empty" aria-label="No resources" />
+        ) : (
+          <div className="org-resource-grid">
+            {resourceRows.map((resource) => (
+              <article className="org-resource-card" key={resource.id}>
+                <div className="org-resource-card-header">
+                  <span className={`org-resource-kind-icon org-resource-kind-${resource.kind}`} aria-hidden="true">
+                    {organizationResourceKindIcon(resource.kind)}
+                  </span>
+                  <div>
+                    <h3>{resource.name}</h3>
+                    <span>{organizationResourceKindLabel(resource.kind)}</span>
+                  </div>
+                </div>
+                <p className="org-resource-locator">{resource.locator}</p>
+                {resource.description && <p className="org-resource-description">{resource.description}</p>}
+                <div className="org-resource-card-actions">
+                  <button className="secondary small-button" onClick={() => editResource(resource)} type="button">
+                    编辑
+                  </button>
+                  <button
+                    className="danger small-button"
+                    disabled={deleteResource.isPending}
+                    onClick={() => deleteResource.mutate(resource.id)}
+                    type="button"
+                  >
+                    删除
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      {deleteResource.error && <ErrorNotice error={deleteResource.error} />}
+      {dialogOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="panel form task-modal resource-dialog" onSubmit={submit}>
+            <div className="task-modal-header">
+              <div>
+                <h2>{editing ? "编辑资源" : "添加资源"}</h2>
+                <p className="muted">
+                  {editing ? "更新这个组织级可复用资源。" : "为当前组织创建一个可复用资源目录项。"}
+                </p>
+              </div>
+              <button className="secondary small-button" onClick={closeResourceDialog} type="button">取消</button>
+            </div>
+            <label>
+              名称
+              <input value={name} onChange={(event) => setName(event.target.value)} required />
+            </label>
+            <label>
+              类型
+              <select value={kind} onChange={(event) => setKind(event.target.value as OrganizationResource["kind"])}>
+                {RESOURCE_KINDS.map((item) => (
+                  <option key={item} value={item}>{organizationResourceKindLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              定位符
+              <input value={locator} onChange={(event) => setLocator(event.target.value)} required />
+            </label>
+            <label>
+              描述
+              <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+            </label>
+            {formError && <p className="error-notice">{formError}</p>}
+            {saveResource.error && <ErrorNotice error={saveResource.error} />}
+            <div className="task-modal-actions">
+              <button className="secondary" onClick={closeResourceDialog} type="button">取消</button>
+              <button disabled={saveResource.isPending} type="submit">{editing ? "保存修改" : "创建资源"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </OrgWorkspace>
+  );
+}
+
+function skillFilePath(skill: OrganizationSkillListItem): string {
+  return skill.fileInventory.find((file) => file.path === "SKILL.md")?.path ?? skill.fileInventory[0]?.path ?? "SKILL.md";
+}
+
+export function OrganizationSkillsPage() {
+  const { orgId = "" } = useParams();
+  const queryClient = useQueryClient();
+  const skills = useQuery({
+    queryKey: ["organization-skills", orgId],
+    queryFn: () => organizationSkillsApi.list(orgId),
+  });
+  const skillRows = Array.isArray(skills.data) ? skills.data : [];
+  const [selectedSkillId, setSelectedSkillId] = useState("");
+  const selectedSkill = skillRows.find((skill) => skill.id === selectedSkillId) ?? skillRows[0];
+  const [newName, setNewName] = useState("");
+  const [newSlug, setNewSlug] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newMarkdown, setNewMarkdown] = useState("");
+  const [draftContent, setDraftContent] = useState("");
+  const selectedPath = selectedSkill ? skillFilePath(selectedSkill) : "SKILL.md";
+  const skillDetail = useQuery({
+    queryKey: ["organization-skill", orgId, selectedSkill?.id],
+    queryFn: () => organizationSkillsApi.get(orgId, selectedSkill!.id),
+    enabled: Boolean(selectedSkill),
+  });
+  const skillFile = useQuery({
+    queryKey: ["organization-skill-file", orgId, selectedSkill?.id, selectedPath],
+    queryFn: () => organizationSkillsApi.readFile(orgId, selectedSkill!.id, selectedPath),
+    enabled: Boolean(selectedSkill),
+  });
+  const updateStatus = useQuery({
+    queryKey: ["organization-skill-update-status", orgId, selectedSkill?.id],
+    queryFn: () => organizationSkillsApi.updateStatus(orgId, selectedSkill!.id),
+    enabled: Boolean(selectedSkill),
+  });
+
+  useEffect(() => {
+    if (skillFile.data) setDraftContent(skillFile.data.content);
+  }, [skillFile.data]);
+
+  const createSkill = useMutation({
+    mutationFn: () => organizationSkillsApi.create(orgId, {
+      name: newName.trim(),
+      slug: newSlug.trim() || null,
+      description: newDescription.trim() || null,
+      markdown: newMarkdown.trim() || null,
+    }),
+    onSuccess: (skill) => {
+      setNewName("");
+      setNewSlug("");
+      setNewDescription("");
+      setNewMarkdown("");
+      setSelectedSkillId(skill.id);
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+    },
+  });
+  const saveFile = useMutation({
+    mutationFn: () => organizationSkillsApi.updateFile(orgId, selectedSkill!.id, { path: selectedPath, content: draftContent }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["organization-skill-file", orgId, selectedSkill?.id, selectedPath] });
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+    },
+  });
+  const deleteSkill = useMutation({
+    mutationFn: (skillId: string) => organizationSkillsApi.delete(orgId, skillId),
+    onSuccess: () => {
+      setSelectedSkillId("");
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+    },
+  });
+
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Organization</p>
+          <h1>技能</h1>
+        </div>
+      </header>
+      {skills.error && <ErrorNotice error={skills.error} />}
+      <div className="organization-skills-layout">
+        <aside className="panel organization-skill-list">
+          <div className="panel-heading">
+            <div>
+              <h2>Skill 管理</h2>
+              <p className="muted">组织技能库</p>
+            </div>
+            <Badge>{skillRows.length}</Badge>
+          </div>
+          <div className="agent-skill-tag-list">
+            {skillRows.map((skill) => (
+              <button
+                className={`agent-skill-tag-main organization-skill-list-entry ${selectedSkill?.id === skill.id ? "selected" : ""}`}
+                key={skill.id}
+                onClick={() => setSelectedSkillId(skill.id)}
+                type="button"
+              >
+                <span className="agent-skill-tag-title-row">
+                  <code>{skill.name}</code>
+                  <span className="agent-skill-enabled-pill enabled">{skill.sourceBadge}</span>
+                </span>
+                <span className="agent-skill-tag-description">{skill.description || "未填写描述"}</span>
+                <span className="agent-skill-tag-facts">
+                  <span><small>引用</small>{skill.attachedAgentCount}</span>
+                  <span><small>状态</small>{skill.compatibility}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </aside>
+        <section className="panel organization-skill-detail">
+          {selectedSkill ? (
+            <>
+              <div className="panel-heading">
+                <div>
+                  <h2>{selectedSkill.name}</h2>
+                  <p className="muted">{selectedSkill.sourceLabel ?? selectedSkill.slug}</p>
+                </div>
+                <div className="row-actions">
+                  <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
+                  <button className="danger small-button" disabled={deleteSkill.isPending} onClick={() => deleteSkill.mutate(selectedSkill.id)} type="button">删除</button>
+                </div>
+              </div>
+              {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
+              {skillFile.error && <ErrorNotice error={skillFile.error} />}
+              {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
+              <div className="agent-summary-grid">
+                <div className="summary-metric"><span>Trust</span><strong>{selectedSkill.trustLevel}</strong></div>
+                <div className="summary-metric"><span>Source</span><strong>{selectedSkill.sourceType}</strong></div>
+                <div className="summary-metric"><span>Agents</span><strong>{skillDetail.data?.usedByAgents.length ?? selectedSkill.attachedAgentCount}</strong></div>
+              </div>
+              <label>
+                {selectedPath}
+                <textarea
+                  className="skill-yaml-textarea organization-skill-editor"
+                  readOnly={!skillFile.data?.editable}
+                  value={draftContent}
+                  onChange={(event) => setDraftContent(event.target.value)}
+                />
+              </label>
+              <button disabled={!skillFile.data?.editable || saveFile.isPending} onClick={() => saveFile.mutate()} type="button">保存文件</button>
+              {saveFile.error && <ErrorNotice error={saveFile.error} />}
+            </>
+          ) : (
+            <p className="muted">暂无组织技能。</p>
+          )}
+        </section>
+        <form className="panel form organization-skill-create" onSubmit={(event) => { event.preventDefault(); if (newName.trim()) createSkill.mutate(); }}>
+          <div className="panel-heading">
+            <div>
+              <h2>创建技能</h2>
+              <p className="muted">安装为组织级 skill。</p>
+            </div>
+          </div>
+          <label>名称<input value={newName} onChange={(event) => setNewName(event.target.value)} required /></label>
+          <label>Short name<input value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="incident-response" /></label>
+          <label>描述<input value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /></label>
+          <label>Skill 内容<textarea className="skill-yaml-textarea" value={newMarkdown} onChange={(event) => setNewMarkdown(event.target.value)} /></label>
+          {createSkill.error && <ErrorNotice error={createSkill.error} />}
+          <button disabled={createSkill.isPending || !newName.trim()} type="submit">创建技能</button>
+        </form>
+      </div>
     </OrgWorkspace>
   );
 }
@@ -672,6 +1048,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
             <span aria-hidden="true" className="context-entry-icon">H</span>
             <span>心跳</span>
           </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/resources`}>
+            <span aria-hidden="true" className="context-entry-icon">R</span>
+            <span>资源</span>
+          </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/workspaces`}>
             <span aria-hidden="true" className="context-entry-icon">W</span>
             <span>工作区</span>
@@ -679,6 +1059,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/goals`}>
             <span aria-hidden="true" className="context-entry-icon">G</span>
             <span>目标</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/skills`}>
+            <span aria-hidden="true" className="context-entry-icon">K</span>
+            <span>技能</span>
           </NavLink>
         </section>
         <section className="local-nav-section">

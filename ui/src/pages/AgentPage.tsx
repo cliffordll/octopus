@@ -314,6 +314,7 @@ export function AgentPage() {
   const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
   const [showInstructionForm, setShowInstructionForm] = useState(false);
   const [newInstructionName, setNewInstructionName] = useState("");
+  const [instructionDraft, setInstructionDraft] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
@@ -361,6 +362,11 @@ export function AgentPage() {
     queryKey: ["agent-skills-analytics", agentId],
     queryFn: () => agentsApi.skillsAnalytics(agentId),
     enabled: activeTab === "skills",
+  });
+  const instructionsBundle = useQuery({
+    queryKey: ["agent-instructions-bundle", agentId],
+    queryFn: () => agentsApi.instructionsBundle(agentId),
+    enabled: activeTab === "profile",
   });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -454,6 +460,14 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
     },
   });
+  const upsertInstruction = useMutation({
+    mutationFn: ({ path, content }: { path: string; content: string }) =>
+      agentsApi.upsertInstructionFile(agentId, { path, content, clearLegacyPromptTemplate: true }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-bundle", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
+    },
+  });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
       title: taskTitle.trim(),
@@ -506,8 +520,26 @@ export function AgentPage() {
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
-  const instructionDocs = agent.data ? buildInstructionDocs(agent.data) : [];
+  const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
+  const instructionDocs = bundleFiles.length > 0
+    ? bundleFiles.map((file) => ({
+      content: "",
+      key: file.path,
+      name: file.path.split("/").at(-1) ?? file.path,
+      path: file.path,
+      source: file.virtual ? "virtual" : "instructions-bundle",
+    }))
+    : agent.data ? buildInstructionDocs(agent.data) : [];
   const selectedInstruction = instructionDocs.find((doc) => doc.key === selectedInstructionKey) ?? instructionDocs[0];
+  const selectedBundleFile = useQuery({
+    queryKey: ["agent-instructions-file", agentId, selectedInstruction?.path],
+    queryFn: () => agentsApi.readInstructionFile(agentId, selectedInstruction!.path),
+    enabled: activeTab === "profile" && bundleFiles.length > 0 && Boolean(selectedInstruction?.path),
+  });
+  const selectedInstructionContent = selectedBundleFile.data?.content ?? selectedInstruction?.content ?? "";
+  useEffect(() => {
+    setInstructionDraft(selectedInstructionContent);
+  }, [selectedInstructionContent]);
   function defaultInstructionName() {
     const names = new Set(instructionDocs.map((doc) => doc.name.toLowerCase()));
     if (!names.has("NEW.md".toLowerCase())) return "NEW.md";
@@ -526,6 +558,12 @@ export function AgentPage() {
   function appendInstruction(event: FormEvent) {
     event.preventDefault();
     if (!agent.data || !newInstructionName.trim()) return;
+    if (bundleFiles.length > 0) {
+      upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
+      setSelectedInstructionKey(newInstructionName.trim());
+      closeInstructionForm();
+      return;
+    }
     const existingFiles = managedInstructionFiles(agent.data.agentRuntimeConfig).map((doc) => ({
       content: doc.content,
       name: doc.name,
@@ -672,6 +710,9 @@ export function AgentPage() {
           </div>}
           {activeTab === "profile" && <section aria-label="Managed Instructions" className="agent-instructions-page">
             {save.error && <ErrorNotice error={save.error} />}
+            {instructionsBundle.error && <ErrorNotice error={instructionsBundle.error} />}
+            {selectedBundleFile.error && <ErrorNotice error={selectedBundleFile.error} />}
+            {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
             <div className="agent-instructions-grid">
               <aside aria-label="Instruction files" className="instruction-files-card">
                 <div className="instruction-card-header">
@@ -712,8 +753,27 @@ export function AgentPage() {
                 </ul>
               </aside>
               <article aria-label="Instruction content" className="instruction-content-card">
-                {selectedInstruction?.content ? (
-                  <pre>{selectedInstruction.content}</pre>
+                {bundleFiles.length > 0 && selectedInstruction ? (
+                  <>
+                    <textarea
+                      aria-label="说明文件内容"
+                      className="instruction-content-editor"
+                      readOnly={selectedBundleFile.data?.editable === false}
+                      value={instructionDraft}
+                      onChange={(event) => setInstructionDraft(event.target.value)}
+                    />
+                    <div className="instruction-create-actions">
+                      <button
+                        disabled={selectedBundleFile.data?.editable === false || upsertInstruction.isPending}
+                        onClick={() => upsertInstruction.mutate({ path: selectedInstruction.path, content: instructionDraft })}
+                        type="button"
+                      >
+                        保存文件
+                      </button>
+                    </div>
+                  </>
+                ) : selectedInstructionContent ? (
+                  <pre>{selectedInstructionContent}</pre>
                 ) : (
                   <div className="instruction-empty-content" />
                 )}

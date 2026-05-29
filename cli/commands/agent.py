@@ -103,6 +103,26 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     skills_analytics_parser.add_argument("agent_id")
     skills_analytics_parser.add_argument("--window-days", type=int, default=30)
     skills_analytics_parser.set_defaults(handler=get_skills_analytics)
+    instructions_parser = actions.add_parser("instructions")
+    instructions_parser.add_argument("agent_id")
+    instructions_parser.set_defaults(handler=get_instructions_bundle)
+    instruction_file_parser = actions.add_parser("instruction-file")
+    instruction_file_parser.add_argument("agent_id")
+    instruction_file_parser.add_argument("--path", required=True)
+    instruction_file_parser.set_defaults(handler=read_instruction_file)
+    instruction_file_update_parser = actions.add_parser("instruction-file-update")
+    instruction_file_update_parser.add_argument("agent_id")
+    instruction_file_update_parser.add_argument("--path", required=True)
+    instruction_file_update_parser.add_argument("--content", required=True)
+    instruction_file_update_parser.add_argument("--clear-legacy-prompt-template", action="store_true")
+    instruction_file_update_parser.set_defaults(handler=update_instruction_file)
+    instructions_update_parser = actions.add_parser("instructions-update")
+    instructions_update_parser.add_argument("agent_id")
+    instructions_update_parser.add_argument("--mode", choices=("managed", "external"))
+    instructions_update_parser.add_argument("--root-path")
+    instructions_update_parser.add_argument("--entry-file")
+    instructions_update_parser.add_argument("--clear-legacy-prompt-template", action="store_true")
+    instructions_update_parser.set_defaults(handler=update_instructions_bundle)
     create_parser = actions.add_parser("create")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--name", required=True)
@@ -299,6 +319,50 @@ def get_skills_analytics(args: argparse.Namespace, client: ApiClient) -> Any:
         "GET",
         f"/api/agents/{args.agent_id}/skills/analytics",
         params={"windowDays": args.window_days},
+    )
+
+
+def get_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/agents/{args.agent_id}/instructions-bundle")
+
+
+def read_instruction_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET",
+        f"/api/agents/{args.agent_id}/instructions-bundle/file",
+        params={"path": args.path},
+    )
+
+
+def update_instruction_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload: dict[str, Any] = {"path": args.path, "content": args.content}
+    if args.clear_legacy_prompt_template:
+        payload["clearLegacyPromptTemplate"] = True
+    return client.request(
+        "PUT",
+        f"/api/agents/{args.agent_id}/instructions-bundle/file",
+        json=payload,
+    )
+
+
+def update_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = {
+        key: value
+        for key, value in {
+            "mode": args.mode,
+            "rootPath": args.root_path,
+            "entryFile": args.entry_file,
+        }.items()
+        if value is not None
+    }
+    if args.clear_legacy_prompt_template:
+        payload["clearLegacyPromptTemplate"] = True
+    if not payload:
+        raise ValueError("At least one update field is required.")
+    return client.request(
+        "PATCH",
+        f"/api/agents/{args.agent_id}/instructions-bundle",
+        json=payload,
     )
 
 
