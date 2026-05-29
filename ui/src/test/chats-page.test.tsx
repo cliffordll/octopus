@@ -518,10 +518,40 @@ it("explains a failed reply without discarding the message draft", async () => {
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-  expect(await screen.findByText("Chat adapter returned no assistant reply")).toBeInTheDocument();
+  const messageThread = screen.getByTestId("chat-message-thread");
+  expect(await within(messageThread).findByText("消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
   expect(screen.queryByText("Request failed (500)")).not.toBeInTheDocument();
   expect(screen.getByText("你好")).toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toHaveValue("");
+});
+
+it("renders send errors in the message thread instead of expanding the composer", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "排查问题", status: "active", preferredAgentId: "agent-1" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active" }]);
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", title: "排查问题", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
+    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+      return respond({ detail: "Request failed (500)" }, 500);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  await screen.findByText("No messages yet.");
+  await userEvent.type(screen.getByLabelText("消息"), "你好");
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+
+  const messageThread = screen.getByTestId("chat-message-thread");
+  expect(await within(messageThread).findByText("消息发送失败：Request failed (500)")).toBeInTheDocument();
+  expect(screen.getByRole("form", { name: "发送消息" })).not.toHaveTextContent("Request failed (500)");
 });
 
 it("does not send from a conversation bound to a terminated agent", async () => {

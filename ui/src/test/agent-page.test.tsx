@@ -190,6 +190,11 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByRole("heading", { name: "身份" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "运行策略" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "权限" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "API 密钥" })).toBeInTheDocument();
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");

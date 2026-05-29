@@ -17,6 +17,10 @@ function displayError(error: unknown) {
   return error instanceof Error ? error.message : "请求失败";
 }
 
+function sendNoticeMessage(value: string) {
+  return value.startsWith("首条消息发送失败：") ? value : `消息发送失败：${value}`;
+}
+
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const [body, setBody] = useState("");
@@ -148,7 +152,7 @@ export function ChatPage() {
               已打开本地缓存的对话，详情刷新失败：{chat.error instanceof Error ? chat.error.message : "请求失败"}
             </div>
           )}
-          <div className="chat-messages">
+          <div className="chat-messages" data-testid="chat-message-thread">
             {messages.isSuccess && visibleMessages.length === 0 && (
               <div className="chat-empty-thread">
                 <h2>No messages yet.</h2>
@@ -178,9 +182,15 @@ export function ChatPage() {
                 )}
               </article>
             ))}
+            {sendNotice && (
+              <article className="chat-message system">
+                <strong>系统</strong>
+                <p>{sendNoticeMessage(sendNotice)}</p>
+              </article>
+            )}
           </div>
           {messages.error && <ErrorNotice error={messages.error} />}
-          <form className="form chat-composer" onSubmit={submit}>
+          <form aria-label="发送消息" className="form chat-composer" onSubmit={submit}>
             <label className="chat-message-input">
               消息
               <textarea
@@ -196,7 +206,6 @@ export function ChatPage() {
                 当前选择的智能体不能用于消息回复，请切换到可运行智能体。
               </div>
             )}
-            {sendNotice && <div className="error-notice">{sendNotice}</div>}
             <div className="chat-compose-actions">
               <div className="chat-composer-toolbar">
                 <select aria-label="对话智能体" value={agentId} onChange={(event) => setAgentId(event.target.value)} required>
