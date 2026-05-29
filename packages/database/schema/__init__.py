@@ -23,6 +23,7 @@ from .issue_comments import IssueComment
 from .issues import Issue
 from .messenger import MessengerThreadUserState
 from .organizations import Organization
+from .organization_skills import OrganizationSkill
 from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
@@ -56,6 +57,7 @@ __all__ = [
     "Issue",
     "MessengerThreadUserState",
     "Organization",
+    "OrganizationSkill",
     "Project",
     "Goal",
     "ProjectGoal",

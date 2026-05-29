@@ -21,16 +21,17 @@ def skill_snapshot_from_root(
     external_detail: str | None = None,
     persistent_materialization: bool = False,
 ) -> dict[str, Any]:
-    root = config.get("skillsRootPath")
     agent_skills_root = _agent_skills_root(config)
     desired = set(desired_skills)
     available: list[Path] = []
     warnings: list[str] = []
     seen_keys: set[str] = set()
-    if isinstance(root, str) and root.strip():
+    for root in _skill_root_values(config):
         root_path = Path(root)
         if root_path.exists() and root_path.is_dir():
             for skill_dir in _skill_dirs(root_path):
+                if skill_dir.name in seen_keys:
+                    continue
                 available.append(skill_dir)
                 seen_keys.add(skill_dir.name)
         else:
@@ -77,6 +78,27 @@ def _agent_skills_root(config: dict[str, Any]) -> Path | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return Path(value).expanduser().resolve()
+
+
+def _skill_root_values(config: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    root = config.get("skillsRootPath")
+    if isinstance(root, str) and root.strip():
+        values.append(root.strip())
+    context = config.get("_octopus")
+    if isinstance(context, dict):
+        organization_root = context.get("organizationSkillsRootPath")
+        if isinstance(organization_root, str) and organization_root.strip():
+            values.append(organization_root.strip())
+    output: list[str] = []
+    seen: set[Path] = set()
+    for value in values:
+        resolved = Path(value).expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        output.append(value)
+    return output
 
 
 def _bundled_skills_root() -> Path:
@@ -183,6 +205,7 @@ def _skill_entries(
                     state="external",
                     managed=False,
                 ),
+                "sourceClass": "adapter_home",
                 "origin": "user_installed",
                 "originLabel": "User-installed",
                 "locationLabel": location_label,
@@ -270,6 +293,7 @@ def _base_skill_entry(
         "key": key,
         "selectionKey": selection_key or key,
         "runtimeName": runtime_name,
+        "sourceRole": runtime_name or key,
         "description": None,
         "desired": desired,
         "configurable": True,

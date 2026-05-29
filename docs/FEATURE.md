@@ -230,9 +230,10 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 目录：`docs/step-18-chat-refs/`
 
-- 目标：补齐 Chat 使用 Agent 时需要的最小附件引用、产物引用和执行可见性，不等待完整 Storage 或完整 Observability。
-- 交付：message attachment/artifact reference、chat 到 run/runtime result 的基础可见字段、跨 organization 引用校验。
-- 验收：消息可以关联已存在附件/产物/run 信息；失败执行有可读摘要；不引入完整 storage lifecycle。
+- 目标：补齐 Chat 使用 Agent 时需要的最小附件引用、产物引用和执行可见性，不等待完整 Storage 或完整 Observability；同时收口 Step 16 遗留的消息持久化与 runtime 失败事务边界。
+- 交付：chat 用户消息先持久化且不因 runtime 失败回滚、runtime 失败摘要、message attachment/artifact reference、chat 到 run/runtime result 的基础可见字段、跨 organization 引用校验。
+- 执行顺序：先完成 18A message persistence/runtime failure boundary，确保非流式和流式发送中已经 ack 的用户消息可刷新查询；再实现附件/产物引用；最后补齐执行可见性字段。
+- 验收：runtime 失败后用户消息仍可通过 message list 查询，错误可读；消息可以关联已存在附件/产物/run 信息；失败执行有可读摘要；不引入完整 storage lifecycle。
 
 ### Step 19: Basic Observability / Debug Visibility
 

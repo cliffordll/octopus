@@ -18,6 +18,9 @@ from packages.shared.api_paths.agents import (
     AGENT_CONFIG_REVISION_PATH,
     AGENT_CONFIG_ROLLBACK_PATH,
     AGENT_DETAIL_PATH,
+    AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH,
+    AGENT_INSTRUCTIONS_BUNDLE_PATH,
+    AGENT_INSTRUCTIONS_PATH,
     AGENT_PAUSE_PATH,
     AGENT_RESET_SESSION_PATH,
     AGENT_RESUME_PATH,
@@ -57,6 +60,9 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentConfigRevision,
     AgentDetail,
+    AgentInstructionsBundle,
+    AgentInstructionsFileDetail,
+    AgentInstructionsPathResult,
     AgentRuntimeState,
     AgentSkillAnalytics,
     AgentSkillSnapshot,
@@ -72,6 +78,9 @@ from packages.shared.validators.agent import (
     validate_reset_agent_session,
     validate_test_agent_runtime_environment,
     validate_update_agent,
+    validate_update_agent_instructions_bundle,
+    validate_update_agent_instructions_path,
+    validate_upsert_agent_instructions_file,
 )
 from packages.shared.validators.heartbeat import validate_wake_agent
 
@@ -81,9 +90,11 @@ from ..dependencies.access import (
     require_board_access,
     require_organization_access,
 )
+from ..dependencies.agent_instructions import get_agent_instructions_service
 from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..services.agents import AgentConflictError, AgentService
+from ..services.agent_instructions import AgentInstructionsService
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 
 router = APIRouter(tags=["agents"])
@@ -278,6 +289,189 @@ async def get_agent_configuration_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return configuration
+
+
+@router.patch(AGENT_INSTRUCTIONS_PATH)
+async def update_agent_instructions_path_route(
+    request: Request,
+    id: str,
+    body: dict[str, Any] = Body(...),
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsPathResult:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        payload = validate_update_agent_instructions_path(body)
+        actor = require_actor_identity(request)
+        result = await instructions_service.update_path(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.get(AGENT_INSTRUCTIONS_BUNDLE_PATH)
+async def get_agent_instructions_bundle_route(
+    request: Request,
+    id: str,
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsBundle:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    result = await instructions_service.get_bundle(id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.patch(AGENT_INSTRUCTIONS_BUNDLE_PATH)
+async def update_agent_instructions_bundle_route(
+    request: Request,
+    id: str,
+    body: dict[str, Any] = Body(...),
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsBundle:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        payload = validate_update_agent_instructions_bundle(body)
+        actor = require_actor_identity(request)
+        result = await instructions_service.update_bundle(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.get(AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH)
+async def read_agent_instructions_file_route(
+    request: Request,
+    id: str,
+    path: str = "",
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsFileDetail:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    if not path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Query parameter 'path' is required",
+        )
+    try:
+        result = await instructions_service.read_file(id, path)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.put(AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH)
+async def upsert_agent_instructions_file_route(
+    request: Request,
+    id: str,
+    body: dict[str, Any] = Body(...),
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsFileDetail:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        payload = validate_upsert_agent_instructions_file(body)
+        actor = require_actor_identity(request)
+        result = await instructions_service.write_file(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.delete(AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH)
+async def delete_agent_instructions_file_route(
+    request: Request,
+    id: str,
+    path: str = "",
+    agent_service: AgentService = Depends(get_agent_service),
+    instructions_service: AgentInstructionsService = Depends(
+        get_agent_instructions_service
+    ),
+) -> AgentInstructionsBundle:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    if not path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Query parameter 'path' is required",
+        )
+    try:
+        actor = require_actor_identity(request)
+        result = await instructions_service.delete_file(
+            id,
+            path,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
 
 
 @router.get(ORG_AGENT_CONFIGURATIONS_PATH)
