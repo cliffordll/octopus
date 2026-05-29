@@ -4,6 +4,7 @@ import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
+import { messengerApi } from "../api/messenger";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 
@@ -381,6 +382,62 @@ describe("chat API", () => {
         method: "POST",
         body: JSON.stringify({ body: "Start" }),
       }),
+    );
+  });
+
+  it("covers Step 16 chat and messenger routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(jsonResponse({ id: "chat-1", isPinned: true }))
+      .mockReturnValueOnce(jsonResponse({ id: "link-1" }, 201))
+      .mockReturnValueOnce(jsonResponse({ id: "chat-1", primaryIssueId: "issue-1" }))
+      .mockReturnValueOnce(jsonResponse({ issue: { id: "issue-1" } }, 201))
+      .mockReturnValueOnce(jsonResponse({ message: { id: "message-1" } }, 201))
+      .mockReturnValueOnce(jsonResponse({ stopped: true }))
+      .mockReturnValueOnce(jsonResponse([{ threadKey: "chat:chat-1" }]))
+      .mockReturnValueOnce(jsonResponse({ conversation: { id: "chat-1" }, messages: [] }))
+      .mockReturnValueOnce(jsonResponse({ threadKey: "chat:chat-1", lastReadAt: "now" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await chatsApi.list("org-1", { status: "archived", q: "deploy" });
+    await chatsApi.updateUserState("chat-1", { pinned: true, unread: false });
+    await chatsApi.addContextLink("chat-1", { entityType: "project", entityId: "project-1" });
+    await chatsApi.setProjectContext("chat-1", "project-1");
+    await chatsApi.convertToIssue("chat-1", { proposal: { title: "Ship", description: "Deploy" } });
+    await chatsApi.resolveOperationProposal("chat-1", "message-1", { action: "approve" });
+    await chatsApi.stopStream("chat-1");
+    await messengerApi.threads("org-1");
+    await messengerApi.chat("org-1", "chat-1");
+    await messengerApi.read("org-1", "chat:chat-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/chats?status=archived&q=deploy",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/chats/chat-1/user-state",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ pinned: true, unread: false }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/chats/chat-1/convert-to-issue",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ proposal: { title: "Ship", description: "Deploy" } }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/orgs/org-1/messenger/threads",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      10,
+      "/api/orgs/org-1/messenger/threads/chat%3Achat-1/read",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
     );
   });
 });

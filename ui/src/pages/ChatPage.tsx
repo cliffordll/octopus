@@ -1,61 +1,112 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
-import { ApiError } from "../api/client";
-import type { ChatMessage } from "../api/types";
+import type { ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+
+interface ChatRouteState {
+  sendError?: string;
+  draft?: string;
+}
+
+function displayError(error: unknown) {
+  return error instanceof Error ? error.message : "请求失败";
+}
+
+function sendNoticeMessage(value: string) {
+  return value.startsWith("首条消息发送失败：") ? value : `消息发送失败：${value}`;
+}
 
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const [body, setBody] = useState("");
   const [agentId, setAgentId] = useState("");
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const chat = useQuery({ queryKey: ["chat", chatId], queryFn: () => chatsApi.get(chatId) });
-  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
-  const chatAgentList = (agents.data ?? []).filter((agent) => agent.status !== "terminated");
-  const boundChatAgent = useQuery({
-    queryKey: ["agent", chat.data?.preferredAgentId ?? ""],
-    queryFn: () => agentsApi.get(chat.data!.preferredAgentId!),
-    enabled: Boolean(chat.data?.preferredAgentId),
+  const location = useLocation();
+  const routeState = location.state as ChatRouteState | null;
+  const cachedChat = queryClient.getQueryData<ChatConversation>(["chat", chatId])
+    ?? queryClient.getQueryData<ChatConversation[]>(["chats", orgId])?.find((item) => item.id === chatId);
+  const chat = useQuery({
+    queryKey: ["chat", chatId],
+    queryFn: () => chatsApi.get(chatId),
+    initialData: cachedChat,
+    retry: cachedChat ? false : 3,
   });
+  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const agentList = Array.isArray(agents.data) ? agents.data : [];
+  const chatAgentList = useMemo(
+    () => agentList.filter((agent) => agent.status !== "terminated" || agent.id === chat.data?.preferredAgentId),
+    [agentList, chat.data?.preferredAgentId],
+  );
   useEffect(() => {
     setAgentId(chat.data?.preferredAgentId ?? "");
   }, [chat.data?.id, chat.data?.preferredAgentId]);
-  const selectedChatAgent = useQuery({
-    queryKey: ["agent", agentId],
-    queryFn: () => agentsApi.get(agentId),
-    enabled: Boolean(agentId),
-  });
+  useEffect(() => {
+    if (routeState?.draft) setBody(routeState.draft);
+    if (routeState?.sendError) setSendNotice(routeState.sendError);
+  }, [routeState?.draft, routeState?.sendError]);
   const messages = useQuery({
     queryKey: ["chat-messages", chatId],
     queryFn: () => chatsApi.listMessages(chatId),
     staleTime: 1000,
   });
-  const boundChatAgentName = typeof boundChatAgent.data?.name === "string" ? boundChatAgent.data.name : null;
-  const selectedChatAgentName = typeof selectedChatAgent.data?.name === "string" ? selectedChatAgent.data.name : null;
-  const selectedChatAgentUnavailable = selectedChatAgent.isSuccess
-    && selectedChatAgent.data.status === "terminated";
+  const visibleMessages = useMemo(() => {
+    const persisted = messages.data ?? [];
+    const persistedUserBodies = new Set(
+      persisted
+        .filter((message) => message.role === "user")
+        .map((message) => message.body),
+    );
+    const merged = new Map<string, ChatMessage>();
+    for (const message of persisted) merged.set(message.id, message);
+    for (const message of optimisticMessages) {
+      if (message.role === "user" && persistedUserBodies.has(message.body)) continue;
+      if (!merged.has(message.id)) merged.set(message.id, message);
+    }
+    return Array.from(merged.values());
+  }, [messages.data, optimisticMessages]);
+  const agentNameById = useMemo(() => new Map(agentList.map((agent) => [agent.id, agent.name])), [agentList]);
+  const boundChatAgentName = chat.data?.preferredAgentId ? agentNameById.get(chat.data.preferredAgentId) ?? null : null;
+  const selectedAgent = agentList.find((agent) => agent.id === agentId);
+  const selectedChatAgentUnavailable = selectedAgent?.status === "terminated";
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const send = useMutation({
     mutationFn: async () => {
+      const draft = body.trim();
+      const optimisticMessage: ChatMessage = {
+        id: `pending-${Date.now()}`,
+        orgId,
+        conversationId: startsNewConversation ? undefined : chatId,
+        role: "user",
+        kind: "message",
+        body: draft,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+      };
+      setOptimisticMessages((current) => [...current, optimisticMessage]);
+      setBody("");
+      setSendNotice(null);
       if (startsNewConversation) {
         const createdChat = await chatsApi.create(orgId, {
-          title: body.trim().slice(0, 40),
+          title: draft.slice(0, 40) || "新对话",
           preferredAgentId: agentId,
         });
-        const created = await chatsApi.addMessage(createdChat.id, { body: body.trim() });
+        queryClient.setQueryData(["chat", createdChat.id], createdChat);
+        const created = await chatsApi.addMessage(createdChat.id, { body: draft });
         return { chat: createdChat, messages: created.messages };
       }
-      const created = await chatsApi.addMessage(chatId, { body: body.trim() });
+      const created = await chatsApi.addMessage(chatId, { body: draft });
       return { chat: null, messages: created.messages };
     },
     onSuccess: (created) => {
-      setBody("");
+      setSendNotice(null);
       if (created.chat) {
         queryClient.setQueryData(["chat", created.chat.id], created.chat);
         queryClient.setQueryData(["chat-messages", created.chat.id], created.messages);
@@ -69,6 +120,7 @@ export function ChatPage() {
         return Array.from(next.values());
       });
     },
+    onError: (error) => setSendNotice(displayError(error)),
   });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -79,65 +131,85 @@ export function ChatPage() {
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   }
-  const sendError = send.error instanceof ApiError
-    && send.error.status >= 500
-    && send.error.message === `Request failed (${send.error.status})`
-    ? new Error(`消息发送失败。请检查 ${selectedChatAgentName ?? "所选智能体"} 的运行配置后重试。`)
-    : send.error;
-  if (chat.error) return <ErrorNotice error={chat.error} />;
+  if (chat.error && !chat.data) return <ErrorNotice error={chat.error} />;
   return (
     <ChatsWorkspace orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/chats`}>返回 Chats</Link>
-          <h1>{chat.data?.title ?? "载入中..."}</h1>
-        </div>
-      </header>
       {chat.data && (
-        <section className="panel chat-panel">
-          <div className="meta-line">
-            <Badge>{chat.data.status}</Badge>
-          </div>
-          <div className="chat-messages">
-            {messages.isSuccess && messages.data.length === 0 && (
+        <section className="chat-thread-shell">
+          <header className="chat-thread-header">
+            <div>
+              <h1>{chat.data.title}</h1>
+              <p>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</p>
+            </div>
+            <div className="meta-line">
+              <Badge>{chat.data.status}</Badge>
+              {chat.data.isPinned && <Badge>已置顶</Badge>}
+              {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
+            </div>
+          </header>
+          {chat.error && (
+            <div className="error-notice">
+              已打开本地缓存的对话，详情刷新失败：{chat.error instanceof Error ? chat.error.message : "请求失败"}
+            </div>
+          )}
+          <div className="chat-messages" data-testid="chat-message-thread">
+            {messages.isSuccess && visibleMessages.length === 0 && (
               <div className="chat-empty-thread">
-                <h2>还没有消息</h2>
+                <h2>No messages yet.</h2>
                 <p className="muted">
                   {boundChatAgentName ? `向 ${boundChatAgentName} 发送第一条消息开始对话。` : "发送第一条消息开始对话。"}
                 </p>
               </div>
             )}
-            {messages.data?.map((message) => (
+            {visibleMessages.map((message) => (
               <article className={`chat-message ${message.role}`} key={message.id}>
                 <strong>
                   {message.role === "user"
                     ? "你"
                     : message.role === "assistant"
-                      ? boundChatAgentName ?? "智能体"
+                      ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
                       : "系统"}
                 </strong>
+                <div className="meta-line">
+                  <Badge>{message.kind ?? "message"}</Badge>
+                  <Badge>{message.status}</Badge>
+                  {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
+                  {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
+                </div>
                 <p>{message.body}</p>
+                {message.structuredPayload && (
+                  <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
+                )}
               </article>
             ))}
+            {sendNotice && (
+              <article className="chat-message system">
+                <strong>系统</strong>
+                <p>{sendNoticeMessage(sendNotice)}</p>
+              </article>
+            )}
           </div>
           {messages.error && <ErrorNotice error={messages.error} />}
-          <form className="form chat-composer" onSubmit={submit}>
+          <form aria-label="发送消息" className="form chat-composer" onSubmit={submit}>
             <label className="chat-message-input">
               消息
-              <textarea value={body} onChange={(event) => setBody(event.target.value)} onKeyDown={handleMessageKeyDown} required />
+              <textarea
+                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                onKeyDown={handleMessageKeyDown}
+                required
+              />
             </label>
             {selectedChatAgentUnavailable && (
               <div className="error-notice">
-                当前对话绑定的智能体不能用于消息回复，请新建对话并选择可运行智能体。
+                当前选择的智能体不能用于消息回复，请切换到可运行智能体。
               </div>
             )}
-            {sendError && <ErrorNotice error={sendError} />}
             <div className="chat-compose-actions">
               <div className="chat-composer-toolbar">
                 <select aria-label="对话智能体" value={agentId} onChange={(event) => setAgentId(event.target.value)} required>
-                  {chat.data.preferredAgentId && !chatAgentList.some((agent) => agent.id === chat.data.preferredAgentId) && (
-                    <option value={chat.data.preferredAgentId}>{boundChatAgentName ?? "当前智能体"}</option>
-                  )}
+                  <option value="">选择智能体</option>
                   {chatAgentList.map((agent) => (
                     <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
                   ))}

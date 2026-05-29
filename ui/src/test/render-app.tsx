@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "../app/App";
 
-export function renderApp(initialEntry: string) {
+export function renderApp(initialEntry: string | { pathname: string; state?: unknown }) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
