@@ -42,6 +42,46 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: "succeeded", sessionDisplayId: "session-1", totalInputTokens: 10, totalOutputTokens: 5, totalCostCents: 1 });
     }
+    if (path === "/api/agents/agent-1/instructions-bundle" && init?.method === "GET") {
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        mode: "managed",
+        rootPath: "D:/work/app/.agent",
+        managedRootPath: "D:/work/app/.agent",
+        entryFile: "SOUL.md",
+        resolvedEntryPath: "D:/work/app/.agent/SOUL.md",
+        editable: true,
+        warnings: [],
+        legacyPromptTemplateActive: false,
+        legacyBootstrapPromptTemplateActive: false,
+        files: [
+          { path: "SOUL.md", size: 20, language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
+          { path: "AGENTS.md", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "TOOLS.md", size: 11, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "MEMORY.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "NOTES.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+        ],
+      });
+    }
+    if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "GET") {
+      const filePath = new URL(`http://local${path}`).searchParams.get("path");
+      const contents: Record<string, string> = {
+        "SOUL.md": "Ship product changes",
+        "AGENTS.md": "",
+        "TOOLS.md": "Tool policy",
+        "MEMORY.md": "Memory policy",
+        "NOTES.md": "Project notes",
+      };
+      return respond({ path: filePath, content: contents[filePath ?? ""] ?? "", size: 0, language: "markdown", markdown: true, isEntryFile: filePath === "SOUL.md", editable: true, deprecated: false, virtual: false });
+    }
+    if (path === "/api/agents/agent-1/instructions-bundle/file" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      return respond({ path: body.path, content: body.content, size: body.content.length, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
+    }
+    if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "DELETE") {
+      return respond({ path: new URL(`http://local${path}`).searchParams.get("path"), content: "", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
+    }
     return respond({ ...agent, status: "paused" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -96,11 +136,27 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(instructionFiles).getByRole("button", { name: "取消" })).toBeInTheDocument();
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "确认" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1",
+    "/api/agents/agent-1/instructions-bundle/file",
     expect.objectContaining({
-      method: "PATCH",
-      body: expect.stringContaining("RUNBOOK.md"),
+      method: "PUT",
+      body: JSON.stringify({ path: "RUNBOOK.md", content: "", clearLegacyPromptTemplate: true }),
     }),
+  );
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "SOUL.md" }));
+  fireEvent.change(within(instructionContent).getByLabelText("说明文件内容"), { target: { value: "Updated soul" } });
+  await userEvent.click(within(instructionContent).getByRole("button", { name: "保存文件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/instructions-bundle/file",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ path: "SOUL.md", content: "Updated soul", clearLegacyPromptTemplate: true }),
+    }),
+  );
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "NOTES.md" }));
+  await userEvent.click(within(instructionContent).getByRole("button", { name: "删除文件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/instructions-bundle/file?path=NOTES.md",
+    expect.objectContaining({ method: "DELETE" }),
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
   expect(await screen.findByText("succeeded")).toBeInTheDocument();

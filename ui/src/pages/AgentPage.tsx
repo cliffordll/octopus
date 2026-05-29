@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, UpdateAgentPayload } from "../api/types";
+import type { AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, UpdateAgentPayload } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -65,60 +65,6 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
-}
-
-type InstructionDoc = {
-  content: string;
-  key: string;
-  name: string;
-  path: string;
-  source: string;
-};
-
-function stringConfig(config: Record<string, unknown>, key: string): string {
-  const value = config[key];
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function managedInstructionFiles(config: Record<string, unknown>): InstructionDoc[] {
-  const files = config.managedInstructionFiles;
-  if (!Array.isArray(files)) return [];
-  return files
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
-    .map((item, index) => {
-      const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `instruction-${index + 1}.md`;
-      const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : name;
-      const content = typeof item.content === "string" ? item.content : "";
-      return { content, key: `managed:${path}:${index}`, name, path, source: "managedInstructionFiles" };
-    });
-}
-
-function buildInstructionDocs(agent: AgentDetail): InstructionDoc[] {
-  const config = agent.agentRuntimeConfig ?? {};
-  const docs: InstructionDoc[] = [];
-  const promptTemplate = stringConfig(config, "promptTemplate") || agent.capabilities || "";
-  const instructionsFilePath = stringConfig(config, "instructionsFilePath");
-  if (instructionsFilePath || promptTemplate) {
-    docs.push({
-      content: promptTemplate,
-      key: "soul",
-      name: "SOUL.md",
-      path: instructionsFilePath || "SOUL.md",
-      source: instructionsFilePath ? "instructionsFilePath" : "promptTemplate",
-    });
-  }
-  const agentsMdPath = stringConfig(config, "agentsMdPath");
-  if (agentsMdPath) {
-    docs.push({
-      content: "",
-      key: "agents-md",
-      name: "AGENTS.md",
-      path: agentsMdPath,
-      source: "agentsMdPath",
-    });
-  }
-  docs.push(...managedInstructionFiles(config));
-  return docs;
 }
 
 function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
@@ -564,6 +510,15 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
     },
   });
+  const deleteInstruction = useMutation({
+    mutationFn: (path: string) => agentsApi.deleteInstructionFile(agentId, path),
+    onSuccess: () => {
+      setSelectedInstructionKey("");
+      setInstructionDraft("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-bundle", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
+    },
+  });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
       title: taskTitle.trim(),
@@ -623,15 +578,18 @@ export function AgentPage() {
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
-  const instructionDocs = bundleFiles.length > 0
+  const instructionDocs = instructionsBundle.data
     ? bundleFiles.map((file) => ({
       content: "",
+      editable: file.editable,
+      isEntryFile: file.isEntryFile,
       key: file.path,
       name: file.path.split("/").at(-1) ?? file.path,
       path: file.path,
       source: file.virtual ? "virtual" : "instructions-bundle",
+      virtual: file.virtual,
     }))
-    : agent.data ? buildInstructionDocs(agent.data) : [];
+    : [];
   const selectedInstruction = instructionDocs.find((doc) => doc.key === selectedInstructionKey) ?? instructionDocs[0];
   const selectedBundleFile = useQuery({
     queryKey: ["agent-instructions-file", agentId, selectedInstruction?.path],
@@ -659,31 +617,9 @@ export function AgentPage() {
   }
   function appendInstruction(event: FormEvent) {
     event.preventDefault();
-    if (!agent.data || !newInstructionName.trim()) return;
-    if (bundleFiles.length > 0) {
-      upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
-      setSelectedInstructionKey(newInstructionName.trim());
-      closeInstructionForm();
-      return;
-    }
-    const existingFiles = managedInstructionFiles(agent.data.agentRuntimeConfig).map((doc) => ({
-      content: doc.content,
-      name: doc.name,
-      path: doc.path,
-    }));
-    save.mutate({
-      agentRuntimeConfig: {
-        ...agent.data.agentRuntimeConfig,
-        managedInstructionFiles: [
-          ...existingFiles,
-          {
-            content: "",
-            name: newInstructionName.trim(),
-            path: newInstructionName.trim(),
-          },
-        ],
-      },
-    });
+    if (!newInstructionName.trim()) return;
+    upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
+    setSelectedInstructionKey(newInstructionName.trim());
     closeInstructionForm();
   }
   function enableSkill(name: string) {
@@ -815,6 +751,7 @@ export function AgentPage() {
             {instructionsBundle.error && <ErrorNotice error={instructionsBundle.error} />}
             {selectedBundleFile.error && <ErrorNotice error={selectedBundleFile.error} />}
             {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
+            {deleteInstruction.error && <ErrorNotice error={deleteInstruction.error} />}
             <div className="agent-instructions-grid">
               <aside aria-label="Instruction files" className="instruction-files-card">
                 <div className="instruction-card-header">
@@ -837,7 +774,7 @@ export function AgentPage() {
                     </label>
                     <div className="instruction-create-actions">
                       <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
-                      <button className="small-button" disabled={save.isPending} type="submit">确认</button>
+                      <button className="small-button" disabled={upsertInstruction.isPending} type="submit">确认</button>
                     </div>
                   </form>
                 )}
@@ -855,7 +792,7 @@ export function AgentPage() {
                 </ul>
               </aside>
               <article aria-label="Instruction content" className="instruction-content-card">
-                {bundleFiles.length > 0 && selectedInstruction ? (
+                {selectedInstruction ? (
                   <>
                     <textarea
                       aria-label="说明文件内容"
@@ -865,6 +802,14 @@ export function AgentPage() {
                       onChange={(event) => setInstructionDraft(event.target.value)}
                     />
                     <div className="instruction-create-actions">
+                      <button
+                        className="danger"
+                        disabled={selectedInstruction.isEntryFile || selectedBundleFile.data?.editable === false || deleteInstruction.isPending}
+                        onClick={() => deleteInstruction.mutate(selectedInstruction.path)}
+                        type="button"
+                      >
+                        删除文件
+                      </button>
                       <button
                         disabled={selectedBundleFile.data?.editable === false || upsertInstruction.isPending}
                         onClick={() => upsertInstruction.mutate({ path: selectedInstruction.path, content: instructionDraft })}
