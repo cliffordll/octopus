@@ -114,14 +114,18 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     instruction_file_update_parser.add_argument("agent_id")
     instruction_file_update_parser.add_argument("--path", required=True)
     instruction_file_update_parser.add_argument("--content", required=True)
-    instruction_file_update_parser.add_argument("--clear-legacy-prompt-template", action="store_true")
+    instruction_file_update_parser.add_argument(
+        "--clear-legacy-prompt-template", action="store_true"
+    )
     instruction_file_update_parser.set_defaults(handler=update_instruction_file)
     instructions_update_parser = actions.add_parser("instructions-update")
     instructions_update_parser.add_argument("agent_id")
     instructions_update_parser.add_argument("--mode", choices=("managed", "external"))
     instructions_update_parser.add_argument("--root-path")
     instructions_update_parser.add_argument("--entry-file")
-    instructions_update_parser.add_argument("--clear-legacy-prompt-template", action="store_true")
+    instructions_update_parser.add_argument(
+        "--clear-legacy-prompt-template", action="store_true"
+    )
     instructions_update_parser.set_defaults(handler=update_instructions_bundle)
     create_parser = actions.add_parser("create")
     create_parser.add_argument("--org-id", required=True)

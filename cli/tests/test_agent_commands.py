@@ -471,26 +471,43 @@ def test_agent_instruction_commands_cover_step17_routes() -> None:
     client = ApiClient(transport=httpx.MockTransport(handler))
 
     assert main(["agent", "instructions", "agent-1"], client=client) == 0
-    assert main(["agent", "instruction-file", "agent-1", "--path", "SOUL.md"], client=client) == 0
-    assert main([
-        "agent",
-        "instruction-file-update",
-        "agent-1",
-        "--path",
-        "SOUL.md",
-        "--content",
-        "# Soul",
-        "--clear-legacy-prompt-template",
-    ], client=client) == 0
-    assert main([
-        "agent",
-        "instructions-update",
-        "agent-1",
-        "--mode",
-        "managed",
-        "--entry-file",
-        "SOUL.md",
-    ], client=client) == 0
+    assert (
+        main(
+            ["agent", "instruction-file", "agent-1", "--path", "SOUL.md"], client=client
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "agent",
+                "instruction-file-update",
+                "agent-1",
+                "--path",
+                "SOUL.md",
+                "--content",
+                "# Soul",
+                "--clear-legacy-prompt-template",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "agent",
+                "instructions-update",
+                "agent-1",
+                "--mode",
+                "managed",
+                "--entry-file",
+                "SOUL.md",
+            ],
+            client=client,
+        )
+        == 0
+    )
 
     assert [request.url.path for request in requests] == [
         "/api/agents/agent-1/instructions-bundle",
