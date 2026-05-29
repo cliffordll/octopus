@@ -199,3 +199,79 @@ def validate_agent_private_skill(payload: Mapping[str, Any]) -> dict[str, Any]:
         "description": payload.get("description"),
         "markdown": payload.get("markdown"),
     }
+
+
+def validate_update_agent_instructions_path(
+    payload: Mapping[str, Any],
+) -> dict[str, str | None]:
+    _reject_unknown_fields(payload, {"path", "agentRuntimeConfigKey"})
+    path = payload.get("path")
+    if path is not None and (not isinstance(path, str) or not path.strip()):
+        raise ValueError("'path' must be a non-empty string or null")
+    key = payload.get("agentRuntimeConfigKey")
+    if key is not None and (not isinstance(key, str) or not key.strip()):
+        raise ValueError("'agentRuntimeConfigKey' must be a non-empty string")
+    return {
+        "path": path.strip() if isinstance(path, str) else None,
+        **(
+            {"agentRuntimeConfigKey": key.strip()}
+            if isinstance(key, str) and key.strip()
+            else {}
+        ),
+    }
+
+
+def validate_update_agent_instructions_bundle(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    _reject_unknown_fields(
+        payload, {"mode", "rootPath", "entryFile", "clearLegacyPromptTemplate"}
+    )
+    result: dict[str, Any] = {}
+    mode = payload.get("mode")
+    if mode is not None:
+        if mode not in {"managed", "external"}:
+            raise ValueError("'mode' must be one of ['managed', 'external']")
+        result["mode"] = mode
+    root_path = payload.get("rootPath")
+    if root_path is not None:
+        if not isinstance(root_path, str) or not root_path.strip():
+            raise ValueError("'rootPath' must be a non-empty string or null")
+        result["rootPath"] = root_path.strip()
+    elif "rootPath" in payload:
+        result["rootPath"] = None
+    entry_file = payload.get("entryFile")
+    if entry_file is not None:
+        if not isinstance(entry_file, str) or not entry_file.strip():
+            raise ValueError("'entryFile' must be a non-empty string")
+        result["entryFile"] = entry_file.strip()
+    if "clearLegacyPromptTemplate" in payload:
+        if not isinstance(payload["clearLegacyPromptTemplate"], bool):
+            raise ValueError("'clearLegacyPromptTemplate' must be a boolean")
+        result["clearLegacyPromptTemplate"] = payload["clearLegacyPromptTemplate"]
+    return result
+
+
+def validate_upsert_agent_instructions_file(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    _reject_unknown_fields(payload, {"path", "content", "clearLegacyPromptTemplate"})
+    path = payload.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("'path' is required and must be a non-empty string")
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise ValueError("'content' is required and must be a string")
+    if "clearLegacyPromptTemplate" in payload and not isinstance(
+        payload["clearLegacyPromptTemplate"], bool
+    ):
+        raise ValueError("'clearLegacyPromptTemplate' must be a boolean")
+    return {
+        "path": path.strip(),
+        "content": content,
+        **(
+            {"clearLegacyPromptTemplate": payload["clearLegacyPromptTemplate"]}
+            if "clearLegacyPromptTemplate" in payload
+            else {}
+        ),
+    }

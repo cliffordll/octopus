@@ -71,6 +71,7 @@ from .agent_instructions import (
     materialize_default_instructions_for_new_agent,
     normalize_instructions_paths,
 )
+from .organization_skills import organization_skills_root
 from .agent_names import pick_unique_agent_name
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -248,11 +249,15 @@ def _apply_desired_skills_to_entries(
 
 
 def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+    organization_root = str(organization_skills_root(row.org_id))
+    config = dict(row.agent_runtime_config)
+    config.setdefault("skillsRootPath", organization_root)
     return {
-        **row.agent_runtime_config,
+        **config,
         "_octopus": {
             "orgId": row.org_id,
             "agentId": row.id,
+            "organizationSkillsRootPath": organization_root,
             "agentSkillsRootPath": str(_agent_skills_root(row)),
         },
     }
