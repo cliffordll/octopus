@@ -45,6 +45,14 @@ function parseJsonObject(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function createApprovalErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/one or more issues not found/i.test(message)) {
+    return "一个或多个任务不存在。请检查任务 ID 后重试。";
+  }
+  return message || "创建审批失败";
+}
+
 export function ApprovalsPage() {
   const { orgId = "" } = useParams();
   const [status, setStatus] = useState<ApprovalStatus | "">("");
@@ -86,7 +94,7 @@ export function ApprovalsPage() {
       setCreateError(null);
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
     },
-    onError: (error) => setCreateError(error instanceof Error ? error.message : "创建审批失败"),
+    onError: (error) => setCreateError(createApprovalErrorMessage(error)),
   });
   const approvalList = approvals.data ?? [];
   const agentList = agents.data ?? [];
