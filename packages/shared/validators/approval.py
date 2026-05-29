@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from ..constants.approval import APPROVAL_STATUSES, APPROVAL_TYPES
 from ..types.approval import (
+    AddApprovalCommentPayload,
     CreateApprovalPayload,
     ListOrgApprovalsQuery,
     RequestApprovalRevisionPayload,
@@ -115,3 +116,15 @@ def validate_resubmit_approval(payload: Mapping[str, Any]) -> ResubmitApprovalPa
         raise ValueError("'payload' must be an object")
     _validate_issue_ids(payload)
     return cast(ResubmitApprovalPayload, payload)
+
+
+def validate_add_approval_comment(
+    payload: Mapping[str, Any],
+) -> AddApprovalCommentPayload:
+    # Mirror upstream `addApprovalCommentSchema = z.object({ body: z.string().min(1) })`
+    # in `packages/shared/src/validators/approval.ts:34-38`.
+    _reject_unknown_fields(payload, allowed_fields={"body"})
+    body = payload.get("body")
+    if not isinstance(body, str) or not body.strip():
+        raise ValueError("'body' must be a non-empty string")
+    return cast(AddApprovalCommentPayload, {"body": body})
