@@ -567,7 +567,7 @@ export function ProjectPage() {
                     <div className="task-form-row two-columns">
                       <label>
                         名称
-                        <input value={newResourceName} onChange={(event) => setNewResourceName(event.target.value)} placeholder="Rudder app repo" required />
+                        <input value={newResourceName} onChange={(event) => setNewResourceName(event.target.value)} placeholder="应用代码仓库" required />
                       </label>
                       <label>
                         类型
