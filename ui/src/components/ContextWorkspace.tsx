@@ -57,6 +57,10 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
               <span aria-hidden="true" className="context-entry-icon">T</span>
               <span>审批管理</span>
             </NavLink>
+            <NavLink className="context-action-entry" to={`/orgs/${orgId}/messenger`}>
+              <span aria-hidden="true" className="context-entry-icon">M</span>
+              <span>消息中心</span>
+            </NavLink>
           </section>
           <section className="context-nav-section">
             <h3>对话</h3>
@@ -67,10 +71,11 @@ export function ChatsWorkspace({ orgId, children }: PropsWithChildren<{ orgId: s
                 <span className="context-item-copy">
                   <strong>{chat.title}</strong>
                   <small>
-                    {chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体"}
+                    {chat.latestReplyPreview
+                      ?? (chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体")}
                   </small>
                 </span>
-                <Badge>{chat.status}</Badge>
+                <Badge>{chat.unreadCount ? `${chat.unreadCount} 未读` : chat.status}</Badge>
               </NavLink>
             ))}
             {chats.isSuccess && conversations.length === 0 && <p className="context-empty">暂无对话</p>}
