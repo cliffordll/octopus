@@ -1,4 +1,4 @@
-﻿---
+---
 name: release-maintainer
 description: >
   Maintain and execute Octopus releases across npm, GitHub Releases, and Desktop

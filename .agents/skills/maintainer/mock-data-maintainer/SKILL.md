@@ -1,4 +1,4 @@
-﻿---
+---
 name: mock-data-maintainer
 description: |
   Create realistic, coherent mock/demo/seed data for Octopus development,

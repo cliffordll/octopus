@@ -1,4 +1,4 @@
-﻿---
+---
 name: debug-run-transcript-maintainer
 description: |
   Debug and analyze Octopus agent run transcripts, run logs, and execution traces. Use this skill whenever the user mentions:

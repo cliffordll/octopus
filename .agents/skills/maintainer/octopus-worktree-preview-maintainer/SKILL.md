@@ -1,4 +1,4 @@
-﻿---
+---
 name: octopus-worktree-preview-maintainer
 description: >
   Start the current Octopus checkout as a temporary managed preview, verify

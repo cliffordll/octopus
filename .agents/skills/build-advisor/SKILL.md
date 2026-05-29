@@ -1,4 +1,4 @@
-﻿---
+---
 name: build-advisor
 description: >
   Expert advisor for when a build, UI, workflow, spec, or implementation feels
