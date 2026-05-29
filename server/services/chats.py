@@ -11,6 +11,7 @@ from packages.database.queries.agents import get_agent_by_id
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.approvals import create_approval
 from packages.database.queries.chats import (
+    create_chat_attachment,
     create_context_link,
     create_conversation,
     create_message,
@@ -18,6 +19,7 @@ from packages.database.queries.chats import (
     get_conversation,
     get_conversation_user_state,
     get_message,
+    list_attachments_for_messages,
     list_conversations,
     list_context_links,
     list_messages,
@@ -31,6 +33,8 @@ from packages.database.queries.issues import get_issue_by_id
 from packages.database.queries.organizations import get_organization_by_id
 from packages.database.queries.projects import get_project_by_id
 from packages.database.schema import Agent as AgentRow
+from packages.database.schema import Asset as AssetRow
+from packages.database.schema import ChatAttachment as ChatAttachmentRow
 from packages.database.schema import ChatContextLink as ChatContextLinkRow
 from packages.database.schema import ChatConversation as ChatConversationRow
 from packages.database.schema import ChatConversationUserState
@@ -48,12 +52,14 @@ from packages.shared.constants.chat import (
 )
 from packages.shared.types.chat import (
     AddChatMessagePayload,
+    ChatAttachment,
     ChatContextLink,
     ChatConversation,
     ChatLinkedEntity,
     ChatMessage,
     ChatPrimaryIssueSummary,
     ConvertChatToIssuePayload,
+    CreateChatAttachmentPayload,
     CreateChatContextLinkPayload,
     CreateChatConversationPayload,
     CreatedChatMessages,
@@ -318,10 +324,66 @@ class ChatService:
         return await self._to_conversation(row, user_id=actor_id)
 
     async def list_messages(self, conversation_id: str) -> list[ChatMessage]:
-        return [
-            self._to_message(row)
-            for row in await list_messages(self._session, conversation_id)
-        ]
+        rows = await list_messages(self._session, conversation_id)
+        attachments = await self._attachments_by_message_id(rows)
+        return [self._to_message(row, attachments.get(row.id, [])) for row in rows]
+
+    async def create_attachment(
+        self,
+        org_id: str,
+        conversation_id: str,
+        payload: CreateChatAttachmentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ChatAttachment | None:
+        conversation = await get_conversation(self._session, conversation_id)
+        if conversation is None:
+            return None
+        if conversation.org_id != org_id:
+            raise ValueError("Chat conversation does not belong to organization")
+        message = await get_message(
+            self._session,
+            conversation_id=conversation.id,
+            message_id=payload["messageId"],
+        )
+        if message is None:
+            raise FileNotFoundError("Chat message not found")
+        asset, attachment = await create_chat_attachment(
+            self._session,
+            asset_fields={
+                "org_id": org_id,
+                "provider": payload["provider"],
+                "object_key": payload["objectKey"],
+                "content_type": payload["contentType"],
+                "byte_size": payload["byteSize"],
+                "sha256": payload["sha256"],
+                "original_filename": payload.get("originalFilename"),
+                "created_by_agent_id": actor_id if actor_type == "agent" else None,
+                "created_by_user_id": actor_id if actor_type != "agent" else None,
+            },
+            attachment_fields={
+                "org_id": org_id,
+                "conversation_id": conversation.id,
+                "message_id": message.id,
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="chat.attachment_added",
+            entity_type="chat",
+            entity_id=conversation.id,
+            details={
+                "attachmentId": attachment.id,
+                "messageId": message.id,
+                "originalFilename": asset.original_filename,
+                "contentType": asset.content_type,
+            },
+        )
+        return self._to_attachment(attachment, asset)
 
     async def convert_to_issue(
         self,
@@ -844,7 +906,24 @@ class ChatService:
             if agent is None or agent.org_id != org_id:
                 raise ValueError("Agent context must belong to the same organization")
 
-    def _to_message(self, row: ChatMessageRow) -> ChatMessage:
+    async def _attachments_by_message_id(
+        self, rows: Sequence[ChatMessageRow]
+    ) -> dict[str, list[ChatAttachment]]:
+        pairs = await list_attachments_for_messages(
+            self._session, [row.id for row in rows]
+        )
+        attachments: dict[str, list[ChatAttachment]] = {}
+        for attachment, asset in pairs:
+            attachments.setdefault(attachment.message_id, []).append(
+                self._to_attachment(attachment, asset)
+            )
+        return attachments
+
+    def _to_message(
+        self,
+        row: ChatMessageRow,
+        attachments: list[ChatAttachment] | None = None,
+    ) -> ChatMessage:
         return {
             "id": row.id,
             "orgId": row.org_id,
@@ -855,12 +934,33 @@ class ChatService:
             "body": row.body,
             "structuredPayload": row.structured_payload,
             "approvalId": row.approval_id,
+            "attachments": attachments or [],
             "replyingAgentId": row.replying_agent_id,
             "chatTurnId": row.chat_turn_id,
             "turnVariant": row.turn_variant,
             "supersededAt": _iso(row.superseded_at),
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
+        }
+
+    def _to_attachment(self, row: ChatAttachmentRow, asset: AssetRow) -> ChatAttachment:
+        return {
+            "id": row.id,
+            "orgId": row.org_id,
+            "conversationId": row.conversation_id,
+            "messageId": row.message_id,
+            "assetId": row.asset_id,
+            "provider": asset.provider,
+            "objectKey": asset.object_key,
+            "contentType": asset.content_type,
+            "byteSize": asset.byte_size,
+            "sha256": asset.sha256,
+            "originalFilename": asset.original_filename,
+            "createdByAgentId": asset.created_by_agent_id,
+            "createdByUserId": asset.created_by_user_id,
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+            "contentPath": f"/api/assets/{row.asset_id}/content",
         }
 
 

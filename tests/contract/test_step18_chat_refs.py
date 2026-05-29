@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 import uuid
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Agent, Base, Organization
+from packages.database.migrations.runner import upgrade_to_head
+from packages.database.schema import Agent, Base, ChatAttachment, Asset, Organization
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
 
@@ -185,3 +188,115 @@ async def test_stream_runtime_failure_keeps_acknowledged_user_message(
     assert list_code == 200
     assert [message["id"] for message in messages] == [user_message_id]
     assert messages[0]["body"] == "stream and fail"
+
+
+def test_chat_attachment_tables_are_registered() -> None:
+    assert Asset.__tablename__ == "assets"
+    assert ChatAttachment.__tablename__ == "chat_attachments"
+    assert "assets" in {table.name for table in Base.metadata.sorted_tables}
+    assert "chat_attachments" in {table.name for table in Base.metadata.sorted_tables}
+
+
+async def test_upgrade_to_head_creates_chat_attachment_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "step18-chat-attachments.db"
+    await upgrade_to_head(f"sqlite+aiosqlite:///{db_path}")
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('assets', 'chat_attachments')"
+            )
+        )
+        names = {row[0] for row in rows}
+    await engine.dispose()
+    assert names == {"assets", "chat_attachments"}
+
+
+async def test_chat_attachment_metadata_is_returned_with_messages(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: FailingChatAdapter()
+    )
+    chat = await _create_chat(application, org_id, agent_id)
+    _, _ = await _request_json(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json_body={"body": "message with attachment"},
+    )
+    _, messages = await _request_json(
+        application, "GET", f"/api/chats/{chat['id']}/messages"
+    )
+    message_id = messages[0]["id"]
+
+    attach_code, attachment = await _request_json(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/chats/{chat['id']}/attachments",
+        json_body={
+            "messageId": message_id,
+            "provider": "local",
+            "objectKey": "chats/example.txt",
+            "contentType": "text/plain",
+            "byteSize": 12,
+            "sha256": "abc123",
+            "originalFilename": "example.txt",
+        },
+    )
+    assert attach_code == 201
+    assert attachment["messageId"] == message_id
+    assert attachment["contentPath"] == f"/api/assets/{attachment['assetId']}/content"
+
+    list_code, hydrated = await _request_json(
+        application, "GET", f"/api/chats/{chat['id']}/messages"
+    )
+    assert list_code == 200
+    assert hydrated[0]["attachments"] == [attachment]
+
+
+async def test_chat_attachment_rejects_message_from_other_conversation(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: FailingChatAdapter()
+    )
+    first_chat = await _create_chat(application, org_id, agent_id)
+    second_chat = await _create_chat(application, org_id, agent_id)
+    _, _ = await _request_json(
+        application,
+        "POST",
+        f"/api/chats/{first_chat['id']}/messages",
+        json_body={"body": "message in first chat"},
+    )
+    _, messages = await _request_json(
+        application, "GET", f"/api/chats/{first_chat['id']}/messages"
+    )
+    message_id = messages[0]["id"]
+
+    attach_code, error = await _request_json(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/chats/{second_chat['id']}/attachments",
+        json_body={
+            "messageId": message_id,
+            "provider": "local",
+            "objectKey": "chats/wrong.txt",
+            "contentType": "text/plain",
+            "byteSize": 5,
+            "sha256": "def456",
+        },
+    )
+    assert attach_code == 404
+    assert error["detail"] == "Chat message not found"

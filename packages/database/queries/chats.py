@@ -8,6 +8,8 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import (
+    Asset,
+    ChatAttachment,
     ChatContextLink,
     ChatConversation,
     ChatConversationUserState,
@@ -186,6 +188,35 @@ async def create_message(
     session.add(row)
     await session.flush()
     return row
+
+
+async def create_chat_attachment(
+    session: AsyncSession,
+    *,
+    asset_fields: Mapping[str, Any],
+    attachment_fields: Mapping[str, Any],
+) -> tuple[Asset, ChatAttachment]:
+    asset = Asset(**dict(asset_fields))
+    session.add(asset)
+    await session.flush()
+    attachment = ChatAttachment(**{**dict(attachment_fields), "asset_id": asset.id})
+    session.add(attachment)
+    await session.flush()
+    return asset, attachment
+
+
+async def list_attachments_for_messages(
+    session: AsyncSession, message_ids: Sequence[str]
+) -> Sequence[tuple[ChatAttachment, Asset]]:
+    if not message_ids:
+        return []
+    result = await session.execute(
+        select(ChatAttachment, Asset)
+        .join(Asset, ChatAttachment.asset_id == Asset.id)
+        .where(ChatAttachment.message_id.in_(message_ids))
+        .order_by(ChatAttachment.created_at, ChatAttachment.id)
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def list_messages(

@@ -52,6 +52,25 @@ class ChatRuntimeDescriptor(TypedDict):
     error: str | None
 
 
+class ChatAttachment(TypedDict):
+    id: str
+    orgId: str
+    conversationId: str
+    messageId: str
+    assetId: str
+    provider: str
+    objectKey: str
+    contentType: str
+    byteSize: int
+    sha256: str
+    originalFilename: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    createdAt: str
+    updatedAt: str
+    contentPath: str
+
+
 class ChatConversation(TypedDict):
     id: str
     orgId: str
@@ -90,6 +109,7 @@ class ChatMessage(TypedDict):
     body: str
     structuredPayload: dict[str, Any] | None
     approvalId: str | None
+    attachments: list[ChatAttachment]
     replyingAgentId: str | None
     chatTurnId: str | None
     turnVariant: int
@@ -155,6 +175,16 @@ class AddChatMessagePayloadBase(TypedDict):
 
 class AddChatMessagePayload(AddChatMessagePayloadBase, total=False):
     editUserMessageId: NotRequired[str | None]
+
+
+class CreateChatAttachmentPayload(TypedDict):
+    messageId: str
+    provider: str
+    objectKey: str
+    contentType: str
+    byteSize: int
+    sha256: str
+    originalFilename: NotRequired[str | None]
 
 
 class CreatedChatMessages(TypedDict):

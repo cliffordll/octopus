@@ -12,6 +12,8 @@ from .agent_state import (
 )
 from .heartbeat import HeartbeatRun, HeartbeatRunEvent
 from .chats import (
+    Asset,
+    ChatAttachment,
     ChatContextLink,
     ChatConversation,
     ChatConversationUserState,
@@ -47,6 +49,8 @@ __all__ = [
     "AgentWakeupRequest",
     "HeartbeatRun",
     "HeartbeatRunEvent",
+    "Asset",
+    "ChatAttachment",
     "ChatContextLink",
     "ChatConversation",
     "ChatConversationUserState",
