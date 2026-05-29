@@ -3415,6 +3415,24 @@ pre {
   font-size: 12px;
 }
 
+.organization-skill-file-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.organization-skill-directory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.organization-skill-directory-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .organization-skill-files button {
   align-items: flex-start;
   background: transparent;
@@ -3424,8 +3442,55 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 8px;
+  padding: 8px 8px 8px calc(8px + (var(--skill-file-depth, 0) * 16px));
   text-align: left;
+}
+
+.organization-skill-files .organization-skill-directory-button {
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.organization-skill-file-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.organization-skill-file-icon,
+.organization-skill-directory-icon {
+  align-items: center;
+  border-radius: 5px;
+  display: inline-flex;
+  flex: 0 0 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.organization-skill-file-icon {
+  background: #172133;
+  color: #91b7ff;
+}
+
+.organization-skill-directory-icon {
+  background: #211b32;
+  color: #c6a8ff;
+}
+
+.organization-skill-directory-toggle {
+  color: #7f8da3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin-left: auto;
+}
+
+.organization-skill-file-button {
+  width: 100%;
 }
 
 .organization-skill-files button:hover,
