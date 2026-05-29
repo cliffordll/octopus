@@ -147,9 +147,10 @@ async def test_org_skill_crud_file_update_and_activity(
 
     list_code, listed = await _request(application, "GET", f"/api/orgs/{org_id}/skills")
     assert list_code == 200
-    assert [item["id"] for item in listed] == [created["id"]]
-    assert listed[0]["sourceBadge"] == "local"
-    assert listed[0]["editable"] is True
+    listed_by_id = {item["id"]: item for item in listed}
+    assert created["id"] in listed_by_id
+    assert listed_by_id[created["id"]]["sourceBadge"] == "local"
+    assert listed_by_id[created["id"]]["editable"] is True
 
     detail_code, detail = await _request(
         application, "GET", f"/api/orgs/{org_id}/skills/{created['id']}"
@@ -184,7 +185,7 @@ async def test_org_skill_crud_file_update_and_activity(
 
     empty_code, empty = await _request(application, "GET", f"/api/orgs/{org_id}/skills")
     assert empty_code == 200
-    assert empty == []
+    assert created["id"] not in {item["id"] for item in empty}
 
     async with factory() as session:
         actions = [
@@ -202,6 +203,76 @@ async def test_org_skill_crud_file_update_and_activity(
         "organization.skill_file_updated",
         "organization.skill_deleted",
     ]
+
+
+async def test_org_skill_list_seeds_bundled_skills(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory, "Step 17 Bundled Skills")
+
+    bundled_root = Path.cwd() / "server" / "skills" / "bundled"
+    (bundled_root / "control-plane").mkdir(parents=True)
+    (bundled_root / "control-plane" / "SKILL.md").write_text(
+        "---\nname: control-plane\ndescription: Manage control plane tasks.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
+    (bundled_root / "skill-creator").mkdir(parents=True)
+    (bundled_root / "skill-creator" / "SKILL.md").write_text(
+        "---\nname: skill-creator\ndescription: Create durable skills.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
+
+    list_code, listed = await _request(application, "GET", f"/api/orgs/{org_id}/skills")
+
+    assert list_code == 200
+    keys = [skill["key"] for skill in listed]
+    assert keys[:7] == [
+        "rudder/para-memory-files",
+        "rudder/rudder",
+        "rudder/rudder-create-agent",
+        "rudder/rudder-create-plugin",
+        "rudder/skill-creator",
+        "rudder/skill-optimizer",
+        "rudder/conversation-to-skill",
+    ]
+    assert listed[0]["sourceBadge"] == "rudder"
+    assert listed[0]["sourceLabel"] == "Bundled by Rudder"
+    assert listed[0]["editable"] is False
+    assert listed[0]["description"]
+
+    file_code, file_detail = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{listed[0]['id']}/files",
+        params={"path": "SKILL.md"},
+    )
+    assert file_code == 200
+    assert file_detail["content"].startswith("---\nname: para-memory-files")
+
+
+async def test_org_skill_routes_accept_organization_url_key(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory, "Step 17 Url Key Skills")
+    org_ref = "step-17-url-key-skills"
+
+    list_code, listed = await _request(
+        application, "GET", f"/api/orgs/{org_ref}/skills"
+    )
+
+    assert list_code == 200
+    assert listed
+    assert {skill["orgId"] for skill in listed} == {org_id}
+
+    detail_code, detail = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_ref}/skills/{listed[0]['id']}",
+    )
+    assert detail_code == 200
+    assert detail["orgId"] == org_id
 
 
 async def test_org_skill_is_available_to_agent_skill_snapshot(
