@@ -186,7 +186,7 @@ Step 14 剩余工作必须先补齐控制面可调用的服务端契约，再深
 - `openclaw_gateway`、`hermes_local` 本步骤不做完整执行实现。
 - Workspace 生命周期与产物持久化，归 Step 15。
 - Workspace runtime service 建立、复用、释放和停止，归 Step 15。
-- Cost/activity 查询归 Step 19；budget 治理归 Step 20。
+- Cost/activity 查询归 Step 21；budget 治理归 Step 22。
 - Quota window 的真实 provider 读取、归集、展示和治理联动归 Step 20；adapter 侧 quota window 兼容入口和失败结构属于本步骤。
 - Local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 22。
 - Claude/OpenCode session resume、HTTP/CLI live hello probe、HTTP endpoint live probe 和完整 runtime compatibility hardening 归 Step 23。

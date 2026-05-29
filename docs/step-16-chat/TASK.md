@@ -184,8 +184,8 @@ Step 11F 仅提前实现触发 Agent runtime 并保存响应所需的最小 conv
 
 ## 不包含
 
-- Attachment/storage 行为，归 Step 21；消息侧最小附件/产物引用入口如阻塞 Chat 验收，归 Step 17。
-- 完整 cost/budget/quota/skills analytics 治理归 Step 19/20。
+- Attachment/storage 行为，归 Step 19；消息侧最小附件 metadata 和 transcript 可见性已归 Step 18。
+- 完整 cost/activity 归 Step 21；budget/quota/skills analytics 治理归 Step 22。
 
 ## 验收
 
