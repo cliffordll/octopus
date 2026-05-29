@@ -100,6 +100,13 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(screen.getByText("skills")).toBeInTheDocument();
   expect(screen.getByText("src")).toBeInTheDocument();
   expect(screen.getByText("agents")).toBeInTheDocument();
+  const fileButtons = within(screen.getByTestId("org-workspaces-files-card"))
+    .getAllByRole("button")
+    .map((button) => button.textContent ?? "");
+  const topLevelOrder = ["agents", "artifacts", "dist", "Microsoft", "node_mode", "plans", "skills", "src"]
+    .map((label) => fileButtons.findIndex((text) => text.includes(label)));
+  expect(topLevelOrder.every((index) => index >= 0)).toBe(true);
+  expect([...topLevelOrder].sort((left, right) => left - right)).toEqual(topLevelOrder);
   expect(screen.getByLabelText("工作区文件内容")).toHaveValue(JSON.stringify({ agents: [] }, null, 2));
   expect(screen.queryByText("已配置代码库")).not.toBeInTheDocument();
 });
