@@ -29,7 +29,9 @@ function ContextWorkspace({
           {sidebar}
         </nav>
       </aside>
-      <div className="org-content">{children}</div>
+      <div className="org-content">
+        <div className="tertiary-detail-frame">{children}</div>
+      </div>
     </div>
   );
 }
