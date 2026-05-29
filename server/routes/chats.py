@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
 from packages.shared.api_paths.chats import (
@@ -17,17 +18,19 @@ from packages.shared.api_paths.chats import (
     CHAT_OPERATION_PROPOSAL_RESOLVE_PATH,
     CHAT_PROJECT_CONTEXT_PATH,
     CHAT_USER_STATE_PATH,
+    ORG_CHAT_ATTACHMENTS_PATH,
     ORG_CHAT_LIST_PATH,
 )
 from packages.shared.types.chat import (
+    ChatAttachment,
     ChatContextLink,
     ChatConversation,
     ChatMessage,
-    CreatedChatMessages,
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
     validate_convert_chat_to_issue,
+    validate_create_chat_attachment_metadata,
     validate_create_chat_context_link,
     validate_create_chat_conversation,
     validate_resolve_chat_operation_proposal,
@@ -233,6 +236,47 @@ async def list_chat_messages_route(
     return await service.list_messages(id)
 
 
+@router.post(ORG_CHAT_ATTACHMENTS_PATH, status_code=status.HTTP_201_CREATED)
+async def create_chat_attachment_route(
+    orgId: str,
+    chatId: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_organization_access),
+    service: ChatService = Depends(get_chat_service),
+) -> ChatAttachment:
+    conversation = await _get_conversation_or_404(
+        chatId, request=request, service=service
+    )
+    if conversation["orgId"] != orgId:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chat conversation does not belong to organization",
+        )
+    try:
+        payload = validate_create_chat_attachment_metadata(body)
+        actor = require_actor_identity(request)
+        attachment = await service.create_attachment(
+            orgId,
+            chatId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if attachment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat conversation not found",
+        )
+    return attachment
+
+
 @router.post(CHAT_CONVERT_TO_ISSUE_PATH, status_code=status.HTTP_201_CREATED)
 async def convert_chat_to_issue_route(
     id: str,
@@ -299,7 +343,7 @@ async def add_chat_message_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: ChatService = Depends(get_chat_service),
-) -> CreatedChatMessages:
+) -> Any:
     await _get_conversation_or_404(id, request=request, service=service)
     try:
         payload = validate_add_chat_message(body)
@@ -313,9 +357,10 @@ async def add_chat_message_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
 
 
 @router.post(CHAT_MESSAGES_STREAM_PATH, status_code=status.HTTP_201_CREATED)

@@ -26,6 +26,15 @@ async def get_organization_by_id(
     return result.scalar_one_or_none()
 
 
+async def get_organization_by_url_key(
+    session: AsyncSession, url_key: str
+) -> Organization | None:
+    result = await session.execute(
+        select(Organization).where(Organization.url_key == url_key)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_organization(
     session: AsyncSession,
     *,
