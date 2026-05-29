@@ -1,4 +1,4 @@
-# Step 20: Cost Summary 与 Activity Query
+# Step 21: Cost Summary 与 Activity Query
 
 状态：待开发
 
@@ -6,7 +6,7 @@
 
 先实现不阻塞主链路的成本摘要和 activity 查询能力，让用户能看见 agent/run/chat 做了什么、消耗了多少。
 
-本步骤只做 cost event 归集、summary/query 和 activity query；budget hard-stop、incident、quota、skills analytics 归 Step 21。
+本步骤只做 cost event 归集、summary/query 和 activity query；budget hard-stop、incident、quota、skills analytics 归 Step 22。
 
 ## 上游证据
 
@@ -43,9 +43,9 @@
 
 ## 边界
 
-- 不做 budget policy、budget incident、hard-stop、approval 副作用，归 Step 21。
-- 不做 provider quota 真实读取，归 Step 21。
-- 不做 skills analytics 真实归集，归 Step 21。
+- 不做 budget policy、budget incident、hard-stop、approval 副作用，归 Step 22。
+- 不做 provider quota 真实读取，归 Step 22。
+- 不做 skills analytics 真实归集，归 Step 22。
 - 不改变 runtime adapter 执行协议；adapter 继续只产出 usage/cost 原始证据。
 
 ## 验收

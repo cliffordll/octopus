@@ -67,6 +67,7 @@ secrets.json
 *.log
 logs/
 tmp/
+pytest-tmp/
 .octopus/
 
 # ─── 本地参考用的上游参考实现源码副本(对照实现,不进仓库) ──
