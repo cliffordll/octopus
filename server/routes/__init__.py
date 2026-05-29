@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from .agents import router as agents_router
 from .approvals import router as approvals_router
 from .issues import router as issues_router
+from .messenger import router as messenger_router
 from .orgs import router as orgs_router
 from .projects import router as projects_router
 from .chats import router as chats_router
@@ -18,4 +19,5 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(projects_router)
     app.include_router(agents_router)
     app.include_router(chats_router)
+    app.include_router(messenger_router)
     app.include_router(goals_router)

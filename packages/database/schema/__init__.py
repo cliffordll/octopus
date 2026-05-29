@@ -11,11 +11,17 @@ from .agent_state import (
     AgentWakeupRequest,
 )
 from .heartbeat import HeartbeatRun, HeartbeatRunEvent
-from .chats import ChatConversation, ChatMessage
+from .chats import (
+    ChatContextLink,
+    ChatConversation,
+    ChatConversationUserState,
+    ChatMessage,
+)
 from .approvals import Approval
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
 from .issues import Issue
+from .messenger import MessengerThreadUserState
 from .organizations import Organization
 from .projects import Project
 from .goals import Goal, ProjectGoal
@@ -40,12 +46,15 @@ __all__ = [
     "AgentWakeupRequest",
     "HeartbeatRun",
     "HeartbeatRunEvent",
+    "ChatContextLink",
     "ChatConversation",
+    "ChatConversationUserState",
     "ChatMessage",
     "Approval",
     "IssueApproval",
     "IssueComment",
     "Issue",
+    "MessengerThreadUserState",
     "Organization",
     "Project",
     "Goal",

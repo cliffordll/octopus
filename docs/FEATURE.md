@@ -61,15 +61,20 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 13 | Run 调度与恢复 | `docs/step-13-runs/` |
 | 14 | 其他 Runtime Adapter 扩展 | `docs/step-14-runtime/` |
 | 15 | Workspace 与执行产物 | `docs/step-15-workspace/` |
-| 16 | Cost、Budget 与 Activity | `docs/step-16-governance/` |
-| 17 | Chat / Messenger 扩展 | `docs/step-17-chat/` |
-| 18 | Attachment / Storage | `docs/step-18-storage/` |
-| 19 | Auth / Actor / Access | `docs/step-19-access/` |
-| 20 | Recovery / Observability / Compatibility | `docs/step-20-hardening/` |
+| 16 | Chat / Messenger 扩展 | `docs/step-16-chat/` |
+| 17 | Organization Resources、Organization Skills 与 Agent Instructions | `docs/step-17-org-resources-skills/` |
+| 18 | Chat Attachments 与基础运行可见性 | `docs/step-18-chat-refs/` |
+| 19 | Basic Observability / Debug Visibility | `docs/step-19-observability/` |
+| 20 | Cost Summary 与 Activity Query | `docs/step-20-cost-activity/` |
+| 21 | Budget / Governance | `docs/step-21-governance/` |
+| 22 | Attachment / Storage | `docs/step-22-storage/` |
+| 23 | Auth / Actor / Access | `docs/step-23-access/` |
+| 24 | Recovery / Observability / Compatibility | `docs/step-24-hardening/` |
+| 25 | Plugin Framework | `docs/step-25-plugins/` |
 
 主依赖链为：
 
-`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> governance -> chat-expansion -> storage -> access -> hardening`
+`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> chat-expansion -> org-resources-skills -> chat-refs -> debug-visibility -> cost-activity -> governance -> storage -> access -> hardening -> plugins`
 
 ## 5. Step 计划
 
@@ -190,9 +195,10 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 后置边界：
 
-- Claude/OpenCode session resume、HTTP/CLI live hello probe、完整 runtime compatibility hardening 归 Step 20。
-- 真实 quota window 读取、provider/biller 成本治理联动和 skills analytics 真实归集归 Step 16。
-- local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 19。
+- Claude/OpenCode session resume、HTTP/CLI live hello probe、完整 runtime compatibility hardening 归 Step 24。
+- 真实 quota window 读取、budget 治理联动和 skills analytics 真实归集归 Step 21。
+- provider/biller/cost 基础归集和 activity query 归 Step 20。
+- local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 23。
 
 ### Step 15: Workspace 与执行产物
 
@@ -203,55 +209,100 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 执行顺序：先拆清 workspace 数据契约与 project 聚合，再补齐执行前 workspace 解析和 runtime context 注入，随后实现 runtime service、operation 记录、work product 引用与恢复清理。
 - 验收：project/issue/run 能稳定关联 workspace；adapter 收到兼容 workspace context；runtime service 和 operation 可追踪；失败、取消或恢复后不留下不一致业务状态。
 
-### Step 16: Cost、Budget 与 Activity
+### Step 16: Chat / Messenger 扩展
 
-目录：`docs/step-16-governance/`
+目录：`docs/step-16-chat/`
 
-- 目标：在 Step 11/13/14 运行基线产生的必要记录基础上，实现完整成本、预算限制、quota window 及关键活动治理闭环。
-- 交付：cost 记录、budget 校验、Step 14 adapter quota window 输出的归集/查询与治理联动、provider/biller 归一化治理、skills analytics 真实归集、activity 扩展和查询。
-- 验收：run 消耗可归集，预算和 quota 限制可解释，activity 副作用可测试。
-
-### Step 17: Chat / Messenger 扩展
-
-目录：`docs/step-17-chat/`
-
-- 目标：在 Step 11F 已建立 agent 对话触发基线后，补齐上游范围内剩余会话、消息和与业务对象的联动能力。
+- 目标：在 Step 11F 已建立 agent 对话触发基线后，优先补齐上游范围内剩余会话、消息和与业务对象的联动能力，使 agent 可以被真实使用。
 - 交付：不属于 agent 执行最小链路的 conversation/message contract、API、service 与副作用。
 - 验收：完整纳入范围的消息链路保持 organization scope 和兼容 payload，且不改变 Step 11F 已建立的调用闭环。
 
-### Step 18: Attachment / Storage
+### Step 17: Organization Resources、Organization Skills 与 Agent Instructions
 
-目录：`docs/step-18-storage/`
+目录：`docs/step-17-org-resources-skills/`
 
-- 目标：实现 attachment 元数据、对象存储边界、业务引用，以及 runtime/chat/workspace 产物需要的存储引用能力。
-- 交付：storage abstraction、attachment API、关联验证和产物/消息附件引用。
+- 目标：在不改 UI/CLI 的前提下，补齐 organization-scoped resource CRUD、organization skill 管理和智能体说明文件管理的服务端契约，使后续 UI/CLI 只消费稳定 API。
+- 交付：organization resources 的 schema/query/service/routes、organization skills 的 schema/文件来源/API/审计、runtime skills snapshot 可消费 organization skill entry、skill entry 展示元数据兼容字段，以及基于 Step 14 managed instructions 的说明文件读取/更新/审计边界。
+- 执行顺序：先对照上游确认 organization resources、organization skills 与 agent instructions 的 schema、route、service 和测试证据；再实现 resources CRUD；随后实现 organization skills CRUD/import/update/delete；再修正 agent skills snapshot 的服务端 response；最后在上游存在契约证据时补齐 agent instructions 文件管理 API，若上游仅有初始化 materialization 行为则明确记录“不提供独立管理 API”。
+- 验收：organization resource 可按 organization scope 创建、查询、更新、删除并记录 activity；organization skill 可被创建、更新、删除、审计并被 agent skills snapshot/sync/enable 消费；服务端返回的 skill entry 足以支持“智能体技能标签显示描述信息”；agent instructions 文件管理边界不会改变 Step 14 runtime materialization 和执行读取行为。
+
+### Step 18: Chat Attachments 与基础运行可见性
+
+目录：`docs/step-18-chat-refs/`
+
+- 目标：补齐 Chat 使用 Agent 时需要的最小附件引用、产物引用和执行可见性，不等待完整 Storage 或完整 Observability。
+- 交付：message attachment/artifact reference、chat 到 run/runtime result 的基础可见字段、跨 organization 引用校验。
+- 验收：消息可以关联已存在附件/产物/run 信息；失败执行有可读摘要；不引入完整 storage lifecycle。
+
+### Step 19: Basic Observability / Debug Visibility
+
+目录：`docs/step-19-observability/`
+
+- 目标：在真实 Auth 接入前，优先补齐 chat、run、runtime、workspace 的基础调试可见性。
+- 交付：run events、runtime stdout/stderr 摘要、错误摘要、workspace operation/work product 关联查询、chat execution error 可读响应。
+- 验收：开发和 UI/CLI 联调能定位 agent 对话、run 执行和 workspace 操作问题；完整生产级 hardening 仍归 Step 24。
+
+### Step 20: Cost Summary 与 Activity Query
+
+目录：`docs/step-20-cost-activity/`
+
+- 目标：先实现不阻塞主链路的成本摘要和 activity 查询，让用户能看见 agent/run/chat 做了什么、消耗了多少。
+- 交付：cost event、cost summary/query、provider/biller 基础归一化、organization/issue/run activity 查询。
+- 验收：run 消耗可归集，activity 可查询，成本和活动可解释；budget hard-stop、quota 和 skills analytics 归 Step 21。
+
+### Step 21: Budget / Governance
+
+目录：`docs/step-21-governance/`
+
+- 目标：在 Step 20 成本和活动记录基础上，实现预算限制、quota window 和 skills analytics 等治理闭环。
+- 交付：budget policy、budget incident、hard-stop、budget approval 副作用、provider quota windows 聚合、skills analytics 真实归集。
+- 验收：预算和 quota 限制可解释；hard-stop 能暂停并阻止新 work；skills analytics 基于持久化 evidence。
+
+### Step 22: Attachment / Storage
+
+目录：`docs/step-22-storage/`
+
+- 目标：实现 attachment 元数据、对象存储边界、业务引用，以及 runtime/chat/workspace 产物需要的完整存储引用能力。
+- 交付：storage abstraction、attachment API、关联验证、上传/读取和产物/消息附件引用 lifecycle。
 - 验收：上传、读取、关联和产物引用行为可测试，存储实现不改变外部契约。
 
-### Step 19: Auth / Actor / Access
+### Step 23: Auth / Actor / Access
 
-目录：`docs/step-19-access/`
+目录：`docs/step-23-access/`
 
 - 目标：按上游证据接入真实认证、actor、授权行为和运行时 secret/env 解析边界，替代开发 actor 数据源。
 - 交付：身份上下文、访问检查、local agent JWT/API key 兼容入口、secret/env binding 解析和迁移策略。
 - 验收：真实 actor 与开发 actor 复用同一结构边界；runtime env/secret 不泄漏、不改变业务 API。
 
-### Step 20: Recovery / Observability / Compatibility
+### Step 24: Recovery / Observability / Compatibility
 
-目录：`docs/step-20-hardening/`
+目录：`docs/step-24-hardening/`
 
-- 目标：补齐失败恢复、可观测性与全链路兼容验收。
+- 目标：补齐失败恢复、生产级可观测性与全链路兼容验收。
 - 交付：恢复策略、Claude/OpenCode session resume 与 cwd mismatch 处理、HTTP/CLI live hello probe、日志/指标边界、完整 contract/workflow 回归。
 - 验收：主要 server 场景可恢复、可定位，并通过兼容测试集。
 
+### Step 25: Plugin Framework
+
+目录：`docs/step-25-plugins/`
+
+- 目标：按上游 server 的 plugin framework 实现 Python 兼容子系统，覆盖插件注册、生命周期、配置、状态、工具、webhook、job、UI bridge 和运行时 worker 边界。
+- 交付：plugin 数据模型与迁移、manifest/schema 校验、registry/lifecycle service、管理 API、plugin state/config/entities/logs/jobs/webhooks 持久化、tool dispatcher、worker RPC 边界、插件 UI 静态资源和 bridge API、内置/示例插件目录约定。
+- 执行顺序：先实现只读 catalog/manifest/registry 和管理 API；再实现生命周期、配置、状态、日志；随后接入 worker、tools、jobs、webhooks、UI bridge；最后补齐 SDK/脚手架兼容和 Linear 等一方插件。
+- 验收：插件管理 API 与上游路径和 payload 对齐；ready/disabled/error/upgrade_pending/uninstalled 状态流转可测试；插件 worker、tool、webhook、job 和 UI bridge 在本地单实例部署可验证；明确不承诺上游尚未完成的云端多实例插件分发能力。
+
 ## 6. 可选扩展
 
-organization resources、skills、plugins、automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。
+automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。organization resources 与 organization skills 已作为服务端独立能力提前纳入 Step 17。
+
+Plugins 已确认属于上游 server 的独立子系统，纳入 Step 25，不再作为可选扩展悬置。其范围以 `D:\coding\rudder\doc\plugins\PLUGIN_SPEC.md`、`server/src/routes/plugins.ts`、`server/src/bootstrap/plugin-host-runtime.ts`、`server/src/services/plugin-*`、`packages/db/src/schema/plugin_*.ts` 和 `packages/plugins/*` 为证据来源。
 
 ### Skills 后续拆分边界
 
 - Runtime skills 消费能力继续归 Step 14：本地 runtime adapter 如何发现、选择、materialize 或 mount skills。
-- Skills 使用统计真实归集归 Step 16：基于 run/event/activity 记录计算 loaded/requested/used 统计，不在 Step 14 伪造数据。
-- Organization skills 管理如果确认纳入，应拆成独立 skills 管理步骤，而不是塞进 Step 17 Chat。范围包括 organization skill 的数据库/文件来源、创建/更新/删除 API、权限与审计、以及与 `agentRuntimeConfig.skillsRootPath` 的迁移关系。
+- Skills 使用统计真实归集归 Step 21：基于 run/event/activity 记录计算 loaded/requested/used 统计，不在 Step 14 伪造数据。
+- Organization skills 管理提前纳入 Step 17，不塞进 Step 16 Chat。范围包括 organization skill 的数据库/文件来源、创建/更新/删除 API、权限与审计、与 `agentRuntimeConfig.skillsRootPath` 的迁移关系，以及 agent skills snapshot 返回描述与来源元数据的服务端兼容修正。
+- Agent instructions 管理缺口纳入 Step 17：Step 14 只负责默认 instructions 初始化、路径配置和 runtime 读取；Step 17 负责按上游证据确认是否存在独立说明文件管理 API，并在存在时补齐读取、更新、路径安全、scope/access 和 activity 审计。
 - External skills 当前仅作为 runtime home 中的外部安装项检测；如后续要支持“导入/接管外部 skill”，应归独立 skills 管理步骤，并先确认上游是否存在对应服务端契约。
 
 ## 7. 验收与更新规则

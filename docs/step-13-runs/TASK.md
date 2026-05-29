@@ -86,7 +86,7 @@ WHERE id = :run_id
 
 - 新 adapter 或 runtime 类型实现，归 Step 14。
 - workspace 创建、释放、产物和日志存储闭环，归 Step 15。
-- budget/cost/activity 治理联动，归 Step 16。
+- cost/activity 查询归 Step 19；budget 治理联动归 Step 20。
 - issue 专属运行治理、automation 调度实体及依赖其领域规则的 closeout；仅保留本步骤通用调度语义。
 
 ## 验收
