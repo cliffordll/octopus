@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from packages.shared.api_paths.issue_attachments import (
+    ATTACHMENT_DETAIL_PATH,
+    ISSUE_ATTACHMENTS_PATH,
+    ORG_ISSUE_ATTACHMENTS_PATH,
+)
 from packages.shared.api_paths.issues import (
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DETAIL_PATH,
@@ -13,6 +19,7 @@ from packages.shared.api_paths.issues import (
     ORG_ISSUE_LIST_PATH,
 )
 from packages.shared.types.issue import IssueDetail, IssueListItem
+from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.validators.issue import (
     validate_create_issue,
     validate_create_issue_comment,
@@ -28,6 +35,7 @@ from ..dependencies.access import (
 )
 from ..dependencies.issues import get_issue_service
 from ..services.issues import IssueService
+from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
 
@@ -272,3 +280,129 @@ async def record_issue_review_decision_route(
             detail="Issue not found",
         )
     return updated
+
+
+@router.get(ISSUE_ATTACHMENTS_PATH)
+async def list_issue_attachments_route(
+    issueId: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+) -> list[IssueAttachment]:
+    detail = await service.get_by_id(issueId)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    return await service.list_attachments(issueId)
+
+
+@router.post(ORG_ISSUE_ATTACHMENTS_PATH, status_code=http_status.HTTP_201_CREATED)
+async def create_issue_attachment_route(
+    orgId: str,
+    issueId: str,
+    request: Request,
+    _: None = Depends(require_organization_access),
+    service: IssueService = Depends(get_issue_service),
+) -> IssueAttachment:
+    detail = await service.get_by_id(issueId)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    if detail["orgId"] != orgId:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Issue does not belong to organization",
+        )
+    try:
+        payload = await _issue_attachment_payload_from_request(request, orgId)
+        actor = require_actor_identity(request)
+        return await service.create_attachment(
+            issueId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete(ATTACHMENT_DETAIL_PATH, status_code=http_status.HTTP_204_NO_CONTENT)
+async def delete_attachment_route(
+    attachmentId: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+) -> Response:
+    current = await service.get_attachment(attachmentId)
+    if current is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found",
+        )
+    assert_organization_access(request, current["orgId"])
+    actor = require_actor_identity(request)
+    deleted = await service.delete_attachment(
+        attachmentId,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if deleted is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found",
+        )
+    attachment, asset, should_delete_asset = deleted
+    if should_delete_asset:
+        await _storage_for_request(request).delete_object(
+            attachment["orgId"], asset.object_key
+        )
+    return Response(status_code=http_status.HTTP_204_NO_CONTENT)
+
+
+async def _issue_attachment_payload_from_request(
+    request: Request, org_id: str
+) -> dict[str, Any]:
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, StarletteUploadFile):
+        raise ValueError("'file' is required")
+    body = await upload.read()
+    if not body:
+        raise ValueError("'file' must not be empty")
+    storage = _storage_for_request(request)
+    stored = await storage.put_file(
+        org_id=org_id,
+        namespace="issue/attachments",
+        original_filename=upload.filename,
+        content_type=upload.content_type or "application/octet-stream",
+        body=body,
+    )
+    usage = form.get("usage")
+    issue_comment_id = form.get("issueCommentId")
+    return {
+        "provider": stored["provider"],
+        "objectKey": stored["objectKey"],
+        "contentType": stored["contentType"],
+        "byteSize": stored["byteSize"],
+        "sha256": stored["sha256"],
+        "originalFilename": stored["originalFilename"],
+        "usage": usage if isinstance(usage, str) and usage else "attachment",
+        "issueCommentId": (
+            issue_comment_id
+            if isinstance(issue_comment_id, str) and issue_comment_id
+            else None
+        ),
+    }
+
+
+def _storage_for_request(request: Request) -> StorageService:
+    storage = getattr(request.app.state, "storage_service", None)
+    if storage is not None:
+        return storage
+    return get_storage_service()
