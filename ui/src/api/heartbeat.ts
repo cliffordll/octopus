@@ -1,9 +1,14 @@
 import { jsonRequest, request } from "./client";
-import type { HeartbeatRun, HeartbeatRunEvent, WakeAgentPayload } from "./types";
+import type { HeartbeatRun, HeartbeatRunEvent, LogReadResult, WakeAgentPayload, WorkspaceOperation } from "./types";
 
 interface EventOptions {
   afterSeq?: number;
   limit?: number;
+}
+
+interface LogOptions {
+  limitBytes?: number;
+  offset?: number;
 }
 
 export const heartbeatApi = {
@@ -37,6 +42,19 @@ export const heartbeatApi = {
       method: "GET",
     });
   },
+  getLog: (runId: string, options: LogOptions = {}): Promise<LogReadResult> => {
+    const params = new URLSearchParams();
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.limitBytes !== undefined) params.set("limitBytes", String(options.limitBytes));
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return request<LogReadResult>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/log${query}`, {
+      method: "GET",
+    });
+  },
+  listWorkspaceOperations: (runId: string): Promise<WorkspaceOperation[]> =>
+    request<WorkspaceOperation[]>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/workspace-operations`, {
+      method: "GET",
+    }),
   cancel: (runId: string): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/cancel`, "POST", {}),
   retry: (runId: string): Promise<HeartbeatRun> =>

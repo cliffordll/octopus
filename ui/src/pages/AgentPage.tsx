@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
+import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -65,6 +65,14 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
+}
+
+function hasJsonObject(value: Record<string, unknown> | null | undefined): value is Record<string, unknown> {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
+function formattedJson(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2);
 }
 
 type InstructionDoc = {
@@ -241,7 +249,27 @@ function skillDisplaySourceText(value: string | null | undefined, bundled: boole
   return value;
 }
 
-function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
+function AgentRunDetail({
+  events = [],
+  eventsError,
+  eventsLoading,
+  log,
+  logError,
+  operations = [],
+  operationsError,
+  operationsLoading,
+  run,
+}: {
+  events?: HeartbeatRunEvent[];
+  eventsError?: unknown;
+  eventsLoading?: boolean;
+  log?: LogReadResult | null;
+  logError?: unknown;
+  operations?: WorkspaceOperation[];
+  operationsError?: unknown;
+  operationsLoading?: boolean;
+  run: HeartbeatRun | null;
+}) {
   if (!run) {
     return (
       <section className="panel agent-run-detail-card">
@@ -251,6 +279,12 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
   }
   const hasUsage = Boolean(run.usageJson && Object.keys(run.usageJson).length > 0);
   const hasSession = Boolean(run.sessionIdBefore || run.sessionIdAfter);
+  const hasContext = hasJsonObject(run.contextSnapshot);
+  const hasResult = hasJsonObject(run.resultJson);
+  const hasUsageJson = hasJsonObject(run.usageJson);
+  const contextSnapshot = run.contextSnapshot ?? {};
+  const resultJson = run.resultJson ?? {};
+  const usageJson = run.usageJson ?? {};
   return (
     <section className="panel agent-run-detail-card" data-testid="agent-runs-detail-pane">
       <div className="agent-run-detail-header">
@@ -270,6 +304,7 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
         <div><dt>Started</dt><dd>{formatRunTime(run.startedAt)}</dd></div>
         <div><dt>Finished</dt><dd>{formatRunTime(run.finishedAt)}</dd></div>
         <div><dt>Exit</dt><dd>{run.exitCode ?? "无"}</dd></div>
+        <div><dt>Error Code</dt><dd>{run.errorCode ?? "无"}</dd></div>
         <div><dt>Retry Of</dt><dd>{run.retryOfRunId ?? "无"}</dd></div>
         <div><dt>External Run</dt><dd>{run.externalRunId ?? "无"}</dd></div>
       </dl>
@@ -288,8 +323,103 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
         </dl>
       )}
       {run.error && <p className="error-notice">{run.error}</p>}
-      {run.stdoutExcerpt && <pre className="run-excerpt">{run.stdoutExcerpt}</pre>}
-      {run.stderrExcerpt && <pre className="run-excerpt error">{run.stderrExcerpt}</pre>}
+      {(run.stdoutExcerpt || run.stderrExcerpt) && (
+        <section className="agent-run-debug-section">
+          <h3>运行输出</h3>
+          {run.stdoutExcerpt && (
+            <div>
+              <span className="agent-run-section-label">stdout</span>
+              <pre className="run-excerpt">{run.stdoutExcerpt}</pre>
+            </div>
+          )}
+          {run.stderrExcerpt && (
+            <div>
+              <span className="agent-run-section-label">stderr</span>
+              <pre className="run-excerpt error">{run.stderrExcerpt}</pre>
+            </div>
+          )}
+        </section>
+      )}
+      {(hasContext || hasResult || hasUsageJson) && (
+        <section className="agent-run-debug-section">
+          <h3>调试快照</h3>
+          <div className="agent-run-json-grid">
+            {hasContext && (
+              <div>
+                <span className="agent-run-section-label">contextSnapshot</span>
+                <pre className="agent-run-json">{formattedJson(contextSnapshot)}</pre>
+              </div>
+            )}
+            {hasResult && (
+              <div>
+                <span className="agent-run-section-label">resultJson</span>
+                <pre className="agent-run-json">{formattedJson(resultJson)}</pre>
+              </div>
+            )}
+            {hasUsageJson && (
+              <div>
+                <span className="agent-run-section-label">usageJson</span>
+                <pre className="agent-run-json">{formattedJson(usageJson)}</pre>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      <section className="agent-run-debug-section">
+        <h3>事件</h3>
+        {Boolean(eventsError) && <ErrorNotice error={eventsError} />}
+        {eventsLoading && <p className="muted">加载事件中...</p>}
+        {!eventsLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+        {events.length > 0 && (
+          <div className="agent-run-events">
+            {events.map((event) => (
+              <article className="agent-run-event" key={event.id}>
+                <div className="agent-run-event-header">
+                  <span>#{event.seq}</span>
+                  <strong>{event.eventType}</strong>
+                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.stream && <Badge>{event.stream}</Badge>}
+                </div>
+                {event.message && <p>{event.message}</p>}
+                {hasJsonObject(event.payload) && <pre className="agent-run-json">{formattedJson(event.payload)}</pre>}
+                <small className="muted">{event.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>原始日志</h3>
+        {Boolean(logError) && <ErrorNotice error={logError} />}
+        {log?.content ? (
+          <pre className="agent-run-json">{log.content}</pre>
+        ) : (
+          <p className="muted">暂无日志。</p>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>工作区操作</h3>
+        {Boolean(operationsError) && <ErrorNotice error={operationsError} />}
+        {operationsLoading && <p className="muted">加载工作区操作中...</p>}
+        {!operationsLoading && operations.length === 0 && <p className="muted">暂无工作区操作。</p>}
+        {operations.length > 0 && (
+          <div className="agent-run-events">
+            {operations.map((operation) => (
+              <article className="agent-run-event" key={operation.id}>
+                <div className="agent-run-event-header">
+                  <strong>{operation.phase}</strong>
+                  <Badge>{operation.status}</Badge>
+                  {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
+                </div>
+                {operation.command && <p>{operation.command}</p>}
+                {operation.stderrExcerpt && <pre className="run-excerpt error">{operation.stderrExcerpt}</pre>}
+                {operation.stdoutExcerpt && <pre className="run-excerpt">{operation.stdoutExcerpt}</pre>}
+                <small className="muted">{operation.cwd ?? operation.id}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -520,6 +650,24 @@ export function AgentPage() {
     [runRows],
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
+  const runEvents = useQuery({
+    queryKey: ["heartbeat-run-events", selectedRun?.id],
+    queryFn: () => heartbeatApi.listEvents(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", selectedRun?.id],
+    queryFn: () => heartbeatApi.getLog(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runWorkspaceOperations = useQuery({
+    queryKey: ["heartbeat-run-workspace-operations", selectedRun?.id],
+    queryFn: () => heartbeatApi.listWorkspaceOperations(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
@@ -1140,7 +1288,17 @@ export function AgentPage() {
           </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
-            <AgentRunDetail run={selectedRun} />
+            <AgentRunDetail
+              events={runEvents.data ?? []}
+              eventsError={runEvents.error}
+              eventsLoading={runEvents.isLoading}
+              log={runLog.data}
+              logError={runLog.error}
+              operations={runWorkspaceOperations.data ?? []}
+              operationsError={runWorkspaceOperations.error}
+              operationsLoading={runWorkspaceOperations.isLoading}
+              run={selectedRun}
+            />
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">
               <div className="panel-heading">
                 <div>
