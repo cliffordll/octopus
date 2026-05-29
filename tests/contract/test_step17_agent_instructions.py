@@ -147,7 +147,12 @@ async def test_agent_instructions_bundle_read_write_delete_and_activity(
     assert bundle["agentId"] == agent_id
     assert bundle["mode"] == "managed"
     assert bundle["entryFile"] == "SOUL.md"
-    assert [file["path"] for file in bundle["files"]] == ["MEMORY.md", "SOUL.md"]
+    assert [file["path"] for file in bundle["files"]] == [
+        "HEARTBEAT.md",
+        "MEMORY.md",
+        "SOUL.md",
+        "TOOLS.md",
+    ]
 
     file_code, file_detail = await _request(
         application,
@@ -240,7 +245,86 @@ async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     assert file_detail["content"] == "# Legacy Soul\nKeep context durable."
     assert bundle_code == 200
     assert bundle["mode"] == "managed"
-    assert [file["path"] for file in bundle["files"]] == ["SOUL.md"]
+    assert [file["path"] for file in bundle["files"]] == [
+        "HEARTBEAT.md",
+        "MEMORY.md",
+        "SOUL.md",
+        "TOOLS.md",
+    ]
+
+
+async def test_agent_instructions_bundle_reconciles_empty_default_files(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root_path = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    root = (
+        root_path
+        / ".octopus"
+        / "workspaces"
+        / f"org_{org_id}"
+        / "agents"
+        / "ceo"
+        / "instructions"
+    )
+    root.mkdir(parents=True)
+    root.joinpath("SOUL.md").write_text("", encoding="utf-8")
+    root.joinpath("MEMORY.md").write_text("Keep this custom memory.", encoding="utf-8")
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="empty-instructions-org",
+                name="Empty Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="CEO",
+                workspace_key="ceo",
+                role="ceo",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "instructionsRootPath": str(root),
+                    "instructionsEntryFile": "SOUL.md",
+                    "instructionsFilePath": str(root / "SOUL.md"),
+                },
+            )
+        )
+        await session.commit()
+
+    soul_code, soul_detail = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent_id}/instructions-bundle/file",
+        params={"path": "SOUL.md"},
+    )
+    memory_code, memory_detail = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent_id}/instructions-bundle/file",
+        params={"path": "MEMORY.md"},
+    )
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+
+    assert soul_code == 200
+    assert "# SOUL.md -- CEO Persona" in soul_detail["content"]
+    assert memory_code == 200
+    assert memory_detail["content"] == "Keep this custom memory."
+    assert bundle_code == 200
+    assert [file["path"] for file in bundle["files"]] == [
+        "HEARTBEAT.md",
+        "MEMORY.md",
+        "SOUL.md",
+        "TOOLS.md",
+    ]
 
 
 async def test_agent_instructions_path_update_and_path_guard(
