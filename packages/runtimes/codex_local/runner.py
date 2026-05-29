@@ -6,12 +6,14 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ..context_env import apply_runtime_context_env
+from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
@@ -25,14 +27,18 @@ class _RunAttempt:
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
-    command = _string(context.config.get("command")) or "codex"
+    command = resolve_runtime_executable(
+        _string(context.config.get("command")) or "codex"
+    )
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Codex adapter cwd must be a string")
     prompt = runtime_prompt_from_config(context.config)
     env = dict(os.environ)
     configured_env = context.config.get("env")
+    explicit_env_keys: set[str] = set()
     if isinstance(configured_env, dict):
+        explicit_env_keys = {key for key in configured_env if isinstance(key, str)}
         env.update(
             {
                 key: value
@@ -42,6 +48,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
     if not _string(env.get("CODEX_HOME")):
         env["CODEX_HOME"] = str(_default_codex_home(context))
     await _prepare_managed_home(env, context.on_log)
@@ -112,15 +119,44 @@ async def _run_attempt(
     billing_type: str,
     biller: str,
 ) -> _RunAttempt:
-    process = await asyncio.create_subprocess_exec(
-        command,
-        *args,
-        cwd=cwd,
-        env=env,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            command,
+            *args,
+            cwd=cwd,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except PermissionError as exc:
+        if os.name == "nt":
+            return await _run_blocking_subprocess_attempt(
+                context=context,
+                command=command,
+                args=args,
+                cwd=cwd,
+                prompt=prompt,
+                env=env,
+                timeout_sec=timeout_sec,
+                loaded_skills=loaded_skills,
+                billing_type=billing_type,
+                biller=biller,
+                startup_error=exc,
+            )
+        return _subprocess_start_error_attempt(
+            exc,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
+    except OSError as exc:
+        return _subprocess_start_error_attempt(
+            exc,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
     pid = getattr(process, "pid", None)
     if context.on_process_started is not None and isinstance(pid, int):
         await context.on_process_started(pid, datetime.now(UTC))
@@ -203,6 +239,127 @@ async def _run_attempt(
         await process.wait()
         raise
 
+    return await _completed_process_attempt(
+        context=context,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+        timed_out=False,
+        timeout_sec=timeout_sec,
+        loaded_skills=loaded_skills,
+        billing_type=billing_type,
+        biller=biller,
+    )
+
+
+def _subprocess_start_error_attempt(
+    exc: OSError,
+    *,
+    loaded_skills: list[dict[str, str | None]],
+    billing_type: str,
+    biller: str,
+) -> _RunAttempt:
+    message = str(exc) or exc.__class__.__name__
+    result = RuntimeExecutionResult(
+        exit_code=1,
+        error_message=f"Failed to start Codex CLI: {message}",
+        result_json={
+            "stdout": "",
+            "stderr": message,
+            "loadedSkills": loaded_skills,
+            "billingType": billing_type,
+            "biller": biller,
+        },
+    )
+    return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
+
+
+async def _run_blocking_subprocess_attempt(
+    *,
+    context: RuntimeExecutionContext,
+    command: str,
+    args: list[str],
+    cwd: str | None,
+    prompt: str,
+    env: dict[str, str],
+    timeout_sec: float,
+    loaded_skills: list[dict[str, str | None]],
+    billing_type: str,
+    biller: str,
+    startup_error: PermissionError,
+) -> _RunAttempt:
+    await context.on_log(
+        "stderr",
+        (
+            "[octopus] asyncio subprocess startup failed on Windows; "
+            f"retrying Codex CLI with blocking subprocess fallback: {startup_error}\n"
+        ),
+    )
+    try:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [command, *args],
+            cwd=cwd,
+            env=env,
+            input=prompt.encode(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_sec if timeout_sec > 0 else None,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or b""
+        stderr = exc.stderr or b""
+        return await _completed_process_attempt(
+            context=context,
+            returncode=1,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=True,
+            timeout_sec=timeout_sec,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
+    except OSError as exc:
+        message = str(exc) or exc.__class__.__name__
+        result = RuntimeExecutionResult(
+            exit_code=1,
+            error_message=f"Failed to start Codex CLI: {message}",
+            result_json={
+                "stdout": "",
+                "stderr": message,
+                "loadedSkills": loaded_skills,
+                "billingType": billing_type,
+                "biller": biller,
+            },
+        )
+        return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
+
+    return await _completed_process_attempt(
+        context=context,
+        returncode=completed.returncode,
+        stdout=completed.stdout or b"",
+        stderr=completed.stderr or b"",
+        timed_out=False,
+        timeout_sec=timeout_sec,
+        loaded_skills=loaded_skills,
+        billing_type=billing_type,
+        biller=biller,
+    )
+
+
+async def _completed_process_attempt(
+    *,
+    context: RuntimeExecutionContext,
+    returncode: int | None,
+    stdout: bytes,
+    stderr: bytes,
+    timed_out: bool,
+    timeout_sec: float,
+    loaded_skills: list[dict[str, str | None]],
+    billing_type: str,
+    biller: str,
+) -> _RunAttempt:
     stdout_text = stdout.decode(errors="replace")
     stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
     await _emit_codex_stream_events_from_text(context, stdout_text)
@@ -210,18 +367,37 @@ async def _run_attempt(
         await context.on_log("stdout", stdout_text)
     if stderr_text:
         await context.on_log("stderr", stderr_text)
+    if timed_out:
+        result = RuntimeExecutionResult(
+            exit_code=returncode,
+            timed_out=True,
+            error_message=f"Timed out after {timeout_sec:g}s",
+            result_json={
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+                "loadedSkills": loaded_skills,
+                "billingType": billing_type,
+                "biller": biller,
+            },
+        )
+        return _RunAttempt(
+            result=result,
+            stdout=stdout_text,
+            stderr=stderr_text,
+            raw_stderr=stderr.decode(errors="replace"),
+        )
     parsed = _parse_jsonl(stdout_text)
     error = None
-    if process.returncode != 0:
+    if returncode != 0:
         error = parsed["errorMessage"] or _first_line(stderr_text)
-        error = error or f"Codex exited with code {process.returncode}"
+        error = error or f"Codex exited with code {returncode}"
     usage = {
         **parsed["usage"],
         "billingType": billing_type,
         "biller": biller,
     }
     result = RuntimeExecutionResult(
-        exit_code=process.returncode,
+        exit_code=returncode,
         error_message=error,
         usage_json=usage,
         session_id_after=parsed["sessionId"],

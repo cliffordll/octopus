@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator
@@ -1102,6 +1103,173 @@ async def test_codex_execute_injects_runtime_context_env(
         '[{"serviceName":"preview"}]'
     )
     assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+
+
+async def test_codex_execute_drops_inherited_sandbox_proxy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_env: dict[str, str] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b'{"type":"thread.started","thread_id":"thread-proxy"}\n', b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-proxy",
+            agent_id="agent-proxy",
+            org_id="org-proxy",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert "HTTPS_PROXY" not in captured_env
+    assert "HTTP_PROXY" not in captured_env
+    assert "ALL_PROXY" not in captured_env
+
+
+async def test_codex_execute_preserves_explicit_proxy_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_env: dict[str, str] = {}
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b'{"type":"thread.started","thread_id":"thread-proxy"}\n', b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_env.update(kwargs["env"])
+        return FakeCodexProcess()
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-proxy",
+            agent_id="agent-proxy",
+            org_id="org-proxy",
+            agent_name="Codex",
+            config={
+                "command": "codex-test",
+                "env": {"HTTPS_PROXY": "http://127.0.0.1:9"},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert captured_env["HTTPS_PROXY"] == "http://127.0.0.1:9"
+
+
+async def test_codex_execute_reports_subprocess_start_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> Any:
+        raise OSError("spawn failed")
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-subprocess-denied",
+            agent_id="agent-subprocess-denied",
+            org_id="org-subprocess-denied",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert result.exit_code == 1
+    assert result.error_message is not None
+    assert "Failed to start Codex CLI" in result.error_message
+    assert result.result_json is not None
+    assert "spawn failed" in str(result.result_json["stderr"])
+
+
+async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> Any:
+        raise PermissionError(5, "Access is denied")
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        captured["args"] = args
+        captured["input"] = kwargs["input"]
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=(
+                b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
+                b'{"type":"item.completed","item":{"type":"agent_message",'
+                b'"text":"fallback ok"}}\n'
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("packages.runtimes.codex_local.runner.os.name", "nt")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr("packages.runtimes.codex_local.runner.subprocess.run", fake_run)
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-subprocess-fallback",
+            agent_id="agent-subprocess-fallback",
+            org_id="org-subprocess-fallback",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    assert result.exit_code == 0
+    assert result.session_id_after == "thread-fallback"
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "fallback ok"
+    assert captured["input"] == b""
 
 
 async def test_claude_and_opencode_execute_inject_runtime_context_env(

@@ -212,6 +212,29 @@ async def test_org_skill_list_seeds_bundled_skills(
     org_id = await _seed_org(factory, "Step 17 Bundled Skills")
 
     bundled_root = Path.cwd() / "server" / "skills" / "bundled"
+    (bundled_root / "para-memory-files" / "reference").mkdir(parents=True)
+    (bundled_root / "para-memory-files" / "scripts").mkdir(parents=True)
+    (bundled_root / "para-memory-files" / "templates").mkdir(parents=True)
+    (bundled_root / "para-memory-files" / "SKILL.md").write_text(
+        "---\nname: para-memory-files\ndescription: Memory files.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
+    (bundled_root / "para-memory-files" / "README.md").write_text(
+        "# PARA Memory Files\n",
+        encoding="utf-8",
+    )
+    (bundled_root / "para-memory-files" / "reference" / "methodology.md").write_text(
+        "# Methodology\n",
+        encoding="utf-8",
+    )
+    (bundled_root / "para-memory-files" / "scripts" / "sync.py").write_text(
+        "print('sync')\n",
+        encoding="utf-8",
+    )
+    (bundled_root / "para-memory-files" / "templates" / "note.md").write_text(
+        "# Note\n",
+        encoding="utf-8",
+    )
     (bundled_root / "control-plane").mkdir(parents=True)
     (bundled_root / "control-plane" / "SKILL.md").write_text(
         "---\nname: control-plane\ndescription: Manage control plane tasks.\n---\n\nUse it.",
@@ -228,18 +251,25 @@ async def test_org_skill_list_seeds_bundled_skills(
     assert list_code == 200
     keys = [skill["key"] for skill in listed]
     assert keys[:7] == [
-        "rudder/para-memory-files",
-        "rudder/rudder",
-        "rudder/rudder-create-agent",
-        "rudder/rudder-create-plugin",
-        "rudder/skill-creator",
-        "rudder/skill-optimizer",
-        "rudder/conversation-to-skill",
+        "skills/para-memory-files",
+        "skills/control-plane",
+        "skills/create-agent",
+        "skills/create-plugin",
+        "skills/skill-creator",
+        "skills/skill-optimizer",
+        "skills/conversation-to-skill",
     ]
-    assert listed[0]["sourceBadge"] == "rudder"
-    assert listed[0]["sourceLabel"] == "Bundled by Rudder"
+    assert listed[0]["sourceBadge"] == "built-in"
+    assert listed[0]["sourceLabel"] == "Built-in skill"
     assert listed[0]["editable"] is False
     assert listed[0]["description"]
+    assert listed[0]["fileInventory"] == [
+        {"path": "SKILL.md", "kind": "skill"},
+        {"path": "README.md", "kind": "readme"},
+        {"path": "reference/methodology.md", "kind": "reference"},
+        {"path": "scripts/sync.py", "kind": "script"},
+        {"path": "templates/note.md", "kind": "template"},
+    ]
 
     file_code, file_detail = await _request(
         application,
@@ -249,6 +279,16 @@ async def test_org_skill_list_seeds_bundled_skills(
     )
     assert file_code == 200
     assert file_detail["content"].startswith("---\nname: para-memory-files")
+
+    reference_code, reference_detail = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{listed[0]['id']}/files",
+        params={"path": "reference/methodology.md"},
+    )
+    assert reference_code == 200
+    assert reference_detail["kind"] == "reference"
+    assert reference_detail["content"] == "# Methodology\n"
 
 
 async def test_org_skill_routes_accept_organization_url_key(

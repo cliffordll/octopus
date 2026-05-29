@@ -5,6 +5,7 @@ import contextlib
 import os
 from datetime import UTC, datetime
 
+from ..environment import resolve_runtime_executable
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import args, configured_env
 
@@ -13,6 +14,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     command = context.config.get("command")
     if not isinstance(command, str) or not command.strip():
         raise ValueError("Process adapter missing command")
+    command = resolve_runtime_executable(command)
     process_args = args(context.config.get("args"))
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):

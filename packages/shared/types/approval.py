@@ -49,3 +49,18 @@ class RequestApprovalRevisionPayload(TypedDict, total=False):
 class ResubmitApprovalPayload(TypedDict, total=False):
     payload: dict[str, Any]
     issueIds: list[str]
+
+
+class ApprovalComment(TypedDict):
+    id: str
+    orgId: str
+    approvalId: str
+    authorAgentId: str | None
+    authorUserId: str | None
+    body: str
+    createdAt: str
+    updatedAt: str
+
+
+class AddApprovalCommentPayload(TypedDict):
+    body: str
