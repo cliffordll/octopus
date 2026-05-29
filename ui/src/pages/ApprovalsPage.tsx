@@ -9,22 +9,15 @@ import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const STATUS_OPTIONS: Array<{ value: ApprovalStatus | ""; label: string }> = [
-  { value: "", label: "全部审批" },
-  { value: "pending", label: "待处理" },
-  { value: "revision_requested", label: "请求修改" },
-  { value: "approved", label: "已同意" },
-  { value: "rejected", label: "已拒绝" },
+  { value: "", label: "all" },
+  { value: "pending", label: "pending" },
+  { value: "revision_requested", label: "revision_requested" },
+  { value: "approved", label: "approved" },
+  { value: "rejected", label: "rejected" },
 ];
 
 function approvalTitle(approval: ApprovalListItem) {
-  const labels: Record<ApprovalListItem["type"], string> = {
-    hire_agent: "招聘智能体",
-    approve_ceo_strategy: "CEO 策略审批",
-    budget_override_required: "预算覆盖审批",
-    chat_issue_creation: "聊天创建任务审批",
-    chat_operation: "聊天操作审批",
-  };
-  return labels[approval.type] ?? approval.type;
+  return approval.type;
 }
 
 function formatDate(value: string) {
@@ -191,11 +184,11 @@ export function ApprovalsPage() {
               <label>
                 审批类型
                 <select value={approvalType} onChange={(event) => setApprovalType(event.target.value as ApprovalListItem["type"])}>
-                  <option value="hire_agent">招聘智能体</option>
-                  <option value="approve_ceo_strategy">CEO 策略审批</option>
-                  <option value="budget_override_required">预算覆盖审批</option>
-                  <option value="chat_issue_creation">聊天创建任务审批</option>
-                  <option value="chat_operation">聊天操作审批</option>
+                  <option value="hire_agent">hire_agent</option>
+                  <option value="approve_ceo_strategy">approve_ceo_strategy</option>
+                  <option value="budget_override_required">budget_override_required</option>
+                  <option value="chat_issue_creation">chat_issue_creation</option>
+                  <option value="chat_operation">chat_operation</option>
                 </select>
               </label>
               <label>

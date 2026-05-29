@@ -320,10 +320,7 @@ export function OrganizationStructurePage() {
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 
 function organizationResourceKindLabel(kind: OrganizationResource["kind"]): string {
-  if (kind === "directory") return "目录";
-  if (kind === "file") return "文件";
-  if (kind === "connector_object") return "连接器对象";
-  return "链接";
+  return kind;
 }
 
 function organizationResourceKindIcon(kind: OrganizationResource["kind"]): string {
@@ -649,11 +646,9 @@ function isBundledOrganizationSkill(skill: OrganizationSkillListItem): boolean {
   return sourceKind?.includes("bundled") === true || skill.sourceBadge === "bundled";
 }
 
-function organizationSkillSourceText(value: string | null | undefined, bundled: boolean, fallback = "系统内置"): string {
-  if (bundled) return "系统内置";
+function organizationSkillSourceText(value: string | null | undefined, bundled: boolean, fallback = "bundled"): string {
+  if (bundled) return "bundled";
   if (!value) return fallback;
-  const normalized = value.toLowerCase();
-  if (normalized.includes("bundled")) return "系统内置";
   return value;
 }
 

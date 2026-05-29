@@ -296,10 +296,8 @@ function skillSourceLabel(entry: Record<string, unknown>): string {
 }
 
 function skillDisplaySourceText(value: string | null | undefined, bundled: boolean): string {
-  if (bundled) return "系统内置";
+  if (bundled) return "bundled";
   if (!value) return "-";
-  const normalized = value.toLowerCase();
-  if (normalized.includes("bundled")) return "系统内置";
   return value;
 }
 

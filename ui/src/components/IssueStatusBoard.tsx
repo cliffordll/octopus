@@ -7,16 +7,7 @@ const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_rev
 type IssueWithCreatedAt = IssueListItem & { createdAt?: string | null };
 
 function issueStatusLabel(status: IssueStatus): string {
-  const labels: Record<IssueStatus, string> = {
-    backlog: "待规划",
-    todo: "待处理",
-    in_progress: "进行中",
-    in_review: "评审中",
-    done: "已完成",
-    blocked: "阻塞",
-    cancelled: "已取消",
-  };
-  return labels[status];
+  return status;
 }
 
 function issuesByStatus(issues: IssueListItem[]): Record<IssueStatus, IssueListItem[]> {
@@ -73,8 +64,8 @@ export function IssueStatusBoard({
       <div className="project-issue-status-summary">
         <div className="summary-metric"><span>总数</span><strong>{issues.length}</strong></div>
         <div className="summary-metric"><span>活跃</span><strong>{activeIssueCount}</strong></div>
-        <div className="summary-metric"><span>阻塞</span><strong>{groupedIssues.blocked.length}</strong></div>
-        <div className="summary-metric"><span>完成</span><strong>{groupedIssues.done.length}</strong></div>
+        <div className="summary-metric"><span>blocked</span><strong>{groupedIssues.blocked.length}</strong></div>
+        <div className="summary-metric"><span>done</span><strong>{groupedIssues.done.length}</strong></div>
       </div>
       <div className="project-issue-status-groups">
         {ISSUE_STATUSES.map((issueStatus) => (

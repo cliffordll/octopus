@@ -121,7 +121,7 @@ it("shows approval management cards and resolves a pending approval", async () =
 
   renderApp("/orgs/org-1/approvals");
   expect(await screen.findByRole("heading", { name: "审批管理" })).toBeInTheDocument();
-  expect(await screen.findByText("聊天操作审批")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "chat_operation" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "创建审批" }));
   const dialog = screen.getByRole("dialog");
   await userEvent.selectOptions(within(dialog).getByLabelText("审批类型"), "chat_operation");

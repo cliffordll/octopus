@@ -4737,6 +4737,109 @@ pre {
   min-width: 210px;
 }
 
+.chat-context-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(180px, .8fr) auto;
+}
+
+.chat-context-controls-readonly select:disabled {
+  background: #0d131c;
+  border-color: #1d2735;
+  color: #9eacbf;
+  cursor: default;
+  opacity: 1;
+}
+
+.chat-context-controls-readonly label {
+  position: relative;
+}
+
+.chat-context-controls-readonly label::after {
+  color: #66748a;
+  content: "只读";
+  font-size: 10px;
+  pointer-events: none;
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.chat-context-controls-readonly select:disabled {
+  appearance: none;
+  padding-right: 42px;
+}
+
+.chat-context-controls label {
+  color: #8792a6;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.chat-context-controls select {
+  width: 100%;
+}
+
+.chat-skill-dropdown {
+  align-self: end;
+  background: #0a0f17;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  color: #dce5f2;
+  min-height: 38px;
+  position: relative;
+}
+
+.chat-create-submit {
+  align-self: end;
+  white-space: nowrap;
+}
+
+.chat-skill-dropdown summary {
+  cursor: pointer;
+  font-size: 12px;
+  padding: 9px 11px;
+}
+
+.chat-skill-list {
+  background: #101722;
+  border: 1px solid #263346;
+  border-radius: 12px;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 32%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  left: 0;
+  max-height: 190px;
+  min-width: 240px;
+  overflow: auto;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  z-index: 40;
+}
+
+.chat-skill-chip {
+  background: #151d2a;
+  border: 1px solid #2a3548;
+  border-radius: 999px;
+  color: #cbd7e8;
+  font-size: 12px;
+  padding: 5px 8px;
+  width: 100%;
+}
+
+.chat-skill-chip.active {
+  background: rgba(47, 123, 214, .16);
+  border-color: rgba(115, 182, 255, .42);
+  color: #d9ebff;
+}
+
 .chat-composer-toolbar select:disabled {
   color: #b6c4d8;
   cursor: not-allowed;

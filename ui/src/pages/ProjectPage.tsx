@@ -21,17 +21,17 @@ const ROLES: ProjectResourceRole[] = [
 ];
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 const RESOURCE_KIND_LABELS: Record<OrganizationResource["kind"], string> = {
-  connector_object: "连接器对象",
-  directory: "目录",
-  file: "文件",
-  url: "URL",
+  connector_object: "connector_object",
+  directory: "directory",
+  file: "file",
+  url: "url",
 };
 const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
-  background: "背景资料",
-  deliverable: "交付物",
-  reference: "参考资料",
-  tracking: "跟踪系统",
-  working_set: "工作集",
+  background: "background",
+  deliverable: "deliverable",
+  reference: "reference",
+  tracking: "tracking",
+  working_set: "working_set",
 };
 
 function formatJson(value: Record<string, unknown> | null | undefined): string {
