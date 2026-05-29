@@ -368,9 +368,22 @@ export interface CreateProjectPayload {
   leadAgentId?: string | null;
   targetDate?: string | null;
   executionWorkspacePolicy?: Record<string, unknown> | null;
+  resourceAttachments?: ProjectResourceAttachmentInput[];
+  newResources?: CreateProjectInlineResourceInput[];
 }
 
 export type UpdateProjectPayload = Partial<CreateProjectPayload>;
+
+export interface CreateProjectInlineResourceInput {
+  name: string;
+  kind: OrganizationResource["kind"];
+  locator: string;
+  description?: string | null;
+  metadata?: Record<string, unknown> | null;
+  role?: ProjectResourceRole;
+  note?: string | null;
+  sortOrder?: number;
+}
 
 export interface ProjectResourceAttachmentInput {
   resourceId: string;
@@ -458,16 +471,32 @@ export interface AgentConfiguration {
 
 export interface AgentConfigRevision {
   id: string;
+  orgId?: string;
   agentId: string;
-  runtimeConfig: Record<string, unknown>;
+  createdByAgentId?: string | null;
+  createdByUserId?: string | null;
+  source?: string;
+  rolledBackFromRevisionId?: string | null;
+  changedKeys?: string[];
+  beforeConfig?: Record<string, unknown>;
+  afterConfig?: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
   createdAt: string;
 }
 
 export interface CreateAgentPayload {
   name: string;
   role: AgentRole;
+  title?: string | null;
+  icon?: string | null;
+  reportsTo?: string | null;
+  capabilities?: string | null;
+  desiredSkills?: string[];
   agentRuntimeType: AgentRuntimeType;
   agentRuntimeConfig: Record<string, unknown>;
+  runtimeConfig?: Record<string, unknown>;
+  budgetMonthlyCents?: number;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface UpdateAgentPayload {
@@ -490,20 +519,32 @@ export interface UpdateAgentPayload {
 
 export interface AgentRuntimeState {
   agentId: string;
+  orgId?: string;
   agentRuntimeType: string;
+  sessionId?: string | null;
+  stateJson?: Record<string, unknown>;
   sessionDisplayId: string | null;
   lastRunStatus: string | null;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCachedInputTokens?: number;
   totalCostCents: number;
   lastError: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  sessionParamsJson?: Record<string, unknown> | null;
 }
 
 export interface AgentTaskSession {
   id: string;
+  orgId?: string;
   agentId: string;
+  agentRuntimeType?: string;
   taskKey: string;
+  sessionParamsJson?: Record<string, unknown> | null;
   sessionDisplayId: string | null;
+  lastRunId?: string | null;
+  lastError?: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -561,6 +602,15 @@ export interface PrivateSkillPayload {
   slug?: string | null;
   description?: string | null;
   markdown?: string | null;
+}
+
+export interface WakeAgentPayload {
+  source?: string;
+  triggerDetail?: string;
+  reason?: string | null;
+  payload?: Record<string, unknown> | null;
+  idempotencyKey?: string | null;
+  forceFreshSession?: boolean;
 }
 
 export interface AgentSkillAnalytics {

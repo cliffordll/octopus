@@ -1,11 +1,5 @@
 import { jsonRequest, request } from "./client";
-import type { HeartbeatRun, HeartbeatRunEvent } from "./types";
-
-interface InvokeOptions {
-  idempotencyKey?: string;
-  reason?: string;
-  forceFreshSession?: boolean;
-}
+import type { HeartbeatRun, HeartbeatRunEvent, WakeAgentPayload } from "./types";
 
 interface EventOptions {
   afterSeq?: number;
@@ -13,13 +7,13 @@ interface EventOptions {
 }
 
 export const heartbeatApi = {
-  wakeup: (agentId: string, options: InvokeOptions = {}): Promise<HeartbeatRun> =>
+  wakeup: (agentId: string, options: WakeAgentPayload = {}): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(
       `/api/agents/${encodeURIComponent(agentId)}/wakeup`,
       "POST",
       options,
     ),
-  invoke: (agentId: string, options: InvokeOptions = {}): Promise<HeartbeatRun> =>
+  invoke: (agentId: string, options: WakeAgentPayload = {}): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(
       `/api/agents/${encodeURIComponent(agentId)}/heartbeat/invoke`,
       "POST",

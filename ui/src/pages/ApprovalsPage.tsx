@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { agentsApi } from "../api/agents";
 import { approvalsApi } from "../api/approvals";
 import type { ApprovalListItem, ApprovalStatus } from "../api/types";
 import { Badge } from "../components/Badge";
@@ -58,6 +59,10 @@ export function ApprovalsPage() {
     queryKey: ["approvals", orgId, status],
     queryFn: () => approvalsApi.list(orgId, status || undefined),
   });
+  const agents = useQuery({
+    queryKey: ["agents", orgId],
+    queryFn: () => agentsApi.list(orgId),
+  });
   const decision = useMutation({
     mutationFn: ({ approvalId, action }: { approvalId: string; action: "approve" | "reject" | "requestRevision" }) =>
       approvalsApi[action](approvalId),
@@ -84,6 +89,7 @@ export function ApprovalsPage() {
     onError: (error) => setCreateError(error instanceof Error ? error.message : "创建审批失败"),
   });
   const approvalList = approvals.data ?? [];
+  const agentList = agents.data ?? [];
   function submitApproval(event: FormEvent) {
     event.preventDefault();
     setCreateError(null);
@@ -189,8 +195,15 @@ export function ApprovalsPage() {
                 <textarea value={approvalPayload} onChange={(event) => setApprovalPayload(event.target.value)} />
               </label>
               <label>
-                发起智能体 ID
-                <input value={requestedByAgentId} onChange={(event) => setRequestedByAgentId(event.target.value)} />
+                发起智能体
+                <select value={requestedByAgentId} onChange={(event) => setRequestedByAgentId(event.target.value)}>
+                  <option value="">无</option>
+                  {agentList.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 任务 ID

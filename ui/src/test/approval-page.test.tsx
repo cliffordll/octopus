@@ -25,6 +25,8 @@ it("shows an approval and submits a board decision", async () => {
   };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
     return respond(approval);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -37,12 +39,54 @@ it("shows an approval and submits a board decision", async () => {
   expect(screen.getByText(/"amount": 1000/)).toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("决策备注"), "额度合理");
+  await userEvent.clear(screen.getByLabelText("决策 Payload JSON"));
+  fireEvent.change(screen.getByLabelText("决策 Payload JSON"), { target: { value: '{"approvedLimit":1000}' } });
   await userEvent.click(screen.getByRole("button", { name: "同意" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/approvals/approval-1/approve",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ decisionNote: "额度合理" }),
+      body: JSON.stringify({ decisionNote: "额度合理", payload: { approvedLimit: 1000 } }),
+    }),
+  );
+});
+
+it("resubmits an approval with edited payload", async () => {
+  const approval = {
+    id: "approval-1",
+    orgId: "org-1",
+    type: "chat_operation",
+    status: "revision_requested",
+    requestedByAgentId: "agent-1",
+    requestedByUserId: null,
+    createdAt: "",
+    payload: { action: "old" },
+    decisionNote: "补充参数",
+    decidedByUserId: "board-1",
+    decidedAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/resubmit" && init?.method === "POST") {
+      return respond({ ...approval, status: "pending", payload: { action: "new" } });
+    }
+    return respond(approval);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/approvals/approval-1");
+  expect(await screen.findByRole("heading", { level: 1, name: /chat_operation/ })).toBeInTheDocument();
+  await userEvent.clear(screen.getByLabelText("重新提交 Payload JSON"));
+  fireEvent.change(screen.getByLabelText("重新提交 Payload JSON"), { target: { value: '{"action":"new"}' } });
+  await userEvent.click(screen.getByRole("button", { name: "重新提交审批" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/approvals/approval-1/resubmit",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ payload: { action: "new" } }),
     }),
   );
 });
@@ -61,7 +105,9 @@ it("shows approval management cards and resolves a pending approval", async () =
   ];
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
-    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Reviewer", role: "reviewer", status: "active" }]);
+    }
     if (path === "/api/orgs/org-1/approvals" && init?.method === "GET") return respond(approvals);
     if (path === "/api/orgs/org-1/approvals" && init?.method === "POST") {
       return respond({ id: "approval-2", orgId: "org-1", type: "chat_operation", status: "pending", requestedByAgentId: "agent-1", requestedByUserId: null, createdAt: "", payload: {} }, 201);
@@ -81,7 +127,7 @@ it("shows approval management cards and resolves a pending approval", async () =
   await userEvent.selectOptions(within(dialog).getByLabelText("审批类型"), "chat_operation");
   await userEvent.clear(within(dialog).getByLabelText("Payload JSON"));
   fireEvent.change(within(dialog).getByLabelText("Payload JSON"), { target: { value: '{"action":"test"}' } });
-  await userEvent.type(within(dialog).getByLabelText("发起智能体 ID"), "agent-1");
+  await userEvent.selectOptions(within(dialog).getByLabelText("发起智能体"), "agent-1");
   await userEvent.type(within(dialog).getByLabelText("任务 ID"), "issue-1,issue-2");
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
   expect(fetchMock).toHaveBeenCalledWith(

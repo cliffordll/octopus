@@ -10,7 +10,18 @@ import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = ["process", "http", "codex_local", "claude_local", "opencode_local"];
+const RUNTIMES: AgentRuntimeType[] = [
+  "process",
+  "http",
+  "claude_local",
+  "codex_local",
+  "gemini_local",
+  "opencode_local",
+  "pi_local",
+  "cursor",
+  "openclaw_gateway",
+  "hermes_local",
+];
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -18,6 +29,17 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
+  const config = readJsonObject(value, "Agent runtime config");
+  if (runtime !== "opencode_local") return config;
+  const model = typeof config.model === "string" ? config.model.trim() : "";
+  const [provider, modelName] = model.split("/", 2);
+  if (!model || !provider?.trim() || !modelName?.trim()) {
+    throw new Error("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。");
+  }
+  return { ...config, model };
 }
 
 function parseCsv(value: string): string[] {
@@ -120,36 +142,95 @@ function skillListField(entry: Record<string, unknown>, keys: string[]): string 
   return "-";
 }
 
+function nestedSkillField(entry: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const direct = entry[key];
+    if (typeof direct === "string" && direct.trim() && direct.trim() !== "---") return direct.trim();
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      const nested = nestedSkillField(direct as Record<string, unknown>, keys);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function descriptionFromMarkdown(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const lines = value.split(/\r?\n/);
+  if (lines[0]?.trim() === "---") {
+    for (const line of lines.slice(1)) {
+      const trimmed = line.trim();
+      if (trimmed === "---") break;
+      const match = trimmed.match(/^description\s*:\s*["']?(.+?)["']?$/i);
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  }
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === "---" || trimmed.startsWith("#")) continue;
+    if (/^[a-z0-9_-]+\s*:/i.test(trimmed)) continue;
+    return trimmed;
+  }
+  return "";
+}
+
+function skillDescription(entry: Record<string, unknown>): string {
+  const explicit = nestedSkillField(entry, ["description", "summary"]);
+  if (explicit) return explicit;
+  return descriptionFromMarkdown(entry.markdown ?? entry.prompt ?? entry.content);
+}
+
+function booleanSkillField(entry: Record<string, unknown>, key: string): boolean {
+  return entry[key] === true;
+}
+
+function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string {
+  const explicit = skillField(entry, ["loadNote", "loadingNote", "detail"], "");
+  if (explicit) return explicit;
+  if (booleanSkillField(entry, "alwaysEnabled")) return "Always loaded by Rudder for every agent run.";
+  if (enabled) return "Enabled for this agent. Future runs can load this skill.";
+  return "Installed, not enabled. Future runs will not load it until enabled.";
+}
+
 function skillEntryName(entry: Record<string, unknown>): string {
   return skillField(entry, ["runtimeName", "name", "key", "selectionKey"], "skill");
 }
 
 function skillActionName(entry: Record<string, unknown>): string {
-  return skillField(entry, ["key", "name", "selectionKey", "runtimeName"], "skill");
+  return skillField(entry, ["selectionKey", "key", "name", "runtimeName"], "skill");
 }
 
 function skillEntryKey(entry: Record<string, unknown>, index: number): string {
   return String(entry.key ?? entry.selectionKey ?? entry.runtimeName ?? entry.name ?? index);
 }
 
-function parseSkillNameFromYaml(value: string): string {
-  const match = value.match(/^\s*name\s*:\s*["']?([^"'\r\n#]+)["']?/m);
-  return match?.[1]?.trim() ?? "";
-}
-
 function skillEnabled(entry: Record<string, unknown>, desiredSkills: string[]): boolean {
   const value = entry.enabled;
   if (typeof value === "boolean") return value;
-  const names = [entry.key, entry.name, entry.runtimeName, entry.selectionKey]
-    .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
+  const names = skillAliases(entry)
+    .map((item) => item.toLowerCase())
     .filter(Boolean);
   const desired = desiredSkills.map((item) => item.toLowerCase());
   return names.some((name) => desired.includes(name));
 }
 
+function skillAliases(entry: Record<string, unknown>): string[] {
+  return [entry.key, entry.name, entry.runtimeName, entry.selectionKey]
+    .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
+    .filter(Boolean);
+}
+
 function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
-  const source = skillField(entry, ["source", "scope", "kind"], "runtime").toLowerCase();
-  return source === "builtin" || source === "external" || source === "runtime" ? "外部技能" : "组织技能";
+  const sourceClass = skillField(entry, ["sourceClass", "source", "scope", "kind"], "runtime").toLowerCase();
+  return sourceClass === "bundled" || sourceClass === "organization" ? "组织技能" : "外部技能";
+}
+
+function skillState(entry: Record<string, unknown>): string {
+  return skillField(entry, ["state", "status"], "available");
+}
+
+function skillSourceLabel(entry: Record<string, unknown>): string {
+  return skillField(entry, ["selectionKey", "sourceClass", "source", "origin", "scope", "kind"], "runtime");
 }
 
 function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
@@ -219,7 +300,10 @@ export function AgentPage() {
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
   const [desiredSkills, setDesiredSkills] = useState("");
   const [skillsToEnable, setSkillsToEnable] = useState("");
-  const [installSkillDraft, setInstallSkillDraft] = useState("");
+  const [newSkillName, setNewSkillName] = useState("");
+  const [newSkillSlug, setNewSkillSlug] = useState("");
+  const [newSkillDescription, setNewSkillDescription] = useState("");
+  const [newSkillMarkdown, setNewSkillMarkdown] = useState("");
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [selectedSkillKey, setSelectedSkillKey] = useState("");
   const [adapterTestChecks, setAdapterTestChecks] = useState<Array<{ label?: string; id?: string; status?: string; message?: string }>>([]);
@@ -335,7 +419,7 @@ export function AgentPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
   });
   const testAdapterEnvironment = useMutation({
-    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, readJsonObject(agentRuntimeConfig, "Agent runtime config")),
+    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, validatedAgentRuntimeConfig(runtime, agentRuntimeConfig)),
     onSuccess: (result) => setAdapterTestChecks(result.checks),
     onError: () => setAdapterTestChecks([]),
   });
@@ -356,11 +440,16 @@ export function AgentPage() {
   });
   const createPrivateSkill = useMutation({
     mutationFn: () => agentsApi.createPrivateSkill(agentId, {
-      name: parseSkillNameFromYaml(installSkillDraft),
-      markdown: installSkillDraft.trim() || null,
+      name: newSkillName.trim(),
+      slug: newSkillSlug.trim() || null,
+      description: newSkillDescription.trim() || null,
+      markdown: newSkillMarkdown.trim() || null,
     }),
     onSuccess: () => {
-      setInstallSkillDraft("");
+      setNewSkillName("");
+      setNewSkillSlug("");
+      setNewSkillDescription("");
+      setNewSkillMarkdown("");
       setSkillDialogOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
     },
@@ -390,7 +479,7 @@ export function AgentPage() {
         capabilities: capabilities.trim() || null,
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
-        agentRuntimeConfig: readJsonObject(agentRuntimeConfig, "Agent runtime config"),
+        agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
         runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
         budgetMonthlyCents: Number(budgetMonthlyCents),
       });
@@ -402,7 +491,7 @@ export function AgentPage() {
     event.preventDefault();
     if (taskTitle.trim()) assignTask.mutate();
   }
-  const canChat = agent.data?.agentRuntimeType === "codex_local" && agent.data.status !== "terminated";
+  const canChat = agent.data?.status !== "terminated";
   const runRows = Array.isArray(runs.data) ? runs.data : [];
   const sortedRuns = useMemo(
     () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
@@ -414,7 +503,6 @@ export function AgentPage() {
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
-  const selectedSkill = skillEntries.find((entry, index) => skillEntryKey(entry, index) === selectedSkillKey) ?? null;
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const instructionDocs = agent.data ? buildInstructionDocs(agent.data) : [];
@@ -461,10 +549,19 @@ export function AgentPage() {
     if (!name.trim()) return;
     enableSkills.mutate([name.trim()]);
   }
+  function closeSkillDialog() {
+    setSkillDialogOpen(false);
+    setNewSkillName("");
+    setNewSkillSlug("");
+    setNewSkillDescription("");
+    setNewSkillMarkdown("");
+  }
   function disableSkill(name: string) {
     if (!name.trim()) return;
     const target = name.trim().toLowerCase();
-    const nextDesired = desiredSkillRows.filter((item) => item.toLowerCase() !== target);
+    const entry = skillEntries.find((item) => skillAliases(item).includes(target));
+    const targets = new Set(entry ? skillAliases(entry) : [target]);
+    const nextDesired = desiredSkillRows.filter((item) => !targets.has(item.toLowerCase()));
     syncSkills.mutate(nextDesired);
   }
   function forkSkill(entry: Record<string, unknown>) {
@@ -705,6 +802,9 @@ export function AgentPage() {
                   <div className="summary-metric"><span>Skills</span><strong>{adapterMetadata.data?.capabilities?.skills ? "supported" : "unsupported"}</strong></div>
                   <div className="summary-metric"><span>Quota</span><strong>{adapterQuotaWindows.data?.ok ? "ok" : (adapterQuotaWindows.data?.error ?? "unknown")}</strong></div>
                 </div>
+                {adapterMetadata.data?.agentConfigurationDoc && (
+                  <pre className="run-excerpt">{adapterMetadata.data.agentConfigurationDoc}</pre>
+                )}
                 <div className="list">
                   {adapterModelRows.map((model) => (
                     <article className="row" key={model.id}>
@@ -829,21 +929,34 @@ export function AgentPage() {
                       const selected = selectedSkillKey === key;
                       const name = skillEntryName(entry);
                       const actionName = skillActionName(entry);
-                      const source = skillField(entry, ["source", "scope", "kind"], "runtime");
                       const enabled = skillEnabled(entry, desiredSkillRows);
-                      const isBuiltin = source.toLowerCase() === "builtin";
+                      const isBundled = skillField(entry, ["sourceClass", "source", "origin"], "").toLowerCase() === "bundled";
+                      const description = skillDescription(entry) || skillField(entry, ["detail"], "");
+                      const tags = skillListField(entry, ["tags", "categories"]);
+                      const version = skillField(entry, ["version"], "");
+                      const sourceLabel = skillSourceLabel(entry);
+                      const originLabel = skillField(entry, ["originLabel"], "");
+                      const locationLabel = skillField(entry, ["locationLabel"], "");
+                      const loadNote = skillLoadNote(entry, enabled);
+                      const state = skillState(entry);
                       return (
                         <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
                           <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
-                            <code>{name}</code>
-                            <Badge>{enabled ? "yes" : "no"}</Badge>
-                            <span>{skillListField(entry, ["tags", "categories"])}</span>
+                            <span className="agent-skill-tag-title-row">
+                              <code>{name}</code>
+                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "已启用" : "未启用"}</span>
+                            </span>
+                            <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
+                            <span className="agent-skill-tag-note">{loadNote}</span>
+                            <span className="agent-skill-tag-facts">
+                              <span><small>来源</small>{originLabel || sourceLabel}</span>
+                              <span><small>状态</small>{state}</span>
+                              <span><small>版本</small>{version ? `v${version}` : "-"}</span>
+                              <span><small>{locationLabel ? "位置" : "标签"}</small>{locationLabel || tags}</span>
+                            </span>
                           </button>
                           <div className="agent-skill-row-actions">
-                            <button className="secondary small-button" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
-                              {selected ? "Hide" : "Show"}
-                            </button>
-                            {isBuiltin ? (
+                            {isBundled ? (
                               <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">Fork</button>
                             ) : (
                               <>
@@ -865,41 +978,41 @@ export function AgentPage() {
                   </div>
                 </section>
               ))}
-              {selectedSkill && (
-                <section className="agent-skill-detail-card">
-                  <div>
-                    <strong>{skillEntryName(selectedSkill)}</strong>
-                    <Badge>{skillField(selectedSkill, ["source", "scope", "kind"], "runtime")}</Badge>
-                    <span>v{skillField(selectedSkill, ["version"], "-")}</span>
-                  </div>
-                  <p>{skillField(selectedSkill, ["description", "summary"], "")}</p>
-                  <div className="muted">allowed_tools: {skillListField(selectedSkill, ["allowedTools", "allowed_tools"])}</div>
-                  <div className="muted">forbidden_tools: {skillListField(selectedSkill, ["forbiddenTools", "forbidden_tools"])}</div>
-                  <pre>{String(selectedSkill.prompt ?? selectedSkill.markdown ?? selectedSkill.content ?? "")}</pre>
-                </section>
-              )}
             </div>
+            {skills.data?.warnings?.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             {skillDialogOpen && (
               <div aria-modal="true" className="modal-backdrop" role="dialog">
                 <section className="panel task-modal skill-create-dialog">
                   <div className="task-modal-header">
                     <div>
                       <h2>创建技能</h2>
-                      <p className="muted">粘贴 manifest YAML，安装为当前智能体私有 skill。</p>
+                      <p className="muted">安装为当前智能体私有 skill。Short name 可选，不填时由服务端根据名称生成。</p>
                     </div>
                   </div>
                   <label>
-                    Skill YAML
+                    名称
+                    <input value={newSkillName} onChange={(event) => setNewSkillName(event.target.value)} required />
+                  </label>
+                  <label>
+                    Short name
+                    <input value={newSkillSlug} onChange={(event) => setNewSkillSlug(event.target.value)} placeholder="incident-response" />
+                  </label>
+                  <label>
+                    描述
+                    <input value={newSkillDescription} onChange={(event) => setNewSkillDescription(event.target.value)} />
+                  </label>
+                  <label>
+                    Skill 内容
                     <textarea
                       className="skill-yaml-textarea"
-                      placeholder={"schema_version: 1\nname: my_skill\ndescription: ...\nprompt: ..."}
-                      value={installSkillDraft}
-                      onChange={(event) => setInstallSkillDraft(event.target.value)}
+                      placeholder={"schema_version: 1\nprompt: ..."}
+                      value={newSkillMarkdown}
+                      onChange={(event) => setNewSkillMarkdown(event.target.value)}
                     />
                   </label>
                   <div className="task-modal-actions">
-                    <button className="secondary" onClick={() => setSkillDialogOpen(false)} type="button">取消</button>
-                    <button disabled={!parseSkillNameFromYaml(installSkillDraft) || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">
+                    <button className="secondary" onClick={closeSkillDialog} type="button">取消</button>
+                    <button disabled={!newSkillName.trim() || createPrivateSkill.isPending} onClick={() => createPrivateSkill.mutate()} type="button">
                       创建
                     </button>
                   </div>
