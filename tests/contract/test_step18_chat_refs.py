@@ -34,6 +34,45 @@ class FailingChatAdapter:
         )
 
 
+class TranscriptChatAdapter:
+    type = "transcript_chat"
+
+    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+        if context.on_stream_event is not None:
+            await context.on_stream_event(
+                {
+                    "type": "transcript_entry",
+                    "entry": {
+                        "kind": "thinking",
+                        "ts": "2026-05-29T08:00:00+00:00",
+                        "text": "Inspecting request",
+                    },
+                }
+            )
+            await context.on_stream_event(
+                {
+                    "type": "transcript_entry",
+                    "entry": {
+                        "kind": "tool_call",
+                        "ts": "2026-05-29T08:00:01+00:00",
+                        "name": "read_file",
+                        "input": {"path": "server/routes/chats.py"},
+                        "toolUseId": "tool-1",
+                    },
+                }
+            )
+            await context.on_stream_event(
+                {"type": "assistant_delta", "delta": "transcript reply"}
+            )
+        return RuntimeExecutionResult(
+            exit_code=0,
+            result_json={
+                "summary": "transcript reply",
+                "structuredPayload": {"visible": True},
+            },
+        )
+
+
 @pytest.fixture
 async def app(
     monkeypatch: pytest.MonkeyPatch,
@@ -97,6 +136,33 @@ async def _seed_org_agent(factory: async_sessionmaker) -> tuple[str, str]:
                 org_id=org_id,
                 name="Failing Chat Agent",
                 agent_runtime_type="failing_chat",
+                agent_runtime_config={},
+            )
+        )
+        await session.commit()
+    return org_id, agent_id
+
+
+async def _seed_org_agent_with_runtime(
+    factory: async_sessionmaker, runtime_type: str
+) -> tuple[str, str]:
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key=f"step18-{org_id[:8]}",
+                name="Step 18 Chat",
+                issue_prefix="C18",
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Transcript Chat Agent",
+                agent_runtime_type=runtime_type,
                 agent_runtime_config={},
             )
         )
@@ -300,3 +366,51 @@ async def test_chat_attachment_rejects_message_from_other_conversation(
     )
     assert attach_code == 404
     assert error["detail"] == "Chat message not found"
+
+
+async def test_chat_stream_transcript_is_persisted_on_assistant_message(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent_with_runtime(factory, "transcript_chat")
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: TranscriptChatAdapter()
+    )
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, content_type, body = await _request_text(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages/stream",
+        json_body={"body": "show transcript"},
+    )
+
+    assert code == 201
+    assert content_type.startswith("application/x-ndjson")
+    events = [json.loads(line) for line in body.splitlines()]
+    assert [event["type"] for event in events] == [
+        "ack",
+        "transcript_entry",
+        "transcript_entry",
+        "assistant_delta",
+        "final",
+    ]
+    assert events[1]["entry"]["kind"] == "thinking"
+    final_messages = events[-1]["messages"]
+    assistant_message = final_messages[1]
+    assert assistant_message["role"] == "assistant"
+    assert assistant_message["structuredPayload"] == {"visible": True}
+    assert assistant_message["transcript"] == [
+        events[1]["entry"],
+        events[2]["entry"],
+    ]
+
+    list_code, messages = await _request_json(
+        application, "GET", f"/api/chats/{chat['id']}/messages"
+    )
+    assert list_code == 200
+    assert messages[1]["structuredPayload"] == {"visible": True}
+    assert messages[1]["transcript"] == [events[1]["entry"], events[2]["entry"]]

@@ -71,6 +71,34 @@ class ChatAttachment(TypedDict):
     contentPath: str
 
 
+class ChatStreamTranscriptTodoItem(TypedDict):
+    text: str
+    status: str
+
+
+class ChatStreamTranscriptEntry(TypedDict, total=False):
+    kind: str
+    ts: str
+    text: str
+    delta: NotRequired[bool]
+    name: NotRequired[str]
+    input: NotRequired[Any]
+    toolUseId: NotRequired[str]
+    toolName: NotRequired[str]
+    content: NotRequired[str]
+    isError: NotRequired[bool]
+    todoListId: NotRequired[str]
+    items: NotRequired[list[ChatStreamTranscriptTodoItem]]
+    model: NotRequired[str]
+    sessionId: NotRequired[str]
+    inputTokens: NotRequired[int]
+    outputTokens: NotRequired[int]
+    cachedTokens: NotRequired[int]
+    costUsd: NotRequired[float]
+    subtype: NotRequired[str]
+    errors: NotRequired[list[str]]
+
+
 class ChatConversation(TypedDict):
     id: str
     orgId: str
@@ -110,6 +138,7 @@ class ChatMessage(TypedDict):
     structuredPayload: dict[str, Any] | None
     approvalId: str | None
     attachments: list[ChatAttachment]
+    transcript: list[ChatStreamTranscriptEntry]
     replyingAgentId: str | None
     chatTurnId: str | None
     turnVariant: int
@@ -203,7 +232,7 @@ class ChatStreamEvent(TypedDict, total=False):
     userMessage: NotRequired[ChatMessage]
     delta: NotRequired[str]
     state: NotRequired[dict[str, Any]]
-    entry: NotRequired[dict[str, Any]]
+    entry: NotRequired[ChatStreamTranscriptEntry]
     messages: NotRequired[list[ChatMessage]]
     error: NotRequired[str]
     messageId: NotRequired[str | None]
