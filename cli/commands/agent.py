@@ -109,6 +109,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--role", required=True, choices=ROLES)
     create_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     create_parser.add_argument("--runtime-config", default="{}")
+    create_parser.add_argument("--model")
     create_parser.add_argument("--icon")
     create_parser.add_argument("--desired-skill", action="append", default=[])
     create_parser.add_argument("--metadata")
@@ -124,6 +125,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     update_parser.add_argument("--desired-skill", action="append")
     update_parser.add_argument("--runtime", choices=RUNTIMES)
     update_parser.add_argument("--runtime-config")
+    update_parser.add_argument("--model")
     update_parser.add_argument("--budget-monthly-cents", type=int)
     update_parser.add_argument("--replace-agent-runtime-config", action="store_true")
     update_parser.add_argument("--status")
@@ -142,6 +144,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     wakeup_parser.add_argument("agent_id")
     wakeup_parser.add_argument("--idempotency-key")
     wakeup_parser.add_argument("--reason")
+    wakeup_parser.add_argument("--source")
+    wakeup_parser.add_argument("--trigger-detail")
+    wakeup_parser.add_argument("--payload")
     wakeup_parser.add_argument("--force-fresh-session", action="store_true")
     wakeup_parser.set_defaults(handler=wakeup_agent)
     bootstrap_parser = actions.add_parser("bootstrap-ceo")
@@ -149,6 +154,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     bootstrap_parser.add_argument("--name", required=True)
     bootstrap_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     bootstrap_parser.add_argument("--runtime-config", default="{}")
+    bootstrap_parser.add_argument("--model")
     bootstrap_parser.set_defaults(handler=bootstrap_ceo)
     for name, handler in (
         ("pause", pause_agent),
@@ -166,6 +172,27 @@ def _json_object(value: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Runtime config must be a JSON object.")
     return parsed
+
+
+def _runtime_config(
+    runtime: str | None, value: str, model: str | None = None
+) -> dict[str, Any]:
+    config = _json_object(value)
+    if model is not None:
+        config["model"] = model
+    if runtime == "opencode_local":
+        configured_model = config.get("model")
+        if not isinstance(configured_model, str) or "/" not in configured_model:
+            raise ValueError(
+                "opencode_local requires --model or runtime config model in provider/model format."
+            )
+        provider, model_name = configured_model.split("/", 1)
+        if not provider.strip() or not model_name.strip():
+            raise ValueError(
+                "opencode_local requires --model or runtime config model in provider/model format."
+            )
+        config["model"] = configured_model.strip()
+    return config
 
 
 def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -280,7 +307,9 @@ def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         "name": args.name,
         "role": args.role,
         "agentRuntimeType": args.runtime,
-        "agentRuntimeConfig": _json_object(args.runtime_config),
+        "agentRuntimeConfig": _runtime_config(
+            args.runtime, args.runtime_config, args.model
+        ),
     }
     if args.icon:
         payload["icon"] = args.icon
@@ -315,7 +344,11 @@ def update_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     if args.desired_skill is not None:
         payload["desiredSkills"] = args.desired_skill
     if args.runtime_config is not None:
-        payload["agentRuntimeConfig"] = _json_object(args.runtime_config)
+        payload["agentRuntimeConfig"] = _runtime_config(
+            args.runtime, args.runtime_config, args.model
+        )
+    elif args.model is not None:
+        payload["agentRuntimeConfig"] = _runtime_config(args.runtime, "{}", args.model)
     if args.metadata is not None:
         payload["metadata"] = _json_object(args.metadata)
     if args.replace_agent_runtime_config:
@@ -350,6 +383,15 @@ def _wake_payload(args: argparse.Namespace) -> dict[str, Any]:
         payload["idempotencyKey"] = args.idempotency_key
     if args.reason:
         payload["reason"] = args.reason
+    if getattr(args, "source", None):
+        payload["source"] = args.source
+    if getattr(args, "trigger_detail", None):
+        payload["triggerDetail"] = args.trigger_detail
+    if getattr(args, "payload", None):
+        parsed = json.loads(args.payload)
+        if not isinstance(parsed, dict):
+            raise ValueError("payload must be a JSON object.")
+        payload["payload"] = parsed
     if args.force_fresh_session:
         payload["forceFreshSession"] = True
     return payload
@@ -376,7 +418,9 @@ def bootstrap_ceo(args: argparse.Namespace, client: ApiClient) -> Any:
             "name": args.name,
             "role": "ceo",
             "agentRuntimeType": args.runtime,
-            "agentRuntimeConfig": _json_object(args.runtime_config),
+            "agentRuntimeConfig": _runtime_config(
+                args.runtime, args.runtime_config, args.model
+            ),
         },
     )
 

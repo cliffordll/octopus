@@ -18,9 +18,7 @@ export function ChatsPage() {
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const chatAgentList = agentList.filter(
-    (agent) => agent.agentRuntimeType === "codex_local" && agent.status !== "terminated",
-  );
+  const chatAgentList = agentList.filter((agent) => agent.status !== "terminated");
   useEffect(() => {
     if (requestedAgentId && chatAgentList.some((agent) => agent.id === requestedAgentId)) {
       setAgentId(requestedAgentId);
@@ -71,7 +69,7 @@ export function ChatsPage() {
         </div>
         <form className="form chat-composer" onSubmit={submit}>
           {agents.isSuccess && chatAgentList.length === 0 && (
-            <p className="muted">暂无可用于对话的智能体，请先配置 codex_local 智能体。</p>
+            <p className="muted">暂无可用于对话的智能体，请先创建或恢复智能体。</p>
           )}
           <label className="chat-message-input">
             消息

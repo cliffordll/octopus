@@ -263,7 +263,13 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.configRevision("agent-1", "revision-1");
     await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
     await agentsApi.resetSession("agent-1", { taskKey: "task-1" });
-    await heartbeatApi.wakeup("agent-1", { reason: "manual" });
+    await heartbeatApi.wakeup("agent-1", {
+      source: "on_demand",
+      triggerDetail: "manual",
+      reason: "manual",
+      payload: { requestedBy: "ui" },
+      forceFreshSession: true,
+    });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -288,7 +294,13 @@ describe("agent and heartbeat APIs", () => {
       "/api/agents/agent-1/wakeup",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ reason: "manual" }),
+        body: JSON.stringify({
+          source: "on_demand",
+          triggerDetail: "manual",
+          reason: "manual",
+          payload: { requestedBy: "ui" },
+          forceFreshSession: true,
+        }),
       }),
     );
   });
