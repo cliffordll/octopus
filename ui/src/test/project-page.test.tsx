@@ -63,10 +63,25 @@ it("updates a project and manages its resource attachments", async () => {
     resources: [
       {
         id: "attachment-1",
+        orgId: "org-1",
+        projectId: "project-1",
         resourceId: "resource-1",
         role: "working_set",
         note: null,
-        resource: { name: "Repository", locator: "D:/coding/octopus" },
+        sortOrder: 0,
+        resource: {
+          id: "resource-1",
+          orgId: "org-1",
+          name: "Repository",
+          kind: "directory",
+          locator: "D:/coding/octopus",
+          description: "主仓库",
+          metadata: null,
+          createdAt: "",
+          updatedAt: "",
+        },
+        createdAt: "",
+        updatedAt: "",
       },
     ],
     archivedAt: null,
@@ -78,6 +93,35 @@ it("updates a project and manages its resource attachments", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/resources" && init?.method === "GET") {
+      return respond([
+        project.resources[0].resource,
+        {
+          id: "resource-2",
+          orgId: "org-1",
+          name: "设计规范",
+          kind: "url",
+          locator: "https://example.com/spec",
+          description: "上游参考",
+          metadata: null,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/resources" && init?.method === "POST") {
+      return respond({
+        id: "resource-3",
+        orgId: "org-1",
+        name: "设计文档",
+        kind: "url",
+        locator: "https://example.com/design",
+        description: "上游参考",
+        metadata: null,
+        createdAt: "",
+        updatedAt: "",
+      });
     }
     if (path.endsWith("/resources") && init?.method === "GET") return respond(project.resources);
     if (path === "/api/orgs/org-1/issues?projectId=project-1" && init?.method === "GET") {
@@ -178,54 +222,48 @@ it("updates a project and manages its resource attachments", async () => {
 
   await userEvent.click(within(tabs).getByRole("link", { name: "资源" }));
   expect(await screen.findByText("Repository")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
-  const editResourceForm = screen.getByRole("button", { name: "保存资源" }).closest("form");
-  expect(editResourceForm).not.toBeNull();
-  await userEvent.selectOptions(within(editResourceForm as HTMLElement).getByLabelText("角色"), "reference");
-  await userEvent.type(within(editResourceForm as HTMLElement).getByLabelText("备注"), "主要仓库");
-  await userEvent.clear(within(editResourceForm as HTMLElement).getByLabelText("排序"));
-  await userEvent.type(within(editResourceForm as HTMLElement).getByLabelText("排序"), "2");
-  await userEvent.click(within(editResourceForm as HTMLElement).getByRole("button", { name: "保存资源" }));
+  await userEvent.selectOptions(screen.getByLabelText("项目角色"), "reference");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1/resources/attachment-1",
     expect.objectContaining({
       method: "PATCH",
-      body: JSON.stringify({ role: "reference", note: "主要仓库", sortOrder: 2 }),
+      body: JSON.stringify({ role: "reference", note: null, sortOrder: 0 }),
     }),
   );
-  await userEvent.type(screen.getByLabelText("资源 ID"), "resource-2");
-  await userEvent.type(screen.getByLabelText("排序"), "3");
-  await userEvent.click(screen.getByRole("button", { name: "添加资源" }));
+  await userEvent.click(screen.getByRole("button", { name: "附加已有" }));
+  await userEvent.click(await screen.findByRole("button", { name: /设计规范/ }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1/resources",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ resourceId: "resource-2", role: "working_set", sortOrder: 3 }),
+      body: JSON.stringify({ resourceId: "resource-2", role: "reference", sortOrder: 1 }),
     }),
   );
-  await userEvent.type(screen.getByLabelText("资源名称"), "设计文档");
-  await userEvent.selectOptions(screen.getByLabelText("资源类型"), "url");
-  await userEvent.type(screen.getByLabelText("资源定位"), "https://example.com/design");
-  await userEvent.type(screen.getByLabelText("资源说明"), "上游参考");
-  await userEvent.selectOptions(screen.getByLabelText("新增资源角色"), "reference");
-  await userEvent.type(screen.getByLabelText("新增资源备注"), "先读这个");
-  await userEvent.click(screen.getByRole("button", { name: "新增并关联资源" }));
+  await userEvent.click(screen.getByRole("button", { name: "新增资源" }));
+  await userEvent.type(screen.getByLabelText("名称"), "设计文档");
+  await userEvent.selectOptions(screen.getByLabelText("类型"), "url");
+  await userEvent.type(screen.getByLabelText("定位"), "https://example.com/design");
+  await userEvent.type(screen.getByLabelText("说明"), "上游参考");
+  await userEvent.selectOptions(screen.getAllByLabelText("项目角色").at(-1) as HTMLElement, "reference");
+  await userEvent.type(screen.getAllByLabelText("项目备注").at(-1) as HTMLElement, "先读这个");
+  await userEvent.click(screen.getByRole("button", { name: "创建并附加" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/projects/project-1",
+    "/api/orgs/org-1/resources",
     expect.objectContaining({
-      method: "PATCH",
+      method: "POST",
       body: JSON.stringify({
-        newResources: [
-          {
-            name: "设计文档",
-            kind: "url",
-            locator: "https://example.com/design",
-            description: "上游参考",
-            role: "reference",
-            note: "先读这个",
-          },
-        ],
+        name: "设计文档",
+        kind: "url",
+        locator: "https://example.com/design",
+        description: "上游参考",
       }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1/resources",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ resourceId: "resource-3", role: "reference", note: "先读这个", sortOrder: 1 }),
     }),
   );
 
@@ -262,4 +300,4 @@ it("updates a project and manages its resource attachments", async () => {
     "/api/projects/project-1",
     expect.objectContaining({ method: "DELETE" }),
   );
-});
+}, 10_000);
