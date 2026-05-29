@@ -711,6 +711,24 @@ function jsonFile(path: string, value: unknown, detail?: string, icon = "{}"): W
   };
 }
 
+function workspaceEntryLabel(entry: WorkspaceTreeEntry): string {
+  return entry.path.split("/").at(-1) ?? entry.path;
+}
+
+function sortWorkspaceEntries(entries: WorkspaceTreeEntry[]): WorkspaceTreeEntry[] {
+  return entries
+    .map((entry) => ({
+      ...entry,
+      children: entry.children ? sortWorkspaceEntries(entry.children) : entry.children,
+    }))
+    .sort((left, right) =>
+      workspaceEntryLabel(left).localeCompare(workspaceEntryLabel(right), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    );
+}
+
 function formatJson(value: unknown): string {
   if (value === null || value === undefined) return "{}";
   return JSON.stringify(value, null, 2);
@@ -812,7 +830,7 @@ function buildWorkspaceTree(projects: ProjectDetail[], agents: Agent[], requeste
       path: requestedPath,
     });
   }
-  return entries;
+  return sortWorkspaceEntries(entries);
 }
 
 function findWorkspaceEntry(entries: WorkspaceTreeEntry[], path: string): WorkspaceTreeEntry | undefined {
