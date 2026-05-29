@@ -102,4 +102,4 @@ curl.exe -s -X POST "http://127.0.0.1:8000/api/approvals/$env:APPROVAL_ID/approv
 ## 未纳入
 
 - 审批触发真实 wakeup/run 执行的后续处理，需在 Step 13 以后按运行流程接入。
-- 真实认证与授权数据来源，归 Step 22；其复用当前统一 actor/access 边界。
+- 真实认证与授权数据来源，归 Step 23；其复用当前统一 actor/access 边界。
