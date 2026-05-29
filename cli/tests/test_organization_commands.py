@@ -143,57 +143,120 @@ def test_organization_resource_and_skill_commands_cover_step17_routes() -> None:
         return httpx.Response(200, json={"id": "ok"})
 
     client = ApiClient(transport=httpx.MockTransport(handler))
-    assert main(["organization", "resource-list", "--org-id", "org-1"], client=client) == 0
-    assert main([
-        "organization",
-        "resource-create",
-        "--org-id",
-        "org-1",
-        "--name",
-        "Repo",
-        "--kind",
-        "url",
-        "--locator",
-        "https://example.test/repo",
-        "--metadata",
-        '{"owner":"team"}',
-    ], client=client) == 0
-    assert main([
-        "organization",
-        "resource-update",
-        "--org-id",
-        "org-1",
-        "res-1",
-        "--description",
-        "Updated",
-    ], client=client) == 0
-    assert main(["organization", "resource-delete", "--org-id", "org-1", "res-1"], client=client) == 0
+    assert (
+        main(["organization", "resource-list", "--org-id", "org-1"], client=client) == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "resource-create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "Repo",
+                "--kind",
+                "url",
+                "--locator",
+                "https://example.test/repo",
+                "--metadata",
+                '{"owner":"team"}',
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "resource-update",
+                "--org-id",
+                "org-1",
+                "res-1",
+                "--description",
+                "Updated",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            ["organization", "resource-delete", "--org-id", "org-1", "res-1"],
+            client=client,
+        )
+        == 0
+    )
     assert main(["organization", "skill-list", "--org-id", "org-1"], client=client) == 0
-    assert main(["organization", "skill-get", "--org-id", "org-1", "skill-1"], client=client) == 0
-    assert main([
-        "organization",
-        "skill-create",
-        "--org-id",
-        "org-1",
-        "--name",
-        "Review",
-        "--slug",
-        "review",
-    ], client=client) == 0
-    assert main(["organization", "skill-file", "--org-id", "org-1", "skill-1", "--path", "SKILL.md"], client=client) == 0
-    assert main([
-        "organization",
-        "skill-file-update",
-        "--org-id",
-        "org-1",
-        "skill-1",
-        "--path",
-        "SKILL.md",
-        "--content",
-        "# Review",
-    ], client=client) == 0
-    assert main(["organization", "skill-update-status", "--org-id", "org-1", "skill-1"], client=client) == 0
-    assert main(["organization", "skill-delete", "--org-id", "org-1", "skill-1"], client=client) == 0
+    assert (
+        main(
+            ["organization", "skill-get", "--org-id", "org-1", "skill-1"], client=client
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "skill-create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "Review",
+                "--slug",
+                "review",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "skill-file",
+                "--org-id",
+                "org-1",
+                "skill-1",
+                "--path",
+                "SKILL.md",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "skill-file-update",
+                "--org-id",
+                "org-1",
+                "skill-1",
+                "--path",
+                "SKILL.md",
+                "--content",
+                "# Review",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            ["organization", "skill-update-status", "--org-id", "org-1", "skill-1"],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            ["organization", "skill-delete", "--org-id", "org-1", "skill-1"],
+            client=client,
+        )
+        == 0
+    )
 
     assert [request.url.path for request in requests] == [
         "/api/orgs/org-1/resources",
