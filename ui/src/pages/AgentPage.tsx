@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
@@ -1322,39 +1322,57 @@ export function AgentPage() {
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
                       const originLabel = skillField(entry, ["originLabel"], "");
+                      const sourceText = skillDisplaySourceText(originLabel || sourceLabel, isBundled);
                       const loadNote = skillLoadNote(entry, enabled);
                       const state = skillState(entry);
+                      const toggleSelectedSkill = () => setSelectedSkillKey(selected ? "" : key);
+                      const onSkillKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggleSelectedSkill();
+                      };
+                      const stopSkillActionClick = (event: MouseEvent) => event.stopPropagation();
                       return (
                         <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
-                          <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
+                          <div
+                            className="agent-skill-tag-main"
+                            onClick={toggleSelectedSkill}
+                            onKeyDown={onSkillKeyDown}
+                            role="button"
+                            tabIndex={0}
+                          >
                             <span className="agent-skill-tag-title-row">
                               <code>{name}</code>
-                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
+                              <span className="agent-skill-title-actions">
+                                <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
+                                {isBundled ? (
+                                  <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={(event) => { stopSkillActionClick(event); forkSkill(entry); }} type="button">派生</button>
+                                ) : (
+                                  <>
+                                    <button
+                                      className="secondary small-button"
+                                      disabled={enableSkills.isPending || syncSkills.isPending}
+                                      onClick={(event) => {
+                                        stopSkillActionClick(event);
+                                        if (enabled) disableSkill(actionName);
+                                        else enableSkill(actionName);
+                                      }}
+                                      type="button"
+                                    >
+                                      {enabled ? "取消使用" : "使用"}
+                                    </button>
+                                    <button className="danger small-button" disabled onClick={stopSkillActionClick} type="button">删除</button>
+                                  </>
+                                )}
+                              </span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
                             {loadNote && <span className="agent-skill-tag-note">{loadNote}</span>}
                             <span className="agent-skill-tag-facts">
-                              <span>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
+                              {!isCommunitySkillEntry(entry) && <span>{sourceText}</span>}
                               <span>{state}</span>
                               <span>{version ? `v${version}` : "-"}</span>
                             </span>
-                          </button>
-                          <div className="agent-skill-row-actions">
-                            {isBundled ? (
-                              <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">派生</button>
-                            ) : (
-                              <>
-                                <button
-                                  className="secondary small-button"
-                                  disabled={enableSkills.isPending || syncSkills.isPending}
-                                  onClick={() => (enabled ? disableSkill(actionName) : enableSkill(actionName))}
-                                  type="button"
-                                >
-                                  {enabled ? "取消使用" : "使用"}
-                                </button>
-                                <button className="danger small-button" disabled type="button">删除</button>
-                              </>
-                            )}
                           </div>
                         </article>
                       );

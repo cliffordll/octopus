@@ -848,7 +848,7 @@ export function OrganizationSkillsPage() {
             <div>
               <h1>技能</h1>
               <p>{skillRows.length} 个可用</p>
-              <p>当前组织的内置、社区预设和导入技能。</p>
+              <p>当前组织的内置、社区和导入技能。</p>
             </div>
             <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button" aria-label="添加技能">+</button>
           </div>
