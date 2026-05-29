@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -15,10 +16,12 @@ from packages.database.queries.workspaces import (
     create_workspace_operation,
     create_workspace_runtime_service,
     get_execution_workspace_by_id,
+    get_workspace_operation,
     list_execution_workspaces,
     list_issue_work_products,
     list_project_workspaces,
     list_running_workspace_operations_for_run,
+    list_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
     update_workspace_operation,
@@ -44,6 +47,8 @@ from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOpera
 from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
 )
+
+from .logs import LogReadResult, read_local_file_log
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -598,6 +603,43 @@ class WorkspaceService:
             },
         )
         return self._to_operation(row) if row is not None else None
+
+    async def list_operations_for_run(
+        self, run_id: str
+    ) -> list[WorkspaceOperationData]:
+        rows = await list_workspace_operations_for_run(self._session, run_id)
+        return [self._to_operation(row) for row in rows]
+
+    async def get_operation(self, operation_id: str) -> WorkspaceOperationData | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        return self._to_operation(row) if row is not None else None
+
+    async def read_operation_log(
+        self, operation_id: str, *, offset: int = 0, limit_bytes: int = 256_000
+    ) -> dict[str, Any] | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        if row is None:
+            return None
+        if row.log_store != "local_file":
+            log: LogReadResult = {"content": "", "endOffset": 0, "eof": True}
+        else:
+            log = read_local_file_log(
+                Path(
+                    os.getenv(
+                        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
+                        ".octopus/workspace-operation-logs",
+                    )
+                ),
+                row.log_ref,
+                offset=offset,
+                limit_bytes=limit_bytes,
+            )
+        return {
+            "operationId": row.id,
+            "store": row.log_store,
+            "logRef": row.log_ref,
+            **log,
+        }
 
     async def _resolve_project_workspace_id(
         self,
