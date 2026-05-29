@@ -166,6 +166,8 @@ class IssueWorkProduct(TypedDict):
     externalId: str | None
     title: str
     url: str | None
+    assetId: NotRequired[str | None]
+    contentPath: NotRequired[str | None]
     status: IssueWorkProductStatus | str
     reviewState: IssueWorkProductReviewState
     isPrimary: bool

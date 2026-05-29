@@ -152,3 +152,33 @@ class Issue(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class IssueAttachment(Base):
+    __tablename__ = "issue_attachments"
+    __table_args__ = (
+        Index("issue_attachments_company_issue_idx", "org_id", "issue_id"),
+        Index("issue_attachments_comment_idx", "issue_comment_id"),
+        Index("issue_attachments_asset_idx", "asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    issue_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("issues.id", ondelete="CASCADE"), nullable=False
+    )
+    issue_comment_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("issue_comments.id", ondelete="CASCADE")
+    )
+    asset_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    usage: Mapped[str] = mapped_column(Text, nullable=False, default="attachment")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

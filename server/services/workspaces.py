@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -15,15 +16,18 @@ from packages.database.queries.workspaces import (
     create_workspace_operation,
     create_workspace_runtime_service,
     get_execution_workspace_by_id,
+    get_workspace_operation,
     list_execution_workspaces,
     list_issue_work_products,
     list_project_workspaces,
     list_running_workspace_operations_for_run,
+    list_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
     update_workspace_operation,
     update_workspace_runtime_service,
 )
+from packages.database.queries.assets import create_asset
 from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
@@ -38,10 +42,13 @@ from packages.shared.constants.workspace import (
 )
 from packages.shared.types.workspace import ExecutionWorkspace as ExecutionWorkspaceData
 from packages.shared.types.workspace import IssueWorkProduct as IssueWorkProductData
+from server.storage import get_storage_service
 from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
 from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
 )
+
+from .logs import LogReadResult, read_local_file_log
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -465,6 +472,7 @@ class WorkspaceService:
             provider = _string(product.get("provider")) or "rudder"
             if not title or not product_type:
                 continue
+            product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
                 self._session,
                 {
@@ -490,6 +498,61 @@ class WorkspaceService:
             )
             stored.append(self._to_work_product(row))
         return stored
+
+    async def _archive_work_product_content(
+        self, org_id: str, product: dict[str, Any]
+    ) -> dict[str, Any]:
+        body = product.get("content")
+        if body is None:
+            return product
+        if isinstance(body, str):
+            content = body.encode("utf-8")
+            content_type = _string(product.get("contentType")) or "text/plain"
+        elif isinstance(body, bytes):
+            content = body
+            content_type = (
+                _string(product.get("contentType")) or "application/octet-stream"
+            )
+        else:
+            return product
+        if not content:
+            return product
+        storage = get_storage_service()
+        stored = await storage.put_file(
+            org_id=org_id,
+            namespace="work-products",
+            original_filename=_string(product.get("filename"))
+            or f"{_string(product.get('title')) or 'work-product'}.txt",
+            content_type=content_type,
+            body=content,
+        )
+        asset = await create_asset(
+            self._session,
+            {
+                "org_id": org_id,
+                "provider": stored["provider"],
+                "object_key": stored["objectKey"],
+                "content_type": stored["contentType"],
+                "byte_size": stored["byteSize"],
+                "sha256": stored["sha256"],
+                "original_filename": stored["originalFilename"],
+            },
+        )
+        metadata = dict(product.get("metadata") or {})
+        metadata.update(
+            {
+                "assetId": asset.id,
+                "contentPath": f"/api/assets/{asset.id}/content",
+                "contentType": asset.content_type,
+                "byteSize": asset.byte_size,
+                "sha256": asset.sha256,
+            }
+        )
+        archived = dict(product)
+        archived.pop("content", None)
+        archived["metadata"] = metadata
+        archived.setdefault("url", f"/api/assets/{asset.id}/content")
+        return archived
 
     async def begin_operation(
         self,
@@ -540,6 +603,43 @@ class WorkspaceService:
             },
         )
         return self._to_operation(row) if row is not None else None
+
+    async def list_operations_for_run(
+        self, run_id: str
+    ) -> list[WorkspaceOperationData]:
+        rows = await list_workspace_operations_for_run(self._session, run_id)
+        return [self._to_operation(row) for row in rows]
+
+    async def get_operation(self, operation_id: str) -> WorkspaceOperationData | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        return self._to_operation(row) if row is not None else None
+
+    async def read_operation_log(
+        self, operation_id: str, *, offset: int = 0, limit_bytes: int = 256_000
+    ) -> dict[str, Any] | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        if row is None:
+            return None
+        if row.log_store != "local_file":
+            log: LogReadResult = {"content": "", "endOffset": 0, "eof": True}
+        else:
+            log = read_local_file_log(
+                Path(
+                    os.getenv(
+                        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
+                        ".octopus/workspace-operation-logs",
+                    )
+                ),
+                row.log_ref,
+                offset=offset,
+                limit_bytes=limit_bytes,
+            )
+        return {
+            "operationId": row.id,
+            "store": row.log_store,
+            "logRef": row.log_ref,
+            **log,
+        }
 
     async def _resolve_project_workspace_id(
         self,
@@ -737,6 +837,16 @@ class WorkspaceService:
             "externalId": row.external_id,
             "title": row.title,
             "url": row.url,
+            "assetId": (
+                row.metadata_json.get("assetId")
+                if isinstance(row.metadata_json, dict)
+                else None
+            ),
+            "contentPath": (
+                row.metadata_json.get("contentPath")
+                if isinstance(row.metadata_json, dict)
+                else None
+            ),
             "status": cast(Any, row.status),
             "reviewState": cast(Any, row.review_state),
             "isPrimary": row.is_primary,
