@@ -100,6 +100,31 @@ it("shows organization skills and edits the selected skill file", async () => {
           sourcePath: ".octopus/workspaces/org_org-1/skills/review",
           workspaceEditPath: ".octopus/workspaces/org_org-1/skills/review/SKILL.md",
         },
+        {
+          id: "skill-community",
+          orgId: "org-1",
+          key: "skills/deep-research",
+          slug: "deep-research",
+          name: "Deep Research",
+          description: "Research deeply",
+          markdown: "# Deep Research",
+          sourceType: "local_path",
+          sourceLocator: "server/skills/community/deep-research",
+          sourceRef: null,
+          trustLevel: "markdown_only",
+          compatibility: "compatible",
+          fileInventory: [{ path: "SKILL.md", kind: "skill" }],
+          metadata: null,
+          createdAt: "",
+          updatedAt: "",
+          attachedAgentCount: 0,
+          editable: false,
+          editableReason: "Community preset",
+          sourceLabel: "Community preset",
+          sourceBadge: "preset",
+          sourcePath: "server/skills/community/deep-research",
+          workspaceEditPath: null,
+        },
       ]);
     }
     if (path === "/api/orgs/org-1/skills/skill-bundled" && init?.method === "GET") {
@@ -143,13 +168,15 @@ it("shows organization skills and edits the selected skill file", async () => {
 
   renderApp("/orgs/org-1/skills");
   expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "本地组织技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "local" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: /Deep Research/ })).toBeInTheDocument();
   expect((await screen.findAllByText("Create durable agent skills")).length).toBeGreaterThanOrEqual(2);
-  expect(screen.getAllByText("bundled").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText("built-in").length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText("2 智能体")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
-  expect(screen.getByText("只读：bundled")).toBeInTheDocument();
+  expect(screen.getByText("只读：built-in")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("Reviewer")).toBeInTheDocument();
