@@ -154,7 +154,7 @@ export function GoalPage() {
         {goal.data && (
           <div className="agent-header-actions">
             <button className="secondary" disabled={update.isPending} onClick={() => update.mutate({ status: "cancelled" })} type="button">Cancel goal</button>
-            <button className="danger" disabled={remove.isPending || (dependencies.data?.blockers.length ?? 0) > 0} onClick={() => remove.mutate()} type="button">Delete</button>
+            <button className="danger" disabled={remove.isPending || (dependencies.data?.blockers.length ?? 0) > 0} onClick={() => remove.mutate()} type="button">删除</button>
           </div>
         )}
       </header>

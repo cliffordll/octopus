@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -8,7 +8,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("filters organization heartbeat runs and opens their event detail", async () => {
+it("shows organization heartbeats by agent and supports heartbeat actions", async () => {
   const run = {
     id: "run-1",
     orgId: "org-1",
@@ -17,88 +17,62 @@ it("filters organization heartbeat runs and opens their event detail", async () 
     status: "running",
     createdAt: "2026-05-27T08:00:00",
     error: null,
-    retryOfRunId: null,
-    processPid: 123,
-    stdoutExcerpt: "adapter-ok",
-    contextSnapshot: {
-      executionWorkspaceId: "exec-1",
-      projectWorkspaceId: "workspace-1",
-      workspace: {
-        rudderWorkspace: {
-          id: "exec-1",
-          name: "Issue workspace",
-          cwd: "D:/coding/octopus/.octopus/workspaces/org-1/exec-1",
-          status: "open",
-          branchName: "issue/OCT-1",
-        },
-        env: {
-          RUDDER_WORKSPACE_ID: "exec-1",
-        },
-      },
-    },
+    resultJson: { summary: "检查运行状态" },
   };
-  const retriedRun = { ...run, id: "run-2", status: "queued", retryOfRunId: "run-1" };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
-    if (path === "/api/orgs" && init?.method === "GET") {
-      return respond([{ id: "org-1", name: "核心团队", status: "active" }]);
-    }
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
-      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle" }]);
+      return respond([{
+        id: "agent-1",
+        orgId: "org-1",
+        name: "Builder",
+        urlKey: "builder",
+        role: "engineer",
+        title: "Engineer",
+        status: "idle",
+        agentRuntimeType: "codex_local",
+        agentRuntimeConfig: { heartbeat: { enabled: true, intervalSec: 60 } },
+        budgetMonthlyCents: 0,
+        lastHeartbeatAt: "2026-05-27T07:00:00",
+      }]);
     }
-    if (path.startsWith("/api/orgs/org-1/heartbeat-runs") && init?.method === "GET") return respond([run]);
-    if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") return respond(run);
-    if (path === "/api/heartbeat-runs/run-1/events?afterSeq=0&limit=200" && init?.method === "GET") {
-      return respond([{ id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.started", message: "Started", createdAt: "2026-05-27T08:00:00" }]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ id: "agent-1", orgId: "org-1", name: "Builder", status: "idle" });
     }
-    if (path === "/api/heartbeat-runs/run-1/events?afterSeq=1&limit=20" && init?.method === "GET") {
-      return respond([{ id: 2, runId: "run-1", agentId: "agent-1", seq: 2, eventType: "heartbeat.finished", message: "Finished", createdAt: "2026-05-27T08:00:01" }]);
+    if (path === "/api/agents/agent-1/heartbeat/invoke" && init?.method === "POST") {
+      return respond({ ...run, id: "run-2", status: "queued" }, 202);
     }
-    if (path === "/api/heartbeat-runs/run-1/cancel" && init?.method === "POST") return respond({ ...run, status: "cancelled" });
-    if (path === "/api/heartbeat-runs/run-1/retry" && init?.method === "POST") return respond(retriedRun, 202);
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/heartbeat-runs");
 
-  expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
-  expect(await screen.findByRole("option", { name: "Builder" })).toBeInTheDocument();
-  await userEvent.selectOptions(screen.getByLabelText("智能体筛选"), "agent-1");
-  await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/orgs/org-1/heartbeat-runs?agentId=agent-1",
-      expect.objectContaining({ method: "GET" }),
-    );
-  });
-  await userEvent.click(screen.getByRole("button", { name: /run-1/ }));
-  expect(await screen.findByText("heartbeat.started")).toBeInTheDocument();
-  expect(screen.getByText("Started")).toBeInTheDocument();
-  expect(screen.getByText("PID 123")).toBeInTheDocument();
-  expect(screen.getByText("执行工作区")).toBeInTheDocument();
-  expect(screen.getByText("exec-1")).toBeInTheDocument();
-  expect(screen.getByText("issue/OCT-1")).toBeInTheDocument();
-  expect(screen.getByText("adapter-ok")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "智能体" })).toBeInTheDocument();
+  const row = await screen.findByTestId("org-heartbeat-row");
+  expect(within(row).getByRole("link", { name: "Builder" })).toBeInTheDocument();
+  expect(within(row).getByText("已计划")).toBeInTheDocument();
+  expect(within(row).getByText("运行中")).toBeInTheDocument();
+  expect(within(row).getByText("检查运行状态")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "最近活动" })).toBeInTheDocument();
 
-  await userEvent.clear(screen.getByLabelText("afterSeq"));
-  await userEvent.type(screen.getByLabelText("afterSeq"), "1");
-  await userEvent.clear(screen.getByLabelText("limit"));
-  await userEvent.type(screen.getByLabelText("limit"), "20");
-  await userEvent.click(screen.getByRole("button", { name: "刷新事件" }));
-  expect(await screen.findByText("heartbeat.finished")).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "取消运行" }));
+  await userEvent.click(within(row).getByRole("button", { name: "关闭" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    "/api/heartbeat-runs/run-1/cancel",
-    expect.objectContaining({ method: "POST" }),
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ agentRuntimeConfig: { heartbeat: { enabled: false, intervalSec: 60 } } }),
+    }),
   ));
-  await userEvent.click(screen.getByRole("button", { name: "重试运行" }));
+
+  await userEvent.click(within(row).getByRole("button", { name: "立即运行" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    "/api/heartbeat-runs/run-1/retry",
+    "/api/agents/agent-1/heartbeat/invoke",
     expect.objectContaining({ method: "POST" }),
   ));
 });
 
-it("shows an empty state when an organization has no heartbeat runs", async () => {
+it("shows empty states when an organization has no heartbeat data", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-empty/heartbeat-runs" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") return respond([]);
@@ -108,5 +82,6 @@ it("shows an empty state when an organization has no heartbeat runs", async () =
 
   renderApp("/orgs/org-empty/heartbeat-runs");
 
+  expect(await screen.findByText("暂无活跃智能体。创建智能体后再管理组织心跳。")).toBeInTheDocument();
   expect(await screen.findByText("暂无心跳运行记录。")).toBeInTheDocument();
 });
