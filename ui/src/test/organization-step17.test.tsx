@@ -131,6 +131,9 @@ it("shows organization skills and edits the selected skill file", async () => {
     if (path === "/api/orgs/org-1/skills/skill-1/files?path=SKILL.md" && init?.method === "GET") {
       return respond({ skillId: "skill-1", path: "SKILL.md", kind: "markdown", content: "# Review", language: "markdown", markdown: true, editable: true });
     }
+    if (path === "/api/orgs/org-1/skills/skill-1/files?path=references%2Fchecklist.md" && init?.method === "GET") {
+      return respond({ skillId: "skill-1", path: "references/checklist.md", kind: "markdown", content: "# Checklist", language: "markdown", markdown: true, editable: true });
+    }
     if (path === "/api/orgs/org-1/skills/skill-1/files" && init?.method === "PATCH") {
       return respond({ skillId: "skill-1", path: "SKILL.md", kind: "markdown", content: "# Review\nUpdated", language: "markdown", markdown: true, editable: true });
     }
@@ -148,8 +151,8 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
   expect(screen.getByText("只读：系统内置")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
-  expect(screen.getByText("Builder")).toBeInTheDocument();
-  expect(screen.getByText("Reviewer")).toBeInTheDocument();
+  expect(await screen.findByText("Builder")).toBeInTheDocument();
+  expect(await screen.findByText("Reviewer")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: /Review/ }));
   expect((await screen.findAllByText("Review code changes")).length).toBeGreaterThanOrEqual(1);
@@ -157,7 +160,17 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review")).toBeInTheDocument();
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review/SKILL.md")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /references\/checklist.md/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /references/ })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("button", { name: /checklist.md/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /references/ }));
+  expect(screen.getByRole("button", { name: /references/ })).toHaveAttribute("aria-expanded", "true");
+  await userEvent.click(screen.getByRole("button", { name: /checklist.md/ }));
+  expect(await screen.findByLabelText("references/checklist.md")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/skills/skill-1/files?path=references%2Fchecklist.md",
+    expect.objectContaining({ method: "GET" }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: /SKILL.md/ }));
   const editor = await screen.findByLabelText("SKILL.md");
   await userEvent.type(editor, "{End}{Enter}Updated");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
