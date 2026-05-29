@@ -31,6 +31,17 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
+  const config = readJsonObject(value, "Agent runtime config");
+  if (runtime !== "opencode_local") return config;
+  const model = typeof config.model === "string" ? config.model.trim() : "";
+  const [provider, modelName] = model.split("/", 2);
+  if (!model || !provider?.trim() || !modelName?.trim()) {
+    throw new Error("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。");
+  }
+  return { ...config, model };
+}
+
 function parseCsv(value: string): string[] {
   return value
     .split(",")
@@ -408,7 +419,7 @@ export function AgentPage() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
   });
   const testAdapterEnvironment = useMutation({
-    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, readJsonObject(agentRuntimeConfig, "Agent runtime config")),
+    mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, validatedAgentRuntimeConfig(runtime, agentRuntimeConfig)),
     onSuccess: (result) => setAdapterTestChecks(result.checks),
     onError: () => setAdapterTestChecks([]),
   });
@@ -468,7 +479,7 @@ export function AgentPage() {
         capabilities: capabilities.trim() || null,
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
-        agentRuntimeConfig: readJsonObject(agentRuntimeConfig, "Agent runtime config"),
+        agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
         runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
         budgetMonthlyCents: Number(budgetMonthlyCents),
       });

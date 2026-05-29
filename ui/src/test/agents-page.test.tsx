@@ -138,6 +138,44 @@ it("creates the first agent as the organization CEO", async () => {
   );
 });
 
+it("requires provider/model when creating an opencode local agent", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Suggested Agent" });
+    }
+    return respond({ id: "agent-2", name: "OpenCode Agent", role: "engineer", status: "idle" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  await userEvent.type(await screen.findByLabelText("智能体名称"), "OpenCode Agent");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "opencode_local");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/orgs/org-1/agents",
+    expect.objectContaining({ method: "POST" }),
+  );
+
+  await userEvent.type(screen.getByLabelText("OpenCode model"), "openai/gpt-5");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/agents",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "OpenCode Agent",
+        role: "engineer",
+        agentRuntimeType: "opencode_local",
+        agentRuntimeConfig: { model: "openai/gpt-5" },
+      }),
+    }),
+  );
+});
+
 it("shows empty detail tabs when the organization has no agents", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") {
