@@ -584,3 +584,46 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
     assert requests[3].url.path == "/api/heartbeat-runs/run-1/cancel"
     assert requests[4].method == "POST"
     assert requests[4].url.path == "/api/heartbeat-runs/run-1/retry"
+
+
+def test_heartbeat_debug_fetches_run_and_events() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/events"):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "seq": 1,
+                        "eventType": "runtime.stderr",
+                        "level": "error",
+                        "message": "model missing",
+                    }
+                ],
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "run-1",
+                "status": "failed",
+                "errorCode": "runtime_error",
+                "error": "Runtime failed",
+                "stdoutExcerpt": "boot ok",
+                "stderrExcerpt": "model missing",
+                "contextSnapshot": {
+                    "workspace": {"executionWorkspaceId": "workspace-1"}
+                },
+            },
+        )
+
+    stdout = io.StringIO()
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["heartbeat", "debug", "run-1"], client=client, stdout=stdout) == 0
+    output = stdout.getvalue()
+    assert "failed" in output
+    assert "runtime_error" in output
+    assert "model missing" in output
+    assert requests[0].url.path == "/api/heartbeat-runs/run-1"
+    assert requests[1].url.path == "/api/heartbeat-runs/run-1/events"
