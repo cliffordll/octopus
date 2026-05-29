@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
+import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 import type { OrganizationResource, ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
@@ -19,6 +20,19 @@ const ROLES: ProjectResourceRole[] = [
   "background",
 ];
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
+const RESOURCE_KIND_LABELS: Record<OrganizationResource["kind"], string> = {
+  connector_object: "连接器对象",
+  directory: "目录",
+  file: "文件",
+  url: "URL",
+};
+const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
+  background: "背景资料",
+  deliverable: "交付物",
+  reference: "参考资料",
+  tracking: "跟踪系统",
+  working_set: "工作集",
+};
 
 function formatJson(value: Record<string, unknown> | null | undefined): string {
   return value ? JSON.stringify(value, null, 2) : "";
@@ -35,6 +49,27 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
 
 function nullableText(value: string | null | undefined): string {
   return value && value.trim() ? value : "未设置";
+}
+
+function roleCount(
+  resources: Array<{ role: ProjectResourceRole }>,
+  role: ProjectResourceRole,
+): number {
+  return resources.filter((resource) => resource.role === role).length;
+}
+
+function resourceKindMark(kind: OrganizationResource["kind"] | undefined): string {
+  switch (kind) {
+    case "directory":
+      return "D";
+    case "file":
+      return "F";
+    case "connector_object":
+      return "C";
+    case "url":
+    default:
+      return "U";
+  }
 }
 
 function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCodebase; workspaces: ProjectWorkspace[] }) {
@@ -88,20 +123,14 @@ export function ProjectPage() {
   const [goalIds, setGoalIds] = useState("");
   const [workspacePolicy, setWorkspacePolicy] = useState("");
   const [workspacePolicyError, setWorkspacePolicyError] = useState("");
-  const [resourceId, setResourceId] = useState("");
-  const [role, setRole] = useState<ProjectResourceRole>("working_set");
-  const [sortOrder, setSortOrder] = useState("");
-  const [editingResourceId, setEditingResourceId] = useState("");
-  const [editingRole, setEditingRole] = useState<ProjectResourceRole>("working_set");
-  const [editingNote, setEditingNote] = useState("");
-  const [editingSortOrder, setEditingSortOrder] = useState("");
+  const [attachCatalogOpen, setAttachCatalogOpen] = useState(false);
+  const [createResourceOpen, setCreateResourceOpen] = useState(false);
   const [newResourceName, setNewResourceName] = useState("");
-  const [newResourceKind, setNewResourceKind] = useState<OrganizationResource["kind"]>("url");
+  const [newResourceKind, setNewResourceKind] = useState<OrganizationResource["kind"]>("directory");
   const [newResourceLocator, setNewResourceLocator] = useState("");
   const [newResourceDescription, setNewResourceDescription] = useState("");
   const [newResourceRole, setNewResourceRole] = useState<ProjectResourceRole>("reference");
   const [newResourceNote, setNewResourceNote] = useState("");
-  const [newResourceSortOrder, setNewResourceSortOrder] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const project = useQuery({
@@ -112,6 +141,11 @@ export function ProjectPage() {
     queryKey: ["project-resources", projectId],
     queryFn: () => projectsApi.listResources(projectId),
     enabled: activeTab === "resources",
+  });
+  const organizationResources = useQuery({
+    queryKey: ["organization-resources", orgId],
+    queryFn: () => organizationsApi.resources(orgId),
+    enabled: activeTab === "resources" && Boolean(orgId),
   });
   const issues = useQuery({
     queryKey: ["issues", orgId, "project", projectId],
@@ -156,58 +190,65 @@ export function ProjectPage() {
       if (error instanceof Error) setWorkspacePolicyError(error.message);
     },
   });
+  const invalidateProjectResources = () => {
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["organization-resources", orgId] });
+  };
   const addResource = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: { resourceId: string; role?: ProjectResourceRole; note?: string | null; sortOrder?: number }) =>
       projectsApi.addResource(projectId, {
-        resourceId: resourceId.trim(),
-        role,
-        ...(sortOrder.trim() ? { sortOrder: Number(sortOrder) } : {}),
+        resourceId: payload.resourceId,
+        role: payload.role ?? "reference",
+        note: payload.note,
+        sortOrder: payload.sortOrder,
       }),
     onSuccess: () => {
-      setResourceId("");
-      setSortOrder("");
-      void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
+      setAttachCatalogOpen(false);
+      invalidateProjectResources();
     },
   });
   const removeResource = useMutation({
     mutationFn: (attachmentId: string) => projectsApi.removeResource(projectId, attachmentId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] }),
+    onSuccess: invalidateProjectResources,
   });
   const updateResource = useMutation({
-    mutationFn: () =>
-      projectsApi.updateResource(projectId, editingResourceId, {
-        role: editingRole,
-        note: editingNote.trim() || null,
-        ...(editingSortOrder.trim() ? { sortOrder: Number(editingSortOrder) } : {}),
-      }),
-    onSuccess: () => {
-      setEditingResourceId("");
-      void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
-    },
+    mutationFn: (payload: {
+      attachmentId: string;
+      role?: ProjectResourceRole;
+      note?: string | null;
+      sortOrder?: number;
+    }) => projectsApi.updateResource(projectId, payload.attachmentId, {
+      role: payload.role,
+      note: payload.note,
+      sortOrder: payload.sortOrder,
+    }),
+    onSuccess: invalidateProjectResources,
   });
-  const createInlineResource = useMutation({
-    mutationFn: () =>
-      projectsApi.update(projectId, {
-        newResources: [
-          {
-            name: newResourceName.trim(),
-            kind: newResourceKind,
-            locator: newResourceLocator.trim(),
-            description: newResourceDescription.trim() || null,
-            role: newResourceRole,
-            note: newResourceNote.trim() || null,
-            ...(newResourceSortOrder.trim() ? { sortOrder: Number(newResourceSortOrder) } : {}),
-          },
-        ],
-      }),
+  const createAndAttachResource = useMutation({
+    mutationFn: async () => {
+      const created = await organizationsApi.createResource(orgId, {
+        name: newResourceName.trim(),
+        kind: newResourceKind,
+        locator: newResourceLocator.trim(),
+        description: newResourceDescription.trim() || null,
+      });
+      return projectsApi.addResource(projectId, {
+        resourceId: created.id,
+        role: newResourceRole,
+        note: newResourceNote.trim() || null,
+        sortOrder: resources.data?.length ?? 0,
+      });
+    },
     onSuccess: () => {
       setNewResourceName("");
+      setNewResourceKind("directory");
       setNewResourceLocator("");
       setNewResourceDescription("");
+      setNewResourceRole("reference");
       setNewResourceNote("");
-      setNewResourceSortOrder("");
-      void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
+      setCreateResourceOpen(false);
+      invalidateProjectResources();
     },
   });
   const removeProject = useMutation({
@@ -222,26 +263,18 @@ export function ProjectPage() {
     setWorkspacePolicyError("");
     update.mutate();
   }
-  function attach(event: FormEvent) {
-    event.preventDefault();
-    if (resourceId.trim()) addResource.mutate();
-  }
-  function startResourceEdit(attachment: { id: string; role: ProjectResourceRole; note: string | null; sortOrder: number }) {
-    setEditingResourceId(attachment.id);
-    setEditingRole(attachment.role);
-    setEditingNote(attachment.note ?? "");
-    setEditingSortOrder(String(attachment.sortOrder ?? ""));
-  }
-  function submitResourceEdit(event: FormEvent) {
-    event.preventDefault();
-    if (editingResourceId) updateResource.mutate();
-  }
   function submitInlineResource(event: FormEvent) {
     event.preventDefault();
-    if (newResourceName.trim() && newResourceLocator.trim()) createInlineResource.mutate();
+    if (newResourceName.trim() && newResourceLocator.trim()) createAndAttachResource.mutate();
   }
   const projectIssues = issues.data ?? [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
+  const attachedResources = [...(resources.data ?? project.data?.resources ?? [])].sort(
+    (left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0),
+  );
+  const availableOrganizationResources = (organizationResources.data ?? []).filter(
+    (resource) => !attachedResources.some((attachment) => attachment.resourceId === resource.id),
+  );
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
     <OrgWorkspace orgId={orgId}>
@@ -367,140 +400,210 @@ export function ProjectPage() {
               <button type="submit">保存项目</button>
             </div>
           </form>}
-          {activeTab === "resources" && <section className="panel project-resources project-tab-panel-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">项目上下文</p>
-                <h2>资源</h2>
-                <p className="muted">为项目关联智能体需要使用的资源，资源目录仍由组织统一维护。</p>
+          {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
+            <div className="project-resource-hero-card">
+              <div className="project-resource-hero-top">
+                <div>
+                  <p className="eyebrow">项目上下文</p>
+                  <h2>资源</h2>
+                  <p className="muted">选择智能体在当前项目中实际使用的仓库、文档、URL 和连接器对象。组织资源目录保持统一维护，这里只决定项目范围内需要加载的资源。</p>
+                </div>
+                <div className="project-resource-actions">
+                  <div className="project-resource-popover-anchor">
+                    <button
+                      className="secondary small-button"
+                      disabled={availableOrganizationResources.length === 0 || addResource.isPending}
+                      onClick={() => setAttachCatalogOpen((value) => !value)}
+                      type="button"
+                    >
+                      附加已有
+                    </button>
+                    {attachCatalogOpen && (
+                      <div className="project-resource-popover">
+                        <div className="project-resource-popover-heading">
+                          <strong>从组织资源目录附加</strong>
+                          <span>选择已有共享资源，默认作为参考资料加入当前项目。</span>
+                        </div>
+                        {availableOrganizationResources.length === 0 ? (
+                          <p className="muted">组织资源已经全部附加到当前项目。</p>
+                        ) : (
+                          <div className="project-resource-catalog-list">
+                            {availableOrganizationResources.map((resource) => (
+                              <button
+                                key={resource.id}
+                                onClick={() => addResource.mutate({
+                                  resourceId: resource.id,
+                                  role: "reference",
+                                  sortOrder: attachedResources.length,
+                                })}
+                                type="button"
+                              >
+                                <span className={`project-resource-kind-icon org-resource-kind-${resource.kind}`} aria-hidden="true">
+                                  {resourceKindMark(resource.kind)}
+                                </span>
+                                <span>
+                                  <strong>{resource.name}</strong>
+                                  <small>{resource.locator}</small>
+                                  {resource.description && <em>{resource.description}</em>}
+                                </span>
+                                <Badge>{RESOURCE_KIND_LABELS[resource.kind]}</Badge>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button className="small-button" onClick={() => setCreateResourceOpen(true)} type="button">新增资源</button>
+                  <Link className="button secondary small-button" to={`/orgs/${orgId}/resources`}>组织资源目录</Link>
+                </div>
+              </div>
+              <div className="project-resource-summary">
+                <div className="summary-metric">
+                  <span>已附加</span>
+                  <strong>{attachedResources.length}</strong>
+                  <small>当前项目可见资源</small>
+                </div>
+                <div className="summary-metric">
+                  <span>工作集</span>
+                  <strong>{roleCount(attachedResources, "working_set")}</strong>
+                  <small>智能体需要主动操作的资源</small>
+                </div>
+                <div className="summary-metric">
+                  <span>参考资料</span>
+                  <strong>{roleCount(attachedResources, "reference")}</strong>
+                  <small>辅助理解背景与决策</small>
+                </div>
               </div>
             </div>
             {resources.error && <ErrorNotice error={resources.error} />}
             {updateResource.error && <ErrorNotice error={updateResource.error} />}
-            {createInlineResource.error && <ErrorNotice error={createInlineResource.error} />}
-            <div className="project-resource-summary">
-              {ROLES.map((item) => (
-                <div className="summary-metric" key={item}>
-                  <span>{item}</span>
-                  <strong>{resources.data?.filter((attachment) => attachment.role === item).length ?? 0}</strong>
+            {addResource.error && <ErrorNotice error={addResource.error} />}
+            {createAndAttachResource.error && <ErrorNotice error={createAndAttachResource.error} />}
+            {organizationResources.error && <ErrorNotice error={organizationResources.error} />}
+            <div className="project-resource-attached-card">
+              <div className="project-resource-attached-heading">
+                <div>
+                  <h3>已附加资源</h3>
+                  <p className="muted">角色和备注只作用于当前项目，不会修改组织资源目录。</p>
                 </div>
-              ))}
-            </div>
-            <div className="project-resource-grid">
-              {resources.data?.map((attachment) => (
-                <article className="project-resource-card" key={attachment.id}>
-                  <div>
-                    <strong>{attachment.resource.name}</strong>
-                    <span>{attachment.resource.locator}</span>
-                    {attachment.note && <p>{attachment.note}</p>}
+              </div>
+              <div className="project-resource-list">
+                {attachedResources.map((attachment) => (
+                <article className="project-resource-item" key={attachment.id}>
+                  <div className="project-resource-item-main">
+                    <span className={`project-resource-kind-icon org-resource-kind-${attachment.resource.kind}`} aria-hidden="true">
+                      {resourceKindMark(attachment.resource.kind)}
+                    </span>
+                    <div>
+                      <div className="project-resource-title-row">
+                        <strong>{attachment.resource.name}</strong>
+                        <Badge>{RESOURCE_KIND_LABELS[attachment.resource.kind]}</Badge>
+                        <Badge>{RESOURCE_ROLE_LABELS[attachment.role]}</Badge>
+                      </div>
+                      <span className="project-resource-locator">{attachment.resource.locator}</span>
+                      {attachment.resource.description && <p>{attachment.resource.description}</p>}
+                    </div>
                   </div>
-                  <Badge>{attachment.role}</Badge>
+                  <div className="project-resource-edit-row">
+                    <label>
+                      项目角色
+                      <select
+                        value={attachment.role}
+                        onChange={(event) => updateResource.mutate({
+                          attachmentId: attachment.id,
+                          note: attachment.note,
+                          role: event.target.value as ProjectResourceRole,
+                          sortOrder: attachment.sortOrder,
+                        })}
+                      >
+                        {ROLES.map((item) => <option key={item} value={item}>{RESOURCE_ROLE_LABELS[item]}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      项目备注
+                      <input
+                        defaultValue={attachment.note ?? ""}
+                        onBlur={(event) => {
+                          const note = event.currentTarget.value.trim();
+                          if (note !== (attachment.note ?? "")) {
+                            updateResource.mutate({
+                              attachmentId: attachment.id,
+                              note: note || null,
+                              role: attachment.role,
+                              sortOrder: attachment.sortOrder,
+                            });
+                          }
+                        }}
+                        placeholder="可选，写给智能体的项目内使用说明"
+                      />
+                    </label>
+                  </div>
+                  <div className="project-resource-card-actions">
                   <button
-                    className="secondary small-button"
-                    onClick={() => startResourceEdit(attachment)}
-                    type="button"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    className="secondary small-button"
+                    className="danger small-button"
                     onClick={() => removeResource.mutate(attachment.id)}
                     type="button"
                   >
                     移除
                   </button>
+                  </div>
                 </article>
-              ))}
-              {resources.isSuccess && resources.data.length === 0 && <p className="muted">暂无关联资源。</p>}
+                ))}
+                {resources.isSuccess && attachedResources.length === 0 && <p className="project-resource-empty muted">暂无关联资源。</p>}
+              </div>
             </div>
-            {editingResourceId && (
-              <form className="form resource-form" onSubmit={submitResourceEdit}>
-                <label>
-                  角色
-                  <select value={editingRole} onChange={(event) => setEditingRole(event.target.value as ProjectResourceRole)}>
-                    {ROLES.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                </label>
-                <label>
-                  备注
-                  <input value={editingNote} onChange={(event) => setEditingNote(event.target.value)} />
-                </label>
-                <label>
-                  排序
-                  <input
-                    min="0"
-                    type="number"
-                    value={editingSortOrder}
-                    onChange={(event) => setEditingSortOrder(event.target.value)}
-                  />
-                </label>
-                <button className="secondary" onClick={() => setEditingResourceId("")} type="button">取消</button>
-                <button disabled={updateResource.isPending} type="submit">保存资源</button>
-              </form>
+            {createResourceOpen && (
+              <div className="modal-backdrop">
+                <form className="panel task-modal resource-dialog" onSubmit={submitInlineResource}>
+                  <div className="task-modal-header">
+                    <div>
+                      <h2>新增资源</h2>
+                      <p className="muted">创建组织资源并同时附加到当前项目。</p>
+                    </div>
+                    <button className="secondary small-button" onClick={() => setCreateResourceOpen(false)} type="button">取消</button>
+                  </div>
+                  <div className="form">
+                    <div className="task-form-row two-columns">
+                      <label>
+                        名称
+                        <input value={newResourceName} onChange={(event) => setNewResourceName(event.target.value)} placeholder="Rudder app repo" required />
+                      </label>
+                      <label>
+                        类型
+                        <select value={newResourceKind} onChange={(event) => setNewResourceKind(event.target.value as OrganizationResource["kind"])}>
+                          {RESOURCE_KINDS.map((item) => <option key={item} value={item}>{RESOURCE_KIND_LABELS[item]}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <label>
+                      定位
+                      <input value={newResourceLocator} onChange={(event) => setNewResourceLocator(event.target.value)} placeholder="D:/coding/octopus 或 https://example.com/spec" required />
+                    </label>
+                    <label>
+                      说明
+                      <textarea value={newResourceDescription} onChange={(event) => setNewResourceDescription(event.target.value)} placeholder="说明这个资源包含什么，以及智能体什么时候应该使用。" />
+                    </label>
+                    <div className="task-form-row two-columns">
+                      <label>
+                        项目角色
+                        <select value={newResourceRole} onChange={(event) => setNewResourceRole(event.target.value as ProjectResourceRole)}>
+                          {ROLES.map((item) => <option key={item} value={item}>{RESOURCE_ROLE_LABELS[item]}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        项目备注
+                        <input value={newResourceNote} onChange={(event) => setNewResourceNote(event.target.value)} placeholder="可选的项目内使用说明" />
+                      </label>
+                    </div>
+                  </div>
+                  <div className="task-modal-actions">
+                    <button className="secondary" onClick={() => setCreateResourceOpen(false)} type="button">取消</button>
+                    <button disabled={createAndAttachResource.isPending || !newResourceName.trim() || !newResourceLocator.trim()} type="submit">创建并附加</button>
+                  </div>
+                </form>
+              </div>
             )}
-            <form className="form resource-form" onSubmit={attach}>
-              <label>
-                资源 ID
-                <input value={resourceId} onChange={(event) => setResourceId(event.target.value)} required />
-              </label>
-              <label>
-                角色
-                <select value={role} onChange={(event) => setRole(event.target.value as ProjectResourceRole)}>
-                  {ROLES.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label>
-                排序
-                <input
-                  min="0"
-                  type="number"
-                  value={sortOrder}
-                  onChange={(event) => setSortOrder(event.target.value)}
-                />
-              </label>
-              {addResource.error && <ErrorNotice error={addResource.error} />}
-              <button type="submit">添加资源</button>
-            </form>
-            <form className="form resource-form project-inline-resource-form" onSubmit={submitInlineResource}>
-              <label>
-                资源名称
-                <input value={newResourceName} onChange={(event) => setNewResourceName(event.target.value)} required />
-              </label>
-              <label>
-                资源类型
-                <select value={newResourceKind} onChange={(event) => setNewResourceKind(event.target.value as OrganizationResource["kind"])}>
-                  {RESOURCE_KINDS.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label>
-                资源定位
-                <input value={newResourceLocator} onChange={(event) => setNewResourceLocator(event.target.value)} required />
-              </label>
-              <label>
-                资源说明
-                <input value={newResourceDescription} onChange={(event) => setNewResourceDescription(event.target.value)} />
-              </label>
-              <label>
-                新增资源角色
-                <select value={newResourceRole} onChange={(event) => setNewResourceRole(event.target.value as ProjectResourceRole)}>
-                  {ROLES.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label>
-                新增资源备注
-                <input value={newResourceNote} onChange={(event) => setNewResourceNote(event.target.value)} />
-              </label>
-              <label>
-                新增资源排序
-                <input
-                  min="0"
-                  type="number"
-                  value={newResourceSortOrder}
-                  onChange={(event) => setNewResourceSortOrder(event.target.value)}
-                />
-              </label>
-              <button disabled={createInlineResource.isPending} type="submit">新增并关联资源</button>
-            </form>
           </section>}
           {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
             <div className="panel-heading">
