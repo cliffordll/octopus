@@ -183,6 +183,7 @@ def _skill_entries(
                     state="external",
                     managed=False,
                 ),
+                "sourceClass": "adapter_home",
                 "origin": "user_installed",
                 "originLabel": "User-installed",
                 "locationLabel": location_label,
