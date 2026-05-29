@@ -17,7 +17,11 @@ from packages.database.schema import (
 )
 from packages.shared.types.heartbeat import HeartbeatRunEvent
 
-from .heartbeat import HeartbeatService
+from .heartbeat import (
+    HeartbeatService,
+    heartbeat_event_to_data,
+    heartbeat_run_to_data,
+)
 
 
 class RunIntelligenceService:
@@ -90,8 +94,7 @@ class RunIntelligenceService:
         if run is None:
             return None
         events = await list_run_events(self._session, run_id, limit=1000)
-        heartbeat = HeartbeatService(self._session)
-        return [heartbeat._to_event(event) for event in events]
+        return [heartbeat_event_to_data(event) for event in events]
 
     async def read_log(self, run_id: str) -> dict[str, str] | None:
         run = await get_run(self._session, run_id)
@@ -105,7 +108,7 @@ class RunIntelligenceService:
     ) -> dict[str, Any]:
         issue = await self._issue_for_run(run)
         return {
-            "run": HeartbeatService(self._session)._to_run(run),
+            "run": heartbeat_run_to_data(run),
             "agentName": agent.name,
             "orgName": org.name,
             "issue": _issue_to_dict(issue) if issue is not None else None,
