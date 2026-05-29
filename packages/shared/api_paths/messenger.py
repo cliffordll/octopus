@@ -1,0 +1,6 @@
+ORG_MESSENGER_THREADS_PATH = "/api/orgs/{orgId}/messenger/threads"
+ORG_MESSENGER_CHAT_THREAD_PATH = "/api/orgs/{orgId}/messenger/chat/{conversationId}"
+ORG_MESSENGER_THREAD_READ_PATH = "/api/orgs/{orgId}/messenger/threads/{threadKey}/read"
+ORG_MESSENGER_ISSUES_PATH = "/api/orgs/{orgId}/messenger/issues"
+ORG_MESSENGER_APPROVALS_PATH = "/api/orgs/{orgId}/messenger/approvals"
+ORG_MESSENGER_SYSTEM_THREAD_PATH = "/api/orgs/{orgId}/messenger/system/{threadKind}"
