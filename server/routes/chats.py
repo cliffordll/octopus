@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from starlette.responses import StreamingResponse
 
 from packages.shared.api_paths.chats import (
@@ -23,7 +24,6 @@ from packages.shared.types.chat import (
     ChatContextLink,
     ChatConversation,
     ChatMessage,
-    CreatedChatMessages,
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
@@ -299,7 +299,7 @@ async def add_chat_message_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: ChatService = Depends(get_chat_service),
-) -> CreatedChatMessages:
+) -> Any:
     await _get_conversation_or_404(id, request=request, service=service)
     try:
         payload = validate_add_chat_message(body)
@@ -313,9 +313,10 @@ async def add_chat_message_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": str(exc)},
+        )
 
 
 @router.post(CHAT_MESSAGES_STREAM_PATH, status_code=status.HTTP_201_CREATED)
