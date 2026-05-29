@@ -6,9 +6,24 @@ import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
+function formatPayload(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("Payload 必须是 JSON 对象。");
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function ApprovalPage() {
   const { orgId = "", approvalId = "" } = useParams();
   const [decisionNote, setDecisionNote] = useState("");
+  const [decisionPayload, setDecisionPayload] = useState("{}");
+  const [resubmitPayload, setResubmitPayload] = useState("{}");
+  const [formError, setFormError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approval = useQuery({
     queryKey: ["approval", approvalId],
@@ -16,13 +31,28 @@ export function ApprovalPage() {
   });
   const act = useMutation({
     mutationFn: (action: "approve" | "reject" | "requestRevision" | "resubmit") => {
-      if (action === "resubmit") return approvalsApi.resubmit(approvalId, {});
-      return approvalsApi[action](approvalId, decisionNote.trim() || undefined);
+      if (action === "resubmit") {
+        return approvalsApi.resubmit(approvalId, {
+          payload: parseJsonObject(resubmitPayload),
+        });
+      }
+      const payload = parseJsonObject(decisionPayload);
+      return approvalsApi[action](approvalId, {
+        ...(decisionNote.trim() ? { decisionNote: decisionNote.trim() } : {}),
+        ...(Object.keys(payload).length > 0 ? { payload } : {}),
+      });
     },
+    onMutate: () => setFormError(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] }),
+    onError: (error) => setFormError(error instanceof Error ? error.message : "审批操作失败"),
   });
+  function runAction(action: "approve" | "reject" | "requestRevision" | "resubmit") {
+    setFormError(null);
+    act.mutate(action);
+  }
   if (approval.error) return <ErrorNotice error={approval.error} />;
   const isActionable = approval.data?.status === "pending";
+  const currentPayload = approval.data ? formatPayload(approval.data.payload) : "{}";
   return (
     <ChatsWorkspace orgId={orgId}>
       <header className="page-header">
@@ -82,10 +112,18 @@ export function ApprovalPage() {
                     onChange={(event) => setDecisionNote(event.target.value)}
                   />
                 </label>
+                <label>
+                  决策 Payload JSON
+                  <textarea
+                    className="config-editor"
+                    value={decisionPayload}
+                    onChange={(event) => setDecisionPayload(event.target.value)}
+                  />
+                </label>
                 <div className="actions">
-                  <button disabled={act.isPending} onClick={() => act.mutate("approve")} type="button">同意</button>
-                  <button className="danger" disabled={act.isPending} onClick={() => act.mutate("reject")} type="button">拒绝</button>
-                  <button className="secondary" disabled={act.isPending} onClick={() => act.mutate("requestRevision")} type="button">
+                  <button disabled={act.isPending} onClick={() => runAction("approve")} type="button">同意</button>
+                  <button className="danger" disabled={act.isPending} onClick={() => runAction("reject")} type="button">拒绝</button>
+                  <button className="secondary" disabled={act.isPending} onClick={() => runAction("requestRevision")} type="button">
                     请求修改
                   </button>
                 </div>
@@ -94,8 +132,21 @@ export function ApprovalPage() {
               <p className="muted">该审批已处理，当前状态为 {approval.data.status}。</p>
             )}
             {approval.data.status === "revision_requested" && (
-              <button className="secondary" disabled={act.isPending} onClick={() => act.mutate("resubmit")} type="button">标记重新提交</button>
+              <div className="approval-resubmit-form">
+                <label>
+                  重新提交 Payload JSON
+                  <textarea
+                    className="config-editor"
+                    value={resubmitPayload === "{}" ? currentPayload : resubmitPayload}
+                    onChange={(event) => setResubmitPayload(event.target.value)}
+                  />
+                </label>
+                <button className="secondary" disabled={act.isPending} onClick={() => runAction("resubmit")} type="button">
+                  重新提交审批
+                </button>
+              </div>
             )}
+            {formError && <p className="error-notice">{formError}</p>}
           </aside>
           {act.error && <ErrorNotice error={act.error} />}
         </section>

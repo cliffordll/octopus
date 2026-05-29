@@ -274,6 +274,41 @@ def test_agent_create_and_update_cover_step14_fields() -> None:
     )
 
 
+def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-1"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "OpenCode Agent",
+                "--role",
+                "engineer",
+                "--runtime",
+                "opencode_local",
+                "--model",
+                "openai/gpt-5",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert requests[0].read() == (
+        b'{"name":"OpenCode Agent","role":"engineer",'
+        b'"agentRuntimeType":"opencode_local",'
+        b'"agentRuntimeConfig":{"model":"openai/gpt-5"}}'
+    )
+
+
 def test_agent_adapter_commands_cover_step14_routes() -> None:
     requests: list[httpx.Request] = []
 
@@ -459,6 +494,12 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
                 "once",
                 "--reason",
                 "manual",
+                "--source",
+                "on_demand",
+                "--trigger-detail",
+                "manual",
+                "--payload",
+                '{"requestedBy":"cli"}',
                 "--force-fresh-session",
             ],
             client=client,
@@ -474,7 +515,9 @@ def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:
     assert requests[2].method == "POST"
     assert requests[2].url.path == "/api/agents/agent-1/wakeup"
     assert requests[2].read() == (
-        b'{"idempotencyKey":"once","reason":"manual","forceFreshSession":true}'
+        b'{"idempotencyKey":"once","reason":"manual","source":"on_demand",'
+        b'"triggerDetail":"manual","payload":{"requestedBy":"cli"},'
+        b'"forceFreshSession":true}'
     )
     assert requests[3].method == "POST"
     assert requests[3].url.path == "/api/heartbeat-runs/run-1/cancel"
