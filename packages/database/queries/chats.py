@@ -230,6 +230,33 @@ async def list_messages(
     return result.scalars().all()
 
 
+async def get_latest_incoming_message_preview(
+    session: AsyncSession, conversation_id: str
+) -> str | None:
+    """Return the most recent non-user message body for preview.
+
+    Mirrors upstream ``listLatestReplyPreviews`` filter
+    (``services/chats.helpers.ts:84``): role != 'user' and trimmed body
+    non-empty, ordered by ``created_at`` desc.
+    """
+
+    result = await session.execute(
+        select(ChatMessage.body)
+        .where(
+            ChatMessage.conversation_id == conversation_id,
+            ChatMessage.role != "user",
+            ChatMessage.superseded_at.is_(None),
+        )
+        .order_by(ChatMessage.created_at.desc())
+        .limit(1)
+    )
+    body = result.scalar_one_or_none()
+    if body is None:
+        return None
+    trimmed = body.strip()
+    return trimmed or None
+
+
 async def get_message(
     session: AsyncSession, *, conversation_id: str, message_id: str
 ) -> ChatMessage | None:

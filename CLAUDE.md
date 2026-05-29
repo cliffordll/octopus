@@ -12,7 +12,7 @@
 ## 核心约束
 
 - 项目内普通文档、注释、命名和说明禁止把上游项目名作为 Octopus 自身产品名使用，应统一使用功能语义名称，例如组织管理、问题流转、审批流程、运行编排、预算控制、组织树、技能管理
-- 已确认属于上游兼容契约的字符串不得为命名清理而擅自改动，例如 runtime env、workspace context、skill key、provider 枚举、测试 fixture 中用于兼容验证的 `RUDDER_*`、`rudderWorkspace`、`rudder/<slug>` 等；若要替换，必须先确认上游契约已变化并同步 shared contract 与测试
+- 已确认属于上游兼容契约的字符串不得为命名清理而擅自改动，例如 runtime env、workspace context、provider 枚举、测试 fixture 中用于兼容验证的 `RUDDER_*`、`rudderWorkspace` 等；若要替换，必须先确认上游契约已变化并同步 shared contract 与测试
 - 保持 上游参考实现 现有数据库业务表结构不变
 - 保持 上游参考实现 现有 API 路径、请求结构、响应结构不变
 - 保持 上游参考实现 枚举值、状态值、错误码语义和关键副作用时机不变

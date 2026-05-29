@@ -35,6 +35,7 @@ class IssueDetail(IssueListItem):
     requestDepth: int
     startedAt: str | None
     completedAt: str | None
+    cancelledAt: str | None
     createdAt: str
     workProducts: list[IssueWorkProduct]
 

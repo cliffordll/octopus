@@ -27,6 +27,19 @@
 | BUG-21-004 | fixed | P3 | 否 | 文档规范与上游兼容命名存在冲突，需要明确允许保留的外部契约名称 | Step 21 | `CLAUDE.md` 已补充兼容契约例外 |
 | BUG-21-005 | open | P2 | 否 | agents route 和核心 service 文件偏大，需按职责拆分审查 | Step 21/25 | 文件规模与职责扫描 |
 | BUG-21-006 | open | P3 | 否 | 部分 Step TASK 状态与实际开发进度不一致 | Step 21 | Step TASK 状态扫描 |
+| BUG-21-007 | fixed | P1 | 否 | `/api/health` 端点未注册，README 验证步骤无法执行 | Step 21 | `pytest tests/contract/test_step21_health.py -q` |
+| BUG-21-008 | fixed | P1 | 否 | issue 响应缺 `cancelledAt` 字段，与上游 schema 列 `cancelled_at` 与 type 字段 `cancelledAt` 不一致 | Step 21 | `pytest tests/contract/test_step21_issue_cancelled_at.py -q` |
+| BUG-21-009 | fixed | P1 | 是 | issue 状态翻转不自动写 `started_at` / `completed_at` / `cancelled_at`（上游 `applyStatusSideEffects` 行为缺失） | Step 21 | `pytest tests/contract/test_step21_issue_status_timestamps.py -q` |
+| BUG-21-010 | fixed | P1 | 是 | Windows 上 CLI-based runtime（codex_local / opencode_local / claude_local / process）`asyncio.create_subprocess_exec` 抛 `FileNotFoundError`，chat sync 直接 500 | Step 21 | `pytest tests/contract/test_step14_runtime_adapters.py -q` 23 passed + opencode/big-pickle 端到端 chat assistant reply OK |
+| BUG-21-011 | fixed | P1 | 否 | issue 创建后 `identifier` / `issueNumber` 永远 null，UI 显示「未编号」，链接如 `/{prefix}/issues/{identifier}` 无法构造 | Step 21 | `pytest tests/contract/test_step21_issue_identifier.py -q` 2 passed + live POST /api/orgs/{id}/issues 返回 identifier="950276-1" |
+| BUG-21-012 | fixed | P1 | 否 | approval `decidedByUserId` 缺默认 `"board"`，与上游 `resolveApprovalSchema.decidedByUserId.default("board")` 不一致 | Step 21 | `pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed |
+| BUG-21-013 | fixed | P1 | 是 | approval 缺 `resolvableStatuses` 前置检查，已 `approved`/`rejected` 仍可改 status，破坏 approval gate 不变量 | Step 21 | `pytest tests/contract/test_step21_approval_resolution.py -q` 含 3 个覆盖 idempotent/同状态/异常状态拒绝 |
+| BUG-21-014 | fixed | P1 | 否 | chat detail `latestReplyPreview` 永远为空，与 messenger threads preview 不一致；UI 列表预览失效 | Step 21 | `pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed |
+| BUG-21-015 | fixed | P2 | 否 | 组织技能列表向 UI 暴露旧品牌 key 和展示文案 | Step 21 | `test_org_skill_list_seeds_bundled_skills` 期望已改为 `skills/<slug>` 与 `built-in` |
+| BUG-21-016 | fixed | P2 | 否 | 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates | Step 21 | contract 测试已覆盖递归 inventory |
+| BUG-21-017 | fixed | P2 | 否 | approval comments / approval-issue 关联 3 个端点 + `approval_comments` 表 + `addApprovalCommentSchema` validator 全部缺失，上游 `approvals.ts:306,645,657` 有 | Step 21 | `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed |
+| BUG-21-018 | fixed | P1 | 是 | chat sync message 只把当前 user body 作为 promptTemplate，不传 conversation 历史，assistant 无 multi-turn 记忆；与上游 `buildPrompt` 行为不一致 | Step 21 | `pytest tests/contract/test_step21_chat_history_prompt.py -q` 3 passed |
+| BUG-21-019 | invalid | P2 | 否 | `GET /api/orgs/{orgId}/messenger/system/{threadKind}` 早前误报 404 | Step 21 | 重测 `failed-runs`/`budget-alerts`/`join-requests` 三个上游真实 kind 全部 200；之前用 `governance/onboarding/...` 等无效 kind 探测才出现 404，属于测试侧错误 |
 
 ## 记录模板
 
@@ -119,13 +132,237 @@
 - 复现步骤：
   1. 阅读 `CLAUDE.md` 中“项目内禁止出现上游项目名”的规范。
   2. 执行全局搜索 `rg "rudder|RUDDER|Rudder"`。
-  3. 对比命中项：`RUDDER_*` env、`rudderWorkspace` context、`rudder/<slug>` skill key、`D:\coding\rudder` 上游证据路径、`Bundled by Rudder` 展示文案。
+  3. 对比命中项：`RUDDER_*` env、`rudderWorkspace` context、`D:\coding\rudder` 上游证据路径、旧组织技能 key 和 `Bundled by Rudder` 展示文案。
 - 预期行为：文档应区分“禁止在普通说明/命名中泄漏上游项目名”和“为上游兼容必须保留的外部契约字符串”。兼容字段不能被误改。
 - 实际行为：当前规范表述过于绝对，和已实现的上游兼容契约存在冲突；直接批量替换会破坏 runtime/env、workspace context、skill key 或测试契约。
 - 初步根因：项目定位清理后，规范没有把“外部兼容契约名”列为例外。
 - 处理归属：Step 21 文档审查。需要修订规范或补充例外清单，再决定哪些文档描述可以改成“上游参考路径”而不影响证据可追溯。
-- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `RUDDER_*`、`rudderWorkspace`、`rudder/<slug>` 等兼容字符串不得因命名清理擅自改动。
+- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `RUDDER_*`、`rudderWorkspace` 等兼容字符串不得因命名清理擅自改动。组织技能 key 已在 BUG-21-015 中改为项目内置 `skills/<slug>` 语义。
 - 验证证据：全局 `rg "rudder|RUDDER|Rudder"` 命中项经分类，runtime env/context、organization skills key/provider、步骤文档上游证据路径和测试 fixture 属于兼容证据或待单独审查项。
+
+### BUG-21-007: `/api/health` 端点未注册，README 验证步骤无法执行
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 README 启动验证步骤无法执行，外层反向代理 / 容器编排 health probe 无入口。
+- 影响范围：`server/routes/__init__.py`、`ui/README.md` 启动指南、外层 health 探针、上游 AGENTS.md §4 标准入口。
+- 复现步骤：
+  1. 启动 `uv run server`。
+  2. `curl http://127.0.0.1:8000/api/health`。
+- 预期行为：200，返回 `{"status": "ok"}` 或上游 health 响应的子集。
+- 实际行为（修复前）：404 Not Found，无任何 health 路由被注册。
+- 初步根因：上游 `upstream-reference/rudder/server/src/bootstrap/register-api-routes.ts:40` 用 `api.use("/health", healthRoutes(...))` 注册；Octopus `server/routes/__init__.py` 缺等价注册。
+- 处理归属：Step 21。
+- 修复记录：新增 `packages/shared/api_paths/health.py` 常量、`server/routes/health.py` 路由、在 `server/routes/__init__.py` 注册。Octopus 范围内最小兼容响应 `{"status": "ok"}`；上游完整字段（version / instanceId / localEnv / runtimeOwnerKind / deploymentMode 等）在 Octopus 尚无对应概念，留到对应 step 实施时再扩展。
+- 验证证据：`uv run pytest tests/contract/test_step21_health.py -q` 2 passed；四步验证 `ruff check / ruff format --check / pyright` 全绿。
+
+### BUG-21-008: issue 响应缺 `cancelledAt` 字段
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 UI / 外部消费方读取 cancelled issue 时无法拿到取消时间；与上游响应 schema 不一致。
+- 影响范围：`packages/shared/types/issue.py`、`server/services/issues.py`、所有消费 `GET /api/issues/{id}` 的客户端。
+- 复现步骤：
+  1. 准备一个 `status=cancelled` 的 issue（DB schema 已有 `cancelled_at` 列）。
+  2. `curl http://127.0.0.1:8000/api/issues/{id}`。
+- 预期行为：响应字段包含 `cancelledAt: string | null`，与上游 `packages/shared/src/types/issue.ts:141` 一致。
+- 实际行为（修复前）：响应字段列表只有 `startedAt`、`completedAt`，**无 `cancelledAt`**；UI 显示「未取消」也无法据此判断。
+- 初步根因：DB schema `packages/database/schema/issues.py:143` 列已存在；type 与 service 序列化遗漏。`packages/shared/types/issue.py:36-37` 只声明 `startedAt`/`completedAt`；`server/services/issues.py:414-415` 序列化漏字段。
+- 处理归属：Step 21。
+- 修复记录：`IssueDetail.cancelledAt` 加入 type；`_to_detail` 增加 `cancelledAt=row.cancelled_at.isoformat() if row.cancelled_at else None`。`IssueListItem` 是列表精简形态，按上游 `IssueDetail` 单独保留 timestamps，列表不带，不在本次修改范围。
+- 验证证据：`uv run pytest tests/contract/test_step21_issue_cancelled_at.py tests/contract/test_step8_issue_management.py -q` 12 passed；ruff / pyright 全绿。
+
+### BUG-21-009: issue 状态翻转不自动写时间戳
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。issue 时间戳是闭环可见性与下游 governance（cost/budget/activity）归集所需的关键 evidence。
+- 影响范围：`server/services/issues.py`、`GET/PATCH /api/issues/{id}`、依赖 `startedAt` / `completedAt` / `cancelledAt` 字段的 UI 与报表。
+- 复现步骤：
+  1. PATCH 一个 issue 到 `status=in_progress`，观察 `startedAt` 字段。
+  2. PATCH 到 `status=done`，观察 `completedAt` 字段。
+  3. PATCH 到 `status=cancelled`，观察 `cancelledAt` 字段。
+- 预期行为：与上游 `upstream-reference/rudder/server/src/services/issues.helpers.ts:64-80` `applyStatusSideEffects` 对齐：
+  - 转 `in_progress` 且 patch 没显式 startedAt → 写当前时间到 `started_at`。
+  - 转 `done` → 写当前时间到 `completed_at`（无论旧值）。
+  - 转 `cancelled` → 写当前时间到 `cancelled_at`（无论旧值）。
+- 实际行为（修复前）：`server/services/issues.py:228` 直接 `await update_issue(session, issue_id, values)`，`values` 只含用户传入的字段，三个时间戳永远不会被自动写入；live 测试 PATCH 状态多次后字段全为 null。
+- 初步根因：Python 实现没有 port 上游 `applyStatusSideEffects` helper。
+- 处理归属：Step 21。
+- 修复记录：在 `server/services/issues.py` 新增 `_apply_status_side_effects(values)` helper，行为对齐上游；在 `update_issue` 调用 `update_issue(session, ...)` 之前调用此 helper，使 review_decision / reopen 等路径导致的状态翻转同样命中。
+- 验证证据：新增 `tests/contract/test_step21_issue_status_timestamps.py` 4 个测试覆盖 in_progress / done / cancelled 三种翻转与 status 未变更不打点；`uv run pytest tests/contract/test_step21_issue_status_timestamps.py tests/contract/test_step8_issue_management.py tests/contract/test_step21_issue_cancelled_at.py -q` 14 passed；ruff / pyright 全绿。
+
+### BUG-21-010: Windows 下所有 CLI-based runtime 无法启动子进程
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。codex_local / opencode_local / claude_local 三个真实 LLM adapter 全部不可用，chat sync 直接 500，闭环断裂。
+- 影响范围：`packages/runtimes/codex_local/runner.py`、`packages/runtimes/opencode_local/runner.py`、`packages/runtimes/claude_local/runner.py`、`packages/runtimes/process/runner.py`、所有依赖 chat / heartbeat 执行的端到端流程。
+- 复现步骤：
+  1. 在 Windows 上 `uv run server`。
+  2. 创建 codex_local 或 opencode_local agent + chat。
+  3. `POST /api/chats/{id}/messages { body: "..." }`。
+- 预期行为：subprocess 启动成功；adapter 调用 LLM 并返回 assistant reply（或 4xx/5xx with detail 如认证失败）。
+- 实际行为（修复前）：500 Internal Server Error。`asyncio.create_subprocess_exec("codex", ...)` 在 Windows 上抛 `FileNotFoundError [WinError 2]`，因为 `_winapi.CreateProcess` 不会自动追加 PATHEXT 解析 `codex.CMD` / `codex.ps1` 等 wrapper；route 只 catch `ChatAvailabilityError / ValueError / RuntimeError`，`FileNotFoundError` 透出导致 500。
+- 初步根因：`test-environment` helper (`packages/runtimes/environment.py:100`) 正确使用 `shutil.which` 解析路径；但 4 个 runner 直接把命令名传给 subprocess。Linux / macOS 上无后缀可执行能直接 launch，Windows 上 CMD 包装失败。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/runtimes/environment.py` 新增 `resolve_runtime_executable(command) -> str` helper：best-effort 用 `shutil.which` 解析；找不到时返回原值，让 subprocess 走原有错误路径（保留 monkeypatch 测试兼容）。
+  - 4 个 runner（codex_local / opencode_local / claude_local / process）在 `create_subprocess_exec` 前用该 helper 解析路径。
+- 验证证据：
+  - `uv run pytest tests/contract/test_step14_runtime_adapters.py -q` 23 passed
+  - Live：opencode_local agent + `agentRuntimeConfig.model="opencode/big-pickle"`，`POST /api/chats/{id}/messages` 真实返回 assistant reply "OK"
+  - ruff / pyright 全绿
+
+### BUG-21-011: issue 创建后 identifier / issueNumber 永远 null
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。issue 仍可创建和流转，只是缺少人类可读编号。但 UI 显示「未编号」、上游链接模板（`/{prefix}/issues/{identifier}`）无法构造、列表搜索和 ticket 引用全部失效。
+- 影响范围：`server/services/issues.py create_issue`、`packages/database/queries/organizations.py`、`packages/database/schema/organizations.py` 的 `issue_prefix` / `issue_counter` 列、所有引用 identifier 的 UI 与外部消费方。
+- 复现步骤：
+  1. `POST /api/orgs` 建组织。
+  2. `POST /api/orgs/{orgId}/issues { title }` 创建 issue。
+  3. `GET /api/issues/{id}`，观察 `identifier` 与 `issueNumber`。
+- 预期行为：与上游 `upstream-reference/rudder/server/src/services/issues.ts:797-804` 对齐：
+  - `UPDATE organizations SET issue_counter = issue_counter + 1 WHERE id = :org_id RETURNING issue_counter, issue_prefix` 原子自增。
+  - 新 issue 写入 `issue_number = counter` 和 `identifier = f"{prefix}-{counter}"`。
+- 实际行为（修复前）：`server/services/issues.py:187` 直接 `create_issue(session, values)`，values 不含 issue_number/identifier；DB 列 nullable，全部留 null。
+- 初步根因：Python create_issue service 缺少 port 上游的 atomic counter increment + identifier 拼装。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/queries/organizations.py` 新增 `increment_issue_counter(session, org_id) -> tuple[int, str] | None`，单 SQL `UPDATE ... RETURNING` 原子自增并返回 `(new_counter, prefix)`。
+  - `server/services/issues.py create_issue` 在 `create_issue(...)` 前调用 helper，设置 `values["issue_number"]` 和 `values["identifier"] = f"{prefix}-{number}"`。
+  - 同时把 `_apply_status_side_effects(values)` 也加进 create 路径，对齐上游 `services/issues.ts:820-828` 在 insert 前 inline 复制的 same 时间戳逻辑。
+- 验证证据：
+  - `pytest tests/contract/test_step21_issue_identifier.py -q` 2 passed（覆盖单 org 自增 PAP-1/PAP-2/PAP-3 与跨 org 隔离）；
+  - 同套 issue 测试 `pytest tests/contract/test_step8_issue_management.py tests/contract/test_step21_issue_cancelled_at.py tests/contract/test_step21_issue_status_timestamps.py -q` 14 passed 回归无破坏；
+  - Live `POST /api/orgs/{orgId}/issues` 返回 `identifier="950276-1"`、`issueNumber=1`，第二次返回 `950276-2`、`issueNumber=2`；
+  - ruff / pyright 全绿。
+- 已知边界：当前 org 创建时的 `issue_prefix` 是 octopus 自己生成（取 org_id 首 6 位）；上游默认是固定 `"PAP"`。两边都是 issue prefix 来源问题，但不影响 identifier 拼装语义，作为独立调查项处理，不在本 bug 范围。
+
+### BUG-21-012: approval `decidedByUserId` 缺默认值 `"board"`
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 board actor approve/reject/request-revision 必须显式传字段；与上游契约不一致。
+- 影响范围：`packages/shared/validators/approval.py`、`POST /api/approvals/{id}/{approve,reject,request-revision}` 三个端点；持久化的 `approvals.decided_by_user_id` 列。
+- 复现步骤：`POST /api/approvals/{id}/approve` 传 `{}`，观察响应 `decidedByUserId`。
+- 预期行为：与上游 `resolveApprovalSchema.decidedByUserId.default("board")`、`requestApprovalRevisionSchema.decidedByUserId.default("board")` 对齐（`upstream-reference/rudder/packages/shared/src/validators/approval.ts:15,23`），返回值含 `decidedByUserId="board"`。
+- 实际行为（修复前）：`validate_resolve_approval`、`validate_request_approval_revision` 仅做类型校验，不 setdefault；响应 `decidedByUserId=null`。
+- 初步根因：Octopus validator 没 port 上游 zod default。
+- 处理归属：Step 21。
+- 修复记录：`validate_resolve_approval` 在 type check 通过后构造 `dict(payload)` 并 `setdefault("decidedByUserId", "board")`，cast 后返回；`validate_request_approval_revision` 改为使用 `validate_resolve_approval` 返回值（之前丢弃返回）。
+- 验证证据：`pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed；`pytest tests/contract/test_step3_shared_contract.py -q` 36 passed（更新了 `test_validate_resolve_approval_empty_ok` 以反映新行为）；ruff / pyright 全绿。
+
+### BUG-21-013: approval 缺 resolvable 状态前置检查
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。破坏 approval 状态机不变量（上游 AGENTS.md §5「Approval gates for governed actions」）；已 approved/rejected 仍可被改 status，治理记录失真。
+- 影响范围：`server/services/approvals.py::_resolve_approval`、`server/routes/approvals.py` 三个 resolve 路由；activity log 含错误的二次决策。
+- 复现步骤：
+  1. 创建 approval（status=pending）。
+  2. `POST /approvals/{id}/approve {}` → status=approved。
+  3. 再次 `POST /approvals/{id}/approve {}` 或 `POST /approvals/{id}/reject {}`。
+- 预期行为：与上游 `services/approvals.ts:15,45-52` 对齐：
+  - 同 target status：返回当前 row（idempotent，200，无副作用）。
+  - 不同 terminal status（已 approved 后 reject 等）：抛 unprocessable，返回 422。
+  - 只有 `pending` / `revision_requested` 才能转 approved/rejected/revision_requested。
+- 实际行为（修复前）：service 直接 update row.status，无前置检查；任何状态下重复调用都成功。
+- 初步根因：Python 实现 `_resolve_approval` 跳过了上游 `canResolveStatuses` 校验。
+- 处理归属：Step 21。
+- 修复记录：
+  - `server/services/approvals.py` 新增 `_RESOLVABLE_APPROVAL_STATUSES = frozenset({"pending", "revision_requested"})`。
+  - `_resolve_approval` 在 update 前检查 `current.status`：同 target → 直接返回 `_to_detail(current)`（idempotent 路径）；其他 → `raise ValueError("Only pending or revision requested approvals can be ...")`。
+  - `server/routes/approvals.py` 三个 resolve route 把 service 调用包进 try/except ValueError → 422，保留 detail。
+- 验证证据：`pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed（覆盖 idempotent / 异常状态拒绝 / 从 revision_requested 决策）；`pytest tests/contract/test_step9_approval_management.py tests/workflows/test_step9_approval_workflow.py -q` 回归 32 passed；ruff / pyright 全绿。
+
+### BUG-21-014: chat detail `latestReplyPreview` 永远为空
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 UI chat 列表 / 详情显示「最新回复」永远空；与 messenger threads preview 不一致。
+- 影响范围：`server/services/chats.py::_to_conversation`、`packages/database/queries/chats.py`、所有 chat detail/list 端点。
+- 复现步骤：
+  1. 创建 chat。
+  2. 写入 assistant message（real chat sync flow 或直接 DB seed）。
+  3. `GET /api/chats/{id}` 观察 `latestReplyPreview`。
+- 预期行为：与上游 `services/chats.ts:280` + `listLatestReplyPreviews` 一致：取最新非-user role 且 trim 后非空的 message body，截断到 140 字符。
+- 实际行为（修复前）：`_to_conversation` 硬编码 `"latestReplyPreview": None`，无论是否有 assistant 回复。
+- 初步根因：octopus 实现遗漏了 latestReplyPreview hydrate 逻辑。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/queries/chats.py` 新增 `get_latest_incoming_message_preview(session, conversation_id) -> str | None`，对齐上游 `incomingMessagePreviewSql` filter：`role != 'user'`、`superseded_at IS NULL`，按 `created_at desc` 取首条；返回 trim 后值。
+  - `server/services/chats.py::_to_conversation` 调用此 helper，截到 140 字符。
+- 验证证据：`pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed（覆盖最新 assistant body / 忽略 user role / 140 截断 / 无 incoming message 时 null）；chat 套件 `pytest tests/contract/test_step11_chat_loop.py tests/contract/test_step16_chat_routes.py -q` 回归 8 passed；ruff / pyright 全绿。
+
+### BUG-21-017: approval comments + approval-issue 关联端点/表全部缺失
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但 approval 协作中评论沟通 + approval-与-issue 关联查询完全用不了，UI 审批协作流程无法跑通。
+- 影响范围：`approval_comments` 表、validator、3 个 HTTP 路由（`GET /api/approvals/{id}/issues`、`GET /api/approvals/{id}/comments`、`POST /api/approvals/{id}/comments`）、service 层、shared type 与 api_paths。
+- 复现步骤：
+  1. `GET /api/approvals/{id}/issues` → 404 (修复前 router 未注册)
+  2. `GET /api/approvals/{id}/comments` → 404
+  3. `POST /api/approvals/{id}/comments {body:"hi"}` → 404
+- 预期行为：与上游 `upstream-reference/rudder/server/src/routes/approvals.ts:306,645,657` 三个路由 + `services/approvals.ts:241-278` (`listComments`/`addComment`) + `services/issue-approvals.ts:115-144` (`listIssuesForApproval`) + `packages/db/src/schema/approval_comments.ts` 表对齐。
+- 实际行为（修复前）：路由未注册 → 404；service 无对应方法；DB 无 `approval_comments` 表；validator 无 `validate_add_approval_comment`。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/schema/approval_comments.py` 新表 `ApprovalComment`（id PK、org_id/approval_id/author_agent_id FK、author_user_id text、body text、created_at/updated_at），与上游 3 个 index 对齐。
+  - `packages/database/migrations/versions/20260529_000014_approval_comments.py` Alembic 迁移。
+  - `packages/database/schema/__init__.py` 导出 `ApprovalComment`。
+  - `packages/database/queries/approvals.py` 新增 `list_approval_comments` / `create_approval_comment` / `list_issues_for_approval`（后者通过 `IssueApproval` join `Issue`，按 link 创建时间排序，对齐上游）。
+  - `packages/shared/types/approval.py` 新增 `ApprovalComment` / `AddApprovalCommentPayload` TypedDict。
+  - `packages/shared/validators/approval.py` 新增 `validate_add_approval_comment`（body 非空），对齐上游 `addApprovalCommentSchema = z.object({ body: z.string().min(1) })`。
+  - `packages/shared/api_paths/approvals.py` 新增 `APPROVAL_ISSUES_PATH` 和 `APPROVAL_COMMENTS_PATH`。
+  - `server/services/approvals.py` 新增 `list_issues_for_approval` / `list_comments` / `add_comment`；后者根据 actor_type 设 author_agent_id 或 author_user_id 并写 `approval.comment_added` activity，与上游一致。
+  - `server/routes/approvals.py` 注册 3 个新路由；comments POST 走 actor identity，issues GET 走 organization scope（继承 `_get_approval_detail` 的 `assert_organization_access`）。
+- 验证证据：
+  - `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed（空 list / 创建+列出 / 空 body 422 / linked issues / approval missing 404）；
+  - `pytest tests/contract/ -q` 全套 287 passed 回归；
+  - ruff / pyright 全绿。
+- 已知边界：上游 `services/approvals.ts:254` 在 list/create 时通过 `instanceSettings.censorUsernameInLogs` 做 username redaction；Octopus 当前没 instance_settings 子系统，所以暂不复制 redaction 行为。需要时另起 hotfix。
+
+### BUG-21-018: chat sync message 不传 conversation 历史，assistant 无 multi-turn 记忆
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。chat 多轮对话不能保持上下文 → assistant 第二轮起完全失忆，最小闭环演示「对话」体验断裂。
+- 影响范围：`server/services/chats.py::add_message_and_reply`、`promptTemplate` 协议、所有 chat-capable runtime adapter 行为可观察性。
+- 复现步骤：
+  1. 创建 chat + opencode_local 真 agent (`agentRuntimeConfig.model="opencode/big-pickle"`)。
+  2. POST 第一条消息 "Reply only OK"，assistant 回 "OK"。
+  3. POST 第二条 "What did I ask before?"，观察 assistant 是否记得 turn 1。
+- 预期行为：与上游 `upstream-reference/rudder/server/src/services/chat-assistant.helpers.ts:154-208 buildPrompt` 对齐——adapter 收到的 `promptTemplate` 是 JSON envelope，包含 `conversation` 元信息、`contextLinks`、`recentMessages`（最近 12 条非 superseded message，包含当前 user message）。
+- 实际行为（修复前）：`server/services/chats.py:660` 把 promptTemplate 直接设为 `payload["body"]`，adapter 看到的就是当前 user 一段文本——assistant 回 "No previous user message — this is the start of the conversation"。
+- 初步根因：Python chat service 未 port 上游 buildPrompt 的 JSON envelope 构造逻辑。
+- 处理归属：Step 21。
+- 修复记录：
+  - `server/services/chats.py` 新增 `_build_assistant_prompt(conversation, latest_user_message)` 私有 helper，构造与上游一致的 JSON envelope：`{conversation: {id,title,status,summary,planMode,issueCreationMode,preferredAgentId,routedAgentId,primaryIssueId}, contextLinks: [{entityType,entityId,metadata}], recentMessages: [{id,role,kind,status,body,structuredPayload}]}`，取 `list_messages` 后过滤 `superseded_at IS NULL`、`slice(-12)`，保底把刚 flush 的当前 user message 放尾部。
+  - `add_message_and_reply` 在 adapter.execute 前调用此 helper，promptTemplate 改为 `json.dumps(envelope, ensure_ascii=False, indent=2)`，与上游 `JSON.stringify(..., null, 2)` 行为一致。
+- 验证证据：
+  - 新增 `tests/contract/test_step21_chat_history_prompt.py` 3 个测试：首轮只含当前 user / 第二轮含 turn 1 user+assistant+turn 2 user / 15 轮后只保留最近 12 条且 latest 必在末尾。
+  - `pytest tests/contract/test_step21_chat_history_prompt.py tests/contract/test_step11_chat_loop.py tests/contract/test_step16_chat_assistant_routes.py tests/contract/test_step21_chat_latest_reply_preview.py -q` 14 passed。
+  - `test_step11_chat_loop.py:198` 旧断言 `captured["prompt"] == b"raw body"` 同步更新为 JSON envelope 断言，注释引用上游 file:line。
+  - `pytest tests/contract/ -q` 全套 290 passed。
+  - ruff / pyright 全绿。
+- 已知边界：上游 buildPrompt 还把 message attachments 拼进 envelope；当前 Octopus chat attachments 仍归 Step 18，未引入 attachment hydration，本修复留位 `attachments` 字段为空（adapter 收到 envelope 时若没有 attachments key 仍可降级；上游 buildPrompt 同样会输出空数组）。下一步若引入 chat attachments 再补 attachments hydration。
+
+### BUG-21-019: messenger system thread 404 误报
+
+- 状态：invalid
+- 严重级别：P2
+- 是否阻塞最小闭环：否。
+- 影响范围：`GET /api/orgs/{orgId}/messenger/system/{threadKind}` 路由。
+- 复现步骤（误报）：先前 probe 使用 `governance`/`onboarding`/`workspace`/`run`/`automation`/`default`/`system` 等 kind 名称全部 404。
+- 预期行为：仅 `failed-runs` / `budget-alerts` / `join-requests` 三个 kind 合法，与上游 `packages/shared/src/constants.ts:200 MESSENGER_SYSTEM_THREAD_KINDS` 完全对齐；Octopus `packages/shared/constants/messenger.py:18` 已声明相同集合，service 也实现完整。
+- 实际行为：重测 `failed-runs` / `budget-alerts` / `join-requests` 都返回 200，body 含 `summary`+`messages` 结构。先前结论是测试侧用错 kind。
+- 处理归属：无需修复，本条仅作记录避免再被误读。
+- 修复记录：无。
+- 验证证据：live `GET /api/orgs/{id}/messenger/system/failed-runs` 等三个端点 200。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 
@@ -159,3 +396,37 @@
 - 处理归属：Step 21 文档审查。
 - 修复记录：已将 Step 20 状态修正为“已完成”；其余步骤待逐项对照实现范围后再修。
 - 验证证据：Step TASK 状态扫描输出显示 Step 20 为“开发中”，本轮已修正。
+
+### BUG-21-015: 组织技能列表向 UI 暴露旧品牌 key 和展示文案
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但会让组织技能页继续显示旧品牌，违背项目定位和命名清理要求。
+- 影响范围：`GET /api/orgs/{orgId}/skills`、组织技能列表 UI、agent desired skills 的内置技能 key。
+- 复现步骤：
+  1. 创建组织或使用已有组织。
+  2. 请求 `GET /api/orgs/{orgId}/skills`。
+  3. 查看返回的内置技能 `key`、`sourceBadge`、`sourceLabel`、`editableReason`。
+- 预期行为：开发阶段不保留旧数据库兼容，内置组织技能 key 使用 `skills/<slug>`；UI 展示字段使用 `built-in` / `Built-in skill`，不向用户暴露旧品牌。
+- 实际行为：server seed 内置技能时返回 `rudder/<slug>`、`sourceBadge: rudder`、`sourceLabel: Bundled by Rudder`、`editableReason: Bundled by Rudder`。
+- 初步根因：Step 17 实现时把上游 bundled skill source 名称直接固化到 Python server 的组织技能业务 key 和展示字段中。
+- 处理归属：Step 21。
+- 修复记录：已将内置组织技能 key 统一为 `skills/<slug>`；`control-plane`、`create-agent`、`create-plugin` 使用项目语义 slug；展示字段统一为 `built-in` / `Built-in skill`；旧 `rudder/*` key 仅在 seed 时作为开发期迁移查找兼容，不再作为新返回值。
+- 验证证据：`tests/contract/test_step17_organization_skills.py::test_org_skill_list_seeds_bundled_skills` 已更新期望；当前本机 pytest 执行被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
+
+### BUG-21-016: 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但会导致组织技能详情页只能看到 `SKILL.md`，无法浏览 community skill 或内置 skill 的参考资料、脚本和模板。
+- 影响范围：`GET /api/orgs/{orgId}/skills`、`GET /api/orgs/{orgId}/skills/{skillId}`、组织技能详情 UI 文件列表。
+- 复现步骤：
+  1. 准备一个包含 `SKILL.md`、`README.md`、`reference/*.md`、`scripts/*.py`、`templates/*.md` 的组织技能目录。
+  2. 请求 `GET /api/orgs/{orgId}/skills`。
+  3. 查看返回的 `fileInventory`。
+- 预期行为：`fileInventory` 应递归列出允许展示的技能文件，并按 `skill/readme/reference/script/template/markdown/other` 标注类型。
+- 实际行为：server seed 和 create 逻辑只写入 `[{ "path": "SKILL.md", "kind": "skill" }]`，导致 UI 不知道还有其他文件。
+- 初步根因：组织技能实现只把 `SKILL.md` 作为固定清单写入数据库，没有按技能根目录递归扫描文件。
+- 处理归属：Step 21。
+- 修复记录：已新增 `_scan_skill_inventory()`，内置技能 seed、组织技能创建、文件更新和响应序列化都复用该扫描逻辑；隐藏文件、缓存目录和 Python bytecode 会被排除。
+- 验证证据：contract 测试已新增 `reference/methodology.md`、`scripts/sync.py`、`templates/note.md` 的 fileInventory 断言；当前本机 pytest 执行仍被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
