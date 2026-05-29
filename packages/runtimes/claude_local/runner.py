@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
+from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
@@ -28,7 +29,9 @@ from .protocol import (
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
-    command = string(context.config.get("command")) or "claude"
+    command = resolve_runtime_executable(
+        string(context.config.get("command")) or "claude"
+    )
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Claude adapter cwd must be a string")

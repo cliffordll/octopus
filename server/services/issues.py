@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,27 @@ _REVIEW_DECISION_STATUS_MAP = {
     "request_changes": "in_progress",
     "blocked": "blocked",
 }
+
+
+def _apply_status_side_effects(values: dict[str, Any]) -> None:
+    """Mirror upstream ``applyStatusSideEffects`` in ``issues.helpers.ts``.
+
+    When ``status`` transitions to ``in_progress``/``done``/``cancelled`` and
+    the caller did not supply a matching timestamp, stamp the current time so
+    issue lifecycle markers stay in sync with the upstream contract.
+    """
+
+    status = values.get("status")
+    if not status:
+        return
+    now = datetime.now(UTC)
+    if status == "in_progress" and not values.get("started_at"):
+        values["started_at"] = now
+    if status == "done":
+        values["completed_at"] = now
+    if status == "cancelled":
+        values["cancelled_at"] = now
+
 
 ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
     "title": "title",
@@ -224,6 +246,8 @@ class IssueService:
         if payload.get("reopen") and "status" not in values:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
+
+        _apply_status_side_effects(values)
 
         row = await update_issue(self._session, issue_id, values)
         if row is None:
@@ -413,6 +437,7 @@ def _to_detail(row: Issue) -> IssueDetail:
         requestDepth=row.request_depth,
         startedAt=row.started_at.isoformat() if row.started_at else None,
         completedAt=row.completed_at.isoformat() if row.completed_at else None,
+        cancelledAt=row.cancelled_at.isoformat() if row.cancelled_at else None,
         createdAt=row.created_at.isoformat(),
         workProducts=[],
     )
