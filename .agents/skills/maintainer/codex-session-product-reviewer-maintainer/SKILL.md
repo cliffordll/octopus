@@ -1,4 +1,4 @@
-﻿---
+---
 name: codex-session-product-reviewer-maintainer
 description: >
   Review a local Codex session, task, or commit as a professional product

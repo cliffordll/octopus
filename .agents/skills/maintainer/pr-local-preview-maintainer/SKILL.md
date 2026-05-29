@@ -1,4 +1,4 @@
-﻿---
+---
 name: pr-local-preview-maintainer
 description: >
   Check out a GitHub pull request into a local worktree, start it safely, verify
