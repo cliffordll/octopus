@@ -27,6 +27,7 @@
 | BUG-21-004 | fixed | P3 | 否 | 文档规范与上游兼容命名存在冲突，需要明确允许保留的外部契约名称 | Step 21 | `CLAUDE.md` 已补充兼容契约例外 |
 | BUG-21-005 | open | P2 | 否 | agents route 和核心 service 文件偏大，需按职责拆分审查 | Step 21/25 | 文件规模与职责扫描 |
 | BUG-21-006 | open | P3 | 否 | 部分 Step TASK 状态与实际开发进度不一致 | Step 21 | Step TASK 状态扫描 |
+| BUG-21-007 | fixed | P2 | 否 | 组织技能列表向 UI 暴露旧品牌 key 和展示文案 | Step 21 | `test_org_skill_list_seeds_bundled_skills` 期望已改为 `skills/<slug>` 与 `built-in` |
 
 ## 记录模板
 
@@ -119,12 +120,12 @@
 - 复现步骤：
   1. 阅读 `CLAUDE.md` 中“项目内禁止出现上游项目名”的规范。
   2. 执行全局搜索 `rg "rudder|RUDDER|Rudder"`。
-  3. 对比命中项：`RUDDER_*` env、`rudderWorkspace` context、`rudder/<slug>` skill key、`D:\coding\rudder` 上游证据路径、`Bundled by Rudder` 展示文案。
+  3. 对比命中项：`RUDDER_*` env、`rudderWorkspace` context、`D:\coding\rudder` 上游证据路径、旧组织技能 key 和 `Bundled by Rudder` 展示文案。
 - 预期行为：文档应区分“禁止在普通说明/命名中泄漏上游项目名”和“为上游兼容必须保留的外部契约字符串”。兼容字段不能被误改。
 - 实际行为：当前规范表述过于绝对，和已实现的上游兼容契约存在冲突；直接批量替换会破坏 runtime/env、workspace context、skill key 或测试契约。
 - 初步根因：项目定位清理后，规范没有把“外部兼容契约名”列为例外。
 - 处理归属：Step 21 文档审查。需要修订规范或补充例外清单，再决定哪些文档描述可以改成“上游参考路径”而不影响证据可追溯。
-- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `RUDDER_*`、`rudderWorkspace`、`rudder/<slug>` 等兼容字符串不得因命名清理擅自改动。
+- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `RUDDER_*`、`rudderWorkspace` 等兼容字符串不得因命名清理擅自改动。组织技能 key 已在 BUG-21-007 中改为项目内置 `skills/<slug>` 语义。
 - 验证证据：全局 `rg "rudder|RUDDER|Rudder"` 命中项经分类，runtime env/context、organization skills key/provider、步骤文档上游证据路径和测试 fixture 属于兼容证据或待单独审查项。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
@@ -159,3 +160,20 @@
 - 处理归属：Step 21 文档审查。
 - 修复记录：已将 Step 20 状态修正为“已完成”；其余步骤待逐项对照实现范围后再修。
 - 验证证据：Step TASK 状态扫描输出显示 Step 20 为“开发中”，本轮已修正。
+
+### BUG-21-007: 组织技能列表向 UI 暴露旧品牌 key 和展示文案
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但会让组织技能页继续显示旧品牌，违背项目定位和命名清理要求。
+- 影响范围：`GET /api/orgs/{orgId}/skills`、组织技能列表 UI、agent desired skills 的内置技能 key。
+- 复现步骤：
+  1. 创建组织或使用已有组织。
+  2. 请求 `GET /api/orgs/{orgId}/skills`。
+  3. 查看返回的内置技能 `key`、`sourceBadge`、`sourceLabel`、`editableReason`。
+- 预期行为：开发阶段不保留旧数据库兼容，内置组织技能 key 使用 `skills/<slug>`；UI 展示字段使用 `built-in` / `Built-in skill`，不向用户暴露旧品牌。
+- 实际行为：server seed 内置技能时返回 `rudder/<slug>`、`sourceBadge: rudder`、`sourceLabel: Bundled by Rudder`、`editableReason: Bundled by Rudder`。
+- 初步根因：Step 17 实现时把上游 bundled skill source 名称直接固化到 Python server 的组织技能业务 key 和展示字段中。
+- 处理归属：Step 21。
+- 修复记录：已将内置组织技能 key 统一为 `skills/<slug>`；`control-plane`、`create-agent`、`create-plugin` 使用项目语义 slug；展示字段统一为 `built-in` / `Built-in skill`；旧 `rudder/*` key 仅在 seed 时作为开发期迁移查找兼容，不再作为新返回值。
+- 验证证据：`tests/contract/test_step17_organization_skills.py::test_org_skill_list_seeds_bundled_skills` 已更新期望；当前本机 pytest 执行被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。

@@ -228,16 +228,16 @@ async def test_org_skill_list_seeds_bundled_skills(
     assert list_code == 200
     keys = [skill["key"] for skill in listed]
     assert keys[:7] == [
-        "rudder/para-memory-files",
-        "rudder/rudder",
-        "rudder/rudder-create-agent",
-        "rudder/rudder-create-plugin",
-        "rudder/skill-creator",
-        "rudder/skill-optimizer",
-        "rudder/conversation-to-skill",
+        "skills/para-memory-files",
+        "skills/control-plane",
+        "skills/create-agent",
+        "skills/create-plugin",
+        "skills/skill-creator",
+        "skills/skill-optimizer",
+        "skills/conversation-to-skill",
     ]
-    assert listed[0]["sourceBadge"] == "rudder"
-    assert listed[0]["sourceLabel"] == "Bundled by Rudder"
+    assert listed[0]["sourceBadge"] == "built-in"
+    assert listed[0]["sourceLabel"] == "Built-in skill"
     assert listed[0]["editable"] is False
     assert listed[0]["description"]
 

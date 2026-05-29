@@ -40,15 +40,15 @@ _SLUG_CLEANUP_RE = re.compile(r"[^a-z0-9_-]+")
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*", re.DOTALL)
 _BUNDLED_SKILLS: tuple[tuple[str, str], ...] = (
     ("para-memory-files", "para-memory-files"),
-    ("rudder", "control-plane"),
-    ("rudder-create-agent", "create-agent"),
-    ("rudder-create-plugin", "create-plugin"),
+    ("control-plane", "control-plane"),
+    ("create-agent", "create-agent"),
+    ("create-plugin", "create-plugin"),
     ("skill-creator", "skill-creator"),
     ("skill-optimizer", "skill-optimizer"),
     ("conversation-to-skill", "conversation-to-skill"),
 )
 _BUNDLED_KEY_ORDER = {
-    f"rudder/{slug}": index for index, (slug, _) in enumerate(_BUNDLED_SKILLS)
+    f"skills/{slug}": index for index, (slug, _) in enumerate(_BUNDLED_SKILLS)
 }
 
 
@@ -86,8 +86,9 @@ class OrganizationSkillService:
             markdown = _read_skill_markdown(skill_dir)
             if markdown is None:
                 continue
-            key = f"rudder/{canonical_slug}"
-            metadata = {"sourceKind": "rudder_bundled", "skillKey": key}
+            key = f"skills/{canonical_slug}"
+            legacy_key = _legacy_bundled_skill_key(canonical_slug)
+            metadata = {"sourceKind": "built_in", "skillKey": key}
             fields = {
                 "key": key,
                 "slug": canonical_slug,
@@ -103,11 +104,15 @@ class OrganizationSkillService:
                 "metadata_json": metadata,
             }
             existing = await get_organization_skill_by_key(self._session, org_id, key)
+            if existing is None and legacy_key is not None:
+                existing = await get_organization_skill_by_key(
+                    self._session, org_id, legacy_key
+                )
             if existing is None:
                 await create_organization_skill(
                     self._session, {"id": str(uuid.uuid4()), "org_id": org_id, **fields}
                 )
-            elif _skill_source_kind(existing) == "rudder_bundled":
+            elif _is_bundled_source_kind(_skill_source_kind(existing)):
                 await update_organization_skill(
                     self._session, org_id, existing.id, fields
                 )
@@ -319,12 +324,12 @@ class OrganizationSkillService:
         skill = self._to_skill(row)
         skill_dir = _skill_root(row)
         source_kind = _skill_source_kind(row)
-        editable = source_kind != "rudder_bundled"
+        editable = not _is_bundled_source_kind(source_kind)
         return {
             **skill,
             "attachedAgentCount": attached_agent_count,
             "editable": editable,
-            "editableReason": None if editable else "Bundled by Rudder",
+            "editableReason": None if editable else "Built-in skill",
             "sourceLabel": _source_label(source_kind),
             "sourceBadge": _source_badge(source_kind),
             "sourcePath": str(skill_dir),
@@ -451,23 +456,36 @@ def _skill_source_kind(row: OrganizationSkill) -> str | None:
 
 
 def _is_bundled_skill(row: OrganizationSkill) -> bool:
-    return _skill_source_kind(row) == "rudder_bundled"
+    return _is_bundled_source_kind(_skill_source_kind(row))
+
+
+def _is_bundled_source_kind(source_kind: str | None) -> bool:
+    return source_kind in {"built_in", "octopus_bundled", "rudder_bundled"}
 
 
 def _source_label(source_kind: str | None) -> str:
-    if source_kind == "rudder_bundled":
-        return "Bundled by Rudder"
+    if _is_bundled_source_kind(source_kind):
+        return "Built-in skill"
     if source_kind == "community_preset":
         return "Community preset"
     return "Local organization skill"
 
 
 def _source_badge(source_kind: str | None) -> str:
-    if source_kind == "rudder_bundled":
-        return "rudder"
+    if _is_bundled_source_kind(source_kind):
+        return "built-in"
     if source_kind == "community_preset":
         return "community"
     return "local"
+
+
+def _legacy_bundled_skill_key(slug: str) -> str | None:
+    legacy_slugs = {
+        "control-plane": "rudder",
+        "create-agent": "rudder-create-agent",
+        "create-plugin": "rudder-create-plugin",
+    }
+    return f"rudder/{legacy_slugs.get(slug, slug)}"
 
 
 def _organization_skill_sort_key(skill: OrganizationSkillListItem) -> tuple[int, str]:
