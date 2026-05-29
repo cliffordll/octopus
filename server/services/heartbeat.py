@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -56,6 +58,7 @@ from packages.shared.types.heartbeat import (
 )
 
 from .agents import AgentConflictError
+from .logs import LogReadResult, read_local_file_log
 from .workspaces import WorkspaceService
 
 
@@ -183,6 +186,21 @@ class HeartbeatService:
             limit=max(1, min(limit, 1000)),
         )
         return [self._to_event(row) for row in rows]
+
+    async def read_log(
+        self, run_id: str, *, offset: int = 0, limit_bytes: int = 256_000
+    ) -> LogReadResult | None:
+        run = await get_run(self._session, run_id)
+        if run is None:
+            return None
+        if run.log_store != "local_file":
+            return {"content": "", "endOffset": 0, "eof": True}
+        return read_local_file_log(
+            Path(os.getenv("OCTOPUS_RUN_LOG_DIR", ".octopus/run-logs")),
+            run.log_ref,
+            offset=offset,
+            limit_bytes=limit_bytes,
+        )
 
     async def cancel_run(self, run_id: str) -> HeartbeatRun | None:
         run = await get_run(self._session, run_id)
