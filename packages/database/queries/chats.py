@@ -211,6 +211,31 @@ async def get_message(
     return result.scalar_one_or_none()
 
 
+async def update_message(
+    session: AsyncSession,
+    *,
+    conversation_id: str,
+    message_id: str,
+    fields: Mapping[str, Any],
+) -> ChatMessage | None:
+    if not fields:
+        return await get_message(
+            session, conversation_id=conversation_id, message_id=message_id
+        )
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(ChatMessage)
+        .where(
+            ChatMessage.conversation_id == conversation_id,
+            ChatMessage.id == message_id,
+        )
+        .values(**values)
+        .returning(ChatMessage)
+    )
+    return result.scalar_one_or_none()
+
+
 async def supersede_turn_messages(
     session: AsyncSession,
     *,
