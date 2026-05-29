@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
-import { Link, Navigate, NavLink, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
@@ -531,21 +531,31 @@ function skillFilePath(skill: OrganizationSkillListItem): string {
 }
 
 export function OrganizationSkillsPage() {
-  const { orgId = "" } = useParams();
+  const { orgId = "", skillId = "" } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const skills = useQuery({
     queryKey: ["organization-skills", orgId],
     queryFn: () => organizationSkillsApi.list(orgId),
   });
   const skillRows = Array.isArray(skills.data) ? skills.data : [];
-  const [selectedSkillId, setSelectedSkillId] = useState("");
-  const selectedSkill = skillRows.find((skill) => skill.id === selectedSkillId) ?? skillRows[0];
+  const [skillFilter, setSkillFilter] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedPathBySkill, setSelectedPathBySkill] = useState<Record<string, string>>({});
+  const selectedSkill = skillRows.find((skill) => skill.id === skillId) ?? skillRows[0];
+  const filteredSkillRows = skillRows.filter((skill) => {
+    const filter = skillFilter.trim().toLowerCase();
+    if (!filter) return true;
+    return [skill.name, skill.slug, skill.description, skill.sourceLabel, skill.sourceBadge]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(filter));
+  });
   const [newName, setNewName] = useState("");
   const [newSlug, setNewSlug] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newMarkdown, setNewMarkdown] = useState("");
   const [draftContent, setDraftContent] = useState("");
-  const selectedPath = selectedSkill ? skillFilePath(selectedSkill) : "SKILL.md";
+  const selectedPath = selectedSkill ? (selectedPathBySkill[selectedSkill.id] ?? skillFilePath(selectedSkill)) : "SKILL.md";
   const skillDetail = useQuery({
     queryKey: ["organization-skill", orgId, selectedSkill?.id],
     queryFn: () => organizationSkillsApi.get(orgId, selectedSkill!.id),
@@ -566,6 +576,11 @@ export function OrganizationSkillsPage() {
     if (skillFile.data) setDraftContent(skillFile.data.content);
   }, [skillFile.data]);
 
+  useEffect(() => {
+    if (!skills.isSuccess || skillId || !selectedSkill) return;
+    navigate(`/orgs/${orgId}/skills/${selectedSkill.id}`, { replace: true });
+  }, [navigate, orgId, selectedSkill, skillId, skills.isSuccess]);
+
   const createSkill = useMutation({
     mutationFn: () => organizationSkillsApi.create(orgId, {
       name: newName.trim(),
@@ -578,7 +593,8 @@ export function OrganizationSkillsPage() {
       setNewSlug("");
       setNewDescription("");
       setNewMarkdown("");
-      setSelectedSkillId(skill.id);
+      setCreateOpen(false);
+      navigate(`/orgs/${orgId}/skills/${skill.id}`);
       void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
     },
   });
@@ -592,102 +608,149 @@ export function OrganizationSkillsPage() {
   const deleteSkill = useMutation({
     mutationFn: (skillId: string) => organizationSkillsApi.delete(orgId, skillId),
     onSuccess: () => {
-      setSelectedSkillId("");
+      navigate(`/orgs/${orgId}/skills`);
       void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
     },
   });
 
+  function submitCreateSkill(event: FormEvent) {
+    event.preventDefault();
+    if (newName.trim()) createSkill.mutate();
+  }
+
   return (
     <OrgWorkspace orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Organization</p>
-          <h1>技能</h1>
-        </div>
-      </header>
       {skills.error && <ErrorNotice error={skills.error} />}
-      <div className="organization-skills-layout">
-        <aside className="panel organization-skill-list">
-          <div className="panel-heading">
+      <div className="organization-skills-shell">
+        <aside className="organization-skills-sidebar">
+          <div className="organization-skills-sidebar-header">
             <div>
-              <h2>Skill 管理</h2>
-              <p className="muted">组织技能库</p>
+              <h1>技能</h1>
+              <p>{skillRows.length} 个可用</p>
+              <p>当前组织的内置、社区预设和导入技能。</p>
             </div>
-            <Badge>{skillRows.length}</Badge>
+            <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button" aria-label="添加技能">+</button>
           </div>
-          <div className="agent-skill-tag-list">
-            {skillRows.map((skill) => (
+          <label className="organization-skill-search">
+            <span>搜索技能</span>
+            <input
+              aria-label="搜索技能"
+              placeholder="筛选技能"
+              value={skillFilter}
+              onChange={(event) => setSkillFilter(event.target.value)}
+            />
+          </label>
+          <div className="organization-skill-list-panel">
+            {skills.isLoading && <p className="muted">加载技能中...</p>}
+            {filteredSkillRows.map((skill) => (
               <button
-                className={`agent-skill-tag-main organization-skill-list-entry ${selectedSkill?.id === skill.id ? "selected" : ""}`}
+                className={`organization-skill-list-card ${selectedSkill?.id === skill.id ? "selected" : ""}`}
                 key={skill.id}
-                onClick={() => setSelectedSkillId(skill.id)}
+                onClick={() => navigate(`/orgs/${orgId}/skills/${skill.id}`)}
                 type="button"
               >
-                <span className="agent-skill-tag-title-row">
-                  <code>{skill.name}</code>
-                  <span className="agent-skill-enabled-pill enabled">{skill.sourceBadge}</span>
+                <span className="organization-skill-list-card-title">
+                  <strong>{skill.name}</strong>
+                  <small>{skill.sourceBadge}</small>
                 </span>
-                <span className="agent-skill-tag-description">{skill.description || "未填写描述"}</span>
-                <span className="agent-skill-tag-facts">
-                  <span><small>引用</small>{skill.attachedAgentCount}</span>
-                  <span><small>状态</small>{skill.compatibility}</span>
+                {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
+                <span className="organization-skill-list-card-meta">
+                  <span>{skill.fileInventory.length} 文件</span>
+                  <span>{skill.attachedAgentCount} 智能体</span>
                 </span>
               </button>
             ))}
           </div>
         </aside>
-        <section className="panel organization-skill-detail">
+        <section className="organization-skill-pane">
           {selectedSkill ? (
             <>
-              <div className="panel-heading">
+              <div className="organization-skill-pane-header">
                 <div>
-                  <h2>{selectedSkill.name}</h2>
+                  <div className="organization-skill-title-row">
+                    <h2>{selectedSkill.name}</h2>
+                    <Badge>{selectedSkill.sourceBadge}</Badge>
+                    <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
+                  </div>
+                  <p>{selectedSkill.description || "未填写描述"}</p>
                   <p className="muted">{selectedSkill.sourceLabel ?? selectedSkill.slug}</p>
                 </div>
                 <div className="row-actions">
-                  <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
+                  <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
                   <button className="danger small-button" disabled={deleteSkill.isPending} onClick={() => deleteSkill.mutate(selectedSkill.id)} type="button">删除</button>
                 </div>
               </div>
               {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
               {skillFile.error && <ErrorNotice error={skillFile.error} />}
               {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
-              <div className="agent-summary-grid">
-                <div className="summary-metric"><span>Trust</span><strong>{selectedSkill.trustLevel}</strong></div>
-                <div className="summary-metric"><span>Source</span><strong>{selectedSkill.sourceType}</strong></div>
-                <div className="summary-metric"><span>Agents</span><strong>{skillDetail.data?.usedByAgents.length ?? selectedSkill.attachedAgentCount}</strong></div>
+              <div className="organization-skill-content-layout">
+                <aside className="organization-skill-files">
+                  <div className="organization-skill-files-header">
+                    <h3>Files</h3>
+                    <span>{selectedSkill.fileInventory.length}</span>
+                  </div>
+                  {selectedSkill.fileInventory.map((file) => (
+                    <button
+                      className={selectedPath === file.path ? "selected" : ""}
+                      key={file.path}
+                      onClick={() =>
+                        setSelectedPathBySkill((current) => ({ ...current, [selectedSkill.id]: file.path }))
+                      }
+                      type="button"
+                    >
+                      <span>{file.path}</span>
+                      <small>{file.kind}</small>
+                    </button>
+                  ))}
+                </aside>
+                <div className="organization-skill-file-panel">
+                  <div className="organization-skill-file-toolbar">
+                    <div>
+                      <h3>{selectedPath}</h3>
+                      <p>{skillFile.data?.editable ? "可编辑" : "只读"}</p>
+                    </div>
+                    <button disabled={!skillFile.data?.editable || saveFile.isPending} onClick={() => saveFile.mutate()} type="button">
+                      保存
+                    </button>
+                  </div>
+                  <textarea
+                    aria-label={selectedPath}
+                    className="skill-yaml-textarea organization-skill-editor"
+                    readOnly={!skillFile.data?.editable}
+                    value={draftContent}
+                    onChange={(event) => setDraftContent(event.target.value)}
+                  />
+                  {saveFile.error && <ErrorNotice error={saveFile.error} />}
+                </div>
               </div>
-              <label>
-                {selectedPath}
-                <textarea
-                  className="skill-yaml-textarea organization-skill-editor"
-                  readOnly={!skillFile.data?.editable}
-                  value={draftContent}
-                  onChange={(event) => setDraftContent(event.target.value)}
-                />
-              </label>
-              <button disabled={!skillFile.data?.editable || saveFile.isPending} onClick={() => saveFile.mutate()} type="button">保存文件</button>
-              {saveFile.error && <ErrorNotice error={saveFile.error} />}
             </>
           ) : (
             <p className="muted">暂无组织技能。</p>
           )}
         </section>
-        <form className="panel form organization-skill-create" onSubmit={(event) => { event.preventDefault(); if (newName.trim()) createSkill.mutate(); }}>
-          <div className="panel-heading">
-            <div>
-              <h2>创建技能</h2>
-              <p className="muted">安装为组织级 skill。</p>
-            </div>
-          </div>
-          <label>名称<input value={newName} onChange={(event) => setNewName(event.target.value)} required /></label>
-          <label>Short name<input value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="incident-response" /></label>
-          <label>描述<input value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /></label>
-          <label>Skill 内容<textarea className="skill-yaml-textarea" value={newMarkdown} onChange={(event) => setNewMarkdown(event.target.value)} /></label>
-          {createSkill.error && <ErrorNotice error={createSkill.error} />}
-          <button disabled={createSkill.isPending || !newName.trim()} type="submit">创建技能</button>
-        </form>
       </div>
+      {createOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="panel form task-modal skill-create-dialog" onSubmit={submitCreateSkill}>
+            <div className="task-modal-header">
+            <div>
+                <h2>添加技能</h2>
+                <p className="muted">创建一个组织级本地技能。</p>
+              </div>
+              <button className="secondary small-button" onClick={() => setCreateOpen(false)} type="button">取消</button>
+            </div>
+            <label>名称<input value={newName} onChange={(event) => setNewName(event.target.value)} required /></label>
+            <label>Short name<input value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="incident-response" /></label>
+            <label>描述<input value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /></label>
+            <label>Skill 内容<textarea className="skill-yaml-textarea" value={newMarkdown} onChange={(event) => setNewMarkdown(event.target.value)} /></label>
+            {createSkill.error && <ErrorNotice error={createSkill.error} />}
+            <div className="task-modal-actions">
+              <button className="secondary" onClick={() => setCreateOpen(false)} type="button">取消</button>
+              <button disabled={createSkill.isPending || !newName.trim()} type="submit">创建技能</button>
+            </div>
+          </form>
+        </div>
+      )}
     </OrgWorkspace>
   );
 }
