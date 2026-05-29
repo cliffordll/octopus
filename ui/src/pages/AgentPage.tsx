@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentDetail, AgentRole, AgentRuntimeType, HeartbeatRun, UpdateAgentPayload } from "../api/types";
+import type { AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -65,60 +65,6 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
-}
-
-type InstructionDoc = {
-  content: string;
-  key: string;
-  name: string;
-  path: string;
-  source: string;
-};
-
-function stringConfig(config: Record<string, unknown>, key: string): string {
-  const value = config[key];
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function managedInstructionFiles(config: Record<string, unknown>): InstructionDoc[] {
-  const files = config.managedInstructionFiles;
-  if (!Array.isArray(files)) return [];
-  return files
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
-    .map((item, index) => {
-      const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : `instruction-${index + 1}.md`;
-      const path = typeof item.path === "string" && item.path.trim() ? item.path.trim() : name;
-      const content = typeof item.content === "string" ? item.content : "";
-      return { content, key: `managed:${path}:${index}`, name, path, source: "managedInstructionFiles" };
-    });
-}
-
-function buildInstructionDocs(agent: AgentDetail): InstructionDoc[] {
-  const config = agent.agentRuntimeConfig ?? {};
-  const docs: InstructionDoc[] = [];
-  const promptTemplate = stringConfig(config, "promptTemplate") || agent.capabilities || "";
-  const instructionsFilePath = stringConfig(config, "instructionsFilePath");
-  if (instructionsFilePath || promptTemplate) {
-    docs.push({
-      content: promptTemplate,
-      key: "soul",
-      name: "SOUL.md",
-      path: instructionsFilePath || "SOUL.md",
-      source: instructionsFilePath ? "instructionsFilePath" : "promptTemplate",
-    });
-  }
-  const agentsMdPath = stringConfig(config, "agentsMdPath");
-  if (agentsMdPath) {
-    docs.push({
-      content: "",
-      key: "agents-md",
-      name: "AGENTS.md",
-      path: agentsMdPath,
-      source: "agentsMdPath",
-    });
-  }
-  docs.push(...managedInstructionFiles(config));
-  return docs;
 }
 
 function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
@@ -192,6 +138,14 @@ function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string
   return "已安装，当前智能体尚未使用。";
 }
 
+function hasJsonObject(value: Record<string, unknown> | null | undefined): value is Record<string, unknown> {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
+function formattedJson(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2);
+}
+
 function skillEntryName(entry: Record<string, unknown>): string {
   return skillField(entry, ["runtimeName", "name", "key", "selectionKey"], "skill");
 }
@@ -241,7 +195,27 @@ function skillDisplaySourceText(value: string | null | undefined, bundled: boole
   return value;
 }
 
-function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
+function AgentRunDetail({
+  events = [],
+  eventsError,
+  eventsLoading,
+  log,
+  logError,
+  operations = [],
+  operationsError,
+  operationsLoading,
+  run,
+}: {
+  events?: HeartbeatRunEvent[];
+  eventsError?: unknown;
+  eventsLoading?: boolean;
+  log?: LogReadResult | null;
+  logError?: unknown;
+  operations?: WorkspaceOperation[];
+  operationsError?: unknown;
+  operationsLoading?: boolean;
+  run: HeartbeatRun | null;
+}) {
   if (!run) {
     return (
       <section className="panel agent-run-detail-card">
@@ -251,6 +225,12 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
   }
   const hasUsage = Boolean(run.usageJson && Object.keys(run.usageJson).length > 0);
   const hasSession = Boolean(run.sessionIdBefore || run.sessionIdAfter);
+  const hasContext = hasJsonObject(run.contextSnapshot);
+  const hasResult = hasJsonObject(run.resultJson);
+  const hasUsageJson = hasJsonObject(run.usageJson);
+  const contextSnapshot = run.contextSnapshot ?? {};
+  const resultJson = run.resultJson ?? {};
+  const usageJson = run.usageJson ?? {};
   return (
     <section className="panel agent-run-detail-card" data-testid="agent-runs-detail-pane">
       <div className="agent-run-detail-header">
@@ -270,6 +250,7 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
         <div><dt>Started</dt><dd>{formatRunTime(run.startedAt)}</dd></div>
         <div><dt>Finished</dt><dd>{formatRunTime(run.finishedAt)}</dd></div>
         <div><dt>Exit</dt><dd>{run.exitCode ?? "无"}</dd></div>
+        <div><dt>Error Code</dt><dd>{run.errorCode ?? "无"}</dd></div>
         <div><dt>Retry Of</dt><dd>{run.retryOfRunId ?? "无"}</dd></div>
         <div><dt>External Run</dt><dd>{run.externalRunId ?? "无"}</dd></div>
       </dl>
@@ -288,8 +269,103 @@ function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
         </dl>
       )}
       {run.error && <p className="error-notice">{run.error}</p>}
-      {run.stdoutExcerpt && <pre className="run-excerpt">{run.stdoutExcerpt}</pre>}
-      {run.stderrExcerpt && <pre className="run-excerpt error">{run.stderrExcerpt}</pre>}
+      {(run.stdoutExcerpt || run.stderrExcerpt) && (
+        <section className="agent-run-debug-section">
+          <h3>运行输出</h3>
+          {run.stdoutExcerpt && (
+            <div>
+              <span className="agent-run-section-label">stdout</span>
+              <pre className="run-excerpt">{run.stdoutExcerpt}</pre>
+            </div>
+          )}
+          {run.stderrExcerpt && (
+            <div>
+              <span className="agent-run-section-label">stderr</span>
+              <pre className="run-excerpt error">{run.stderrExcerpt}</pre>
+            </div>
+          )}
+        </section>
+      )}
+      {(hasContext || hasResult || hasUsageJson) && (
+        <section className="agent-run-debug-section">
+          <h3>调试快照</h3>
+          <div className="agent-run-json-grid">
+            {hasContext && (
+              <div>
+                <span className="agent-run-section-label">contextSnapshot</span>
+                <pre className="agent-run-json">{formattedJson(contextSnapshot)}</pre>
+              </div>
+            )}
+            {hasResult && (
+              <div>
+                <span className="agent-run-section-label">resultJson</span>
+                <pre className="agent-run-json">{formattedJson(resultJson)}</pre>
+              </div>
+            )}
+            {hasUsageJson && (
+              <div>
+                <span className="agent-run-section-label">usageJson</span>
+                <pre className="agent-run-json">{formattedJson(usageJson)}</pre>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+      <section className="agent-run-debug-section">
+        <h3>事件</h3>
+        {Boolean(eventsError) && <ErrorNotice error={eventsError} />}
+        {eventsLoading && <p className="muted">加载事件中...</p>}
+        {!eventsLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+        {events.length > 0 && (
+          <div className="agent-run-events">
+            {events.map((event) => (
+              <article className="agent-run-event" key={event.id}>
+                <div className="agent-run-event-header">
+                  <span>#{event.seq}</span>
+                  <strong>{event.eventType}</strong>
+                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.stream && <Badge>{event.stream}</Badge>}
+                </div>
+                {event.message && <p>{event.message}</p>}
+                {hasJsonObject(event.payload) && <pre className="agent-run-json">{formattedJson(event.payload)}</pre>}
+                <small className="muted">{event.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>原始日志</h3>
+        {Boolean(logError) && <ErrorNotice error={logError} />}
+        {log?.content ? (
+          <pre className="agent-run-json">{log.content}</pre>
+        ) : (
+          <p className="muted">暂无日志。</p>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>工作区操作</h3>
+        {Boolean(operationsError) && <ErrorNotice error={operationsError} />}
+        {operationsLoading && <p className="muted">加载工作区操作中...</p>}
+        {!operationsLoading && operations.length === 0 && <p className="muted">暂无工作区操作。</p>}
+        {operations.length > 0 && (
+          <div className="agent-run-events">
+            {operations.map((operation) => (
+              <article className="agent-run-event" key={operation.id}>
+                <div className="agent-run-event-header">
+                  <strong>{operation.phase}</strong>
+                  <Badge>{operation.status}</Badge>
+                  {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
+                </div>
+                {operation.command && <p>{operation.command}</p>}
+                {operation.stderrExcerpt && <pre className="run-excerpt error">{operation.stderrExcerpt}</pre>}
+                {operation.stdoutExcerpt && <pre className="run-excerpt">{operation.stdoutExcerpt}</pre>}
+                <small className="muted">{operation.cwd ?? operation.id}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -476,6 +552,15 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
     },
   });
+  const deleteInstruction = useMutation({
+    mutationFn: (path: string) => agentsApi.deleteInstructionFile(agentId, path),
+    onSuccess: () => {
+      setSelectedInstructionKey("");
+      setInstructionDraft("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-bundle", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
+    },
+  });
   const assignTask = useMutation({
     mutationFn: () => issuesApi.create(orgId, {
       title: taskTitle.trim(),
@@ -520,6 +605,24 @@ export function AgentPage() {
     [runRows],
   );
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
+  const runEvents = useQuery({
+    queryKey: ["heartbeat-run-events", selectedRun?.id],
+    queryFn: () => heartbeatApi.listEvents(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", selectedRun?.id],
+    queryFn: () => heartbeatApi.getLog(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runWorkspaceOperations = useQuery({
+    queryKey: ["heartbeat-run-workspace-operations", selectedRun?.id],
+    queryFn: () => heartbeatApi.listWorkspaceOperations(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
@@ -529,15 +632,18 @@ export function AgentPage() {
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
-  const instructionDocs = bundleFiles.length > 0
+  const instructionDocs = instructionsBundle.data
     ? bundleFiles.map((file) => ({
       content: "",
+      editable: file.editable,
+      isEntryFile: file.isEntryFile,
       key: file.path,
       name: file.path.split("/").at(-1) ?? file.path,
       path: file.path,
       source: file.virtual ? "virtual" : "instructions-bundle",
+      virtual: file.virtual,
     }))
-    : agent.data ? buildInstructionDocs(agent.data) : [];
+    : [];
   const selectedInstruction = instructionDocs.find((doc) => doc.key === selectedInstructionKey) ?? instructionDocs[0];
   const selectedBundleFile = useQuery({
     queryKey: ["agent-instructions-file", agentId, selectedInstruction?.path],
@@ -565,31 +671,9 @@ export function AgentPage() {
   }
   function appendInstruction(event: FormEvent) {
     event.preventDefault();
-    if (!agent.data || !newInstructionName.trim()) return;
-    if (bundleFiles.length > 0) {
-      upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
-      setSelectedInstructionKey(newInstructionName.trim());
-      closeInstructionForm();
-      return;
-    }
-    const existingFiles = managedInstructionFiles(agent.data.agentRuntimeConfig).map((doc) => ({
-      content: doc.content,
-      name: doc.name,
-      path: doc.path,
-    }));
-    save.mutate({
-      agentRuntimeConfig: {
-        ...agent.data.agentRuntimeConfig,
-        managedInstructionFiles: [
-          ...existingFiles,
-          {
-            content: "",
-            name: newInstructionName.trim(),
-            path: newInstructionName.trim(),
-          },
-        ],
-      },
-    });
+    if (!newInstructionName.trim()) return;
+    upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
+    setSelectedInstructionKey(newInstructionName.trim());
     closeInstructionForm();
   }
   function enableSkill(name: string) {
@@ -721,6 +805,7 @@ export function AgentPage() {
             {instructionsBundle.error && <ErrorNotice error={instructionsBundle.error} />}
             {selectedBundleFile.error && <ErrorNotice error={selectedBundleFile.error} />}
             {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
+            {deleteInstruction.error && <ErrorNotice error={deleteInstruction.error} />}
             <div className="agent-instructions-grid">
               <aside aria-label="Instruction files" className="instruction-files-card">
                 <div className="instruction-card-header">
@@ -743,7 +828,7 @@ export function AgentPage() {
                     </label>
                     <div className="instruction-create-actions">
                       <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
-                      <button className="small-button" disabled={save.isPending} type="submit">确认</button>
+                      <button className="small-button" disabled={upsertInstruction.isPending} type="submit">确认</button>
                     </div>
                   </form>
                 )}
@@ -761,7 +846,7 @@ export function AgentPage() {
                 </ul>
               </aside>
               <article aria-label="Instruction content" className="instruction-content-card">
-                {bundleFiles.length > 0 && selectedInstruction ? (
+                {selectedInstruction ? (
                   <>
                     <textarea
                       aria-label="说明文件内容"
@@ -771,6 +856,14 @@ export function AgentPage() {
                       onChange={(event) => setInstructionDraft(event.target.value)}
                     />
                     <div className="instruction-create-actions">
+                      <button
+                        className="danger"
+                        disabled={selectedInstruction.isEntryFile || selectedBundleFile.data?.editable === false || deleteInstruction.isPending}
+                        onClick={() => deleteInstruction.mutate(selectedInstruction.path)}
+                        type="button"
+                      >
+                        删除文件
+                      </button>
                       <button
                         disabled={selectedBundleFile.data?.editable === false || upsertInstruction.isPending}
                         onClick={() => upsertInstruction.mutate({ path: selectedInstruction.path, content: instructionDraft })}
@@ -1140,7 +1233,17 @@ export function AgentPage() {
           </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
-            <AgentRunDetail run={selectedRun} />
+            <AgentRunDetail
+              events={runEvents.data ?? []}
+              eventsError={runEvents.error}
+              eventsLoading={runEvents.isLoading}
+              log={runLog.data}
+              logError={runLog.error}
+              operations={runWorkspaceOperations.data ?? []}
+              operationsError={runWorkspaceOperations.error}
+              operationsLoading={runWorkspaceOperations.isLoading}
+              run={selectedRun}
+            />
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">
               <div className="panel-heading">
                 <div>

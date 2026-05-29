@@ -42,6 +42,46 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: "succeeded", sessionDisplayId: "session-1", totalInputTokens: 10, totalOutputTokens: 5, totalCostCents: 1 });
     }
+    if (path === "/api/agents/agent-1/instructions-bundle" && init?.method === "GET") {
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        mode: "managed",
+        rootPath: "D:/work/app/.agent",
+        managedRootPath: "D:/work/app/.agent",
+        entryFile: "SOUL.md",
+        resolvedEntryPath: "D:/work/app/.agent/SOUL.md",
+        editable: true,
+        warnings: [],
+        legacyPromptTemplateActive: false,
+        legacyBootstrapPromptTemplateActive: false,
+        files: [
+          { path: "SOUL.md", size: 20, language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
+          { path: "AGENTS.md", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "TOOLS.md", size: 11, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "MEMORY.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "NOTES.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+        ],
+      });
+    }
+    if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "GET") {
+      const filePath = new URL(`http://local${path}`).searchParams.get("path");
+      const contents: Record<string, string> = {
+        "SOUL.md": "Ship product changes",
+        "AGENTS.md": "",
+        "TOOLS.md": "Tool policy",
+        "MEMORY.md": "Memory policy",
+        "NOTES.md": "Project notes",
+      };
+      return respond({ path: filePath, content: contents[filePath ?? ""] ?? "", size: 0, language: "markdown", markdown: true, isEntryFile: filePath === "SOUL.md", editable: true, deprecated: false, virtual: false });
+    }
+    if (path === "/api/agents/agent-1/instructions-bundle/file" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      return respond({ path: body.path, content: body.content, size: body.content.length, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
+    }
+    if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "DELETE") {
+      return respond({ path: new URL(`http://local${path}`).searchParams.get("path"), content: "", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
+    }
     return respond({ ...agent, status: "paused" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -81,11 +121,11 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(instructionsPanel).getByRole("button", { name: "NOTES.md" })).toBeInTheDocument();
   expect(within(screen.getByRole("complementary", { name: "Instruction files" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
   const instructionContent = screen.getByRole("article", { name: "Instruction content" });
-  expect(within(instructionsPanel).getByText(/Ship product changes/)).toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Ship product changes/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
   expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" }));
-  expect(within(instructionContent).getByText(/Tool policy/)).toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Tool policy/)).toBeInTheDocument();
   const instructionFiles = screen.getByRole("complementary", { name: "Instruction files" });
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "新增文件" }));
   expect(within(instructionFiles).getByLabelText("文件名")).toHaveValue("NEW.md");
@@ -96,11 +136,27 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(instructionFiles).getByRole("button", { name: "取消" })).toBeInTheDocument();
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "确认" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1",
+    "/api/agents/agent-1/instructions-bundle/file",
     expect.objectContaining({
-      method: "PATCH",
-      body: expect.stringContaining("RUNBOOK.md"),
+      method: "PUT",
+      body: JSON.stringify({ path: "RUNBOOK.md", content: "", clearLegacyPromptTemplate: true }),
     }),
+  );
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "SOUL.md" }));
+  fireEvent.change(within(instructionContent).getByLabelText("说明文件内容"), { target: { value: "Updated soul" } });
+  await userEvent.click(within(instructionContent).getByRole("button", { name: "保存文件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/instructions-bundle/file",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ path: "SOUL.md", content: "Updated soul", clearLegacyPromptTemplate: true }),
+    }),
+  );
+  await userEvent.click(within(instructionsPanel).getByRole("button", { name: "NOTES.md" }));
+  await userEvent.click(within(instructionContent).getByRole("button", { name: "删除文件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/instructions-bundle/file?path=NOTES.md",
+    expect.objectContaining({ method: "DELETE" }),
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
   expect(await screen.findByText("succeeded")).toBeInTheDocument();
@@ -182,8 +238,54 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
+      return respond({ content: "raw run log", endOffset: 11, eof: true });
+    }
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
+      return respond([
+        {
+          id: "op-1",
+          orgId: "org-1",
+          executionWorkspaceId: "workspace-1",
+          heartbeatRunId: "run-1",
+          phase: "setup",
+          command: "npm test",
+          cwd: "D:/work/app",
+          status: "failed",
+          exitCode: 1,
+          stdoutExcerpt: "workspace stdout",
+          stderrExcerpt: "workspace stderr",
+          logStore: "local_file",
+          logRef: "logs/op-1.log",
+          logBytes: 32,
+          logSha256: null,
+          logCompressed: false,
+          metadata: null,
+          startedAt: "2026-05-29T01:00:00Z",
+          finishedAt: "2026-05-29T01:00:02Z",
+          createdAt: "2026-05-29T01:00:00Z",
+          updatedAt: "2026-05-29T01:00:02Z",
+        },
+      ]);
+    }
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
-      return respond([{ id: "run-1", status: "succeeded", invocationSource: "on_demand" }]);
+      if (path === "/api/heartbeat-runs/run-1/events") {
+        return respond([
+          { id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "runtime.stderr", stream: "stderr", level: "error", message: "model missing", payload: { phase: "adapter" }, createdAt: "2026-05-29T01:00:01Z" },
+        ]);
+      }
+      return respond([{
+        id: "run-1",
+        status: "failed",
+        invocationSource: "on_demand",
+        error: "Runtime failed",
+        errorCode: "runtime_error",
+        stdoutExcerpt: "boot ok",
+        stderrExcerpt: "model missing",
+        usageJson: { inputTokens: 12 },
+        resultJson: { summary: "failed summary" },
+        contextSnapshot: { workspace: { executionWorkspaceId: "workspace-1" } },
+      }]);
     }
     return respond({ ...agent, name: "Builder 2" });
   });
@@ -212,7 +314,16 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
-  expect(await within(screen.getByTestId("agent-runs-detail-pane")).findByText("succeeded")).toBeInTheDocument();
+  const detail = screen.getByTestId("agent-runs-detail-pane");
+  expect((await within(detail).findAllByText("failed")).length).toBeGreaterThanOrEqual(1);
+  expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
+  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
+  expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
+  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
+  expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
+  expect(within(detail).getByText("raw run log")).toBeInTheDocument();
+  expect(within(detail).getByText("npm test")).toBeInTheDocument();
+  expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
