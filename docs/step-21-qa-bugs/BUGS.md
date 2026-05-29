@@ -28,6 +28,7 @@
 | BUG-21-005 | open | P2 | 否 | agents route 和核心 service 文件偏大，需按职责拆分审查 | Step 21/25 | 文件规模与职责扫描 |
 | BUG-21-006 | open | P3 | 否 | 部分 Step TASK 状态与实际开发进度不一致 | Step 21 | Step TASK 状态扫描 |
 | BUG-21-007 | fixed | P2 | 否 | 组织技能列表向 UI 暴露旧品牌 key 和展示文案 | Step 21 | `test_org_skill_list_seeds_bundled_skills` 期望已改为 `skills/<slug>` 与 `built-in` |
+| BUG-21-008 | fixed | P2 | 否 | 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates | Step 21 | contract 测试已覆盖递归 inventory |
 
 ## 记录模板
 
@@ -177,3 +178,20 @@
 - 处理归属：Step 21。
 - 修复记录：已将内置组织技能 key 统一为 `skills/<slug>`；`control-plane`、`create-agent`、`create-plugin` 使用项目语义 slug；展示字段统一为 `built-in` / `Built-in skill`；旧 `rudder/*` key 仅在 seed 时作为开发期迁移查找兼容，不再作为新返回值。
 - 验证证据：`tests/contract/test_step17_organization_skills.py::test_org_skill_list_seeds_bundled_skills` 已更新期望；当前本机 pytest 执行被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
+
+### BUG-21-008: 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。但会导致组织技能详情页只能看到 `SKILL.md`，无法浏览 community skill 或内置 skill 的参考资料、脚本和模板。
+- 影响范围：`GET /api/orgs/{orgId}/skills`、`GET /api/orgs/{orgId}/skills/{skillId}`、组织技能详情 UI 文件列表。
+- 复现步骤：
+  1. 准备一个包含 `SKILL.md`、`README.md`、`reference/*.md`、`scripts/*.py`、`templates/*.md` 的组织技能目录。
+  2. 请求 `GET /api/orgs/{orgId}/skills`。
+  3. 查看返回的 `fileInventory`。
+- 预期行为：`fileInventory` 应递归列出允许展示的技能文件，并按 `skill/readme/reference/script/template/markdown/other` 标注类型。
+- 实际行为：server seed 和 create 逻辑只写入 `[{ "path": "SKILL.md", "kind": "skill" }]`，导致 UI 不知道还有其他文件。
+- 初步根因：组织技能实现只把 `SKILL.md` 作为固定清单写入数据库，没有按技能根目录递归扫描文件。
+- 处理归属：Step 21。
+- 修复记录：已新增 `_scan_skill_inventory()`，内置技能 seed、组织技能创建、文件更新和响应序列化都复用该扫描逻辑；隐藏文件、缓存目录和 Python bytecode 会被排除。
+- 验证证据：contract 测试已新增 `reference/methodology.md`、`scripts/sync.py`、`templates/note.md` 的 fileInventory 断言；当前本机 pytest 执行仍被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
