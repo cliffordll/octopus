@@ -4187,7 +4187,7 @@ pre {
 }
 
 .agent-skill-tag {
-  align-items: flex-start;
+  align-items: stretch;
   background: #111722;
   border: 1px solid #202a3b;
   border-radius: 14px;
@@ -4209,10 +4209,12 @@ pre {
   background: transparent;
   border: 0;
   color: #dce5f2;
+  cursor: pointer;
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 7px;
+  height: 100%;
   min-width: 0;
   padding: 0;
   text-align: left;
@@ -4224,6 +4226,13 @@ pre {
   gap: 8px;
   justify-content: space-between;
   min-width: 0;
+}
+
+.agent-skill-title-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
 }
 
 .agent-skill-tag-main code {
@@ -4245,7 +4254,9 @@ pre {
   -webkit-line-clamp: 4;
   color: #aab6c8;
   display: -webkit-box;
+  flex: 1;
   line-height: 1.45;
+  min-height: 42px;
   overflow: hidden;
 }
 
@@ -4284,6 +4295,7 @@ pre {
   display: grid;
   gap: 5px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: auto;
 }
 
 .agent-skill-tag-facts > span {
@@ -4299,14 +4311,16 @@ pre {
 }
 
 .agent-skill-row-actions {
-  align-items: flex-end;
+  align-items: flex-start;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex-shrink: 0;
 }
 
-.agent-skill-row-actions .small-button {
+.agent-skill-row-actions .small-button,
+.agent-skill-title-actions .small-button {
   align-items: center;
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid #2b3548;
@@ -4323,7 +4337,8 @@ pre {
   padding: 0 10px;
 }
 
-.agent-skill-row-actions .small-button:hover:not(:disabled) {
+.agent-skill-row-actions .small-button:hover:not(:disabled),
+.agent-skill-title-actions .small-button:hover:not(:disabled) {
   background: rgba(148, 163, 184, 0.18);
   border-color: #3a465a;
 }
