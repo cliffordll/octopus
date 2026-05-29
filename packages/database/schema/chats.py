@@ -113,6 +113,73 @@ class ChatMessage(Base):
     )
 
 
+class Asset(Base):
+    __tablename__ = "assets"
+    __table_args__ = (
+        Index("assets_company_created_idx", "org_id", "created_at"),
+        Index("assets_company_provider_idx", "org_id", "provider"),
+        UniqueConstraint("org_id", "object_key", name="assets_company_object_key_uq"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(Text)
+    created_by_agent_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("agents.id")
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ChatAttachment(Base):
+    __tablename__ = "chat_attachments"
+    __table_args__ = (
+        Index(
+            "chat_attachments_conversation_message_idx",
+            "conversation_id",
+            "message_id",
+        ),
+        Index("chat_attachments_company_conversation_idx", "org_id", "conversation_id"),
+        Index("chat_attachments_asset_idx", "asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    asset_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class ChatConversationUserState(Base):
     __tablename__ = "chat_conversation_user_states"
     __table_args__ = (

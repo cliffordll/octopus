@@ -1,4 +1,5 @@
 ORG_CHAT_LIST_PATH = "/api/orgs/{orgId}/chats"
+ORG_CHAT_ATTACHMENTS_PATH = "/api/orgs/{orgId}/chats/{chatId}/attachments"
 CHAT_DETAIL_PATH = "/api/chats/{id}"
 CHAT_MESSAGES_PATH = "/api/chats/{id}/messages"
 CHAT_MESSAGES_STREAM_PATH = "/api/chats/{id}/messages/stream"

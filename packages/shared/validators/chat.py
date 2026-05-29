@@ -12,6 +12,7 @@ from ..constants.chat import (
 from ..types.chat import (
     AddChatMessagePayload,
     ConvertChatToIssuePayload,
+    CreateChatAttachmentPayload,
     CreateChatContextLinkPayload,
     CreateChatConversationPayload,
     ResolveChatOperationProposalPayload,
@@ -56,6 +57,16 @@ _ISSUE_PROPOSAL_FIELDS = {
 }
 
 _OPERATION_DECISION_ACTIONS = {"approve", "reject", "requestRevision"}
+
+_CREATE_ATTACHMENT_FIELDS = {
+    "messageId",
+    "provider",
+    "objectKey",
+    "contentType",
+    "byteSize",
+    "sha256",
+    "originalFilename",
+}
 
 
 def validate_create_chat_conversation(
@@ -231,6 +242,34 @@ def validate_add_chat_message(payload: Mapping[str, Any]) -> AddChatMessagePaylo
             _validate_uuid(edit_user_message_id, "editUserMessageId")
         result["editUserMessageId"] = edit_user_message_id
     return cast(AddChatMessagePayload, result)
+
+
+def validate_create_chat_attachment_metadata(
+    payload: Mapping[str, Any],
+) -> CreateChatAttachmentPayload:
+    _reject_unknown_fields(payload, _CREATE_ATTACHMENT_FIELDS)
+    result = dict(payload)
+    for field in ("messageId", "provider", "objectKey", "contentType", "sha256"):
+        if field not in result:
+            raise ValueError(f"'{field}' is required")
+    _validate_uuid(result["messageId"], "messageId")
+    result["provider"] = _trimmed_text(result["provider"], "provider", maximum=100)
+    result["objectKey"] = _trimmed_text(result["objectKey"], "objectKey", maximum=2000)
+    result["contentType"] = _trimmed_text(
+        result["contentType"], "contentType", maximum=200
+    )
+    result["sha256"] = _trimmed_text(result["sha256"], "sha256", maximum=200)
+    byte_size = result.get("byteSize")
+    if not isinstance(byte_size, int) or isinstance(byte_size, bool) or byte_size <= 0:
+        raise ValueError("'byteSize' must be a positive integer")
+    if "originalFilename" in result and result["originalFilename"] is not None:
+        result["originalFilename"] = _trimmed_text(
+            result["originalFilename"],
+            "originalFilename",
+            maximum=500,
+            allow_empty=True,
+        )
+    return cast(CreateChatAttachmentPayload, result)
 
 
 def _reject_unknown_fields(payload: Mapping[str, Any], allowed: set[str]) -> None:
