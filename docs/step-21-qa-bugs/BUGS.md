@@ -38,6 +38,8 @@
 | BUG-21-015 | fixed | P2 | 否 | 组织技能列表向 UI 暴露旧品牌 key 和展示文案 | Step 21 | `test_org_skill_list_seeds_bundled_skills` 期望已改为 `skills/<slug>` 与 `built-in` |
 | BUG-21-016 | fixed | P2 | 否 | 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates | Step 21 | contract 测试已覆盖递归 inventory |
 | BUG-21-017 | fixed | P2 | 否 | approval comments / approval-issue 关联 3 个端点 + `approval_comments` 表 + `addApprovalCommentSchema` validator 全部缺失，上游 `approvals.ts:306,645,657` 有 | Step 21 | `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed |
+| BUG-21-018 | fixed | P1 | 是 | chat sync message 只把当前 user body 作为 promptTemplate，不传 conversation 历史，assistant 无 multi-turn 记忆；与上游 `buildPrompt` 行为不一致 | Step 21 | `pytest tests/contract/test_step21_chat_history_prompt.py -q` 3 passed |
+| BUG-21-019 | invalid | P2 | 否 | `GET /api/orgs/{orgId}/messenger/system/{threadKind}` 早前误报 404 | Step 21 | 重测 `failed-runs`/`budget-alerts`/`join-requests` 三个上游真实 kind 全部 200；之前用 `governance/onboarding/...` 等无效 kind 探测才出现 404，属于测试侧错误 |
 
 ## 记录模板
 
@@ -323,6 +325,44 @@
   - `pytest tests/contract/ -q` 全套 287 passed 回归；
   - ruff / pyright 全绿。
 - 已知边界：上游 `services/approvals.ts:254` 在 list/create 时通过 `instanceSettings.censorUsernameInLogs` 做 username redaction；Octopus 当前没 instance_settings 子系统，所以暂不复制 redaction 行为。需要时另起 hotfix。
+
+### BUG-21-018: chat sync message 不传 conversation 历史，assistant 无 multi-turn 记忆
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。chat 多轮对话不能保持上下文 → assistant 第二轮起完全失忆，最小闭环演示「对话」体验断裂。
+- 影响范围：`server/services/chats.py::add_message_and_reply`、`promptTemplate` 协议、所有 chat-capable runtime adapter 行为可观察性。
+- 复现步骤：
+  1. 创建 chat + opencode_local 真 agent (`agentRuntimeConfig.model="opencode/big-pickle"`)。
+  2. POST 第一条消息 "Reply only OK"，assistant 回 "OK"。
+  3. POST 第二条 "What did I ask before?"，观察 assistant 是否记得 turn 1。
+- 预期行为：与上游 `upstream-reference/rudder/server/src/services/chat-assistant.helpers.ts:154-208 buildPrompt` 对齐——adapter 收到的 `promptTemplate` 是 JSON envelope，包含 `conversation` 元信息、`contextLinks`、`recentMessages`（最近 12 条非 superseded message，包含当前 user message）。
+- 实际行为（修复前）：`server/services/chats.py:660` 把 promptTemplate 直接设为 `payload["body"]`，adapter 看到的就是当前 user 一段文本——assistant 回 "No previous user message — this is the start of the conversation"。
+- 初步根因：Python chat service 未 port 上游 buildPrompt 的 JSON envelope 构造逻辑。
+- 处理归属：Step 21。
+- 修复记录：
+  - `server/services/chats.py` 新增 `_build_assistant_prompt(conversation, latest_user_message)` 私有 helper，构造与上游一致的 JSON envelope：`{conversation: {id,title,status,summary,planMode,issueCreationMode,preferredAgentId,routedAgentId,primaryIssueId}, contextLinks: [{entityType,entityId,metadata}], recentMessages: [{id,role,kind,status,body,structuredPayload}]}`，取 `list_messages` 后过滤 `superseded_at IS NULL`、`slice(-12)`，保底把刚 flush 的当前 user message 放尾部。
+  - `add_message_and_reply` 在 adapter.execute 前调用此 helper，promptTemplate 改为 `json.dumps(envelope, ensure_ascii=False, indent=2)`，与上游 `JSON.stringify(..., null, 2)` 行为一致。
+- 验证证据：
+  - 新增 `tests/contract/test_step21_chat_history_prompt.py` 3 个测试：首轮只含当前 user / 第二轮含 turn 1 user+assistant+turn 2 user / 15 轮后只保留最近 12 条且 latest 必在末尾。
+  - `pytest tests/contract/test_step21_chat_history_prompt.py tests/contract/test_step11_chat_loop.py tests/contract/test_step16_chat_assistant_routes.py tests/contract/test_step21_chat_latest_reply_preview.py -q` 14 passed。
+  - `test_step11_chat_loop.py:198` 旧断言 `captured["prompt"] == b"raw body"` 同步更新为 JSON envelope 断言，注释引用上游 file:line。
+  - `pytest tests/contract/ -q` 全套 290 passed。
+  - ruff / pyright 全绿。
+- 已知边界：上游 buildPrompt 还把 message attachments 拼进 envelope；当前 Octopus chat attachments 仍归 Step 18，未引入 attachment hydration，本修复留位 `attachments` 字段为空（adapter 收到 envelope 时若没有 attachments key 仍可降级；上游 buildPrompt 同样会输出空数组）。下一步若引入 chat attachments 再补 attachments hydration。
+
+### BUG-21-019: messenger system thread 404 误报
+
+- 状态：invalid
+- 严重级别：P2
+- 是否阻塞最小闭环：否。
+- 影响范围：`GET /api/orgs/{orgId}/messenger/system/{threadKind}` 路由。
+- 复现步骤（误报）：先前 probe 使用 `governance`/`onboarding`/`workspace`/`run`/`automation`/`default`/`system` 等 kind 名称全部 404。
+- 预期行为：仅 `failed-runs` / `budget-alerts` / `join-requests` 三个 kind 合法，与上游 `packages/shared/src/constants.ts:200 MESSENGER_SYSTEM_THREAD_KINDS` 完全对齐；Octopus `packages/shared/constants/messenger.py:18` 已声明相同集合，service 也实现完整。
+- 实际行为：重测 `failed-runs` / `budget-alerts` / `join-requests` 都返回 200，body 含 `summary`+`messages` 结构。先前结论是测试侧用错 kind。
+- 处理归属：无需修复，本条仅作记录避免再被误读。
+- 修复记录：无。
+- 验证证据：live `GET /api/orgs/{id}/messenger/system/failed-runs` 等三个端点 200。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 

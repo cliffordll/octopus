@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -195,7 +196,22 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
         json={"body": "Implement the next task."},
     )
     assert send_code == 201
-    assert captured["prompt"] == b"Implement the next task."
+    # Prompt now mirrors upstream `chat-assistant.helpers.ts:154-208 buildPrompt`:
+    # JSON envelope including conversation metadata and recent message history
+    # so multi-turn context is preserved. The latest user body must still be
+    # carried in `recentMessages` for the LLM to act on.
+    prompt_bytes = captured["prompt"]
+    assert isinstance(prompt_bytes, bytes)
+    envelope = json.loads(prompt_bytes.decode("utf-8"))
+    assert envelope["conversation"]["id"] == conversation["id"]
+    assert envelope["recentMessages"][-1] == {
+        "id": envelope["recentMessages"][-1]["id"],
+        "role": "user",
+        "kind": "message",
+        "status": "completed",
+        "body": "Implement the next task.",
+        "structuredPayload": None,
+    }
     assert [(message["role"], message["body"]) for message in created["messages"]] == [
         ("user", "Implement the next task."),
         ("assistant", "Reply from Codex"),

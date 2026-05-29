@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Sequence, cast
+import json
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -657,7 +658,13 @@ class ChatService:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
             raise ChatAvailabilityError(str(exc)) from exc
-        config = {**agent.agent_runtime_config, "promptTemplate": payload["body"]}
+        # Mirror upstream `chat-assistant.helpers.ts:154-208 buildPrompt`: ship
+        # the adapter a JSON envelope with conversation metadata, context links
+        # and the most recent 12 non-superseded messages so multi-turn agents
+        # can see prior history. The trailing user message is included via the
+        # `addMessage` flush above, so it is part of the slice.
+        prompt_payload = await self._build_assistant_prompt(conversation, user_message)
+        config = {**agent.agent_runtime_config, "promptTemplate": prompt_payload}
         runtime_context = config.get("_octopus")
         if not isinstance(runtime_context, dict):
             runtime_context = {}
@@ -782,6 +789,62 @@ class ChatService:
             )
             return approval.id
         return None
+
+    async def _build_assistant_prompt(
+        self,
+        conversation: ChatConversationRow,
+        latest_user_message: ChatMessageRow,
+    ) -> str:
+        """Build the JSON envelope passed to the runtime adapter as ``promptTemplate``.
+
+        Mirrors upstream ``chat-assistant.helpers.ts:154-208`` ``buildPrompt``:
+        ships ``conversation`` metadata, hydrated ``contextLinks`` and the most
+        recent 12 non-superseded messages (oldest first). The trailing entry is
+        the message the agent should respond to.
+        """
+
+        messages = await list_messages(self._session, conversation.id)
+        recent = [row for row in messages if row.superseded_at is None][-12:]
+        if not any(row.id == latest_user_message.id for row in recent):
+            recent.append(latest_user_message)
+            recent = recent[-12:]
+        context_links = await self._context_links_for_conversation(conversation.id)
+        return json.dumps(
+            {
+                "conversation": {
+                    "id": conversation.id,
+                    "title": conversation.title,
+                    "status": conversation.status,
+                    "summary": conversation.summary,
+                    "planMode": conversation.plan_mode,
+                    "issueCreationMode": conversation.issue_creation_mode,
+                    "preferredAgentId": conversation.preferred_agent_id,
+                    "routedAgentId": conversation.routed_agent_id,
+                    "primaryIssueId": conversation.primary_issue_id,
+                },
+                "contextLinks": [
+                    {
+                        "entityType": link["entityType"],
+                        "entityId": link["entityId"],
+                        "metadata": link.get("metadata"),
+                    }
+                    for link in context_links
+                ],
+                "recentMessages": [
+                    {
+                        "id": row.id,
+                        "role": row.role,
+                        "kind": row.kind,
+                        "status": row.status,
+                        "body": row.body,
+                        "structuredPayload": row.structured_payload,
+                    }
+                    for row in recent
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     async def _to_conversation(
         self,
