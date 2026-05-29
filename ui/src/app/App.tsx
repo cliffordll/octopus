@@ -13,6 +13,7 @@ import { HomePage } from "../pages/HomePage";
 import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
+import { MessengerPage } from "../pages/MessengerPage";
 import {
   OrganizationIndexPage,
   OrganizationPage,
@@ -50,6 +51,7 @@ export function App() {
         <Route path="orgs/:orgId/agents/:agentId/:tab" element={<AgentPage />} />
         <Route path="orgs/:orgId/chats" element={<ChatsPage />} />
         <Route path="orgs/:orgId/chats/:chatId" element={<ChatPage />} />
+        <Route path="orgs/:orgId/messenger" element={<MessengerPage />} />
       </Route>
     </Routes>
   );
