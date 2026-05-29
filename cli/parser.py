@@ -13,6 +13,7 @@ from .commands import (
     messenger,
     organization,
     project,
+    run_intelligence,
 )
 
 
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     goal.configure(resources)
     agent.configure(resources)
     heartbeat.configure(resources)
+    run_intelligence.configure(resources)
     chat.configure(resources)
     messenger.configure(resources)
     return parser

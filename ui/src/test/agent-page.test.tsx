@@ -121,11 +121,11 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(instructionsPanel).getByRole("button", { name: "NOTES.md" })).toBeInTheDocument();
   expect(within(screen.getByRole("complementary", { name: "Instruction files" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
   const instructionContent = screen.getByRole("article", { name: "Instruction content" });
-  expect(within(instructionsPanel).getByText(/Ship product changes/)).toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Ship product changes/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
   expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" }));
-  expect(within(instructionContent).getByText(/Tool policy/)).toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Tool policy/)).toBeInTheDocument();
   const instructionFiles = screen.getByRole("complementary", { name: "Instruction files" });
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "新增文件" }));
   expect(within(instructionFiles).getByLabelText("文件名")).toHaveValue("NEW.md");
@@ -238,6 +238,36 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
+      return respond({ content: "raw run log", endOffset: 11, eof: true });
+    }
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
+      return respond([
+        {
+          id: "op-1",
+          orgId: "org-1",
+          executionWorkspaceId: "workspace-1",
+          heartbeatRunId: "run-1",
+          phase: "setup",
+          command: "npm test",
+          cwd: "D:/work/app",
+          status: "failed",
+          exitCode: 1,
+          stdoutExcerpt: "workspace stdout",
+          stderrExcerpt: "workspace stderr",
+          logStore: "local_file",
+          logRef: "logs/op-1.log",
+          logBytes: 32,
+          logSha256: null,
+          logCompressed: false,
+          metadata: null,
+          startedAt: "2026-05-29T01:00:00Z",
+          finishedAt: "2026-05-29T01:00:02Z",
+          createdAt: "2026-05-29T01:00:00Z",
+          updatedAt: "2026-05-29T01:00:02Z",
+        },
+      ]);
+    }
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
       if (path === "/api/heartbeat-runs/run-1/events") {
         return respond([
@@ -285,12 +315,15 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
   const detail = screen.getByTestId("agent-runs-detail-pane");
-  expect(await within(detail).findByText("failed")).toBeInTheDocument();
+  expect((await within(detail).findAllByText("failed")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
   expect(within(detail).getByText("boot ok")).toBeInTheDocument();
   expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
   expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
+  expect(within(detail).getByText("raw run log")).toBeInTheDocument();
+  expect(within(detail).getByText("npm test")).toBeInTheDocument();
+  expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 

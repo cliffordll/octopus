@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, UpdateAgentPayload } from "../api/types";
+import type { AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -199,11 +199,21 @@ function AgentRunDetail({
   events = [],
   eventsError,
   eventsLoading,
+  log,
+  logError,
+  operations = [],
+  operationsError,
+  operationsLoading,
   run,
 }: {
   events?: HeartbeatRunEvent[];
   eventsError?: unknown;
   eventsLoading?: boolean;
+  log?: LogReadResult | null;
+  logError?: unknown;
+  operations?: WorkspaceOperation[];
+  operationsError?: unknown;
+  operationsLoading?: boolean;
   run: HeartbeatRun | null;
 }) {
   if (!run) {
@@ -319,6 +329,38 @@ function AgentRunDetail({
                 {event.message && <p>{event.message}</p>}
                 {hasJsonObject(event.payload) && <pre className="agent-run-json">{formattedJson(event.payload)}</pre>}
                 <small className="muted">{event.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>原始日志</h3>
+        {Boolean(logError) && <ErrorNotice error={logError} />}
+        {log?.content ? (
+          <pre className="agent-run-json">{log.content}</pre>
+        ) : (
+          <p className="muted">暂无日志。</p>
+        )}
+      </section>
+      <section className="agent-run-debug-section">
+        <h3>工作区操作</h3>
+        {Boolean(operationsError) && <ErrorNotice error={operationsError} />}
+        {operationsLoading && <p className="muted">加载工作区操作中...</p>}
+        {!operationsLoading && operations.length === 0 && <p className="muted">暂无工作区操作。</p>}
+        {operations.length > 0 && (
+          <div className="agent-run-events">
+            {operations.map((operation) => (
+              <article className="agent-run-event" key={operation.id}>
+                <div className="agent-run-event-header">
+                  <strong>{operation.phase}</strong>
+                  <Badge>{operation.status}</Badge>
+                  {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
+                </div>
+                {operation.command && <p>{operation.command}</p>}
+                {operation.stderrExcerpt && <pre className="run-excerpt error">{operation.stderrExcerpt}</pre>}
+                {operation.stdoutExcerpt && <pre className="run-excerpt">{operation.stdoutExcerpt}</pre>}
+                <small className="muted">{operation.cwd ?? operation.id}</small>
               </article>
             ))}
           </div>
@@ -566,6 +608,18 @@ export function AgentPage() {
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", selectedRun?.id],
     queryFn: () => heartbeatApi.listEvents(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", selectedRun?.id],
+    queryFn: () => heartbeatApi.getLog(selectedRun!.id),
+    enabled: activeTab === "runs" && Boolean(selectedRun?.id),
+    refetchInterval: selectedRun?.status === "running" ? 5000 : false,
+  });
+  const runWorkspaceOperations = useQuery({
+    queryKey: ["heartbeat-run-workspace-operations", selectedRun?.id],
+    queryFn: () => heartbeatApi.listWorkspaceOperations(selectedRun!.id),
     enabled: activeTab === "runs" && Boolean(selectedRun?.id),
     refetchInterval: selectedRun?.status === "running" ? 5000 : false,
   });
@@ -1183,6 +1237,11 @@ export function AgentPage() {
               events={runEvents.data ?? []}
               eventsError={runEvents.error}
               eventsLoading={runEvents.isLoading}
+              log={runLog.data}
+              logError={runLog.error}
+              operations={runWorkspaceOperations.data ?? []}
+              operationsError={runWorkspaceOperations.error}
+              operationsLoading={runWorkspaceOperations.isLoading}
               run={selectedRun}
             />
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">

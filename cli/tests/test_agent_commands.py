@@ -627,3 +627,102 @@ def test_heartbeat_debug_fetches_run_and_events() -> None:
     assert "model missing" in output
     assert requests[0].url.path == "/api/heartbeat-runs/run-1"
     assert requests[1].url.path == "/api/heartbeat-runs/run-1/events"
+
+
+def test_heartbeat_observability_commands_use_existing_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/log"):
+            return httpx.Response(
+                200,
+                json={"content": "raw run log", "endOffset": 11, "eof": True},
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "op-1",
+                    "phase": "setup",
+                    "status": "failed",
+                    "command": "npm test",
+                    "stderrExcerpt": "workspace stderr",
+                }
+            ],
+        )
+
+    stdout = io.StringIO()
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            ["heartbeat", "log", "run-1", "--offset", "10", "--limit-bytes", "64"],
+            client=client,
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert (
+        main(
+            ["heartbeat", "workspace-operations", "run-1"],
+            client=client,
+            stdout=stdout,
+        )
+        == 0
+    )
+    output = stdout.getvalue()
+    assert "raw run log" in output
+    assert "workspace stderr" in output
+    assert requests[0].url.path == "/api/heartbeat-runs/run-1/log"
+    assert requests[0].url.params["offset"] == "10"
+    assert requests[0].url.params["limitBytes"] == "64"
+    assert requests[1].url.path == "/api/heartbeat-runs/run-1/workspace-operations"
+
+
+def test_run_intelligence_commands_use_existing_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/events"):
+            return httpx.Response(200, json=[{"eventType": "runtime.stderr"}])
+        if request.url.path.endswith("/log"):
+            return httpx.Response(200, json={"content": "run intelligence log"})
+        return httpx.Response(
+            200,
+            json={
+                "run": {"id": "run-1", "status": "failed"},
+                "agentName": "Builder",
+                "orgName": "OCT",
+            },
+        )
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "run-intelligence",
+                "list",
+                "--org-id",
+                "org-1",
+                "--status",
+                "failed",
+                "--agent-id",
+                "agent-1",
+                "--limit",
+                "5",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert main(["run-intelligence", "get", "run-1"], client=client) == 0
+    assert main(["run-intelligence", "events", "run-1"], client=client) == 0
+    assert main(["run-intelligence", "log", "run-1"], client=client) == 0
+    assert requests[0].url.path == "/api/run-intelligence/orgs/org-1/runs"
+    assert requests[0].url.params["status"] == "failed"
+    assert requests[0].url.params["agentId"] == "agent-1"
+    assert requests[0].url.params["limit"] == "5"
+    assert requests[1].url.path == "/api/run-intelligence/runs/run-1"
+    assert requests[2].url.path == "/api/run-intelligence/runs/run-1/events"
+    assert requests[3].url.path == "/api/run-intelligence/runs/run-1/log"
