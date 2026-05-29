@@ -31,6 +31,10 @@
 | BUG-21-008 | fixed | P1 | 否 | issue 响应缺 `cancelledAt` 字段，与上游 schema 列 `cancelled_at` 与 type 字段 `cancelledAt` 不一致 | Step 21 | `pytest tests/contract/test_step21_issue_cancelled_at.py -q` |
 | BUG-21-009 | fixed | P1 | 是 | issue 状态翻转不自动写 `started_at` / `completed_at` / `cancelled_at`（上游 `applyStatusSideEffects` 行为缺失） | Step 21 | `pytest tests/contract/test_step21_issue_status_timestamps.py -q` |
 | BUG-21-010 | fixed | P1 | 是 | Windows 上 CLI-based runtime（codex_local / opencode_local / claude_local / process）`asyncio.create_subprocess_exec` 抛 `FileNotFoundError`，chat sync 直接 500 | Step 21 | `pytest tests/contract/test_step14_runtime_adapters.py -q` 23 passed + opencode/big-pickle 端到端 chat assistant reply OK |
+| BUG-21-011 | fixed | P1 | 否 | issue 创建后 `identifier` / `issueNumber` 永远 null，UI 显示「未编号」，链接如 `/{prefix}/issues/{identifier}` 无法构造 | Step 21 | `pytest tests/contract/test_step21_issue_identifier.py -q` 2 passed + live POST /api/orgs/{id}/issues 返回 identifier="950276-1" |
+| BUG-21-012 | fixed | P1 | 否 | approval `decidedByUserId` 缺默认 `"board"`，与上游 `resolveApprovalSchema.decidedByUserId.default("board")` 不一致 | Step 21 | `pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed |
+| BUG-21-013 | fixed | P1 | 是 | approval 缺 `resolvableStatuses` 前置检查，已 `approved`/`rejected` 仍可改 status，破坏 approval gate 不变量 | Step 21 | `pytest tests/contract/test_step21_approval_resolution.py -q` 含 3 个覆盖 idempotent/同状态/异常状态拒绝 |
+| BUG-21-014 | fixed | P1 | 否 | chat detail `latestReplyPreview` 永远为空，与 messenger threads preview 不一致；UI 列表预览失效 | Step 21 | `pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed |
 
 ## 记录模板
 
@@ -204,6 +208,89 @@
   - `uv run pytest tests/contract/test_step14_runtime_adapters.py -q` 23 passed
   - Live：opencode_local agent + `agentRuntimeConfig.model="opencode/big-pickle"`，`POST /api/chats/{id}/messages` 真实返回 assistant reply "OK"
   - ruff / pyright 全绿
+
+### BUG-21-011: issue 创建后 identifier / issueNumber 永远 null
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。issue 仍可创建和流转，只是缺少人类可读编号。但 UI 显示「未编号」、上游链接模板（`/{prefix}/issues/{identifier}`）无法构造、列表搜索和 ticket 引用全部失效。
+- 影响范围：`server/services/issues.py create_issue`、`packages/database/queries/organizations.py`、`packages/database/schema/organizations.py` 的 `issue_prefix` / `issue_counter` 列、所有引用 identifier 的 UI 与外部消费方。
+- 复现步骤：
+  1. `POST /api/orgs` 建组织。
+  2. `POST /api/orgs/{orgId}/issues { title }` 创建 issue。
+  3. `GET /api/issues/{id}`，观察 `identifier` 与 `issueNumber`。
+- 预期行为：与上游 `upstream-reference/rudder/server/src/services/issues.ts:797-804` 对齐：
+  - `UPDATE organizations SET issue_counter = issue_counter + 1 WHERE id = :org_id RETURNING issue_counter, issue_prefix` 原子自增。
+  - 新 issue 写入 `issue_number = counter` 和 `identifier = f"{prefix}-{counter}"`。
+- 实际行为（修复前）：`server/services/issues.py:187` 直接 `create_issue(session, values)`，values 不含 issue_number/identifier；DB 列 nullable，全部留 null。
+- 初步根因：Python create_issue service 缺少 port 上游的 atomic counter increment + identifier 拼装。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/queries/organizations.py` 新增 `increment_issue_counter(session, org_id) -> tuple[int, str] | None`，单 SQL `UPDATE ... RETURNING` 原子自增并返回 `(new_counter, prefix)`。
+  - `server/services/issues.py create_issue` 在 `create_issue(...)` 前调用 helper，设置 `values["issue_number"]` 和 `values["identifier"] = f"{prefix}-{number}"`。
+  - 同时把 `_apply_status_side_effects(values)` 也加进 create 路径，对齐上游 `services/issues.ts:820-828` 在 insert 前 inline 复制的 same 时间戳逻辑。
+- 验证证据：
+  - `pytest tests/contract/test_step21_issue_identifier.py -q` 2 passed（覆盖单 org 自增 PAP-1/PAP-2/PAP-3 与跨 org 隔离）；
+  - 同套 issue 测试 `pytest tests/contract/test_step8_issue_management.py tests/contract/test_step21_issue_cancelled_at.py tests/contract/test_step21_issue_status_timestamps.py -q` 14 passed 回归无破坏；
+  - Live `POST /api/orgs/{orgId}/issues` 返回 `identifier="950276-1"`、`issueNumber=1`，第二次返回 `950276-2`、`issueNumber=2`；
+  - ruff / pyright 全绿。
+- 已知边界：当前 org 创建时的 `issue_prefix` 是 octopus 自己生成（取 org_id 首 6 位）；上游默认是固定 `"PAP"`。两边都是 issue prefix 来源问题，但不影响 identifier 拼装语义，作为独立调查项处理，不在本 bug 范围。
+
+### BUG-21-012: approval `decidedByUserId` 缺默认值 `"board"`
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 board actor approve/reject/request-revision 必须显式传字段；与上游契约不一致。
+- 影响范围：`packages/shared/validators/approval.py`、`POST /api/approvals/{id}/{approve,reject,request-revision}` 三个端点；持久化的 `approvals.decided_by_user_id` 列。
+- 复现步骤：`POST /api/approvals/{id}/approve` 传 `{}`，观察响应 `decidedByUserId`。
+- 预期行为：与上游 `resolveApprovalSchema.decidedByUserId.default("board")`、`requestApprovalRevisionSchema.decidedByUserId.default("board")` 对齐（`upstream-reference/rudder/packages/shared/src/validators/approval.ts:15,23`），返回值含 `decidedByUserId="board"`。
+- 实际行为（修复前）：`validate_resolve_approval`、`validate_request_approval_revision` 仅做类型校验，不 setdefault；响应 `decidedByUserId=null`。
+- 初步根因：Octopus validator 没 port 上游 zod default。
+- 处理归属：Step 21。
+- 修复记录：`validate_resolve_approval` 在 type check 通过后构造 `dict(payload)` 并 `setdefault("decidedByUserId", "board")`，cast 后返回；`validate_request_approval_revision` 改为使用 `validate_resolve_approval` 返回值（之前丢弃返回）。
+- 验证证据：`pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed；`pytest tests/contract/test_step3_shared_contract.py -q` 36 passed（更新了 `test_validate_resolve_approval_empty_ok` 以反映新行为）；ruff / pyright 全绿。
+
+### BUG-21-013: approval 缺 resolvable 状态前置检查
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。破坏 approval 状态机不变量（上游 AGENTS.md §5「Approval gates for governed actions」）；已 approved/rejected 仍可被改 status，治理记录失真。
+- 影响范围：`server/services/approvals.py::_resolve_approval`、`server/routes/approvals.py` 三个 resolve 路由；activity log 含错误的二次决策。
+- 复现步骤：
+  1. 创建 approval（status=pending）。
+  2. `POST /approvals/{id}/approve {}` → status=approved。
+  3. 再次 `POST /approvals/{id}/approve {}` 或 `POST /approvals/{id}/reject {}`。
+- 预期行为：与上游 `services/approvals.ts:15,45-52` 对齐：
+  - 同 target status：返回当前 row（idempotent，200，无副作用）。
+  - 不同 terminal status（已 approved 后 reject 等）：抛 unprocessable，返回 422。
+  - 只有 `pending` / `revision_requested` 才能转 approved/rejected/revision_requested。
+- 实际行为（修复前）：service 直接 update row.status，无前置检查；任何状态下重复调用都成功。
+- 初步根因：Python 实现 `_resolve_approval` 跳过了上游 `canResolveStatuses` 校验。
+- 处理归属：Step 21。
+- 修复记录：
+  - `server/services/approvals.py` 新增 `_RESOLVABLE_APPROVAL_STATUSES = frozenset({"pending", "revision_requested"})`。
+  - `_resolve_approval` 在 update 前检查 `current.status`：同 target → 直接返回 `_to_detail(current)`（idempotent 路径）；其他 → `raise ValueError("Only pending or revision requested approvals can be ...")`。
+  - `server/routes/approvals.py` 三个 resolve route 把 service 调用包进 try/except ValueError → 422，保留 detail。
+- 验证证据：`pytest tests/contract/test_step21_approval_resolution.py -q` 6 passed（覆盖 idempotent / 异常状态拒绝 / 从 revision_requested 决策）；`pytest tests/contract/test_step9_approval_management.py tests/workflows/test_step9_approval_workflow.py -q` 回归 32 passed；ruff / pyright 全绿。
+
+### BUG-21-014: chat detail `latestReplyPreview` 永远为空
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：否。但 UI chat 列表 / 详情显示「最新回复」永远空；与 messenger threads preview 不一致。
+- 影响范围：`server/services/chats.py::_to_conversation`、`packages/database/queries/chats.py`、所有 chat detail/list 端点。
+- 复现步骤：
+  1. 创建 chat。
+  2. 写入 assistant message（real chat sync flow 或直接 DB seed）。
+  3. `GET /api/chats/{id}` 观察 `latestReplyPreview`。
+- 预期行为：与上游 `services/chats.ts:280` + `listLatestReplyPreviews` 一致：取最新非-user role 且 trim 后非空的 message body，截断到 140 字符。
+- 实际行为（修复前）：`_to_conversation` 硬编码 `"latestReplyPreview": None`，无论是否有 assistant 回复。
+- 初步根因：octopus 实现遗漏了 latestReplyPreview hydrate 逻辑。
+- 处理归属：Step 21。
+- 修复记录：
+  - `packages/database/queries/chats.py` 新增 `get_latest_incoming_message_preview(session, conversation_id) -> str | None`，对齐上游 `incomingMessagePreviewSql` filter：`role != 'user'`、`superseded_at IS NULL`，按 `created_at desc` 取首条；返回 trim 后值。
+  - `server/services/chats.py::_to_conversation` 调用此 helper，截到 140 字符。
+- 验证证据：`pytest tests/contract/test_step21_chat_latest_reply_preview.py -q` 4 passed（覆盖最新 assistant body / 忽略 user role / 140 截断 / 无 incoming message 时 null）；chat 套件 `pytest tests/contract/test_step11_chat_loop.py tests/contract/test_step16_chat_routes.py -q` 回归 8 passed；ruff / pyright 全绿。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 

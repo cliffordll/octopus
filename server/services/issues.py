@@ -22,6 +22,7 @@ from packages.database.queries.issues import (
     list_org_issues,
     update_issue,
 )
+from packages.database.queries.organizations import increment_issue_counter
 from packages.database.schema import Asset, Issue, IssueAttachment, IssueComment
 from packages.shared.constants.issue import (
     IssueOriginKind,
@@ -184,6 +185,13 @@ class IssueService:
             ).get_default_organization_goal(org_id)
             if default_goal is not None:
                 values["goal_id"] = default_goal["id"]
+        counter = await increment_issue_counter(self._session, org_id)
+        if counter is None:
+            raise ValueError("Organization not found")
+        issue_number, issue_prefix = counter
+        values["issue_number"] = issue_number
+        values["identifier"] = f"{issue_prefix}-{issue_number}"
+        _apply_status_side_effects(values)
         row = await create_issue(self._session, values)
         await insert_activity_log(
             self._session,

@@ -93,15 +93,20 @@ def validate_resolve_approval(payload: Mapping[str, Any]) -> ResolveApprovalPayl
     if "payload" in payload and not isinstance(payload["payload"], dict):
         raise ValueError("'payload' must be an object")
 
-    return cast(ResolveApprovalPayload, payload)
+    # Mirror upstream `resolveApprovalSchema.decidedByUserId.default("board")` in
+    # `packages/shared/src/validators/approval.ts:15`.
+    result = dict(payload)
+    result.setdefault("decidedByUserId", "board")
+    return cast(ResolveApprovalPayload, result)
 
 
 def validate_request_approval_revision(
     payload: Mapping[str, Any],
 ) -> RequestApprovalRevisionPayload:
-    _reject_unknown_fields(payload, allowed_fields=_RESOLVE_APPROVAL_FIELDS)
-    validate_resolve_approval(payload)
-    return cast(RequestApprovalRevisionPayload, payload)
+    # Mirror upstream `requestApprovalRevisionSchema.decidedByUserId.default("board")`
+    # in `packages/shared/src/validators/approval.ts:23`.
+    result = validate_resolve_approval(payload)
+    return cast(RequestApprovalRevisionPayload, result)
 
 
 def validate_resubmit_approval(payload: Mapping[str, Any]) -> ResubmitApprovalPayload:

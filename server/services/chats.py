@@ -18,6 +18,7 @@ from packages.database.queries.chats import (
     delete_project_context_links,
     get_conversation,
     get_conversation_user_state,
+    get_latest_incoming_message_preview,
     get_message,
     list_attachments_for_messages,
     list_conversations,
@@ -799,13 +800,18 @@ class ChatService:
         is_unread = _is_unread(row, user_state)
         context_links = await self._context_links_for_conversation(row.id)
         primary_issue = await self._primary_issue_summary(row.primary_issue_id)
+        latest_reply_preview = await get_latest_incoming_message_preview(
+            self._session, row.id
+        )
+        if latest_reply_preview is not None and len(latest_reply_preview) > 140:
+            latest_reply_preview = latest_reply_preview[:140]
         return {
             "id": row.id,
             "orgId": row.org_id,
             "status": cast(ChatConversationStatus, row.status),
             "title": row.title,
             "summary": row.summary,
-            "latestReplyPreview": None,
+            "latestReplyPreview": latest_reply_preview,
             "searchPreview": None,
             "preferredAgentId": row.preferred_agent_id,
             "routedAgentId": row.routed_agent_id,
