@@ -280,10 +280,10 @@ small {
 }
 
 .org-content {
-  max-width: 1120px;
   min-width: 0;
   overflow: auto;
   padding: 32px 36px 42px;
+  width: 100%;
 }
 
 .org-content-full {
@@ -521,15 +521,14 @@ small {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 860px;
 }
 
 .project-tab-panel {
-  max-width: 896px;
+  width: 100%;
 }
 
 .project-tab-panel-wide {
-  max-width: 1040px;
+  width: 100%;
 }
 
 .project-property-list {
@@ -687,7 +686,7 @@ small {
   grid-template-columns: 300px minmax(0, 1fr);
   height: calc(100vh - 152px);
   min-height: 560px;
-  max-width: 1280px;
+  width: 100%;
 }
 
 .workspace-files-card,
@@ -2334,8 +2333,7 @@ button.danger {
   display: grid;
   gap: 24px;
   grid-template-columns: minmax(0, 1fr) 280px;
-  margin: 0 auto;
-  max-width: 1180px;
+  width: 100%;
 }
 
 .issue-detail-main {
@@ -2666,7 +2664,6 @@ pre {
 .approval-thread {
   display: grid;
   gap: 14px;
-  max-width: 860px;
 }
 
 .approval-card {
@@ -2727,7 +2724,7 @@ pre {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) 320px;
-  max-width: 1040px;
+  width: 100%;
 }
 
 .approval-detail,
@@ -2816,7 +2813,7 @@ pre {
 
 .agent-config-card,
 .agent-create-form {
-  max-width: 720px;
+  width: 100%;
 }
 
 .agent-property-list {
@@ -4265,7 +4262,7 @@ pre {
 }
 
 .project-configuration, .project-resources, .project-issues {
-  max-width: 760px;
+  width: 100%;
 }
 
 .agent-empty-state {
@@ -4308,7 +4305,7 @@ pre {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 145px);
-  max-width: 860px;
+  width: 100%;
 }
 
 .chat-thread-shell {
