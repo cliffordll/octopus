@@ -534,7 +534,15 @@ const DEFAULT_SKILL_MARKDOWN = "Use this skill when it is relevant to the curren
 
 function isBundledOrganizationSkill(skill: OrganizationSkillListItem): boolean {
   const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : null;
-  return sourceKind === "rudder_bundled" || skill.sourceBadge === "rudder" || skill.key.startsWith("rudder/");
+  return sourceKind?.includes("bundled") === true || skill.sourceBadge === "bundled";
+}
+
+function organizationSkillSourceText(value: string | null | undefined, bundled: boolean, fallback = "系统内置"): string {
+  if (bundled) return "系统内置";
+  if (!value) return fallback;
+  const normalized = value.toLowerCase();
+  if (normalized.includes("bundled")) return "系统内置";
+  return value;
 }
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
@@ -672,7 +680,7 @@ export function OrganizationSkillsPage() {
                   >
                     <span className="organization-skill-list-card-title">
                       <strong>{skill.name}</strong>
-                      <small>{skill.sourceBadge}</small>
+                      <small>{organizationSkillSourceText(skill.sourceBadge, isBundledOrganizationSkill(skill))}</small>
                     </span>
                     {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
                     <span className="organization-skill-list-card-meta">
@@ -692,13 +700,13 @@ export function OrganizationSkillsPage() {
                 <div>
                   <div className="organization-skill-title-row">
                     <h2>{selectedSkill.name}</h2>
-                    <Badge>{selectedSkill.sourceBadge}</Badge>
+                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</Badge>
                     <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                   </div>
                   <p>{selectedSkill.description || "未填写描述"}</p>
-                  <p className="muted">{selectedSkill.sourceLabel ?? selectedSkill.slug}</p>
+                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBundledOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
                   {!selectedSkill.editable && selectedSkill.editableReason && (
-                    <p className="organization-skill-readonly">只读：{selectedSkill.editableReason}</p>
+                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBundledOrganizationSkill(selectedSkill))}</p>
                   )}
                 </div>
                 <div className="row-actions">
@@ -719,14 +727,14 @@ export function OrganizationSkillsPage() {
               <div className="organization-skill-info-grid">
                 <div>
                   <span>来源</span>
-                  <strong>{selectedSkill.sourceLabel ?? selectedSkill.sourceBadge}</strong>
+                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</strong>
                 </div>
                 <div>
-                  <span>Source path</span>
+                  <span>来源路径</span>
                   <strong>{selectedSkill.sourcePath ?? "未设置"}</strong>
                 </div>
                 <div>
-                  <span>Workspace edit path</span>
+                  <span>工作区编辑路径</span>
                   <strong>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
                 </div>
                 <div>
@@ -750,7 +758,7 @@ export function OrganizationSkillsPage() {
               <div className="organization-skill-content-layout">
                 <aside className="organization-skill-files">
                   <div className="organization-skill-files-header">
-                    <h3>Files</h3>
+                    <h3>文件</h3>
                     <span>{selectedSkill.fileInventory.length}</span>
                   </div>
                   {selectedSkill.fileInventory.map((file) => (
@@ -810,7 +818,7 @@ export function OrganizationSkillsPage() {
             <label>名称<input value={newName} onChange={(event) => setNewName(event.target.value)} required /></label>
             <label>Short name<input value={newSlug} onChange={(event) => setNewSlug(event.target.value)} placeholder="incident-response" /></label>
             <label>描述<input value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /></label>
-            <label>Skill 内容<textarea className="skill-yaml-textarea" value={newMarkdown} onChange={(event) => setNewMarkdown(event.target.value)} /></label>
+            <label>技能内容<textarea className="skill-yaml-textarea" value={newMarkdown} onChange={(event) => setNewMarkdown(event.target.value)} /></label>
             {createSkill.error && <ErrorNotice error={createSkill.error} />}
             <div className="task-modal-actions">
               <button className="secondary" onClick={() => setCreateOpen(false)} type="button">取消</button>

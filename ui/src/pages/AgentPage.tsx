@@ -187,9 +187,9 @@ function booleanSkillField(entry: Record<string, unknown>, key: string): boolean
 function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string {
   const explicit = skillField(entry, ["loadNote", "loadingNote", "detail"], "");
   if (explicit) return explicit;
-  if (booleanSkillField(entry, "alwaysEnabled")) return "Always loaded by Rudder for every agent run.";
-  if (enabled) return "Enabled for this agent. Future runs can load this skill.";
-  return "Installed, not enabled. Future runs will not load it until enabled.";
+  if (booleanSkillField(entry, "alwaysEnabled")) return "每次智能体运行都会自动加载。";
+  if (enabled) return "当前智能体已使用该技能，后续运行可加载。";
+  return "已安装，当前智能体尚未使用。";
 }
 
 function skillEntryName(entry: Record<string, unknown>): string {
@@ -231,6 +231,14 @@ function skillState(entry: Record<string, unknown>): string {
 
 function skillSourceLabel(entry: Record<string, unknown>): string {
   return skillField(entry, ["selectionKey", "sourceClass", "source", "origin", "scope", "kind"], "runtime");
+}
+
+function skillDisplaySourceText(value: string | null | undefined, bundled: boolean): string {
+  if (bundled) return "系统内置";
+  if (!value) return "-";
+  const normalized = value.toLowerCase();
+  if (normalized.includes("bundled")) return "系统内置";
+  return value;
 }
 
 function AgentRunDetail({ run }: { run: HeartbeatRun | null }) {
@@ -851,7 +859,7 @@ export function AgentPage() {
                       {permissionRows.length > 0 ? permissionRows.map(([key, enabled]) => (
                         <div className="agent-permission-item" key={key}>
                           <span>{key}</span>
-                          <Badge>{enabled ? "允许" : "禁用"}</Badge>
+                          <Badge>{enabled ? "允许" : "不允许"}</Badge>
                         </div>
                       )) : (
                         <p className="muted">当前接口未返回权限明细。</p>
@@ -864,7 +872,7 @@ export function AgentPage() {
                       <p className="muted">密钥不在页面明文保存；运行时通过环境变量、本地 CLI 登录或后续真实 secret 绑定提供。</p>
                     </div>
                     <div className="agent-summary-grid">
-                      <div className="summary-metric"><span>本地 Agent JWT</span><strong>{adapterMetadata.data?.supportsLocalAgentJwt ? "支持" : "未启用"}</strong></div>
+                      <div className="summary-metric"><span>本地 Agent JWT</span><strong>{adapterMetadata.data?.supportsLocalAgentJwt ? "支持" : "未开启"}</strong></div>
                       <div className="summary-metric"><span>认证检查</span><strong>{adapterTestChecks.find((check) => check.id === "auth")?.status ?? "未测试"}</strong></div>
                     </div>
                   </section>
@@ -909,7 +917,7 @@ export function AgentPage() {
                 <div className="agent-summary-grid">
                   <div className="summary-metric"><span>Runtime</span><strong>{runtime}</strong></div>
                   <div className="summary-metric"><span>Models</span><strong>{adapterModelRows.length}</strong></div>
-                  <div className="summary-metric"><span>Skills</span><strong>{adapterMetadata.data?.capabilities?.skills ? "supported" : "unsupported"}</strong></div>
+                  <div className="summary-metric"><span>技能</span><strong>{adapterMetadata.data?.capabilities?.skills ? "支持" : "不支持"}</strong></div>
                   <div className="summary-metric"><span>Quota</span><strong>{adapterQuotaWindows.data?.ok ? "ok" : (adapterQuotaWindows.data?.error ?? "unknown")}</strong></div>
                 </div>
                 {adapterMetadata.data?.agentConfigurationDoc && (
@@ -1000,8 +1008,8 @@ export function AgentPage() {
           {activeTab === "skills" && <section className="agent-skills-page">
             <div className="agent-skills-page-header">
               <div>
-                <h2>Skill 管理</h2>
-                <p className="muted">管理当前智能体的 skill 列表、启用状态和私有 skill 安装。</p>
+                <h2>技能管理</h2>
+                <p className="muted">管理当前智能体的技能列表、使用状态和私有技能安装。</p>
               </div>
               <button onClick={() => setSkillDialogOpen(true)} type="button">创建技能</button>
             </div>
@@ -1054,12 +1062,12 @@ export function AgentPage() {
                           <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
                             <span className="agent-skill-tag-title-row">
                               <code>{name}</code>
-                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "已启用" : "未启用"}</span>
+                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
                             <span className="agent-skill-tag-note">{loadNote}</span>
                             <span className="agent-skill-tag-facts">
-                              <span><small>来源</small>{originLabel || sourceLabel}</span>
+                              <span><small>来源</small>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
                               <span><small>状态</small>{state}</span>
                               <span><small>版本</small>{version ? `v${version}` : "-"}</span>
                               <span><small>{locationLabel ? "位置" : "标签"}</small>{locationLabel || tags}</span>
@@ -1067,7 +1075,7 @@ export function AgentPage() {
                           </button>
                           <div className="agent-skill-row-actions">
                             {isBundled ? (
-                              <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">Fork</button>
+                              <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">派生</button>
                             ) : (
                               <>
                                 <button
@@ -1076,9 +1084,9 @@ export function AgentPage() {
                                   onClick={() => (enabled ? disableSkill(actionName) : enableSkill(actionName))}
                                   type="button"
                                 >
-                                  {enabled ? "Disable" : "Enable"}
+                                  {enabled ? "取消使用" : "使用"}
                                 </button>
-                                <button className="danger small-button" disabled type="button">Delete</button>
+                                <button className="danger small-button" disabled type="button">删除</button>
                               </>
                             )}
                           </div>
@@ -1096,7 +1104,7 @@ export function AgentPage() {
                   <div className="task-modal-header">
                     <div>
                       <h2>创建技能</h2>
-                      <p className="muted">安装为当前智能体私有 skill。Short name 可选，不填时由服务端根据名称生成。</p>
+                      <p className="muted">安装为当前智能体私有技能。Short name 可选，不填时由服务端根据名称生成。</p>
                     </div>
                   </div>
                   <label>
@@ -1112,7 +1120,7 @@ export function AgentPage() {
                     <input value={newSkillDescription} onChange={(event) => setNewSkillDescription(event.target.value)} />
                   </label>
                   <label>
-                    Skill 内容
+                    技能内容
                     <textarea
                       className="skill-yaml-textarea"
                       placeholder={"schema_version: 1\nprompt: ..."}

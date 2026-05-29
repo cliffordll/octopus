@@ -50,7 +50,7 @@ it("shows organization skills and edits the selected skill file", async () => {
         {
           id: "skill-bundled",
           orgId: "org-1",
-          key: "rudder/skill-creator",
+          key: "system/skill-creator",
           slug: "skill-creator",
           name: "Skill Creator",
           description: "Create durable agent skills",
@@ -61,14 +61,14 @@ it("shows organization skills and edits the selected skill file", async () => {
           trustLevel: "markdown_only",
           compatibility: "compatible",
           fileInventory: [{ path: "SKILL.md", kind: "skill" }],
-          metadata: { sourceKind: "rudder_bundled" },
+          metadata: { sourceKind: "system_bundled" },
           createdAt: "",
           updatedAt: "",
           attachedAgentCount: 2,
           editable: false,
-          editableReason: "Bundled by Rudder",
-          sourceLabel: "Bundled by Rudder",
-          sourceBadge: "rudder",
+          editableReason: "Bundled reference",
+          sourceLabel: "Bundled reference",
+          sourceBadge: "bundled",
           sourcePath: "server/skills/bundled/skill-creator",
           workspaceEditPath: null,
         },
@@ -143,10 +143,10 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "本地组织技能" })).toBeInTheDocument();
   expect((await screen.findAllByText("Create durable agent skills")).length).toBeGreaterThanOrEqual(2);
-  expect(screen.getAllByText("Bundled by Rudder").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText("系统内置").length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText("2 智能体")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
-  expect(screen.getByText("只读：Bundled by Rudder")).toBeInTheDocument();
+  expect(screen.getByText("只读：系统内置")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
   expect(screen.getByText("Builder")).toBeInTheDocument();
   expect(screen.getByText("Reviewer")).toBeInTheDocument();
@@ -156,7 +156,7 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByRole("button", { name: /Review/ })).toHaveClass("selected");
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review")).toBeInTheDocument();
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review/SKILL.md")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /references\/checklist.md/ })).toBeInTheDocument();
   const editor = await screen.findByLabelText("SKILL.md");
   await userEvent.type(editor, "{End}{Enter}Updated");
