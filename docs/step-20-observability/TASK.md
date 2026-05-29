@@ -1,10 +1,10 @@
-# Step 19: Basic Observability / Debug Visibility
+# Step 20: Basic Observability / Debug Visibility
 
 状态：待开发
 
 ## 目标
 
-在真实 Auth 接入前，先补齐开发和联调需要的基础可见性，使 chat、run、runtime、workspace 的问题能被定位。
+在 Step 19 Storage/Attachment 提供稳定对象引用后，补齐开发和联调需要的基础可见性，使 chat、run、runtime、workspace 的问题能被定位。
 
 本步骤只做调试可见性，不做完整恢复、生产级指标或全链路兼容收口。
 
@@ -20,7 +20,7 @@
 
 - 不实现真实 Auth / Actor / Access，归 Step 23。
 - 不实现完整 Recovery / Compatibility 矩阵，归 Step 24。
-- 不实现 budget/cost 治理，归 Step 20/21。
+- 不实现 budget/cost 治理，归 Step 21/22。
 - 不新增外部观测系统依赖；本阶段以数据库记录和服务端响应可见性为主。
 
 ## 验收

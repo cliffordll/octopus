@@ -172,7 +172,7 @@ queued run
 ## 15G：Work Product / Artifact 引用
 
 - 实现上游已包含的 work product 引用结构，记录 issue/run/workspace 产生的产物引用。
-- 本步骤只持久化引用、类型、来源和关联关系；真实文件上传、对象存储、下载权限和 attachment body 归 Step 21。
+- 本步骤只持久化引用、类型、来源和关联关系；真实文件上传、对象存储、下载权限和 attachment body 归 Step 19。
 - Runtime adapter 输出中若包含产物引用，应通过统一 service 写入，不能由 adapter 直接操作业务表。
 - 产物引用必须受 organization/issue/workspace scope 约束。
 
@@ -216,10 +216,10 @@ curl.exe -s -X POST "$base/api/agents/$($agent.id)/wakeup" -H "Content-Type: app
 
 ## 不包含
 
-- Cost/activity 查询归 Step 19；budget、quota window 聚合与治理联动归 Step 20。
-- Chat/Messenger 扩展归 Step 16；消息附件/产物引用归 Step 17。
-- Attachment body、对象存储、文件上传下载和存储权限，归 Step 21。
-- 真实认证、secret/env binding 和访问策略替换，归 Step 22。
+- Cost/activity 查询归 Step 21；budget、quota window 聚合与治理联动归 Step 22。
+- Chat/Messenger 扩展归 Step 16；消息附件 metadata 和 transcript 可见性归 Step 18，完整 storage lifecycle 归 Step 19。
+- Attachment body、对象存储、文件上传下载和存储权限，归 Step 19。
+- 真实认证、secret/env binding 和访问策略替换，归 Step 23。
 - Desktop/Tauri workspace UI。
 - 没有上游证据的 workspace provider、远程基础设施编排或新业务对象。
 
