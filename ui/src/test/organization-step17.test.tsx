@@ -146,10 +146,10 @@ it("shows organization skills and edits the selected skill file", async () => {
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "本地组织技能" })).toBeInTheDocument();
   expect((await screen.findAllByText("Create durable agent skills")).length).toBeGreaterThanOrEqual(2);
-  expect(screen.getAllByText("系统内置").length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText("bundled").length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText("2 智能体")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
-  expect(screen.getByText("只读：系统内置")).toBeInTheDocument();
+  expect(screen.getByText("只读：bundled")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("Reviewer")).toBeInTheDocument();

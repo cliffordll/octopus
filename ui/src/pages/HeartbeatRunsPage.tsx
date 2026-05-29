@@ -13,8 +13,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function humanize(value?: string | null): string {
-  if (!value) return "无";
-  return value.replaceAll("_", " ");
+  if (!value) return "none";
+  return value;
 }
 
 function relativeTime(value?: string | null): string {
@@ -83,22 +83,22 @@ function buildHeartbeatPatch(agent: Agent, enabled: boolean): { agentRuntimeConf
 
 function schedulerState(agent: Agent): { className: string; label: string } {
   if (heartbeatEnabled(agent) && heartbeatIntervalSec(agent) > 0) {
-    return { className: "heartbeat-state-success", label: "已计划" };
+    return { className: "heartbeat-state-success", label: "scheduled" };
   }
   if (heartbeatEnabled(agent)) {
-    return { className: "heartbeat-state-warning", label: "已配置，未激活" };
+    return { className: "heartbeat-state-warning", label: "configured_inactive" };
   }
-  return { className: "heartbeat-state-muted", label: "已关闭" };
+  return { className: "heartbeat-state-muted", label: "disabled" };
 }
 
 function latestRunState(run: HeartbeatRun | null): { className: string; label: string } {
-  if (!run) return { className: "heartbeat-state-muted", label: "暂无运行" };
+  if (!run) return { className: "heartbeat-state-muted", label: "no_run" };
   if (run.status === "failed" || run.status === "timed_out") {
-    return { className: "heartbeat-state-danger", label: "最近运行失败" };
+    return { className: "heartbeat-state-danger", label: run.status };
   }
-  if (run.status === "succeeded") return { className: "heartbeat-state-success", label: "最近运行完成" };
-  if (run.status === "running") return { className: "heartbeat-state-live", label: "运行中" };
-  if (run.status === "queued") return { className: "heartbeat-state-warning", label: "排队中" };
+  if (run.status === "succeeded") return { className: "heartbeat-state-success", label: run.status };
+  if (run.status === "running") return { className: "heartbeat-state-live", label: run.status };
+  if (run.status === "queued") return { className: "heartbeat-state-warning", label: run.status };
   return { className: "heartbeat-state-muted", label: humanize(run.status) };
 }
 

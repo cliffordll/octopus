@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
@@ -31,6 +31,20 @@ function hasAssistantReply(messages: ChatMessage[]) {
 
 const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
 
+function skillLabel(entry: Record<string, unknown>) {
+  const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
+  return typeof value === "string" && value.trim() ? value.trim() : "skill";
+}
+
+function agentOptionLabel(agent: { name?: string | null; role?: string | null } | null | undefined, fallback: string) {
+  if (!agent?.name) return fallback;
+  return agent.role ? `${agent.name} (${agent.role})` : agent.name;
+}
+
+function focusLeftElement(event: ReactFocusEvent<HTMLElement>) {
+  return !(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget);
+}
+
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const [body, setBody] = useState("");
@@ -38,6 +52,8 @@ export function ChatPage() {
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
+  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
+  const skillDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -52,10 +68,6 @@ export function ChatPage() {
   });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const chatAgentList = useMemo(
-    () => agentList.filter((agent) => agent.status !== "terminated" || agent.id === chat.data?.preferredAgentId),
-    [agentList, chat.data?.preferredAgentId],
-  );
   useEffect(() => {
     setAgentId(chat.data?.preferredAgentId ?? "");
   }, [chat.data?.id, chat.data?.preferredAgentId]);
@@ -68,6 +80,25 @@ export function ChatPage() {
     queryFn: () => chatsApi.listMessages(chatId),
     staleTime: 1000,
   });
+  const selectedAgentSkills = useQuery({
+    queryKey: ["agent-skills", agentId],
+    queryFn: () => agentsApi.skills(agentId),
+    enabled: Boolean(agentId),
+  });
+  useEffect(() => {
+    if (!skillDropdownOpen) return;
+    function closeWhenOutside(event: Event) {
+      if (event.target instanceof Node && !skillDropdownRef.current?.contains(event.target)) {
+        setSkillDropdownOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("focusin", closeWhenOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("focusin", closeWhenOutside);
+    };
+  }, [skillDropdownOpen]);
   const visibleMessages = useMemo(() => {
     const persisted = messages.data ?? [];
     const persistedUserBodies = new Set(
@@ -87,6 +118,14 @@ export function ChatPage() {
   const boundChatAgentName = chat.data?.preferredAgentId ? agentNameById.get(chat.data.preferredAgentId) ?? null : null;
   const selectedAgent = agentList.find((agent) => agent.id === agentId);
   const selectedAgentName = selectedAgent?.name ?? boundChatAgentName ?? "智能体";
+  const selectedAgentControlLabel = agentOptionLabel(selectedAgent, selectedAgentName);
+  const projectContext = chat.data?.contextLinks?.find((link) => link.entityType === "project");
+  const skillEntries = selectedAgentSkills.data && !Array.isArray(selectedAgentSkills.data) && Array.isArray(selectedAgentSkills.data.entries)
+    ? selectedAgentSkills.data.entries
+    : [];
+  const desiredSkills = selectedAgentSkills.data && !Array.isArray(selectedAgentSkills.data) && Array.isArray(selectedAgentSkills.data.desiredSkills)
+    ? selectedAgentSkills.data.desiredSkills
+    : [];
   const selectedChatAgentUnavailable = selectedAgent?.status === "terminated";
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const send = useMutation({
@@ -256,16 +295,46 @@ export function ChatPage() {
                 当前选择的智能体不能用于消息回复，请切换到可运行智能体。
               </div>
             )}
-            <div className="chat-compose-actions">
-              <div className="chat-composer-toolbar">
-                <select aria-label="对话智能体" value={agentId} onChange={(event) => setAgentId(event.target.value)} required>
-                  <option value="">选择智能体</option>
-                  {chatAgentList.map((agent) => (
-                    <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
-                  ))}
+            {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
+            <div className="chat-context-controls chat-context-controls-readonly" aria-label="当前对话上下文">
+              <label aria-label="当前项目">
+                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
+                  <option value={projectContext?.entityId ?? ""}>
+                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
+                  </option>
                 </select>
-              </div>
-              <button disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">发送</button>
+              </label>
+              <label aria-label="当前智能体" className="chat-agent-readonly-field">
+                <select aria-label="对话智能体" disabled value={agentId}>
+                  <option value={agentId}>{selectedAgentControlLabel}</option>
+                </select>
+              </label>
+              <details
+                className="chat-skill-dropdown"
+                onBlur={(event) => {
+                  if (focusLeftElement(event)) setSkillDropdownOpen(false);
+                }}
+                onToggle={(event) => setSkillDropdownOpen(event.currentTarget.open)}
+                open={skillDropdownOpen}
+                ref={skillDropdownRef}
+              >
+                <summary>技能列表</summary>
+                <div className="chat-skill-list">
+                  {desiredSkills.map((skill) => (
+                    <span className="chat-skill-chip active" key={`desired-${skill}`}>{skill}</span>
+                  ))}
+                  {skillEntries.map((entry) => (
+                    <span className="chat-skill-chip" key={skillLabel(entry)}>{skillLabel(entry)}</span>
+                  ))}
+                  {agentId && selectedAgentSkills.isSuccess && desiredSkills.length === 0 && skillEntries.length === 0 && (
+                    <span className="muted">暂无技能</span>
+                  )}
+                  {!agentId && <span className="muted">未选择智能体</span>}
+                </div>
+              </details>
+              <button className="chat-create-submit" disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">
+                发送
+              </button>
             </div>
           </form>
         </section>
