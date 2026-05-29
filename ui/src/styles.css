@@ -286,6 +286,11 @@ small {
   padding: 32px 36px 42px;
 }
 
+.org-content-full {
+  max-width: none;
+  padding: 0;
+}
+
 .organization-settings {
   margin: 0 auto;
 }
@@ -3141,12 +3146,14 @@ pre {
 
 .organization-skills-shell {
   background: #0d131d;
-  border: 1px solid #202a3b;
-  border-radius: 16px;
   display: grid;
   grid-template-columns: 304px minmax(0, 1fr);
   min-height: calc(100vh - 150px);
   overflow: hidden;
+}
+
+.org-content-full .organization-skills-shell {
+  min-height: 100vh;
 }
 
 .organization-skills-sidebar {

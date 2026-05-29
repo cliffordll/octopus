@@ -76,18 +76,6 @@ function skillField(entry: Record<string, unknown>, keys: string[], fallback = "
   return fallback;
 }
 
-function skillListField(entry: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = entry[key];
-    if (Array.isArray(value)) {
-      const items = value.map((item) => String(item)).filter(Boolean);
-      if (items.length > 0) return items.join(", ");
-    }
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "-";
-}
-
 function nestedSkillField(entry: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const direct = entry[key];
@@ -1143,11 +1131,9 @@ export function AgentPage() {
                       const enabled = skillEnabled(entry, desiredSkillRows);
                       const isBundled = skillField(entry, ["sourceClass", "source", "origin"], "").toLowerCase() === "bundled";
                       const description = skillDescription(entry) || skillField(entry, ["detail"], "");
-                      const tags = skillListField(entry, ["tags", "categories"]);
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
                       const originLabel = skillField(entry, ["originLabel"], "");
-                      const locationLabel = skillField(entry, ["locationLabel"], "");
                       const loadNote = skillLoadNote(entry, enabled);
                       const state = skillState(entry);
                       return (
@@ -1163,7 +1149,6 @@ export function AgentPage() {
                               <span><small>来源</small>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
                               <span><small>状态</small>{state}</span>
                               <span><small>版本</small>{version ? `v${version}` : "-"}</span>
-                              <span><small>{locationLabel ? "位置" : "标签"}</small>{locationLabel || tags}</span>
                             </span>
                           </button>
                           <div className="agent-skill-row-actions">

@@ -408,7 +408,7 @@ export function OrganizationResourcesPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <section className="org-resource-hero">
         <div className="org-resource-hero-copy">
           <p className="org-resource-eyebrow">
@@ -609,7 +609,6 @@ function SkillFileTree({
           <span className="organization-skill-file-icon" aria-hidden="true">F</span>
           <span>{file.path.split("/").at(-1) ?? file.path}</span>
         </span>
-        <small>{file.kind}</small>
       </button>
     );
   }
@@ -1401,11 +1400,11 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
   );
 }
 
-export function OrgWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+export function OrgWorkspace({ children, contentClassName = "", orgId }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
   return (
     <div className="org-workspace">
       <OrgNavigation orgId={orgId} />
-      <div className="org-content">{children}</div>
+      <div className={`org-content ${contentClassName}`}>{children}</div>
     </div>
   );
 }
