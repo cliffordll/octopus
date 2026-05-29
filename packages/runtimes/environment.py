@@ -96,6 +96,20 @@ def _cwd_check(config: dict[str, Any]) -> dict[str, str | None]:
     }
 
 
+def resolve_runtime_executable(command: str) -> str:
+    """Best-effort resolution of a CLI command name to an absolute path.
+
+    On Windows, plain command names such as ``codex`` map to wrappers like
+    ``codex.CMD`` that ``asyncio.create_subprocess_exec`` cannot launch
+    without the explicit extension. Using ``shutil.which`` mirrors the same
+    PATHEXT-aware lookup the test-environment helper already performs.
+    When ``shutil.which`` cannot resolve the name (e.g. tests that monkeypatch
+    subprocess startup with a fake command) the original value is returned so
+    the caller's existing error path keeps working.
+    """
+    return shutil.which(command) or command
+
+
 def _command_check(command: str, label: str) -> dict[str, str | None]:
     resolved = shutil.which(command)
     if resolved is None:
