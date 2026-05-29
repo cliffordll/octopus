@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
+import { AgentCreateDialog } from "../pages/NewAgentPage";
+import { ProjectCreateDialog } from "../pages/ProjectsPage";
 
 function organizationTarget(pathname: string, orgId: string) {
   const section = pathname.match(
@@ -13,9 +15,12 @@ function organizationTarget(pathname: string, orgId: string) {
 export function AppShell() {
   const location = useLocation();
   const [organizationMenuOpen, setOrganizationMenuOpen] = useState(false);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [agentCreateOpen, setAgentCreateOpen] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
   const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
-  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|settings)/.test(location.pathname);
+  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|resources|workspaces|goals|skills|settings)/.test(location.pathname);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],
@@ -35,6 +40,53 @@ export function AppShell() {
         <nav className="global-nav" aria-label="主导航">
           {selectedOrganizationId ? (
             <>
+              <div className="quick-create">
+                <button
+                  aria-expanded={quickCreateOpen}
+                  aria-label="快速创建"
+                  className="quick-create-trigger"
+                  onClick={() => {
+                    setQuickCreateOpen((open) => !open);
+                    setOrganizationMenuOpen(false);
+                  }}
+                  type="button"
+                >
+                  <span aria-hidden="true" className="nav-icon">+</span>
+                  <span>创建</span>
+                </button>
+                {quickCreateOpen && (
+                  <nav aria-label="快速创建菜单" className="quick-create-menu">
+                    <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/chats`}>
+                      <span aria-hidden="true" className="context-entry-icon">M</span>
+                      创建新聊天
+                    </Link>
+                    <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/issues?create=1`}>
+                      <span aria-hidden="true" className="context-entry-icon">T</span>
+                      创建新任务
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setQuickCreateOpen(false);
+                        setAgentCreateOpen(true);
+                      }}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="context-entry-icon">A</span>
+                      创建智能体
+                    </button>
+                    <button
+                      onClick={() => {
+                        setQuickCreateOpen(false);
+                        setProjectCreateOpen(true);
+                      }}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="context-entry-icon">P</span>
+                      创建新项目
+                    </button>
+                  </nav>
+                )}
+              </div>
               <NavLink className={isMessagesArea ? "active" : undefined} to={`/orgs/${selectedOrganizationId}/chats`}>
                 <span aria-hidden="true" className="nav-icon">M</span>
                 <span>消息</span>
@@ -50,6 +102,7 @@ export function AppShell() {
             </>
           ) : (
             <>
+              <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">+</span>创建</span>
               <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">M</span>消息</span>
               <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">A</span>智能体</span>
               <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">T</span>任务</span>
@@ -69,7 +122,10 @@ export function AppShell() {
             aria-expanded={organizationMenuOpen}
             aria-label="切换组织"
             className="organization-trigger"
-            onClick={() => setOrganizationMenuOpen((open) => !open)}
+            onClick={() => {
+              setOrganizationMenuOpen((open) => !open);
+              setQuickCreateOpen(false);
+            }}
             type="button"
           >
             <span className="organization-avatar">
@@ -109,6 +165,12 @@ export function AppShell() {
       <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`}>
         <Outlet />
       </main>
+      {agentCreateOpen && selectedOrganizationId && (
+        <AgentCreateDialog onClose={() => setAgentCreateOpen(false)} orgId={selectedOrganizationId} />
+      )}
+      {projectCreateOpen && selectedOrganizationId && (
+        <ProjectCreateDialog onClose={() => setProjectCreateOpen(false)} orgId={selectedOrganizationId} />
+      )}
     </div>
   );
 }

@@ -50,9 +50,8 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/orgs/org-1/structure");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   const agentNavigation = within(screen.getByRole("navigation", { name: "智能体导航" }));
-  expect(agentNavigation.getByRole("heading", { name: "智能体" })).toBeInTheDocument();
   expect(agentNavigation.getByRole("heading", { name: "团队" })).toBeInTheDocument();
-  expect(agentNavigation.getByRole("link", { name: /新建智能体/ })).toHaveClass("context-action-entry");
+  expect(agentNavigation.queryByRole("link", { name: /新建智能体/ })).not.toBeInTheDocument();
   expect(
     agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
@@ -67,9 +66,8 @@ it("opens the first agent by default and creates one from the new agent flow", a
     organizationMenu.getByRole("link", { name: /设计团队/ }),
   ).toHaveAttribute("href", "/orgs/org-2/agents");
 
-  await userEvent.click(
-    within(screen.getByRole("navigation", { name: "智能体导航" })).getByRole("link", { name: /新建智能体/ }),
-  );
+  await userEvent.click(primaryNavigation.getByRole("button", { name: "快速创建" }));
+  await userEvent.click(screen.getByRole("button", { name: "创建智能体" }));
   await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
   expect(screen.getByLabelText("智能体名称")).toHaveValue("Suggested Agent");
   await userEvent.clear(screen.getByLabelText("智能体名称"));

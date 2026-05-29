@@ -44,7 +44,7 @@ it("shows a composer and sends a first message through a selected agent", async 
   expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /新建对话/ })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /新建聊天/ })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "What do you want to work on?" })).toBeInTheDocument();
   expect(screen.queryByLabelText("标题（可选）")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toBeInTheDocument();
@@ -256,7 +256,7 @@ it("lists conversations without sidebar filters and identifies their selected ag
   const messageNavigation = screen.getByRole("navigation", { name: "消息导航" });
   expect(within(messageNavigation).getByRole("heading", { name: "消息" })).toBeInTheDocument();
   expect(within(messageNavigation).getByRole("heading", { name: "对话" })).toBeInTheDocument();
-  expect(within(messageNavigation).getByRole("link", { name: /新建对话/ })).toHaveClass("context-action-entry");
+  expect(within(messageNavigation).getByRole("link", { name: /新建聊天/ })).toHaveClass("context-action-entry");
   expect(within(messageNavigation).getByRole("link", { name: "审批管理" })).toHaveAttribute(
     "href",
     "/orgs/org-1/approvals",

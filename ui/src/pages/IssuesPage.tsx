@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
@@ -30,7 +30,9 @@ const MODEL_OPTIONS = [
 export function IssuesPage() {
   const { orgId = "" } = useParams();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const requestedStatus = searchParams.get("status");
+  const shouldOpenCreate = searchParams.get("create") === "1";
   const status = STATUSES.includes(requestedStatus as IssueStatus) ? requestedStatus as IssueStatus | "" : "";
   const projectId = searchParams.get("projectId") ?? "";
   const [title, setTitle] = useState("");
@@ -64,9 +66,14 @@ export function IssuesPage() {
       setPriority("medium");
       setNewIssueStatus("todo");
       setTaskDialogOpen(false);
+      if (shouldOpenCreate) navigate(`/orgs/${orgId}/issues`);
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
+  function closeTaskDialog() {
+    setTaskDialogOpen(false);
+    if (shouldOpenCreate) navigate(`/orgs/${orgId}/issues`);
+  }
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!title.trim()) return;
@@ -85,8 +92,14 @@ export function IssuesPage() {
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const issueList = Array.isArray(issues.data) ? issues.data : [];
+  useEffect(() => {
+    if (shouldOpenCreate) {
+      setSelectedProjectId(projectId);
+      setTaskDialogOpen(true);
+    }
+  }, [projectId, shouldOpenCreate]);
   return (
-    <IssuesWorkspace orgId={orgId}>
+    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Issues</p>
@@ -115,7 +128,7 @@ export function IssuesPage() {
         <div
           className="modal-backdrop"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setTaskDialogOpen(false);
+            if (event.target === event.currentTarget) closeTaskDialog();
           }}
           role="presentation"
         >
@@ -125,7 +138,7 @@ export function IssuesPage() {
                 <h2 id="new-task-title">新建任务</h2>
                 <p className="muted">配置任务信息、执行归属和优先级。</p>
               </div>
-              <button aria-label="关闭" className="secondary" onClick={() => setTaskDialogOpen(false)} type="button">关闭</button>
+              <button aria-label="关闭" className="secondary" onClick={closeTaskDialog} type="button">关闭</button>
             </div>
             <form className="form task-create-form" onSubmit={submit}>
               <div className="task-form-row">
