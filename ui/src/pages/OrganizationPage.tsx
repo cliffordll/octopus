@@ -641,21 +641,68 @@ function SkillFileTree({
   return <div className="organization-skill-file-tree">{renderNode(tree)}</div>;
 }
 
-function isBundledOrganizationSkill(skill: OrganizationSkillListItem): boolean {
-  const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : null;
-  return sourceKind?.includes("bundled") === true || skill.sourceBadge === "bundled";
+function organizationSkillString(skill: OrganizationSkillListItem, key: keyof OrganizationSkillListItem): string {
+  const value = skill[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
-function organizationSkillSourceText(value: string | null | undefined, bundled: boolean, fallback = "bundled"): string {
-  if (bundled) return "bundled";
+function normalizedOrganizationSkillSource(value: string): string {
+  return value.trim().toLowerCase().replaceAll("-", "_");
+}
+
+function organizationSkillSourceCandidates(skill: OrganizationSkillListItem): string[] {
+  const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : "";
+  return [
+    sourceKind
+    || "",
+    organizationSkillString(skill, "sourceBadge"),
+    organizationSkillString(skill, "sourceLocator"),
+    organizationSkillString(skill, "sourcePath"),
+    organizationSkillString(skill, "sourceLabel"),
+  ]
+    .map(normalizedOrganizationSkillSource)
+    .filter(Boolean);
+}
+
+function organizationSkillSourceKind(skill: OrganizationSkillListItem): string {
+  return organizationSkillSourceCandidates(skill)[0] ?? "";
+}
+
+function isBuiltInOrganizationSkill(skill: OrganizationSkillListItem): boolean {
+  const sourceKind = organizationSkillSourceKind(skill);
+  return sourceKind === "built_in"
+    || sourceKind === "octopus_bundled"
+    || sourceKind === "system_bundled"
+    || sourceKind === "rudder_bundled"
+    || sourceKind.includes("bundled")
+    || skill.sourceBadge === "built-in"
+    || skill.sourceBadge === "bundled";
+}
+
+function isCommunityOrganizationSkill(skill: OrganizationSkillListItem): boolean {
+  return organizationSkillSourceCandidates(skill).some((sourceKind) => (
+    sourceKind === "community"
+    || sourceKind === "community_preset"
+    || sourceKind.includes("/community/")
+    || sourceKind.includes("\\community\\")
+  ));
+}
+
+function organizationSkillSourceText(value: string | null | undefined, builtIn: boolean, fallback = "built-in"): string {
+  if (builtIn) return "built-in";
   if (!value) return fallback;
+  if (normalizedOrganizationSkillSource(value) === "community_preset") return "community";
   return value;
 }
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
-    { title: "内置技能", rows: skills.filter(isBundledOrganizationSkill) },
-    { title: "本地组织技能", rows: skills.filter((skill) => !isBundledOrganizationSkill(skill)) },
+    { title: "built-in", rows: skills.filter(isBuiltInOrganizationSkill) },
+    { title: "community", rows: skills.filter(isCommunityOrganizationSkill) },
+    {
+      title: "local",
+      rows: skills.filter((skill) => !isBuiltInOrganizationSkill(skill) && !isCommunityOrganizationSkill(skill)),
+    },
   ];
 }
 
@@ -831,7 +878,7 @@ export function OrganizationSkillsPage() {
                   >
                     <span className="organization-skill-list-card-title">
                       <strong>{skill.name}</strong>
-                      <small>{organizationSkillSourceText(skill.sourceBadge, isBundledOrganizationSkill(skill))}</small>
+                      <small>{organizationSkillSourceText(skill.sourceBadge, isBuiltInOrganizationSkill(skill))}</small>
                     </span>
                     {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
                     <span className="organization-skill-list-card-meta">
@@ -851,13 +898,13 @@ export function OrganizationSkillsPage() {
                 <div>
                   <div className="organization-skill-title-row">
                     <h2>{selectedSkill.name}</h2>
-                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</Badge>
+                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
                     <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                   </div>
                   <p>{selectedSkill.description || "未填写描述"}</p>
-                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBundledOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
+                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBuiltInOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
                   {!selectedSkill.editable && selectedSkill.editableReason && (
-                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBundledOrganizationSkill(selectedSkill))}</p>
+                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBuiltInOrganizationSkill(selectedSkill))}</p>
                   )}
                 </div>
                 <div className="row-actions">
@@ -878,7 +925,7 @@ export function OrganizationSkillsPage() {
               <div className="organization-skill-info-grid">
                 <div>
                   <span>来源</span>
-                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</strong>
+                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</strong>
                 </div>
                 <div>
                   <span>来源路径</span>
