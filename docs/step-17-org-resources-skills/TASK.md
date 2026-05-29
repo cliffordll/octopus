@@ -55,6 +55,13 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 - `D:\coding\rudder\server\src\services\knowledge-portability\organization-skills.ts`：实现 organization skill library、agent skill catalog、file read/update、runtime materialization、import/scan/delete。
 - `D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts`：运行时语义包含 shared organization skills 目录。
 
+已确认的 Step 17D agent instructions 上游证据：
+
+- `D:\coding\rudder\server\src\routes\agents.management-routes.ts`：暴露 `PATCH /api/agents/:id/instructions-path`、`GET/PATCH /api/agents/:id/instructions-bundle`、`GET/PUT/DELETE /api/agents/:id/instructions-bundle/file`。
+- `D:\coding\rudder\packages\shared\src\validators\agent.ts`：定义 `updateAgentInstructionsPathSchema`、`updateAgentInstructionsBundleSchema`、`upsertAgentInstructionsFileSchema`。
+- `D:\coding\rudder\server\src\services\agent-instructions.ts`：定义 bundle state、managed/external mode、路径归一化、bundle reconcile、file read/write/delete、legacy promptTemplate pseudo-file 和 managed bundle materialization。
+- `D:\coding\rudder\server\src\__tests__\agent-instructions-service.test.ts` 与 `agent-skills-routes.test.ts`：覆盖 managed bundle、路径恢复、文件写入/删除和默认 instructions materialization。
+
 ## 任务拆分
 
 ### 17A: Organization Resources CRUD
@@ -182,15 +189,34 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 
 ### 17D: Agent Instructions 文件管理边界
 
-本节必须先判定上游是否真的有独立 management API。若没有，只把“Step 14 已有 materialization + runtime 读取”写成兼容边界，不新增管理 API。
+上游已确认存在独立 management API，因此本节落地 server 端最小兼容实现。
 
-- 对照上游确认是否存在完整的 instructions 文件管理 API。
-- 如果上游存在对应契约，补齐 shared path/type/validator、server routes/service、路径安全校验、scope/access 校验和 contract/workflow tests。
-- 管理对象只围绕 Step 14 已建立的 `instructionsRootPath`、`instructionsFilePath`、`instructionsEntryFile` 和 managed instructions bundle，不新增独立于 agent runtime config 的说明业务模型。
-- 支持读取当前 agent instructions 内容、更新允许编辑的说明文件、恢复或重新 materialize 默认 bundle 的兼容行为；具体操作以确认到的上游 route/service 为准。
-- 明确路径安全：相对路径仍解析到 agent `cwd` 或 managed agent home；禁止越界访问任意文件。
-- 记录 instructions 更新 activity，保留 actor、agent、文件路径和变更来源，但不记录敏感内容。
-- 与 Step 23 的真实 actor/access 解耦：本步骤使用现有开发 actor 结构和 organization scope，真实认证接入后替换数据来源，不改变 API shape。
+已完成：
+
+- 新增 shared path/type/validator：
+  - `PATCH /api/agents/{id}/instructions-path`
+  - `GET /api/agents/{id}/instructions-bundle`
+  - `PATCH /api/agents/{id}/instructions-bundle`
+  - `GET /api/agents/{id}/instructions-bundle/file?path=SOUL.md`
+  - `PUT /api/agents/{id}/instructions-bundle/file`
+  - `DELETE /api/agents/{id}/instructions-bundle/file?path=...`
+- 新增 `AgentInstructionsService`，围绕 Step 14 已建立的 `instructionsRootPath`、`instructionsFilePath`、`instructionsEntryFile` 和 managed instructions bundle 管理，不新增独立 instructions 数据表。
+- 支持 bundle 列表、文件读取、文件写入、非 entry 文件删除、instructions path 更新和 bundle mode/entry 更新。
+- 支持 legacy `instructionsFilePath` 推导 bundle state；相对 path 仍要求 `agentRuntimeConfig.cwd` 为绝对路径。
+- 明确路径安全：bundle file path 必须 stay within bundle root，`../` 越界返回 422。
+- 记录 activity：
+  - `agent.instructions_path_updated`
+  - `agent.instructions_bundle_updated`
+  - `agent.instructions_file_updated`
+  - `agent.instructions_file_deleted`
+- 增加 contract tests 覆盖 shared contract、bundle read、file read/write/delete、path update、path guard 和 activity。
+
+不做：
+
+- 不新增独立于 `agentRuntimeConfig` 的 instructions 业务模型或数据库表。
+- 不重写 Step 14 默认 instructions materialization 与 runtime 读取逻辑。
+- 不在本阶段实现完整上游的 reconcile/heal 复杂恢复策略；当前只提供最小兼容 bundle state 推导和安全文件管理。
+- 不修改 UI/CLI。
 
 ## 验收
 

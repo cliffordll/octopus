@@ -201,6 +201,43 @@ class AgentSkillAnalytics(TypedDict):
     days: list[dict[str, Any]]
 
 
+class AgentInstructionsFileSummary(TypedDict):
+    path: str
+    size: int
+    language: str
+    markdown: bool
+    isEntryFile: bool
+    editable: bool
+    deprecated: bool
+    virtual: bool
+
+
+class AgentInstructionsFileDetail(AgentInstructionsFileSummary):
+    content: str
+
+
+class AgentInstructionsBundle(TypedDict):
+    agentId: str
+    orgId: str
+    mode: str | None
+    rootPath: str | None
+    managedRootPath: str
+    entryFile: str
+    resolvedEntryPath: str | None
+    editable: bool
+    warnings: list[str]
+    legacyPromptTemplateActive: bool
+    legacyBootstrapPromptTemplateActive: bool
+    files: list[AgentInstructionsFileSummary]
+
+
+class AgentInstructionsPathResult(TypedDict):
+    agentId: str
+    agentRuntimeType: str
+    agentRuntimeConfigKey: str
+    path: str | None
+
+
 class ProviderQuotaResult(TypedDict, total=False):
     provider: str
     source: str | None
