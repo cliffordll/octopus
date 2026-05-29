@@ -133,12 +133,18 @@ async def approve_approval_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    updated = await service.approve_approval(
-        id,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-    )
+    try:
+        updated = await service.approve_approval(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if updated is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -164,12 +170,18 @@ async def reject_approval_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    updated = await service.reject_approval(
-        id,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-    )
+    try:
+        updated = await service.reject_approval(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if updated is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -195,12 +207,18 @@ async def request_approval_revision_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    updated = await service.request_revision(
-        id,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-    )
+    try:
+        updated = await service.request_revision(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if updated is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
