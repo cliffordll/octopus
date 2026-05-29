@@ -1111,58 +1111,66 @@ class HeartbeatService:
         return context
 
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
-        return {
-            "id": row.id,
-            "orgId": row.org_id,
-            "agentId": row.agent_id,
-            "invocationSource": cast(HeartbeatInvocationSource, row.invocation_source),
-            "triggerDetail": cast(WakeupTriggerDetail | None, row.trigger_detail),
-            "status": cast(HeartbeatRunStatus, row.status),
-            "startedAt": row.started_at.isoformat() if row.started_at else None,
-            "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
-            "error": row.error,
-            "wakeupRequestId": row.wakeup_request_id,
-            "exitCode": row.exit_code,
-            "signal": row.signal,
-            "usageJson": row.usage_json,
-            "resultJson": row.result_json,
-            "sessionIdBefore": row.session_id_before,
-            "sessionIdAfter": row.session_id_after,
-            "logStore": row.log_store,
-            "logRef": row.log_ref,
-            "logBytes": row.log_bytes,
-            "logSha256": row.log_sha256,
-            "logCompressed": row.log_compressed,
-            "stdoutExcerpt": row.stdout_excerpt,
-            "stderrExcerpt": row.stderr_excerpt,
-            "errorCode": row.error_code,
-            "externalRunId": row.external_run_id,
-            "processPid": row.process_pid,
-            "processStartedAt": (
-                row.process_started_at.isoformat() if row.process_started_at else None
-            ),
-            "retryOfRunId": row.retry_of_run_id,
-            "processLossRetryCount": row.process_loss_retry_count,
-            "contextSnapshot": row.context_snapshot,
-            "createdAt": row.created_at.isoformat(),
-            "updatedAt": row.updated_at.isoformat(),
-        }
+        return heartbeat_run_to_data(row)
 
     def _to_event(self, row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
-        return {
-            "id": row.id,
-            "orgId": row.org_id,
-            "runId": row.run_id,
-            "agentId": row.agent_id,
-            "seq": row.seq,
-            "eventType": row.event_type,
-            "stream": row.stream,
-            "level": row.level,
-            "color": row.color,
-            "message": row.message,
-            "payload": row.payload,
-            "createdAt": row.created_at.isoformat(),
-        }
+        return heartbeat_event_to_data(row)
+
+
+def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
+    return {
+        "id": row.id,
+        "orgId": row.org_id,
+        "agentId": row.agent_id,
+        "invocationSource": cast(HeartbeatInvocationSource, row.invocation_source),
+        "triggerDetail": cast(WakeupTriggerDetail | None, row.trigger_detail),
+        "status": cast(HeartbeatRunStatus, row.status),
+        "startedAt": row.started_at.isoformat() if row.started_at else None,
+        "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
+        "error": row.error,
+        "wakeupRequestId": row.wakeup_request_id,
+        "exitCode": row.exit_code,
+        "signal": row.signal,
+        "usageJson": row.usage_json,
+        "resultJson": row.result_json,
+        "sessionIdBefore": row.session_id_before,
+        "sessionIdAfter": row.session_id_after,
+        "logStore": row.log_store,
+        "logRef": row.log_ref,
+        "logBytes": row.log_bytes,
+        "logSha256": row.log_sha256,
+        "logCompressed": row.log_compressed,
+        "stdoutExcerpt": row.stdout_excerpt,
+        "stderrExcerpt": row.stderr_excerpt,
+        "errorCode": row.error_code,
+        "externalRunId": row.external_run_id,
+        "processPid": row.process_pid,
+        "processStartedAt": (
+            row.process_started_at.isoformat() if row.process_started_at else None
+        ),
+        "retryOfRunId": row.retry_of_run_id,
+        "processLossRetryCount": row.process_loss_retry_count,
+        "contextSnapshot": row.context_snapshot,
+        "createdAt": row.created_at.isoformat(),
+        "updatedAt": row.updated_at.isoformat(),
+    }
+
+
+def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
+    return {
+        "id": row.id,
+        "orgId": row.org_id,
+        "runId": row.run_id,
+        "agentId": row.agent_id,
+        "seq": row.seq,
+        "eventType": row.event_type,
+        "stream": row.stream,
+        "level": row.level,
+        "color": row.color,
+        "message": row.message,
+        "payload": row.payload,
+        "createdAt": row.created_at.isoformat(),
+    }
 
 
 async def dispatch_queued_agent(

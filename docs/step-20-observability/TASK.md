@@ -1,6 +1,6 @@
 # Step 20: Basic Observability / Debug Visibility
 
-状态：开发中
+状态：已完成
 
 ## 目标
 

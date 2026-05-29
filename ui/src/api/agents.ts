@@ -118,8 +118,8 @@ export const agentsApi = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
-  deleteInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsFileDetail> =>
-    request<AgentInstructionsFileDetail>(
+  deleteInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsBundle> =>
+    request<AgentInstructionsBundle>(
       `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ),
