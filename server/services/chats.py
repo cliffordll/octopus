@@ -58,6 +58,7 @@ from packages.shared.types.chat import (
     ChatLinkedEntity,
     ChatMessage,
     ChatPrimaryIssueSummary,
+    ChatStreamTranscriptEntry,
     ConvertChatToIssuePayload,
     CreateChatAttachmentPayload,
     CreateChatContextLinkPayload,
@@ -73,6 +74,9 @@ from .issues import IssueService
 
 class ChatAvailabilityError(ValueError):
     pass
+
+
+_CHAT_TRANSCRIPT_KEY = "__chatTranscript"
 
 
 class ChatService:
@@ -660,6 +664,16 @@ class ChatService:
             **runtime_context,
             "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
         }
+        transcript: list[ChatStreamTranscriptEntry] = []
+
+        async def capture_stream_event(event: dict[str, Any]) -> None:
+            if event.get("type") == "transcript_entry" and isinstance(
+                event.get("entry"), dict
+            ):
+                transcript.append(cast(ChatStreamTranscriptEntry, event["entry"]))
+            if on_stream_event is not None:
+                await on_stream_event(event)
+
         result = await adapter.execute(
             RuntimeExecutionContext(
                 run_id=f"chat-{conversation.id}-{uuid.uuid4()}",
@@ -669,7 +683,9 @@ class ChatService:
                 config=config,
                 on_log=_ignore_log,
                 cancel_event=cancel_event,
-                on_stream_event=on_stream_event,
+                on_stream_event=(
+                    capture_stream_event if on_stream_event is not None else None
+                ),
             )
         )
         if result.timed_out:
@@ -681,7 +697,9 @@ class ChatService:
             raise RuntimeError("Chat adapter returned no assistant reply")
         result_json = result.result_json or {}
         assistant_kind = _assistant_kind(result_json.get("kind"))
-        structured_payload = _assistant_structured_payload(result_json)
+        structured_payload = _with_persisted_transcript(
+            _assistant_structured_payload(result_json), transcript
+        )
         approval_id = await self._create_proposal_approval(
             conversation,
             kind=assistant_kind,
@@ -932,9 +950,12 @@ class ChatService:
             "kind": cast(ChatMessageKind, row.kind),
             "status": cast(ChatMessageStatus, row.status),
             "body": row.body,
-            "structuredPayload": row.structured_payload,
+            "structuredPayload": _strip_chat_metadata_from_payload(
+                row.structured_payload
+            ),
             "approvalId": row.approval_id,
             "attachments": attachments or [],
+            "transcript": _chat_transcript_from_payload(row.structured_payload),
             "replyingAgentId": row.replying_agent_id,
             "chatTurnId": row.chat_turn_id,
             "turnVariant": row.turn_variant,
@@ -985,6 +1006,45 @@ def _assistant_structured_payload(
     if isinstance(value, dict):
         return value
     return None
+
+
+def _chat_transcript_from_payload(
+    payload: dict[str, Any] | None,
+) -> list[ChatStreamTranscriptEntry]:
+    transcript = (payload or {}).get(_CHAT_TRANSCRIPT_KEY)
+    if not isinstance(transcript, list):
+        return []
+    return [
+        cast(ChatStreamTranscriptEntry, entry)
+        for entry in transcript
+        if isinstance(entry, dict)
+    ]
+
+
+def _strip_chat_metadata_from_payload(
+    payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    if _CHAT_TRANSCRIPT_KEY not in payload:
+        return payload
+    clean_payload = {
+        key: value for key, value in payload.items() if key != _CHAT_TRANSCRIPT_KEY
+    }
+    return clean_payload or None
+
+
+def _with_persisted_transcript(
+    payload: dict[str, Any] | None,
+    transcript: list[ChatStreamTranscriptEntry],
+) -> dict[str, Any] | None:
+    clean_payload = _strip_chat_metadata_from_payload(payload)
+    if not transcript:
+        return clean_payload
+    return {
+        **(clean_payload or {}),
+        _CHAT_TRANSCRIPT_KEY: transcript,
+    }
 
 
 def _proposal_payload(
