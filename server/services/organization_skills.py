@@ -21,6 +21,10 @@ from packages.database.queries.organization_skills import (
     list_organization_skills,
     update_organization_skill,
 )
+from packages.database.queries.organizations import (
+    get_organization_by_id,
+    get_organization_by_url_key,
+)
 from packages.database.schema import OrganizationSkill
 from packages.shared.types.organization_skill import (
     OrganizationSkill as OrganizationSkillData,
@@ -33,6 +37,19 @@ from packages.shared.types.organization_skill import (
 _DEFAULT_MARKDOWN = "Use this skill when it is relevant to the current task."
 _SKILL_FILE = "SKILL.md"
 _SLUG_CLEANUP_RE = re.compile(r"[^a-z0-9_-]+")
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*", re.DOTALL)
+_BUNDLED_SKILLS: tuple[tuple[str, str], ...] = (
+    ("para-memory-files", "para-memory-files"),
+    ("rudder", "control-plane"),
+    ("rudder-create-agent", "create-agent"),
+    ("rudder-create-plugin", "create-plugin"),
+    ("skill-creator", "skill-creator"),
+    ("skill-optimizer", "skill-optimizer"),
+    ("conversation-to-skill", "conversation-to-skill"),
+)
+_BUNDLED_KEY_ORDER = {
+    f"rudder/{slug}": index for index, (slug, _) in enumerate(_BUNDLED_SKILLS)
+}
 
 
 class OrganizationSkillService:
@@ -40,16 +57,81 @@ class OrganizationSkillService:
         self._session = session
 
     async def list(self, org_id: str) -> list[OrganizationSkillListItem]:
-        rows = await list_organization_skills(self._session, org_id)
-        attached_counts = await self._attached_counts(org_id, rows)
-        return [
-            self._to_list_item(row, attached_counts.get(row.key, 0)) for row in rows
-        ]
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            return []
+        await self._ensure_skill_inventory_current(resolved_org_id)
+        rows = await list_organization_skills(self._session, resolved_org_id)
+        attached_counts = await self._attached_counts(resolved_org_id, rows)
+        return sorted(
+            [self._to_list_item(row, attached_counts.get(row.key, 0)) for row in rows],
+            key=_organization_skill_sort_key,
+        )
+
+    async def _ensure_skill_inventory_current(self, org_id: str) -> None:
+        await self._ensure_bundled_skills(org_id)
+
+    async def _resolve_org_id(self, org_ref: str) -> str | None:
+        by_id = await get_organization_by_id(self._session, org_ref)
+        if by_id is not None:
+            return by_id.id
+        by_url_key = await get_organization_by_url_key(self._session, org_ref)
+        return by_url_key.id if by_url_key is not None else None
+
+    async def _ensure_bundled_skills(self, org_id: str) -> None:
+        for canonical_slug, local_slug in _BUNDLED_SKILLS:
+            skill_dir = _find_bundled_skill_dir(local_slug)
+            if skill_dir is None:
+                continue
+            markdown = _read_skill_markdown(skill_dir)
+            if markdown is None:
+                continue
+            key = f"rudder/{canonical_slug}"
+            metadata = {"sourceKind": "rudder_bundled", "skillKey": key}
+            fields = {
+                "key": key,
+                "slug": canonical_slug,
+                "name": _skill_name_from_markdown(markdown, canonical_slug),
+                "description": _skill_description_from_markdown(markdown),
+                "markdown": markdown,
+                "source_type": "local_path",
+                "source_locator": str(skill_dir),
+                "source_ref": None,
+                "trust_level": "markdown_only",
+                "compatibility": "compatible",
+                "file_inventory": [{"path": _SKILL_FILE, "kind": "skill"}],
+                "metadata_json": metadata,
+            }
+            existing = await get_organization_skill_by_key(self._session, org_id, key)
+            if existing is None:
+                await create_organization_skill(
+                    self._session, {"id": str(uuid.uuid4()), "org_id": org_id, **fields}
+                )
+            elif _skill_source_kind(existing) == "rudder_bundled":
+                await update_organization_skill(
+                    self._session, org_id, existing.id, fields
+                )
+
+    async def _list_rows(self, org_id: str) -> list[OrganizationSkill]:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            return []
+        org_id = resolved_org_id
+        await self._ensure_skill_inventory_current(org_id)
+        return list(await list_organization_skills(self._session, org_id))
+
+    async def _get_row(self, org_id: str, skill_id: str) -> OrganizationSkill | None:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            return None
+        org_id = resolved_org_id
+        await self._ensure_skill_inventory_current(org_id)
+        return await get_organization_skill(self._session, org_id, skill_id)
 
     async def detail(
         self, org_id: str, skill_id: str
     ) -> OrganizationSkillDetail | None:
-        row = await get_organization_skill(self._session, org_id, skill_id)
+        row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
         attached_counts = await self._attached_counts(org_id, [row])
@@ -61,7 +143,7 @@ class OrganizationSkillService:
     async def update_status(
         self, org_id: str, skill_id: str
     ) -> OrganizationSkillUpdateStatus | None:
-        row = await get_organization_skill(self._session, org_id, skill_id)
+        row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
         return {
@@ -81,6 +163,10 @@ class OrganizationSkillService:
         actor_type: str,
         actor_id: str,
     ) -> OrganizationSkillData:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            raise ValueError("Organization not found")
+        org_id = resolved_org_id
         slug = str(payload.get("slug") or _slugify(str(payload["name"])))
         existing = await get_organization_skill_by_key(self._session, org_id, slug)
         if existing is not None:
@@ -125,7 +211,7 @@ class OrganizationSkillService:
     async def read_file(
         self, org_id: str, skill_id: str, relative_path: str
     ) -> OrganizationSkillFileDetail | None:
-        row = await get_organization_skill(self._session, org_id, skill_id)
+        row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
         path = _normalize_skill_file_path(relative_path)
@@ -146,9 +232,13 @@ class OrganizationSkillService:
         actor_type: str,
         actor_id: str,
     ) -> OrganizationSkillFileDetail | None:
-        row = await get_organization_skill(self._session, org_id, skill_id)
+        row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
+        if _is_bundled_skill(row):
+            raise OrganizationSkillPathError(
+                "Bundled organization skills are read-only"
+            )
         path = _normalize_skill_file_path(relative_path)
         file_path = _resolve_skill_file(row, path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,6 +272,10 @@ class OrganizationSkillService:
         actor_type: str,
         actor_id: str,
     ) -> OrganizationSkillData | None:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            return None
+        org_id = resolved_org_id
         existing = await get_organization_skill(self._session, org_id, skill_id)
         if existing is None:
             return None
@@ -223,16 +317,18 @@ class OrganizationSkillService:
         self, row: OrganizationSkill, attached_agent_count: int
     ) -> OrganizationSkillListItem:
         skill = self._to_skill(row)
-        skill_dir = _org_skill_dir(row.org_id, row.slug)
+        skill_dir = _skill_root(row)
+        source_kind = _skill_source_kind(row)
+        editable = source_kind != "rudder_bundled"
         return {
             **skill,
             "attachedAgentCount": attached_agent_count,
-            "editable": True,
-            "editableReason": None,
-            "sourceLabel": "Local organization skill",
-            "sourceBadge": "local",
+            "editable": editable,
+            "editableReason": None if editable else "Bundled by Rudder",
+            "sourceLabel": _source_label(source_kind),
+            "sourceBadge": _source_badge(source_kind),
             "sourcePath": str(skill_dir),
-            "workspaceEditPath": str(skill_dir / _SKILL_FILE),
+            "workspaceEditPath": str(skill_dir / _SKILL_FILE) if editable else None,
         }
 
     def _to_skill(self, row: OrganizationSkill) -> OrganizationSkillData:
@@ -277,6 +373,48 @@ def _org_skill_dir(org_id: str, slug: str) -> Path:
     return organization_skills_root(org_id) / slug
 
 
+def _find_bundled_skill_dir(local_slug: str) -> Path | None:
+    for root in _bundled_skill_roots():
+        skill_dir = root / local_slug
+        if (skill_dir / _SKILL_FILE).is_file():
+            return skill_dir.resolve()
+    return None
+
+
+def _bundled_skill_roots() -> list[Path]:
+    repo_root = Path(__file__).resolve().parents[2]
+    return [
+        Path.cwd() / "server" / "skills" / "bundled",
+        repo_root / "server" / "skills" / "bundled",
+    ]
+
+
+def _read_skill_markdown(skill_dir: Path) -> str | None:
+    try:
+        return (skill_dir / _SKILL_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _frontmatter_value(markdown: str, key: str) -> str | None:
+    match = _FRONTMATTER_RE.match(markdown)
+    if match is None:
+        return None
+    for line in match.group("body").splitlines():
+        name, separator, value = line.partition(":")
+        if separator and name.strip() == key:
+            return value.strip().strip("\"'")
+    return None
+
+
+def _skill_name_from_markdown(markdown: str, fallback_slug: str) -> str:
+    return _frontmatter_value(markdown, "name") or fallback_slug
+
+
+def _skill_description_from_markdown(markdown: str) -> str | None:
+    return _frontmatter_value(markdown, "description")
+
+
 def _slugify(value: str) -> str:
     slug = _SLUG_CLEANUP_RE.sub("-", value.strip().lower()).strip("-_")
     return slug or "skill"
@@ -291,11 +429,52 @@ def _normalize_skill_file_path(value: str) -> str:
 
 
 def _resolve_skill_file(row: OrganizationSkill, relative_path: str) -> Path:
-    root = _org_skill_dir(row.org_id, row.slug)
+    root = _skill_root(row)
     target = (root / relative_path).resolve()
     if not _is_relative_to(target, root.resolve()):
         raise OrganizationSkillPathError("Invalid organization skill file path")
     return target
+
+
+def _skill_root(row: OrganizationSkill) -> Path:
+    if row.source_locator:
+        path = Path(row.source_locator)
+        if path.exists():
+            return path.resolve()
+    return _org_skill_dir(row.org_id, row.slug)
+
+
+def _skill_source_kind(row: OrganizationSkill) -> str | None:
+    metadata = row.metadata_json or {}
+    value = metadata.get("sourceKind")
+    return value if isinstance(value, str) else None
+
+
+def _is_bundled_skill(row: OrganizationSkill) -> bool:
+    return _skill_source_kind(row) == "rudder_bundled"
+
+
+def _source_label(source_kind: str | None) -> str:
+    if source_kind == "rudder_bundled":
+        return "Bundled by Rudder"
+    if source_kind == "community_preset":
+        return "Community preset"
+    return "Local organization skill"
+
+
+def _source_badge(source_kind: str | None) -> str:
+    if source_kind == "rudder_bundled":
+        return "rudder"
+    if source_kind == "community_preset":
+        return "community"
+    return "local"
+
+
+def _organization_skill_sort_key(skill: OrganizationSkillListItem) -> tuple[int, str]:
+    bundled_order = _BUNDLED_KEY_ORDER.get(skill["key"])
+    if bundled_order is not None:
+        return (bundled_order, "")
+    return (len(_BUNDLED_KEY_ORDER), skill["name"].lower())
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
