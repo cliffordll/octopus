@@ -3115,9 +3115,36 @@ pre {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
   overflow-y: auto;
   padding: 12px;
+}
+
+.organization-skill-list-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.organization-skill-list-section-heading {
+  align-items: center;
+  color: #93a3bb;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+.organization-skill-list-section-heading h2 {
+  color: #aebbd0;
+  font-size: 11px;
+  letter-spacing: .08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.organization-skill-list-section-heading span {
+  color: #6f7d92;
+  font-size: 11px;
 }
 
 .organization-skill-list-card {
@@ -3212,6 +3239,79 @@ pre {
   font-size: 13px;
   line-height: 1.55;
   margin: 6px 0 0;
+}
+
+.organization-skill-readonly {
+  color: #f0b86b !important;
+}
+
+.organization-skill-info-grid {
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 12px 18px;
+}
+
+.organization-skill-info-grid div {
+  background: #101722;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.organization-skill-info-grid span {
+  color: #778397;
+  display: block;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.organization-skill-info-grid strong {
+  color: #dbe7f7;
+  display: block;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-skill-usage {
+  border-bottom: 1px solid #202a3b;
+  padding: 12px 18px;
+}
+
+.organization-skill-usage h3 {
+  color: #dce6f4;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.organization-skill-usage div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.organization-skill-usage div > span {
+  background: #101722;
+  border: 1px solid #243149;
+  border-radius: 999px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+}
+
+.organization-skill-usage strong {
+  color: #e6eefb;
+  font-size: 12px;
+}
+
+.organization-skill-usage small {
+  color: #8792a6;
+  font-size: 10px;
 }
 
 .organization-skill-content-layout {

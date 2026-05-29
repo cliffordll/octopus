@@ -530,6 +530,20 @@ function skillFilePath(skill: OrganizationSkillListItem): string {
   return skill.fileInventory.find((file) => file.path === "SKILL.md")?.path ?? skill.fileInventory[0]?.path ?? "SKILL.md";
 }
 
+const DEFAULT_SKILL_MARKDOWN = "Use this skill when it is relevant to the current task.";
+
+function isBundledOrganizationSkill(skill: OrganizationSkillListItem): boolean {
+  const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : null;
+  return sourceKind === "rudder_bundled" || skill.sourceBadge === "rudder" || skill.key.startsWith("rudder/");
+}
+
+function organizationSkillSections(skills: OrganizationSkillListItem[]) {
+  return [
+    { title: "内置技能", rows: skills.filter(isBundledOrganizationSkill) },
+    { title: "本地组织技能", rows: skills.filter((skill) => !isBundledOrganizationSkill(skill)) },
+  ];
+}
+
 export function OrganizationSkillsPage() {
   const { orgId = "", skillId = "" } = useParams();
   const navigate = useNavigate();
@@ -553,9 +567,10 @@ export function OrganizationSkillsPage() {
   const [newName, setNewName] = useState("");
   const [newSlug, setNewSlug] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  const [newMarkdown, setNewMarkdown] = useState("");
+  const [newMarkdown, setNewMarkdown] = useState(DEFAULT_SKILL_MARKDOWN);
   const [draftContent, setDraftContent] = useState("");
   const selectedPath = selectedSkill ? (selectedPathBySkill[selectedSkill.id] ?? skillFilePath(selectedSkill)) : "SKILL.md";
+  const filteredSkillSections = organizationSkillSections(filteredSkillRows);
   const skillDetail = useQuery({
     queryKey: ["organization-skill", orgId, selectedSkill?.id],
     queryFn: () => organizationSkillsApi.get(orgId, selectedSkill!.id),
@@ -592,7 +607,7 @@ export function OrganizationSkillsPage() {
       setNewName("");
       setNewSlug("");
       setNewDescription("");
-      setNewMarkdown("");
+      setNewMarkdown(DEFAULT_SKILL_MARKDOWN);
       setCreateOpen(false);
       navigate(`/orgs/${orgId}/skills/${skill.id}`);
       void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
@@ -642,23 +657,31 @@ export function OrganizationSkillsPage() {
           </label>
           <div className="organization-skill-list-panel">
             {skills.isLoading && <p className="muted">加载技能中...</p>}
-            {filteredSkillRows.map((skill) => (
-              <button
-                className={`organization-skill-list-card ${selectedSkill?.id === skill.id ? "selected" : ""}`}
-                key={skill.id}
-                onClick={() => navigate(`/orgs/${orgId}/skills/${skill.id}`)}
-                type="button"
-              >
-                <span className="organization-skill-list-card-title">
-                  <strong>{skill.name}</strong>
-                  <small>{skill.sourceBadge}</small>
-                </span>
-                {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
-                <span className="organization-skill-list-card-meta">
-                  <span>{skill.fileInventory.length} 文件</span>
-                  <span>{skill.attachedAgentCount} 智能体</span>
-                </span>
-              </button>
+            {filteredSkillSections.map((section) => (
+              <section className="organization-skill-list-section" key={section.title}>
+                <div className="organization-skill-list-section-heading">
+                  <h2>{section.title}</h2>
+                  <span>{section.rows.length}</span>
+                </div>
+                {section.rows.map((skill) => (
+                  <button
+                    className={`organization-skill-list-card ${selectedSkill?.id === skill.id ? "selected" : ""}`}
+                    key={skill.id}
+                    onClick={() => navigate(`/orgs/${orgId}/skills/${skill.id}`)}
+                    type="button"
+                  >
+                    <span className="organization-skill-list-card-title">
+                      <strong>{skill.name}</strong>
+                      <small>{skill.sourceBadge}</small>
+                    </span>
+                    {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
+                    <span className="organization-skill-list-card-meta">
+                      <span>{skill.fileInventory.length} 文件</span>
+                      <span>{skill.attachedAgentCount} 智能体</span>
+                    </span>
+                  </button>
+                ))}
+              </section>
             ))}
           </div>
         </aside>
@@ -674,15 +697,56 @@ export function OrganizationSkillsPage() {
                   </div>
                   <p>{selectedSkill.description || "未填写描述"}</p>
                   <p className="muted">{selectedSkill.sourceLabel ?? selectedSkill.slug}</p>
+                  {!selectedSkill.editable && selectedSkill.editableReason && (
+                    <p className="organization-skill-readonly">只读：{selectedSkill.editableReason}</p>
+                  )}
                 </div>
                 <div className="row-actions">
                   <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
-                  <button className="danger small-button" disabled={deleteSkill.isPending} onClick={() => deleteSkill.mutate(selectedSkill.id)} type="button">删除</button>
+                  <button
+                    className="danger small-button"
+                    disabled={deleteSkill.isPending || !selectedSkill.editable}
+                    onClick={() => deleteSkill.mutate(selectedSkill.id)}
+                    type="button"
+                  >
+                    删除
+                  </button>
                 </div>
               </div>
               {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
               {skillFile.error && <ErrorNotice error={skillFile.error} />}
               {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
+              <div className="organization-skill-info-grid">
+                <div>
+                  <span>来源</span>
+                  <strong>{selectedSkill.sourceLabel ?? selectedSkill.sourceBadge}</strong>
+                </div>
+                <div>
+                  <span>Source path</span>
+                  <strong>{selectedSkill.sourcePath ?? "未设置"}</strong>
+                </div>
+                <div>
+                  <span>Workspace edit path</span>
+                  <strong>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
+                </div>
+                <div>
+                  <span>兼容性</span>
+                  <strong>{selectedSkill.compatibility}</strong>
+                </div>
+              </div>
+              {(skillDetail.data?.usedByAgents ?? []).length > 0 && (
+                <section className="organization-skill-usage">
+                  <h3>使用中的智能体</h3>
+                  <div>
+                    {skillDetail.data?.usedByAgents.map((agent) => (
+                      <span key={agent.id}>
+                        <strong>{agent.name}</strong>
+                        <small>{agent.desired ? "desired" : "available"} · {agent.actualState ?? agent.agentRuntimeType}</small>
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
               <div className="organization-skill-content-layout">
                 <aside className="organization-skill-files">
                   <div className="organization-skill-files-header">
@@ -709,14 +773,18 @@ export function OrganizationSkillsPage() {
                       <h3>{selectedPath}</h3>
                       <p>{skillFile.data?.editable ? "可编辑" : "只读"}</p>
                     </div>
-                    <button disabled={!skillFile.data?.editable || saveFile.isPending} onClick={() => saveFile.mutate()} type="button">
+                    <button
+                      disabled={!selectedSkill.editable || !skillFile.data?.editable || saveFile.isPending}
+                      onClick={() => saveFile.mutate()}
+                      type="button"
+                    >
                       保存
                     </button>
                   </div>
                   <textarea
                     aria-label={selectedPath}
                     className="skill-yaml-textarea organization-skill-editor"
-                    readOnly={!skillFile.data?.editable}
+                    readOnly={!selectedSkill.editable || !skillFile.data?.editable}
                     value={draftContent}
                     onChange={(event) => setDraftContent(event.target.value)}
                   />

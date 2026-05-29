@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import httpx
 
@@ -135,8 +136,14 @@ def test_organization_commands_support_policy_fields() -> None:
     )
 
 
-def test_organization_resource_and_skill_commands_cover_step17_routes() -> None:
+def test_organization_resource_and_skill_commands_cover_step17_routes(
+    tmp_path: Path,
+) -> None:
     requests: list[httpx.Request] = []
+    markdown_file = tmp_path / "SKILL.md"
+    markdown_file.write_text("# Review\n\nUse this.", encoding="utf-8")
+    content_file = tmp_path / "updated.md"
+    content_file.write_text("# Review\nUpdated", encoding="utf-8")
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -206,6 +213,8 @@ def test_organization_resource_and_skill_commands_cover_step17_routes() -> None:
                 "Review",
                 "--slug",
                 "review",
+                "--markdown-file",
+                str(markdown_file),
             ],
             client=client,
         )
@@ -236,8 +245,8 @@ def test_organization_resource_and_skill_commands_cover_step17_routes() -> None:
                 "skill-1",
                 "--path",
                 "SKILL.md",
-                "--content",
-                "# Review",
+                "--content-file",
+                str(content_file),
             ],
             client=client,
         )
@@ -275,4 +284,7 @@ def test_organization_resource_and_skill_commands_cover_step17_routes() -> None:
         b'{"name":"Repo","kind":"url","locator":"https://example.test/repo",'
         b'"metadata":{"owner":"team"}}'
     )
-    assert requests[8].read() == b'{"path":"SKILL.md","content":"# Review"}'
+    assert requests[6].read() == (
+        b'{"name":"Review","slug":"review","markdown":"# Review\\n\\nUse this."}'
+    )
+    assert requests[8].read() == b'{"path":"SKILL.md","content":"# Review\\nUpdated"}'
