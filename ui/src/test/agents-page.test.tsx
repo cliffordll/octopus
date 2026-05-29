@@ -55,13 +55,13 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(
     agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
-  await userEvent.click(screen.getByRole("button", { name: "切换组织" }));
+  await userEvent.click(screen.getByRole("button", { name: "组织菜单" }));
   const organizationMenu = within(screen.getByRole("navigation", { name: "组织切换菜单" }));
   expect(organizationMenu.getByRole("link", { name: "组织设置" })).toHaveAttribute(
     "href",
     "/orgs/org-1/settings",
   );
-  expect(organizationMenu.getByRole("link", { name: "管理组织" })).toHaveAttribute("href", "/organizations");
+  expect(organizationMenu.getByRole("link", { name: "创建组织" })).toHaveAttribute("href", "/organizations");
   expect(
     organizationMenu.getByRole("link", { name: /设计团队/ }),
   ).toHaveAttribute("href", "/orgs/org-2/agents");
