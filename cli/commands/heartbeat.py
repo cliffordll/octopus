@@ -22,6 +22,11 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     events_parser.add_argument("--after-seq", type=int)
     events_parser.add_argument("--limit", type=int)
     events_parser.set_defaults(handler=list_events)
+    debug_parser = actions.add_parser("debug")
+    debug_parser.add_argument("run_id")
+    debug_parser.add_argument("--after-seq", type=int)
+    debug_parser.add_argument("--limit", type=int, default=100)
+    debug_parser.set_defaults(handler=debug_run)
     run_parser = actions.add_parser("run")
     run_parser.add_argument("--agent-id", required=True)
     run_parser.add_argument("--idempotency-key")
@@ -61,6 +66,26 @@ def list_events(args: argparse.Namespace, client: ApiClient) -> Any:
         f"/api/heartbeat-runs/{args.run_id}/events",
         params=params or None,
     )
+
+
+def debug_run(args: argparse.Namespace, client: ApiClient) -> Any:
+    run = client.request("GET", f"/api/heartbeat-runs/{args.run_id}")
+    params: dict[str, str] = {}
+    if args.after_seq is not None:
+        params["afterSeq"] = str(args.after_seq)
+    if args.limit is not None:
+        params["limit"] = str(args.limit)
+    events = client.request(
+        "GET",
+        f"/api/heartbeat-runs/{args.run_id}/events",
+        params=params or None,
+    )
+    return {
+        "debug": {
+            "run": run,
+            "events": events,
+        }
+    }
 
 
 def run_heartbeat(args: argparse.Namespace, client: ApiClient) -> Any:

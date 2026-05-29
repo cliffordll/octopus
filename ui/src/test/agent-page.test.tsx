@@ -183,7 +183,23 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
-      return respond([{ id: "run-1", status: "succeeded", invocationSource: "on_demand" }]);
+      if (path === "/api/heartbeat-runs/run-1/events") {
+        return respond([
+          { id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "runtime.stderr", stream: "stderr", level: "error", message: "model missing", payload: { phase: "adapter" }, createdAt: "2026-05-29T01:00:01Z" },
+        ]);
+      }
+      return respond([{
+        id: "run-1",
+        status: "failed",
+        invocationSource: "on_demand",
+        error: "Runtime failed",
+        errorCode: "runtime_error",
+        stdoutExcerpt: "boot ok",
+        stderrExcerpt: "model missing",
+        usageJson: { inputTokens: 12 },
+        resultJson: { summary: "failed summary" },
+        contextSnapshot: { workspace: { executionWorkspaceId: "workspace-1" } },
+      }]);
     }
     return respond({ ...agent, name: "Builder 2" });
   });
@@ -212,7 +228,13 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
-  expect(await within(screen.getByTestId("agent-runs-detail-pane")).findByText("succeeded")).toBeInTheDocument();
+  const detail = screen.getByTestId("agent-runs-detail-pane");
+  expect(await within(detail).findByText("failed")).toBeInTheDocument();
+  expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
+  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
+  expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
+  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
+  expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
