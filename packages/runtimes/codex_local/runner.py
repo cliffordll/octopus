@@ -130,7 +130,7 @@ async def _run_attempt(
             stderr=asyncio.subprocess.PIPE,
         )
     except PermissionError as exc:
-        if os.name == "nt":
+        if _should_retry_with_blocking_subprocess(exc):
             return await _run_blocking_subprocess_attempt(
                 context=context,
                 command=command,
@@ -272,6 +272,10 @@ def _subprocess_start_error_attempt(
         },
     )
     return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
+
+
+def _should_retry_with_blocking_subprocess(_: PermissionError) -> bool:
+    return os.name == "nt"
 
 
 async def _run_blocking_subprocess_attempt(

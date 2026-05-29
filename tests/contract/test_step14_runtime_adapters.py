@@ -1247,7 +1247,10 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
             stderr=b"",
         )
 
-    monkeypatch.setattr("packages.runtimes.codex_local.runner.os.name", "nt")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner._should_retry_with_blocking_subprocess",
+        lambda exc: True,
+    )
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
