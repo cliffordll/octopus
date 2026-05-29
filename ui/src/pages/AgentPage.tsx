@@ -102,7 +102,7 @@ function nestedSkillField(entry: Record<string, unknown>, keys: string[]): strin
 
 function descriptionFromMarkdown(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "";
-  const lines = value.split(/\r?\n/);
+  const lines = value.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() === "---") {
     for (const line of lines.slice(1)) {
       const trimmed = line.trim();
@@ -174,9 +174,17 @@ function skillAliases(entry: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
+type SkillSourceGroup = "内置技能" | "社区技能" | "组织技能" | "外部技能";
+
+function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
   const sourceClass = skillField(entry, ["sourceClass", "source", "scope", "kind"], "runtime").toLowerCase();
-  return sourceClass === "bundled" || sourceClass === "organization" ? "组织技能" : "外部技能";
+  const sourceBadge = skillField(entry, ["sourceBadge"], "").toLowerCase();
+  const origin = skillField(entry, ["origin"], "").toLowerCase();
+  const originLabel = skillField(entry, ["originLabel", "sourceLabel"], "").toLowerCase();
+  if (sourceClass === "bundled" || sourceBadge === "built-in" || origin === "bundled") return "内置技能";
+  if (sourceBadge === "community" || origin === "community_preset" || originLabel.includes("community")) return "社区技能";
+  if (sourceClass === "organization") return "组织技能";
+  return "外部技能";
 }
 
 function skillState(entry: Record<string, unknown>): string {
@@ -629,6 +637,8 @@ export function AgentPage() {
   const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
+  const builtInSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "内置技能");
+  const communitySkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "社区技能");
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
@@ -1126,6 +1136,8 @@ export function AgentPage() {
                 </section>
               )}
               {[
+                { label: "内置技能", rows: builtInSkillEntries },
+                { label: "社区技能", rows: communitySkillEntries },
                 { label: "组织技能", rows: organizationSkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },
               ].map((group) => (
