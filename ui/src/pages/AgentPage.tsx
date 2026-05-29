@@ -501,6 +501,7 @@ export function AgentPage() {
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
+  const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
@@ -726,38 +727,87 @@ export function AgentPage() {
                   <div>
                     <p className="eyebrow">Configuration</p>
                     <h2>基础配置</h2>
-                    <p className="muted">按上游详情页的属性行布局展示，运行配置保留可编辑 JSON。</p>
                   </div>
                 </div>
-                <div className="agent-property-list">
-                  <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
-                  <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-                  <label className="agent-property-row">
-                    <span>角色</span>
-                  <select value={role} onChange={(event) => setRole(event.target.value as AgentRole)}>
-                    {ROLES.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                </label>
-                  <label className="agent-property-row">
-                    <span>上级智能体</span>
-                  <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
-                    <option value="">未设置</option>
-                    {(organizationAgents.data ?? [])
-                      .filter((item) => item.id !== agentId)
-                      .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                  </select>
-                </label>
-                  <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
-                  <label className="agent-property-row">
-                    <span>Runtime</span>
-                  <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
-                    {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                </label>
-                  <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
-                  <label className="agent-property-row"><span>Desired Skills</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
-                  <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
-                  <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+                <div className="agent-config-sections">
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>身份</h2>
+                      <p className="muted">智能体的名称、职责和组织汇报关系。</p>
+                    </div>
+                    <div className="agent-property-list">
+                      <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
+                      <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+                      <label className="agent-property-row">
+                        <span>角色</span>
+                        <select value={role} onChange={(event) => setRole(event.target.value as AgentRole)}>
+                          {ROLES.map((item) => <option key={item}>{item}</option>)}
+                        </select>
+                      </label>
+                      <label className="agent-property-row">
+                        <span>上级智能体</span>
+                        <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
+                          <option value="">未设置</option>
+                          {(organizationAgents.data ?? [])
+                            .filter((item) => item.id !== agentId)
+                            .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
+                    </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>智能体运行时</h2>
+                      <p className="muted">选择本地或外部运行适配器，并维护适配器配置。</p>
+                    </div>
+                    <div className="agent-property-list">
+                      <label className="agent-property-row">
+                        <span>Runtime</span>
+                        <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+                          {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
+                        </select>
+                      </label>
+                      <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+                    </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>运行策略</h2>
+                      <p className="muted">预算、技能偏好和运行上下文策略。</p>
+                    </div>
+                    <div className="agent-property-list">
+                      <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
+                      <label className="agent-property-row"><span>Desired Skills</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
+                      <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+                    </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>权限</h2>
+                      <p className="muted">服务端返回的当前智能体权限快照。</p>
+                    </div>
+                    <div className="agent-permission-grid">
+                      {permissionRows.length > 0 ? permissionRows.map(([key, enabled]) => (
+                        <div className="agent-permission-item" key={key}>
+                          <span>{key}</span>
+                          <Badge>{enabled ? "允许" : "禁用"}</Badge>
+                        </div>
+                      )) : (
+                        <p className="muted">当前接口未返回权限明细。</p>
+                      )}
+                    </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>API 密钥</h2>
+                      <p className="muted">密钥不在页面明文保存；运行时通过环境变量、本地 CLI 登录或后续真实 secret 绑定提供。</p>
+                    </div>
+                    <div className="agent-summary-grid">
+                      <div className="summary-metric"><span>本地 Agent JWT</span><strong>{adapterMetadata.data?.supportsLocalAgentJwt ? "支持" : "未启用"}</strong></div>
+                      <div className="summary-metric"><span>认证检查</span><strong>{adapterTestChecks.find((check) => check.id === "auth")?.status ?? "未测试"}</strong></div>
+                    </div>
+                  </section>
                 </div>
                 {configurationError && <p className="error-notice">{configurationError}</p>}
                 {save.error && <ErrorNotice error={save.error} />}
