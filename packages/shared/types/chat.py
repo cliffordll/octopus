@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from ..constants.chat import (
+    ChatContextEntityType,
     ChatConversationStatus,
     ChatIssueCreationMode,
     ChatMessageKind,
@@ -11,20 +12,70 @@ from ..constants.chat import (
 )
 
 
+class ChatLinkedEntity(TypedDict, total=False):
+    type: ChatContextEntityType
+    id: str
+    label: str
+    subtitle: str | None
+    identifier: str | None
+    status: str | None
+    href: str
+
+
+class ChatContextLink(TypedDict):
+    id: str
+    orgId: str
+    conversationId: str
+    entityType: ChatContextEntityType
+    entityId: str
+    metadata: dict[str, Any] | None
+    entity: ChatLinkedEntity | None
+    createdAt: str
+    updatedAt: str
+
+
+class ChatPrimaryIssueSummary(TypedDict):
+    id: str
+    identifier: str | None
+    title: str
+    status: str
+    priority: str
+
+
+class ChatRuntimeDescriptor(TypedDict):
+    sourceType: str
+    sourceLabel: str
+    runtimeAgentId: str | None
+    agentRuntimeType: str | None
+    model: str | None
+    available: bool
+    error: str | None
+
+
 class ChatConversation(TypedDict):
     id: str
     orgId: str
     status: ChatConversationStatus
     title: str
     summary: str | None
+    latestReplyPreview: str | None
+    searchPreview: NotRequired[str | None]
     preferredAgentId: str | None
     routedAgentId: str | None
     primaryIssueId: str | None
+    primaryIssue: ChatPrimaryIssueSummary | None
     issueCreationMode: ChatIssueCreationMode
     planMode: bool
     createdByUserId: str | None
     lastMessageAt: str | None
+    lastReadAt: str | None
+    isPinned: bool
+    isUnread: bool
+    unreadCount: int
+    needsAttention: bool
     resolvedAt: str | None
+    contextLinks: list[ChatContextLink]
+    chatRuntime: ChatRuntimeDescriptor
     createdAt: str
     updatedAt: str
 
@@ -53,11 +104,76 @@ class CreateChatConversationPayload(TypedDict, total=False):
     preferredAgentId: NotRequired[str | None]
     issueCreationMode: NotRequired[ChatIssueCreationMode]
     planMode: NotRequired[bool]
+    contextLinks: NotRequired[list[CreateChatContextLinkPayload]]
 
 
-class AddChatMessagePayload(TypedDict):
+class CreateChatContextLinkPayload(TypedDict):
+    entityType: ChatContextEntityType
+    entityId: str
+    metadata: NotRequired[dict[str, Any] | None]
+
+
+class UpdateChatConversationPayload(TypedDict, total=False):
+    title: NotRequired[str]
+    summary: NotRequired[str | None]
+    preferredAgentId: NotRequired[str | None]
+    issueCreationMode: NotRequired[ChatIssueCreationMode]
+    planMode: NotRequired[bool]
+    status: NotRequired[ChatConversationStatus]
+    routedAgentId: NotRequired[str | None]
+    primaryIssueId: NotRequired[str | None]
+    resolvedAt: NotRequired[str | None]
+
+
+class UpdateChatConversationUserStatePayload(TypedDict, total=False):
+    pinned: NotRequired[bool]
+    unread: NotRequired[bool]
+
+
+class SetChatProjectContextPayload(TypedDict, total=False):
+    projectId: NotRequired[str | None]
+
+
+class ConvertChatToIssuePayload(TypedDict, total=False):
+    messageId: NotRequired[str | None]
+    proposal: NotRequired[dict[str, Any] | None]
+
+
+class ResolveChatOperationProposalPayloadBase(TypedDict):
+    action: str
+
+
+class ResolveChatOperationProposalPayload(
+    ResolveChatOperationProposalPayloadBase, total=False
+):
+    decisionNote: NotRequired[str | None]
+
+
+class AddChatMessagePayloadBase(TypedDict):
     body: str
+
+
+class AddChatMessagePayload(AddChatMessagePayloadBase, total=False):
+    editUserMessageId: NotRequired[str | None]
 
 
 class CreatedChatMessages(TypedDict):
     messages: list[ChatMessage]
+
+
+class ChatStreamEvent(TypedDict, total=False):
+    type: Literal[
+        "ack",
+        "assistant_delta",
+        "assistant_state",
+        "transcript_entry",
+        "final",
+        "error",
+    ]
+    userMessage: NotRequired[ChatMessage]
+    delta: NotRequired[str]
+    state: NotRequired[dict[str, Any]]
+    entry: NotRequired[dict[str, Any]]
+    messages: NotRequired[list[ChatMessage]]
+    error: NotRequired[str]
+    messageId: NotRequired[str | None]

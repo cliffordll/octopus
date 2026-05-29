@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -104,6 +105,90 @@ class ChatMessage(Base):
     chat_turn_id: Mapped[str | None] = mapped_column(String(36))
     turn_variant: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ChatConversationUserState(Base):
+    __tablename__ = "chat_conversation_user_states"
+    __table_args__ = (
+        Index(
+            "chat_conversation_user_states_org_conversation_idx",
+            "org_id",
+            "conversation_id",
+        ),
+        Index("chat_conversation_user_states_org_user_idx", "org_id", "user_id"),
+        UniqueConstraint(
+            "org_id",
+            "conversation_id",
+            "user_id",
+            name="chat_conversation_user_states_org_conversation_user_idx",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    last_read_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ChatContextLink(Base):
+    __tablename__ = "chat_context_links"
+    __table_args__ = (
+        Index(
+            "chat_context_links_conversation_entity_idx",
+            "conversation_id",
+            "entity_type",
+            "entity_id",
+        ),
+        Index(
+            "chat_context_links_company_entity_idx",
+            "org_id",
+            "entity_type",
+            "entity_id",
+        ),
+        UniqueConstraint(
+            "conversation_id",
+            "entity_type",
+            "entity_id",
+            name="chat_context_links_unique_conversation_entity_idx",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    org_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata", JSON().with_variant(JSONB(), "postgresql")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

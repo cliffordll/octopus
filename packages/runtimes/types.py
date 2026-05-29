@@ -19,6 +19,7 @@ class RuntimeExecutionContext:
     workspace: dict[str, Any] | None = None
     cancel_event: asyncio.Event | None = None
     on_process_started: Callable[[int, datetime], Awaitable[None]] | None = None
+    on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)

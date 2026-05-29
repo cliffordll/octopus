@@ -50,7 +50,7 @@
 
 - Step 3 以 `packages/shared` 替换 route/service 内部的临时契约表达。
 - Step 4 将数据库 engine/session 与 queries 接入 lifespan 和 services。
-- Step 19 将以真实 actor/access 来源替换当前请求上下文输入边界。
+- Step 22 将以真实 actor/access 来源替换当前请求上下文输入边界。
 
 ## 验收证据
 
