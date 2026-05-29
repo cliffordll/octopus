@@ -390,6 +390,55 @@ async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> 
     assert any(stream == "stdout" for stream, _ in logs)
 
 
+async def test_opencode_local_streams_text_events(tmp_path) -> None:
+    fake_opencode = tmp_path / "fake_opencode_stream.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, sys, time",
+                "sys.stdin.read()",
+                "print(json.dumps({'type':'step_start','sessionID':'ses_stream'}), flush=True)",
+                "print(json.dumps({'type':'text','part':{'type':'text','text':'hello '}}), flush=True)",
+                "time.sleep(0.01)",
+                "print(json.dumps({'type':'text','part':{'type':'text','text':'from stream'}}), flush=True)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    events: list[dict[str, object]] = []
+
+    async def on_log(stream: str, chunk: str) -> None:
+        return None
+
+    async def on_stream_event(event: dict[str, object]) -> None:
+        events.append(event)
+
+    result = await OpenCodeLocalRuntimeAdapter().execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-stream",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "model": "openai/gpt-5",
+                "promptTemplate": "Stream from OpenCode.",
+            },
+            on_log=on_log,
+            on_stream_event=on_stream_event,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "hello\n\nfrom stream"
+    assert events == [
+        {"type": "assistant_delta", "delta": "hello "},
+        {"type": "assistant_delta", "delta": "from stream"},
+    ]
+
+
 async def test_opencode_local_injects_desired_skills_into_managed_home(
     tmp_path,
 ) -> None:

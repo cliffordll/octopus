@@ -205,6 +205,7 @@ async def _run_attempt(
 
     stdout_text = stdout.decode(errors="replace")
     stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
+    await _emit_codex_stream_events_from_text(context, stdout_text)
     if stdout_text:
         await context.on_log("stdout", stdout_text)
     if stderr_text:
@@ -319,6 +320,30 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
         "usage": usage,
         "errorMessage": error_message,
     }
+
+
+async def _emit_codex_stream_events_from_text(
+    context: RuntimeExecutionContext, stdout_text: str
+) -> None:
+    if context.on_stream_event is None:
+        return
+    for raw_line in stdout_text.splitlines():
+        try:
+            event = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if (
+            isinstance(item, dict)
+            and item.get("type") == "agent_message"
+            and isinstance(item.get("text"), str)
+            and item["text"]
+        ):
+            await context.on_stream_event(
+                {"type": "assistant_delta", "delta": item["text"]}
+            )
 
 
 def _integer(value: Any) -> int:

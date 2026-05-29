@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from ..constants.chat import (
     ChatContextEntityType,
@@ -159,3 +159,21 @@ class AddChatMessagePayload(AddChatMessagePayloadBase, total=False):
 
 class CreatedChatMessages(TypedDict):
     messages: list[ChatMessage]
+
+
+class ChatStreamEvent(TypedDict, total=False):
+    type: Literal[
+        "ack",
+        "assistant_delta",
+        "assistant_state",
+        "transcript_entry",
+        "final",
+        "error",
+    ]
+    userMessage: NotRequired[ChatMessage]
+    delta: NotRequired[str]
+    state: NotRequired[dict[str, Any]]
+    entry: NotRequired[dict[str, Any]]
+    messages: NotRequired[list[ChatMessage]]
+    error: NotRequired[str]
+    messageId: NotRequired[str | None]

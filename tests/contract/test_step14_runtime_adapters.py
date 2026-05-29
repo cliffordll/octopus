@@ -673,6 +673,58 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
     assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
 
 
+async def test_codex_execute_streams_agent_message_delta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                b'{"type":"thread.started","thread_id":"thread-stream"}\n'
+                b'{"type":"item.completed","item":{"type":"agent_message","text":"done"}}\n',
+                b"",
+            )
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        return FakeCodexProcess()
+
+    async def on_log(stream: str, chunk: str) -> None:
+        return None
+
+    streamed: list[dict[str, object]] = []
+
+    async def on_stream_event(event: dict[str, object]) -> None:
+        streamed.append(event)
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-14-stream",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=on_log,
+            on_stream_event=on_stream_event,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert streamed == [{"type": "assistant_delta", "delta": "done"}]
+
+
 async def test_codex_execute_infers_openrouter_biller_from_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, Sequence, cast
+from typing import Any, Awaitable, Callable, Sequence, cast
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -519,7 +519,12 @@ class ChatService:
         return _issue_proposal_from_payload(message.structured_payload)
 
     async def add_message_and_reply(
-        self, conversation_id: str, payload: AddChatMessagePayload
+        self,
+        conversation_id: str,
+        payload: AddChatMessagePayload,
+        *,
+        cancel_event: Any | None = None,
+        on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> CreatedChatMessages:
         conversation = await get_conversation(self._session, conversation_id)
         if conversation is None:
@@ -577,6 +582,10 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, user_message.created_at
         )
+        if on_stream_event is not None:
+            await on_stream_event(
+                {"type": "ack", "userMessage": self._to_message(user_message)}
+            )
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
@@ -597,6 +606,8 @@ class ChatService:
                 agent_name=agent.name,
                 config=config,
                 on_log=_ignore_log,
+                cancel_event=cancel_event,
+                on_stream_event=on_stream_event,
             )
         )
         if result.timed_out:
