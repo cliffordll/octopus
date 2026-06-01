@@ -189,3 +189,51 @@ def test_issue_comment_and_review_post_payloads() -> None:
     assert requests[1].read() == b'{"body":"Compatible"}'
     assert requests[2].url.path == "/api/issues/issue-1/review-decision"
     assert requests[2].read() == b'{"decision":"approve"}'
+
+
+def test_issue_attachment_commands_use_storage_routes(tmp_path) -> None:
+    upload = tmp_path / "evidence.txt"
+    upload.write_text("attachment body", encoding="utf-8")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "id": "attachment-1",
+                "assetId": "asset-1",
+                "contentPath": "/api/assets/asset-1/content",
+            },
+        )
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["issue", "attachments", "issue-1"], client=client) == 0
+    assert (
+        main(
+            [
+                "issue",
+                "attachment-upload",
+                "--org-id",
+                "org-1",
+                "issue-1",
+                "--file",
+                str(upload),
+                "--usage",
+                "evidence",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert main(["issue", "attachment-delete", "attachment-1"], client=client) == 0
+
+    assert requests[0].method == "GET"
+    assert requests[0].url.path == "/api/issues/issue-1/attachments"
+    assert requests[1].method == "POST"
+    assert requests[1].url.path == "/api/orgs/org-1/issues/issue-1/attachments"
+    assert b'name="usage"' in requests[1].read()
+    assert requests[2].method == "DELETE"
+    assert requests[2].url.path == "/api/attachments/attachment-1"

@@ -178,3 +178,36 @@ def test_chat_step16_commands_use_extended_routes() -> None:
     )
     assert requests[6].read() == b'{"action":"approve","decisionNote":"OK"}'
     assert requests[7].url.path == "/api/chats/chat-1/messages/stream/stop"
+
+
+def test_chat_attachment_upload_uses_multipart_route(tmp_path) -> None:
+    upload = tmp_path / "note.txt"
+    upload.write_text("chat attachment", encoding="utf-8")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"id": "attachment-1", "assetId": "asset-1"})
+
+    assert (
+        main(
+            [
+                "chat",
+                "attachment-upload",
+                "--org-id",
+                "org-1",
+                "chat-1",
+                "--message-id",
+                "message-1",
+                "--file",
+                str(upload),
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/orgs/org-1/chats/chat-1/attachments"
+    body = requests[0].read()
+    assert b'name="messageId"' in body
+    assert b"message-1" in body

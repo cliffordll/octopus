@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { issuesApi } from "../api/issues";
 import type { IssueDetail, IssueReviewDecision } from "../api/types";
@@ -81,11 +81,17 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
   const [comment, setComment] = useState("");
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentUsage, setAttachmentUsage] = useState("attachment");
   const queryClient = useQueryClient();
   const issue = useQuery({ queryKey: ["issue", issueId], queryFn: () => issuesApi.get(issueId) });
   const comments = useQuery({
     queryKey: ["comments", issueId],
     queryFn: () => issuesApi.listComments(issueId),
+  });
+  const attachments = useQuery({
+    queryKey: ["issue-attachments", issueId],
+    queryFn: () => issuesApi.listAttachments(issueId),
   });
   const addComment = useMutation({
     mutationFn: () => issuesApi.addComment(issueId, { body: comment.trim() }),
@@ -102,6 +108,24 @@ export function IssuePage() {
     mutationFn: (decision: IssueReviewDecision) => issuesApi.review(issueId, { decision }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
   });
+  const uploadAttachment = useMutation({
+    mutationFn: () => {
+      if (!attachmentFile) throw new Error("请选择附件文件");
+      return issuesApi.uploadAttachment(orgId, issueId, {
+        file: attachmentFile,
+        usage: attachmentUsage.trim() || "attachment",
+      });
+    },
+    onSuccess: () => {
+      setAttachmentFile(null);
+      setAttachmentUsage("attachment");
+      void queryClient.invalidateQueries({ queryKey: ["issue-attachments", issueId] });
+    },
+  });
+  const deleteAttachment = useMutation({
+    mutationFn: (attachmentId: string) => issuesApi.deleteAttachment(attachmentId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["issue-attachments", issueId] }),
+  });
   useEffect(() => {
     if (!issue.data) return;
     writeRecentIssue(orgId, {
@@ -115,9 +139,16 @@ export function IssuePage() {
     event.preventDefault();
     if (comment.trim()) addComment.mutate();
   }
+  function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
+    setAttachmentFile(event.target.files?.[0] ?? null);
+  }
+  function submitAttachment(event: FormEvent) {
+    event.preventDefault();
+    if (attachmentFile) uploadAttachment.mutate();
+  }
   if (issue.error) return <ErrorNotice error={issue.error} />;
   return (
-    <IssuesWorkspace orgId={orgId}>
+    <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {issue.data && (
         <div className="issue-detail-layout">
           <main className="issue-detail-main">
@@ -172,6 +203,51 @@ export function IssuePage() {
             </section>
 
             <IssueWorkProductsPanel issue={issue.data} />
+
+            <section aria-label="Attachments" className="issue-section-card">
+              <div className="issue-section-heading">
+                <h2>Attachments</h2>
+                <span className="muted">{attachments.data?.length ?? 0}</span>
+              </div>
+              {attachments.error && <ErrorNotice error={attachments.error} />}
+              {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
+              {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
+              {attachments.isSuccess && attachments.data.length === 0 && <p className="muted">No attachments.</p>}
+              {attachments.data && attachments.data.length > 0 && (
+                <div className="issue-attachment-list">
+                  {attachments.data.map((attachment) => (
+                    <article className="issue-attachment-item" key={attachment.id}>
+                      <div>
+                        <strong>{attachment.originalFilename ?? attachment.id}</strong>
+                        <p className="muted">{attachment.usage} · {attachment.contentType} · {attachment.byteSize} bytes</p>
+                      </div>
+                      <div className="issue-attachment-actions">
+                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                        <button
+                          className="danger small-button"
+                          disabled={deleteAttachment.isPending}
+                          onClick={() => deleteAttachment.mutate(attachment.id)}
+                          type="button"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+              <form className="form issue-attachment-form" onSubmit={submitAttachment}>
+                <label>
+                  附件
+                  <input onChange={selectAttachment} type="file" />
+                </label>
+                <label>
+                  用途
+                  <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
+                </label>
+                <button disabled={!attachmentFile || uploadAttachment.isPending} type="submit">上传附件</button>
+              </form>
+            </section>
 
             <section aria-label="Activity" className="issue-section-card">
               <div className="issue-section-heading">
