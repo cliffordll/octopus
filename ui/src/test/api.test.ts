@@ -7,12 +7,22 @@ import { issuesApi } from "../api/issues";
 import { messengerApi } from "../api/messenger";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
+import { request } from "../api/client";
 
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
       status,
       headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+function streamResponse(events: unknown[], status = 201): Promise<Response> {
+  return Promise.resolve(
+    new Response(events.map((event) => JSON.stringify(event)).join("\n"), {
+      status,
+      headers: { "Content-Type": "application/x-ndjson" },
     }),
   );
 }
@@ -383,6 +393,55 @@ describe("chat API", () => {
         body: JSON.stringify({ body: "Start" }),
       }),
     );
+  });
+
+  it("streams chat message events", async () => {
+    const events: string[] = [];
+    const fetchMock = vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "ack", userMessage: { id: "message-1", role: "user", body: "Start" } },
+      { type: "assistant_delta", delta: "Re" },
+      { type: "assistant_delta", delta: "ady" },
+      { type: "final", messages: [{ id: "message-2", role: "assistant", body: "Ready" }] },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chatsApi.addMessageStream("chat-1", { body: "Start" }, (event) => {
+      events.push(event.type);
+    });
+
+    expect(result.messages).toEqual([{ id: "message-2", role: "assistant", body: "Ready" }]);
+    expect(events).toEqual(["ack", "assistant_delta", "assistant_delta", "final"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chats/chat-1/messages/stream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ body: "Start" }),
+      }),
+    );
+  });
+
+  it("shows the root cause for SQLAlchemy stream errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(streamResponse([
+      {
+        type: "error",
+        error: "(sqlite3.OperationalError) database is locked\n[SQL: INSERT INTO chat_messages ...]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow("database is locked");
+  });
+
+  it("shows the root cause for JSON API errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse(
+      {
+        detail: "(sqlite3.OperationalError) database is locked\n[SQL: INSERT INTO chat_messages ...]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      },
+      500,
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/fails", { method: "GET" })).rejects.toThrow("database is locked");
   });
 
   it("covers Step 16 chat and messenger routes", async () => {
