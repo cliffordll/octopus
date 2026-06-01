@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { projectsApi } from "../api/projects";
+import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -82,29 +83,38 @@ export function ChatsPage() {
           ? { contextLinks: [{ entityType: "project", entityId: projectId }] }
           : {}),
       });
+      const optimisticMessage: ChatMessage = {
+        id: `pending-${Date.now()}`,
+        orgId,
+        conversationId: chat.id,
+        role: "user",
+        kind: "message",
+        body: draft,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+      };
       queryClient.setQueryData(["chat", chat.id], chat);
+      queryClient.setQueryData(["chat-messages", chat.id], [optimisticMessage]);
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
       try {
         const created = await chatsApi.addMessage(chat.id, { body: draft });
         return {
           chat,
           messages: created.messages,
-          draft,
           firstMessageError: hasAssistantReply(created.messages) ? null : missingAssistantReplyMessage,
         };
       } catch (error) {
-        queryClient.setQueryData(["chat-messages", chat.id], []);
-        return { chat, messages: null, draft, firstMessageError: errorMessage(error) };
+        return { chat, messages: [optimisticMessage], firstMessageError: errorMessage(error) };
       }
     },
-    onSuccess: ({ chat, messages, draft, firstMessageError }) => {
+    onSuccess: ({ chat, messages, firstMessageError }) => {
       queryClient.setQueryData(["chat", chat.id], chat);
       if (messages) {
         queryClient.setQueryData(["chat-messages", chat.id], messages);
         setBody("");
       }
       navigate(`/orgs/${orgId}/chats/${chat.id}`, {
-        state: firstMessageError ? { sendError: `首条消息发送失败：${firstMessageError}`, draft } : undefined,
+        state: firstMessageError ? { sendError: `首条消息发送失败：${firstMessageError}` } : undefined,
       });
     },
   });
