@@ -596,6 +596,7 @@ class ChatService:
         *,
         cancel_event: Any | None = None,
         on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        commit_after_user_message: bool = False,
     ) -> CreatedChatMessages:
         conversation = await get_conversation(self._session, conversation_id)
         if conversation is None:
@@ -657,6 +658,8 @@ class ChatService:
             await on_stream_event(
                 {"type": "ack", "userMessage": self._to_message(user_message)}
             )
+        if commit_after_user_message:
+            await self._session.commit()
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
@@ -742,6 +745,8 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, assistant_message.created_at
         )
+        if commit_after_user_message:
+            await self._session.commit()
         return {
             "messages": [
                 self._to_message(user_message),
