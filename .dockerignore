@@ -1,0 +1,17 @@
+.git
+.venv
+.ruff_cache
+.pytest_cache
+.uv-cache*
+**/__pycache__
+*.pyc
+ui/node_modules
+.playwright-mcp
+upstream-reference
+*.db
+*.log
+*.png
+.octopus
+pytest-tmp
+docs
+tests
