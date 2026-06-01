@@ -1,7 +1,7 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import { renderApp, respond } from "./render-app";
+import { renderApp, respond, respondStream } from "./render-app";
 
 afterEach(() => {
   cleanup();
@@ -34,13 +34,18 @@ it("shows a composer and sends a first message through a selected agent", async 
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({
-        messages: [
-          { id: "message-1", role: "user", body: "请规划部署", status: "completed" },
-          { id: "message-2", role: "assistant", body: "已收到部署请求", status: "completed" },
-        ],
-      }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "请规划部署", status: "completed" } },
+        { type: "assistant_delta", delta: "已收到部署请求" },
+        {
+          type: "final",
+          messages: [
+            { id: "message-1", role: "user", body: "请规划部署", status: "completed" },
+            { id: "message-2", role: "assistant", body: "已收到部署请求", status: "completed" },
+          ],
+        },
+      ]);
     }
     return respond([]);
   });
@@ -84,15 +89,15 @@ it("shows a composer and sends a first message through a selected agent", async 
       }),
     }),
   );
+  expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
+  expect(await screen.findByText("已收到部署请求")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-2/messages",
+    "/api/chats/chat-2/messages/stream",
     expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ body: "请规划部署" }),
     }),
   );
-  expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
-  expect(await screen.findByText("已收到部署请求")).toBeInTheDocument();
 });
 
 it("creates a conversation by pressing Enter while Shift+Enter keeps a line break", async () => {
@@ -106,8 +111,8 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "第一行 第二行", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({ messages: [] }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([{ type: "final", messages: [] }]);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
       return respond({ id: "chat-2", title: "第一行 第二行", status: "active", preferredAgentId: "agent-1" });
@@ -164,8 +169,11 @@ it("opens a new conversation with an error notice when no assistant reply is ret
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "你好", status: "completed" } },
+        { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+      ]);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
@@ -184,7 +192,7 @@ it("opens a new conversation with an error notice when no assistant reply is ret
 
   expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
   expect(
-    await screen.findByText("首条消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
+    await screen.findByText("消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
   ).toBeInTheDocument();
 });
 
@@ -242,7 +250,7 @@ it("opens the conversation when the first reply request fails", async () => {
       conversationCreated = true;
       return respond({ id: "chat-2", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
@@ -261,7 +269,7 @@ it("opens the conversation when the first reply request fails", async () => {
 
   expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
   expect(within(screen.getByTestId("chat-message-thread")).getByText("请规划部署")).toBeInTheDocument();
-  expect(await screen.findByText("首条消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
+  expect(await screen.findByText("消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "打开已创建的对话" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toHaveTextContent("请规划部署");
 });
@@ -278,8 +286,11 @@ it("shows the first user message immediately after creating a conversation", asy
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "你好", status: "completed" } },
+        { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+      ]);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
@@ -298,7 +309,7 @@ it("shows the first user message immediately after creating a conversation", asy
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
 
   expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
-  expect(within(screen.getByTestId("chat-message-thread")).getByText("你好")).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getAllByText("你好")).toHaveLength(1);
 });
 
 it("opens the cached created conversation when the first reply fails and detail reload errors", async () => {
@@ -320,7 +331,7 @@ it("opens the cached created conversation when the first reply fails and detail 
       conversationCreated = true;
       return respond({ id: "chat-2", orgId: "org-1", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
@@ -394,6 +405,61 @@ it("shows an empty sidebar state when no conversations exist", async () => {
   expect(await within(screen.getByRole("navigation", { name: "消息导航" })).findByText("暂无对话")).toBeInTheDocument();
 });
 
+it("manages a conversation from the sidebar action menu", async () => {
+  let chats = [{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1" }];
+  const writeText = vi.fn();
+  Object.assign(navigator, { clipboard: { writeText } });
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond(chats);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active" }]);
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", title: chats[0]?.title ?? "支持会话", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
+    if (path === "/api/chats/chat-1" && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body)) as { title?: string; status?: string };
+      if (body.title) {
+        chats = [{ ...chats[0], title: body.title }];
+        return respond({ id: "chat-1", title: body.title, status: "active", preferredAgentId: "agent-1" });
+      }
+      if (body.status === "archived") {
+        chats = [];
+        return respond({ id: "chat-1", title: "已重命名", status: "archived", preferredAgentId: "agent-1" });
+      }
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByRole("heading", { name: "支持会话" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "支持会话 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "重命名" }));
+  await userEvent.clear(screen.getByLabelText("新会话名称"));
+  await userEvent.type(screen.getByLabelText("新会话名称"), "已重命名");
+  await userEvent.click(screen.getByRole("button", { name: "确认" }));
+
+  expect(await screen.findByRole("link", { name: /已重命名/ })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/chats/chat-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ title: "已重命名" }) }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "已重命名 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "复制聊天 ID" }));
+  expect(writeText).toHaveBeenCalledWith("chat-1");
+
+  await userEvent.click(screen.getByRole("button", { name: "已重命名 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "归档" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/chats/chat-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "archived" }) }),
+  );
+  expect(screen.queryByRole("link", { name: /已重命名/ })).not.toBeInTheDocument();
+});
+
 it("shows the selected conversation and agent identity while sending messages", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
@@ -411,12 +477,21 @@ it("shows the selected conversation and agent identity while sending messages", 
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([{ id: "message-1", role: "assistant", body: "已有回复", status: "completed" }]);
     }
-    return respond({
-      messages: [
-        { id: "message-2", role: "user", body: "现在状态？", status: "completed" },
-        { id: "message-3", role: "assistant", body: "新回复", status: "completed" },
-      ],
-    }, 201);
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-2", role: "user", body: "现在状态？", status: "completed" } },
+        { type: "assistant_delta", delta: "新" },
+        { type: "assistant_delta", delta: "回复" },
+        {
+          type: "final",
+          messages: [
+            { id: "message-2", role: "user", body: "现在状态？", status: "completed" },
+            { id: "message-3", role: "assistant", body: "新回复", status: "completed" },
+          ],
+        },
+      ]);
+    }
+    return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
@@ -438,7 +513,7 @@ it("shows the selected conversation and agent identity while sending messages", 
   await userEvent.type(screen.getByLabelText("消息"), "现在状态？");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-1/messages",
+    "/api/chats/chat-1/messages/stream",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "现在状态？" }) }),
   );
   expect(await screen.findByText("新回复")).toBeInTheDocument();
@@ -519,7 +594,10 @@ it("sends a message from an existing conversation by pressing Enter", async () =
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    return respond({ messages: [] }, 201);
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
+      return respondStream([{ type: "final", messages: [] }]);
+    }
+    return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
@@ -528,7 +606,7 @@ it("sends a message from an existing conversation by pressing Enter", async () =
   await userEvent.type(screen.getByLabelText("消息"), "你好{Enter}");
 
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-1/messages",
+    "/api/chats/chat-1/messages/stream",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "你好" }) }),
   );
 });
@@ -548,7 +626,7 @@ it("shows the user's message immediately after clicking send", async () => {
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return new Promise<Response>((resolve) => {
         resolvePost = resolve;
       });
@@ -570,7 +648,9 @@ it("shows the user's message immediately after clicking send", async () => {
   expect(within(messageThread).queryByText("completed")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toHaveValue("");
 
-  resolvePost(respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201));
+  resolvePost(respondStream([
+    { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+  ]));
   expect(
     await within(messageThread).findByText("消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
   ).toBeInTheDocument();
@@ -619,7 +699,7 @@ it("explains a failed reply without discarding the message draft", async () => {
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     return respond([]);
@@ -650,7 +730,7 @@ it("renders send errors in the message thread instead of expanding the composer"
       return respond({ id: "chat-1", title: "排查问题", status: "active", preferredAgentId: "agent-1" });
     }
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Request failed (500)" }, 500);
     }
     return respond([]);
