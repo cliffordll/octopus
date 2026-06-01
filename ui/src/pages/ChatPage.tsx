@@ -53,6 +53,7 @@ export function ChatPage() {
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
   const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
+  const messageThreadRef = useRef<HTMLDivElement | null>(null);
   const skillDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -114,6 +115,11 @@ export function ChatPage() {
     }
     return Array.from(merged.values());
   }, [messages.data, optimisticMessages]);
+  useEffect(() => {
+    const messageThread = messageThreadRef.current;
+    if (!messageThread) return;
+    messageThread.scrollTop = messageThread.scrollHeight;
+  }, [visibleMessages.length, thinkingChatId, sendNotice]);
   const agentNameById = useMemo(() => new Map(agentList.map((agent) => [agent.id, agent.name])), [agentList]);
   const boundChatAgentName = chat.data?.preferredAgentId ? agentNameById.get(chat.data.preferredAgentId) ?? null : null;
   const selectedAgent = agentList.find((agent) => agent.id === agentId);
@@ -213,7 +219,7 @@ export function ChatPage() {
               已打开本地缓存的对话，详情刷新失败：{chat.error instanceof Error ? chat.error.message : "请求失败"}
             </div>
           )}
-          <div className="chat-messages" data-testid="chat-message-thread">
+          <div className="chat-messages" data-testid="chat-message-thread" ref={messageThreadRef}>
             {messages.isSuccess && visibleMessages.length === 0 && (
               <div className="chat-empty-thread">
                 <h2>No messages yet.</h2>
