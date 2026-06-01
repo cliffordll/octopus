@@ -796,7 +796,7 @@ export function AgentPage() {
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
   const instructionDocs: InstructionDoc[] = instructionsBundle.data
     ? bundleFiles.map((file) => ({
-      content: "",
+      content: typeof file.content === "string" ? file.content : "",
       editable: file.editable,
       isEntryFile: file.isEntryFile,
       key: file.path,
@@ -812,7 +812,8 @@ export function AgentPage() {
     queryFn: () => agentsApi.readInstructionFile(agentId, selectedInstruction!.path),
     enabled: activeTab === "profile" && bundleFiles.length > 0 && Boolean(selectedInstruction?.path),
   });
-  const selectedInstructionContent = selectedBundleFile.data?.content ?? selectedInstruction?.content ?? "";
+  const selectedFileContent = selectedBundleFile.data?.content;
+  const selectedInstructionContent = selectedFileContent?.trim() ? selectedFileContent : (selectedInstruction?.content ?? selectedFileContent ?? "");
   useEffect(() => {
     if (!selectedInstruction?.path) return;
     const ancestors = instructionFileDirectoryAncestors(selectedInstruction.path);

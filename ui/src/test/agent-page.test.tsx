@@ -56,10 +56,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
         legacyPromptTemplateActive: false,
         legacyBootstrapPromptTemplateActive: false,
         files: [
-          { path: "SOUL.md", size: 20, language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
-          { path: "AGENTS.md", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
-          { path: "TOOLS.md", size: 11, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
-          { path: "MEMORY.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "SOUL.md", size: 20, content: "Ship product changes", language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
+          { path: "AGENTS.md", size: 14, content: "Agent contract", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "TOOLS.md", size: 11, content: "Tool policy", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "MEMORY.md", size: 13, content: "Memory policy", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
           { path: "NOTES.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
         ],
       });
@@ -124,6 +124,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(await within(instructionContent).findByDisplayValue(/Ship product changes/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
   expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Agent contract/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" }));
   expect(await within(instructionContent).findByDisplayValue(/Tool policy/)).toBeInTheDocument();
   const instructionFiles = screen.getByRole("complementary", { name: "说明文件列表" });
