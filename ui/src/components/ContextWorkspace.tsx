@@ -68,22 +68,23 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
               <span>消息中心</span>
             </NavLink>
           </section>
-          <section className="context-nav-section">
+          <section className="context-nav-section chat-conversation-section">
             <h3>对话</h3>
             {chats.error && <ErrorNotice error={chats.error} />}
-            {conversations.map((chat) => (
-              <NavLink key={chat.id} to={`/orgs/${orgId}/chats/${chat.id}`}>
-                <span aria-hidden="true" className="context-entry-icon">C</span>
-                <span className="context-item-copy">
-                  <strong>{chat.title}</strong>
-                  <small>
-                    {chat.latestReplyPreview
-                      ?? (chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体")}
-                  </small>
-                </span>
-                <Badge>{chat.unreadCount ? `${chat.unreadCount} 未读` : chat.status}</Badge>
-              </NavLink>
-            ))}
+            <div className="chat-conversation-list">
+              {conversations.map((chat) => (
+                <NavLink key={chat.id} to={`/orgs/${orgId}/chats/${chat.id}`}>
+                  <span aria-hidden="true" className="context-entry-icon">C</span>
+                  <span className="context-item-copy">
+                    <strong title={chat.title}>{chat.title}</strong>
+                    <small title={chat.latestReplyPreview ?? undefined}>
+                      {chat.latestReplyPreview
+                        ?? (chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体")}
+                    </small>
+                  </span>
+                </NavLink>
+              ))}
+            </div>
             {chats.isSuccess && conversations.length === 0 && <p className="context-empty">暂无对话</p>}
           </section>
         </>
