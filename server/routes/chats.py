@@ -28,6 +28,7 @@ from packages.shared.types.chat import (
     ChatConversation,
     ChatMessage,
     CreateChatAttachmentPayload,
+    CreatedChatMessages,
 )
 from packages.shared.validators.chat import (
     validate_add_chat_message,
@@ -423,9 +424,12 @@ async def add_chat_message_stream_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    service: ChatService = Depends(get_chat_service),
 ) -> StreamingResponse:
-    await _get_conversation_or_404(id, request=request, service=service)
+    session_factory = request.app.state.session_factory
+    async with session_factory() as session:
+        async with session.begin():
+            service = ChatService(session)
+            await _get_conversation_or_404(id, request=request, service=service)
     try:
         payload = validate_add_chat_message(body)
     except ValueError as exc:
@@ -448,14 +452,22 @@ async def add_chat_message_stream_route(
         async def on_stream_event(event: dict[str, Any]) -> None:
             await queue.put(event)
 
-        task = asyncio.create_task(
-            service.add_message_and_reply(
-                id,
-                payload,
-                cancel_event=cancel_event,
-                on_stream_event=on_stream_event,
-            )
-        )
+        async def run_reply() -> CreatedChatMessages:
+            async with session_factory() as session:
+                service = ChatService(session)
+                try:
+                    return await service.add_message_and_reply(
+                        id,
+                        payload,
+                        cancel_event=cancel_event,
+                        on_stream_event=on_stream_event,
+                        commit_after_user_message=True,
+                    )
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        task = asyncio.create_task(run_reply())
         try:
             while True:
                 if task.done() and queue.empty():
