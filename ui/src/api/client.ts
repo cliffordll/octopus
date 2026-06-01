@@ -25,14 +25,21 @@ export async function request<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers = new Headers(options.headers);
-  if (options.body !== undefined) {
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
   const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     throw new ApiError(response.status, await parseError(response));
   }
-  return (await response.json()) as T;
+  if (response.status === 204) {
+    return {} as T;
+  }
+  const text = await response.text();
+  if (!text) {
+    return {} as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export function jsonRequest<T>(

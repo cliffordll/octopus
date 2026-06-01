@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
+from pathlib import Path
 from typing import Any
 
 from ..client import ApiClient
@@ -62,6 +64,12 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     message_parser.add_argument("--body", required=True)
     message_parser.add_argument("--edit-user-message-id")
     message_parser.set_defaults(handler=add_message)
+    attachment_parser = actions.add_parser("attachment-upload")
+    attachment_parser.add_argument("--org-id", required=True)
+    attachment_parser.add_argument("chat_id")
+    attachment_parser.add_argument("--message-id", required=True)
+    attachment_parser.add_argument("--file", required=True)
+    attachment_parser.set_defaults(handler=upload_attachment)
     stream_parser = actions.add_parser("stream")
     stream_parser.add_argument("chat_id")
     stream_parser.add_argument("--body", required=True)
@@ -176,6 +184,18 @@ def add_message(args: argparse.Namespace, client: ApiClient) -> Any:
     if args.edit_user_message_id:
         payload["editUserMessageId"] = args.edit_user_message_id
     return client.request("POST", f"/api/chats/{args.chat_id}/messages", json=payload)
+
+
+def upload_attachment(args: argparse.Namespace, client: ApiClient) -> Any:
+    file_path = Path(args.file)
+    content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+    with file_path.open("rb") as handle:
+        return client.request(
+            "POST",
+            f"/api/orgs/{args.org_id}/chats/{args.chat_id}/attachments",
+            data={"messageId": args.message_id},
+            files={"file": (file_path.name, handle, content_type)},
+        )
 
 
 def stream_message(args: argparse.Namespace, client: ApiClient) -> Any:

@@ -6,9 +6,9 @@ import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
 const SYSTEM_THREADS = [
-  { key: "failed-runs", label: "失败运行" },
-  { key: "budget-alerts", label: "预算提醒" },
-  { key: "join-requests", label: "加入请求" },
+  { key: "failed-runs", label: "failed-runs" },
+  { key: "budget-alerts", label: "budget-alerts" },
+  { key: "join-requests", label: "join-requests" },
 ];
 
 export function MessengerPage() {
@@ -25,7 +25,7 @@ export function MessengerPage() {
   });
 
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Messenger</p>
