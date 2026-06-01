@@ -1,4 +1,4 @@
-﻿---
+---
 name: advisor-review-loop-maintainer
 description: >
   Run a decision-grade advisor-to-reviewer loop for Octopus development work.

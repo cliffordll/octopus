@@ -1,4 +1,4 @@
-﻿---
+---
 name: landing-proof-shots-maintainer
 description: |
   Maintain the Octopus landing-shot workflow. Use when the user wants either

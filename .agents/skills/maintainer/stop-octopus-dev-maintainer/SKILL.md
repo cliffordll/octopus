@@ -1,4 +1,4 @@
-﻿---
+---
 name: stop-octopus-dev-maintainer
 description: >
   Stop or clean up Octopus local `pnpm dev` processes safely. Use this only

@@ -1,4 +1,4 @@
-﻿---
+---
 name: octopus-ui-polish-maintainer
 description: >
   Execute screenshot-driven Octopus UI polish and narrow visible interaction

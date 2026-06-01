@@ -40,6 +40,8 @@
 | BUG-21-017 | fixed | P2 | 否 | approval comments / approval-issue 关联 3 个端点 + `approval_comments` 表 + `addApprovalCommentSchema` validator 全部缺失，上游 `approvals.ts:306,645,657` 有 | Step 21 | `pytest tests/contract/test_step21_approval_comments.py -q` 5 passed |
 | BUG-21-018 | fixed | P1 | 是 | chat sync message 只把当前 user body 作为 promptTemplate，不传 conversation 历史，assistant 无 multi-turn 记忆；与上游 `buildPrompt` 行为不一致 | Step 21 | `pytest tests/contract/test_step21_chat_history_prompt.py -q` 3 passed |
 | BUG-21-019 | invalid | P2 | 否 | `GET /api/orgs/{orgId}/messenger/system/{threadKind}` 早前误报 404 | Step 21 | 重测 `failed-runs`/`budget-alerts`/`join-requests` 三个上游真实 kind 全部 200；之前用 `governance/onboarding/...` 等无效 kind 探测才出现 404，属于测试侧错误 |
+| BUG-21-020 | fixed | P3 | 否 | codex runner `clear_inherited_blocking_proxy_env` 的 explicit_keys 只收集 config.env 的键，workspace `context.env` 显式设的代理会被误删 | Step 21 | 多代理审查发现；`pytest tests/contract/test_step14_runtime_adapters.py -q` 回归通过 |
+| BUG-21-021 | fixed | P2 | 否 | chat 多轮 prompt envelope 的 contextLinks 缺 entity hydration 字段（label/identifier/status/description/priority），与上游 `buildPrompt` contextSummary 不一致 | Step 21 | `pytest tests/contract/test_step21_chat_history_prompt.py::test_prompt_context_links_include_hydrated_entity_fields -q` |
 
 ## 记录模板
 
@@ -363,6 +365,39 @@
 - 处理归属：无需修复，本条仅作记录避免再被误读。
 - 修复记录：无。
 - 验证证据：live `GET /api/orgs/{id}/messenger/system/failed-runs` 等三个端点 200。
+
+### BUG-21-020: codex runner blocking-proxy 清理误删 workspace 显式代理
+
+- 状态：fixed
+- 严重级别：P3
+- 是否阻塞最小闭环：否。仅在 workspace `context.env` 显式注入了 sandbox blackhole 代理（`127.0.0.1:9` 系列）时才触发，实践概率极低；但逻辑不严谨，应修正。
+- 影响范围：`packages/runtimes/codex_local/runner.py` 的 env 组装。
+- 复现步骤：
+  1. heartbeat 流程通过 workspace context 的 `env` payload 注入 `HTTP_PROXY=http://127.0.0.1:9`（即 `context.env`）。
+  2. codex runner 执行时该值会被 `clear_inherited_blocking_proxy_env` 当成「继承自 os.environ 的非显式值」删除。
+- 预期行为：与 helper docstring「Explicit agent runtime env always wins and is left untouched」一致——`config.env` 和 `context.env` 显式注入的代理都视为 explicit，不删。
+- 实际行为（修复前）：`explicit_env_keys` 只从 `config.get("env")` 收集键，`context.env` 的键未纳入；导致 workspace 显式代理被误删。
+- 初步根因：多代理审查（Explore agent）发现。`runner.py:49-51` 合并 `context.env` 后未把其键加入 `explicit_env_keys`。
+- 处理归属：Step 21。
+- 修复记录：`if context.env:` 分支内增加 `explicit_env_keys.update(context.env)`，再 `env.update`，最后才 `clear_inherited_blocking_proxy_env`。
+- 验证证据：`pytest tests/contract/test_step14_runtime_adapters.py -q` 回归通过；ruff / pyright 全绿。
+- 说明：仅 codex_local runner 使用 proxy 清理逻辑，其它 runner（opencode/claude/process）不涉及，无需同步。
+
+### BUG-21-021: chat 多轮 prompt 的 contextLinks 缺 entity hydration 字段
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。multi-turn 主功能（BUG-21-018）正常；但 runtime 收到的 context link 缺少所引用 issue/project/agent 的描述/状态/优先级，agent 无法据此推理。
+- 影响范围：`server/services/chats.py::_build_assistant_prompt`、所有带 contextLinks 的 chat 对话发给 runtime 的 prompt envelope。
+- 复现步骤：
+  1. 创建带 contextLinks（如 issue）的 chat。
+  2. 发消息触发 adapter，检查 promptTemplate JSON 里 contextLinks 字段。
+- 预期行为：与上游 `chat-assistant.helpers.ts:158-166` contextSummary 一致——每个 link 含 `entityType`、`entityId`、`label`、`identifier`、`status`、`description`、`priority`。
+- 实际行为（修复前）：BUG-21-018 写的 `_build_assistant_prompt` 只放了 `entityType`、`entityId`、`metadata`，丢弃了 `_hydrate_context_links` 已经查出的 entity 子字段。
+- 初步根因：多代理审查发现。`_build_assistant_prompt` 的 contextLinks 列表推导式只取了 3 个字段。
+- 处理归属：Step 21。
+- 修复记录：新增模块级 `_context_link_summary(link)` helper，从 hydrated link 的 `entity` 字段提取 label/identifier/status/description/priority；`_build_assistant_prompt` 改为调用此 helper。`metadata` 字段移除（上游 contextSummary 不含 metadata，改为对齐 entity 字段）。
+- 验证证据：新增 `tests/contract/test_step21_chat_history_prompt.py::test_prompt_context_links_include_hydrated_entity_fields`（seed 一个 issue 作 contextLink，断言 envelope 含全部 hydration 字段）；`pytest tests/contract/ -q` 全套 299 passed；ruff / pyright 全绿。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 

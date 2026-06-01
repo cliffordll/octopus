@@ -142,6 +142,7 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 - 本地 organization skill 文件落盘到 `.octopus/workspaces/org_<orgId>/skills/<slug>/SKILL.md`。
 - Agent runtime config 默认把 `skillsRootPath` 指向组织 skills 根目录，使 Step 14 已实现的 runtime skills snapshot/sync/enable 能发现 organization skill。
 - `GET /api/orgs/{orgId}/skills` 会按上游方式自动 seed bundled organization skills，避免新组织技能页返回空列表；当前本地 bundled source 来自 `server/skills/bundled`，以内置 `skills/<slug>` key 返回，并标记为只读。
+- `GET /api/orgs/{orgId}/skills` 会同时自动 seed community preset skills；当前本地 community source 来自 `server/skills/community`，按上游组织作用域 key `organization/{orgId}/{slug}` 返回，metadata 标记 `sourceKind=community_preset`，source badge/label 为 `community` / `Community preset`，并标记为只读。
 - Organization skills 路由支持用 organization UUID 或 `urlKey` 访问，内部统一解析为真实 organization UUID，避免 `/api/orgs/OCT/skills` 这类路径把 urlKey 当成数据库 `org_id` 写入。
 - 记录 activity：
   - `organization.skill_created`
@@ -156,7 +157,6 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
 - `POST /api/orgs/{orgId}/skills/scan-projects`：扫描组织 workspace/project workspace 中的 skill packages。
 - `POST /api/orgs/{orgId}/skills/{skillId}/install-update`：对可更新来源执行 update install。
 - organization skill reference 解析：支持 id、key、slug、public ref 等多种 selection reference。
-- community preset seeding 的完整上游兼容。
 
 不做：
 

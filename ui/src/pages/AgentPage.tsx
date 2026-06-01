@@ -246,7 +246,7 @@ function nestedSkillField(entry: Record<string, unknown>, keys: string[]): strin
 
 function descriptionFromMarkdown(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "";
-  const lines = value.split(/\r?\n/);
+  const lines = value.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() === "---") {
     for (const line of lines.slice(1)) {
       const trimmed = line.trim();
@@ -318,13 +318,14 @@ function skillAliases(entry: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
+type SkillSourceGroup = "built-in" | "community" | "组织技能" | "外部技能";
+
+function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
   const sourceClass = skillSourceKind(entry);
-  return ["bundled", "built_in", "organization", "community", "community_preset"].includes(sourceClass)
-    || sourceClass.includes("bundled")
-    || isCommunitySkillEntry(entry)
-    ? "组织技能"
-    : "外部技能";
+  if (isBuiltInSkillEntry(entry)) return "built-in";
+  if (isCommunitySkillEntry(entry)) return "community";
+  if (sourceClass === "organization") return "组织技能";
+  return "外部技能";
 }
 
 function skillState(entry: Record<string, unknown>): string {
@@ -791,6 +792,7 @@ export function AgentPage() {
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
   const communitySkillEntries = skillEntries.filter((entry) => !isBuiltInSkillEntry(entry) && isCommunitySkillEntry(entry));
+  const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
   const skillWarnings = (skills.data?.warnings ?? []).filter(visibleSkillWarning);
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
@@ -1304,6 +1306,7 @@ export function AgentPage() {
               {[
                 { label: "built-in", rows: builtInSkillEntries },
                 { label: "community", rows: communitySkillEntries },
+                { label: "组织技能", rows: organizationSkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },
               ].map((group) => (
                 <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>

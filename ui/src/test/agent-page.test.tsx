@@ -532,6 +532,18 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             markdown: "---\ndescription: Deploy safely from frontmatter\n---\n\nDeploy carefully.",
           },
           {
+            key: "organization/org-1/deep-research",
+            selectionKey: "org:organization/org-1/deep-research",
+            runtimeName: "deep-research",
+            sourceClass: "organization",
+            sourceBadge: "community",
+            origin: "community_preset",
+            originLabel: "Community preset",
+            state: "available",
+            enabled: false,
+            description: "Research deeply.",
+          },
+          {
             key: "debug",
             selectionKey: "external:debug",
             runtimeName: "Debug",
@@ -581,9 +593,12 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
+  expect(await screen.findByText("deep-research")).toBeInTheDocument();
+  expect(await screen.findByText("Research deeply.")).toBeInTheDocument();
   expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
   expect(screen.queryByText(/skillsRootPath does not exist/)).not.toBeInTheDocument();
   expect(await screen.findByText("installed")).toBeInTheDocument();

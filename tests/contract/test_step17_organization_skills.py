@@ -237,12 +237,27 @@ async def test_org_skill_list_seeds_bundled_skills(
     )
     (bundled_root / "control-plane").mkdir(parents=True)
     (bundled_root / "control-plane" / "SKILL.md").write_text(
-        "---\nname: control-plane\ndescription: Manage control plane tasks.\n---\n\nUse it.",
+        "\ufeff---\nname: control-plane\ndescription: Manage control plane tasks.\n---\n\nUse it.",
         encoding="utf-8",
     )
     (bundled_root / "skill-creator").mkdir(parents=True)
     (bundled_root / "skill-creator" / "SKILL.md").write_text(
         "---\nname: skill-creator\ndescription: Create durable skills.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
+    community_root = Path.cwd() / "server" / "skills" / "community"
+    (community_root / "deep-research" / "reference").mkdir(parents=True)
+    (community_root / "deep-research" / "SKILL.md").write_text(
+        "---\nname: deep-research\ndescription: Research deeply.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
+    (community_root / "deep-research" / "reference" / "methodology.md").write_text(
+        "# Research Methodology\n",
+        encoding="utf-8",
+    )
+    (community_root / "software-product-advisor").mkdir(parents=True)
+    (community_root / "software-product-advisor" / "SKILL.md").write_text(
+        "---\nname: software-product-advisor\ndescription: >\n  Advise product work.\n  Turn fuzzy concerns into clear next steps.\n---\n\nUse it.",
         encoding="utf-8",
     )
 
@@ -259,10 +274,15 @@ async def test_org_skill_list_seeds_bundled_skills(
         "skills/skill-optimizer",
         "skills/conversation-to-skill",
     ]
+    assert {
+        f"organization/{org_id}/deep-research",
+        f"organization/{org_id}/software-product-advisor",
+    } == {skill["key"] for skill in listed if skill["sourceBadge"] == "community"}
     assert listed[0]["sourceBadge"] == "built-in"
     assert listed[0]["sourceLabel"] == "Built-in skill"
     assert listed[0]["editable"] is False
     assert listed[0]["description"]
+    assert listed[1]["description"] == "Manage control plane tasks."
     assert listed[0]["fileInventory"] == [
         {"path": "SKILL.md", "kind": "skill"},
         {"path": "README.md", "kind": "readme"},
@@ -289,6 +309,33 @@ async def test_org_skill_list_seeds_bundled_skills(
     assert reference_code == 200
     assert reference_detail["kind"] == "reference"
     assert reference_detail["content"] == "# Methodology\n"
+
+    community = next(skill for skill in listed if skill["slug"] == "deep-research")
+    advisor = next(
+        skill for skill in listed if skill["slug"] == "software-product-advisor"
+    )
+    assert community["key"] == f"organization/{org_id}/deep-research"
+    assert community["sourceBadge"] == "community"
+    assert community["sourceLabel"] == "Community preset"
+    assert community["editable"] is False
+    assert community["editableReason"] == "Community preset skill"
+    assert (
+        advisor["description"]
+        == "Advise product work. Turn fuzzy concerns into clear next steps."
+    )
+    assert community["fileInventory"] == [
+        {"path": "SKILL.md", "kind": "skill"},
+        {"path": "reference/methodology.md", "kind": "reference"},
+    ]
+
+    community_file_code, community_file = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{community['id']}/files",
+        params={"path": "reference/methodology.md"},
+    )
+    assert community_file_code == 200
+    assert community_file["content"] == "# Research Methodology\n"
 
 
 async def test_org_skill_routes_accept_organization_url_key(
@@ -321,6 +368,12 @@ async def test_org_skill_is_available_to_agent_skill_snapshot(
     application, factory = app
     org_id = await _seed_org(factory, "Step 17 Skill Runtime")
     agent_id = await _seed_agent(factory, org_id)
+    community_root = Path.cwd() / "server" / "skills" / "community"
+    (community_root / "deep-research").mkdir(parents=True)
+    (community_root / "deep-research" / "SKILL.md").write_text(
+        "---\nname: deep-research\ndescription: Research deeply.\n---\n\nUse it.",
+        encoding="utf-8",
+    )
 
     create_code, created = await _request(
         application,
@@ -341,6 +394,13 @@ async def test_org_skill_is_available_to_agent_skill_snapshot(
     assert entries["review"]["desired"] is True
     assert entries["review"]["sourceClass"] == "organization"
     assert entries["review"]["description"] == "Review code."
+    community = entries[f"organization/{org_id}/deep-research"]
+    assert community["selectionKey"] == f"org:organization/{org_id}/deep-research"
+    assert community["runtimeName"] == "deep-research"
+    assert community["sourceClass"] == "organization"
+    assert community["origin"] == "community_preset"
+    assert community["originLabel"] == "Community preset"
+    assert community["description"] == "Research deeply."
 
 
 async def test_org_skill_scope_and_path_guard(

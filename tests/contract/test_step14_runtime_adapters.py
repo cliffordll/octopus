@@ -405,6 +405,14 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert entries["conversation-to-skill"]["state"] == "missing"
     assert entries["conversation-to-skill"]["sourceClass"] == "bundled"
     assert entries["conversation-to-skill"]["readOnly"] is True
+    assert entries["conversation-to-skill"]["description"]
+    assert entries["conversation-to-skill"]["description"] != "---"
+    assert entries["control-plane"]["description"]
+    assert entries["control-plane"]["description"] != "\ufeff---"
+    assert entries["create-agent"]["description"]
+    assert entries["create-agent"]["description"] != "\ufeff---"
+    assert entries["create-plugin"]["description"]
+    assert entries["create-plugin"]["description"] != "\ufeff---"
 
 
 async def test_local_runtime_agent_resolves_explicit_relative_instructions_path(
@@ -1247,7 +1255,10 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
             stderr=b"",
         )
 
-    monkeypatch.setattr("packages.runtimes.codex_local.runner.os.name", "nt")
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner._should_retry_with_blocking_subprocess",
+        lambda exc: True,
+    )
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,

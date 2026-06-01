@@ -47,6 +47,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             }
         )
     if context.env:
+        explicit_env_keys.update(context.env)
         env.update(context.env)
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
     if not _string(env.get("CODEX_HOME")):
@@ -130,7 +131,7 @@ async def _run_attempt(
             stderr=asyncio.subprocess.PIPE,
         )
     except PermissionError as exc:
-        if os.name == "nt":
+        if _should_retry_with_blocking_subprocess(exc):
             return await _run_blocking_subprocess_attempt(
                 context=context,
                 command=command,
@@ -272,6 +273,10 @@ def _subprocess_start_error_attempt(
         },
     )
     return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
+
+
+def _should_retry_with_blocking_subprocess(_: PermissionError) -> bool:
+    return os.name == "nt"
 
 
 async def _run_blocking_subprocess_attempt(

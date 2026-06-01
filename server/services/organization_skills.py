@@ -40,7 +40,7 @@ _SKILL_FILE = "SKILL.md"
 _INVENTORY_EXCLUDED_DIRS = {"__pycache__", ".git", ".hg", ".svn", ".mypy_cache"}
 _INVENTORY_EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 _SLUG_CLEANUP_RE = re.compile(r"[^a-z0-9_-]+")
-_FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*", re.DOTALL)
+_FRONTMATTER_RE = re.compile(r"\A\ufeff?---\s*\n(?P<body>.*?)\n---\s*", re.DOTALL)
 _BUNDLED_SKILLS: tuple[tuple[str, str], ...] = (
     ("para-memory-files", "para-memory-files"),
     ("control-plane", "control-plane"),
@@ -49,6 +49,10 @@ _BUNDLED_SKILLS: tuple[tuple[str, str], ...] = (
     ("skill-creator", "skill-creator"),
     ("skill-optimizer", "skill-optimizer"),
     ("conversation-to-skill", "conversation-to-skill"),
+)
+_COMMUNITY_PRESET_SKILLS: tuple[str, ...] = (
+    "deep-research",
+    "software-product-advisor",
 )
 _BUNDLED_KEY_ORDER = {
     f"skills/{slug}": index for index, (slug, _) in enumerate(_BUNDLED_SKILLS)
@@ -73,6 +77,7 @@ class OrganizationSkillService:
 
     async def _ensure_skill_inventory_current(self, org_id: str) -> None:
         await self._ensure_bundled_skills(org_id)
+        await self._ensure_community_preset_skills(org_id)
 
     async def _resolve_org_id(self, org_ref: str) -> str | None:
         by_id = await get_organization_by_id(self._session, org_ref)
@@ -116,6 +121,40 @@ class OrganizationSkillService:
                     self._session, {"id": str(uuid.uuid4()), "org_id": org_id, **fields}
                 )
             elif _is_bundled_source_kind(_skill_source_kind(existing)):
+                await update_organization_skill(
+                    self._session, org_id, existing.id, fields
+                )
+
+    async def _ensure_community_preset_skills(self, org_id: str) -> None:
+        for slug in _COMMUNITY_PRESET_SKILLS:
+            skill_dir = _find_community_preset_skill_dir(slug)
+            if skill_dir is None:
+                continue
+            markdown = _read_skill_markdown(skill_dir)
+            if markdown is None:
+                continue
+            key = f"organization/{org_id}/{slug}"
+            metadata = {"sourceKind": "community_preset", "skillKey": key}
+            fields = {
+                "key": key,
+                "slug": slug,
+                "name": _skill_name_from_markdown(markdown, slug),
+                "description": _skill_description_from_markdown(markdown),
+                "markdown": markdown,
+                "source_type": "local_path",
+                "source_locator": str(skill_dir),
+                "source_ref": None,
+                "trust_level": "markdown_only",
+                "compatibility": "compatible",
+                "file_inventory": _scan_skill_inventory(skill_dir),
+                "metadata_json": metadata,
+            }
+            existing = await get_organization_skill_by_key(self._session, org_id, key)
+            if existing is None:
+                await create_organization_skill(
+                    self._session, {"id": str(uuid.uuid4()), "org_id": org_id, **fields}
+                )
+            elif _skill_source_kind(existing) == "community_preset":
                 await update_organization_skill(
                     self._session, org_id, existing.id, fields
                 )
@@ -243,9 +282,9 @@ class OrganizationSkillService:
         row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
-        if _is_bundled_skill(row):
+        if _is_read_only_source_kind(_skill_source_kind(row)):
             raise OrganizationSkillPathError(
-                "Bundled organization skills are read-only"
+                "Shipped organization skills are read-only"
             )
         path = _normalize_skill_file_path(relative_path)
         file_path = _resolve_skill_file(row, path)
@@ -328,12 +367,12 @@ class OrganizationSkillService:
         skill = self._to_skill(row)
         skill_dir = _skill_root(row)
         source_kind = _skill_source_kind(row)
-        editable = not _is_bundled_source_kind(source_kind)
+        editable = not _is_read_only_source_kind(source_kind)
         return {
             **skill,
             "attachedAgentCount": attached_agent_count,
             "editable": editable,
-            "editableReason": None if editable else "Built-in skill",
+            "editableReason": None if editable else _read_only_reason(source_kind),
             "sourceLabel": _source_label(source_kind),
             "sourceBadge": _source_badge(source_kind),
             "sourcePath": str(skill_dir),
@@ -383,11 +422,27 @@ def _find_bundled_skill_dir(local_slug: str) -> Path | None:
     return None
 
 
+def _find_community_preset_skill_dir(slug: str) -> Path | None:
+    for root in _community_preset_skill_roots():
+        skill_dir = root / slug
+        if (skill_dir / _SKILL_FILE).is_file():
+            return skill_dir.resolve()
+    return None
+
+
 def _bundled_skill_roots() -> list[Path]:
     repo_root = Path(__file__).resolve().parents[2]
     return [
         Path.cwd() / "server" / "skills" / "bundled",
         repo_root / "server" / "skills" / "bundled",
+    ]
+
+
+def _community_preset_skill_roots() -> list[Path]:
+    repo_root = Path(__file__).resolve().parents[2]
+    return [
+        Path.cwd() / "server" / "skills" / "community",
+        repo_root / "server" / "skills" / "community",
     ]
 
 
@@ -474,10 +529,27 @@ def _frontmatter_value(markdown: str, key: str) -> str | None:
     match = _FRONTMATTER_RE.match(markdown)
     if match is None:
         return None
-    for line in match.group("body").splitlines():
-        name, separator, value = line.partition(":")
+    lines = match.group("body").splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        name, separator, value = line.strip().partition(":")
         if separator and name.strip() == key:
-            return value.strip().strip("\"'")
+            text = value.strip().strip("\"'")
+            if text in {">", "|"}:
+                folded: list[str] = []
+                index += 1
+                while index < len(lines):
+                    nested = lines[index]
+                    if nested and not nested[:1].isspace():
+                        break
+                    stripped = nested.strip()
+                    if stripped:
+                        folded.append(stripped)
+                    index += 1
+                return (" " if text == ">" else "\n").join(folded) or None
+            return text or None
+        index += 1
     return None
 
 
@@ -530,6 +602,16 @@ def _is_bundled_skill(row: OrganizationSkill) -> bool:
 
 def _is_bundled_source_kind(source_kind: str | None) -> bool:
     return source_kind in {"built_in", "octopus_bundled", "rudder_bundled"}
+
+
+def _is_read_only_source_kind(source_kind: str | None) -> bool:
+    return _is_bundled_source_kind(source_kind) or source_kind == "community_preset"
+
+
+def _read_only_reason(source_kind: str | None) -> str:
+    if source_kind == "community_preset":
+        return "Community preset skill"
+    return "Built-in skill"
 
 
 def _source_label(source_kind: str | None) -> str:

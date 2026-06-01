@@ -1,4 +1,4 @@
-﻿---
+---
 name: octopus-data-path-diagnostician-maintainer
 description: >
   Diagnose Octopus pages or product surfaces that show missing, stale, sparse,

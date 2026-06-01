@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Agent, Base, Organization
+from packages.database.schema import Agent, Base, Issue, Organization
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
 
@@ -192,3 +192,63 @@ async def test_prompt_envelope_caps_recent_messages_at_twelve(
     assert len(envelope["recentMessages"]) == 12
     # last entry must still be the freshest user message
     assert envelope["recentMessages"][-1]["body"] == "msg 14"
+
+
+async def test_prompt_context_links_include_hydrated_entity_fields(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    issue_id = str(uuid.uuid4())
+    async with factory() as session:
+        async with session.begin():
+            session.add(
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Linked context issue",
+                    status="in_progress",
+                    priority="high",
+                    identifier="HIS-7",
+                    description="context body",
+                    origin_kind="manual",
+                )
+            )
+
+    adapter = CapturingChatAdapter([{"summary": "ack"}])
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+
+    code, chat = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/chats",
+        json={
+            "title": "Context chat",
+            "preferredAgentId": agent_id,
+            "contextLinks": [{"entityType": "issue", "entityId": issue_id}],
+        },
+    )
+    assert code == 201
+
+    await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "use the linked issue"},
+    )
+
+    envelope = json.loads(adapter.captured_prompts[-1])
+    links = envelope["contextLinks"]
+    assert len(links) == 1
+    link = links[0]
+    # Mirror upstream chat-assistant.helpers.ts:158-166 contextSummary fields.
+    assert link["entityType"] == "issue"
+    assert link["entityId"] == issue_id
+    assert link["label"] == "Linked context issue"
+    assert link["identifier"] == "HIS-7"
+    assert link["status"] == "in_progress"
+    assert link["description"] == "context body"
+    assert link["priority"] == "high"
