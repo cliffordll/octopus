@@ -390,6 +390,41 @@ async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> 
     assert any(stream == "stdout" for stream, _ in logs)
 
 
+async def test_opencode_local_prefers_nested_error_message(tmp_path) -> None:
+    fake_opencode = tmp_path / "fake_opencode_error.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "sys.stdin.read()",
+                "print(json.dumps({'type':'error','error':{'name':'UnknownError','data':{'message':'Model not found: openai/kimi-k2.5.'}}}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = await OpenCodeLocalRuntimeAdapter().execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-error",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "model": "openai/kimi-k2.5",
+                "promptTemplate": "Respond from OpenCode.",
+            },
+            on_log=_noop_log,
+        )
+    )
+
+    assert result.exit_code == 1
+    assert result.error_message == "Model not found: openai/kimi-k2.5."
+    assert result.result_json is not None
+    assert result.result_json["modelUnavailable"] is True
+
+
 async def test_opencode_local_streams_text_events(tmp_path) -> None:
     fake_opencode = tmp_path / "fake_opencode_stream.py"
     fake_opencode.write_text(
@@ -544,6 +579,87 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
     assert capture["credential"] == "token=test\n"
+
+
+async def test_opencode_local_syncs_opencode_config_into_managed_home(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    operator_home = tmp_path / "operator-home"
+    operator_home.joinpath(".config", "opencode").mkdir(parents=True)
+    operator_home.joinpath(".config", "opencode", "opencode.json").write_text(
+        json.dumps(
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "kimik": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": "Kimi local",
+                        "options": {"baseURL": "http://127.0.0.1:32788/v1"},
+                        "models": {"kimi-k2.5": {"name": "Kimi K2.5"}},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    operator_home.joinpath(".local", "share", "opencode").mkdir(parents=True)
+    operator_home.joinpath(".local", "share", "opencode", "auth.json").write_text(
+        "{}\n", encoding="utf-8"
+    )
+    managed_home = (
+        tmp_path
+        / ".octopus"
+        / "runtime-homes"
+        / "opencode_local"
+        / "org-opencode"
+        / "agent-opencode"
+        / "home"
+    )
+    managed_home.joinpath(".config", "opencode").mkdir(parents=True)
+    managed_home.joinpath(".config", "opencode", "opencode.jsonc").write_text(
+        '{"$schema":"https://opencode.ai/config.json"}\n',
+        encoding="utf-8",
+    )
+    capture_path = tmp_path / "opencode-config-capture.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os, pathlib, sys",
+                "home = pathlib.Path(os.environ['HOME'])",
+                "config = home / '.config' / 'opencode' / 'opencode.json'",
+                "auth = home / '.local' / 'share' / 'opencode' / 'auth.json'",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({'config': config.read_text(encoding='utf-8'), 'auth': auth.read_text(encoding='utf-8')}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'opencode-session'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    await OpenCodeLocalRuntimeAdapter().execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-config",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "env": {
+                    "OCTOPUS_TEST_CAPTURE": str(capture_path),
+                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                },
+            },
+            on_log=_noop_log,
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    assert '"kimik"' in capture["config"]
+    assert '"kimi-k2.5"' in capture["config"]
+    assert capture["auth"] == "{}\n"
 
 
 async def test_opencode_local_discovers_models_from_cli(tmp_path) -> None:
