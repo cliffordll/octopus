@@ -1,7 +1,6 @@
 # Octopus control-plane server + agent runtimes in a single image.
 # 主服务与各 runtime 子进程同进程/同容器运行（见 server/services/heartbeat.py 的
 # asyncio.create_subprocess_exec），因此 runtime CLI 必须与服务端打进同一镜像。
-
 FROM python:3.12-slim-bookworm
 
 # uv：用 uv.lock 做可复现安装（pip 无法直接读 uv.lock）
@@ -10,7 +9,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
 # 系统依赖：
 #   git                 —— execution workspace 走 git checkout/worktree
 #   ca-certificates/curl —— TLS 与 NodeSource 安装脚本
-#   nodejs              —— claude/codex/opencode 三个 runtime CLI 是 npm 包
+#   nodejs              —— claude/codex/opencode/openclaw 四个 runtime CLI 是 npm 包
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -22,7 +21,8 @@ RUN apt-get update \
 RUN npm install -g --omit=dev \
       opencode-ai \
       @anthropic-ai/claude-code@latest \
-      @openai/codex@latest
+      @openai/codex@latest \
+      openclaw@latest
 
 WORKDIR /app
 
@@ -51,5 +51,4 @@ VOLUME ["/data"]
 WORKDIR /data
 
 EXPOSE 8000
-
 CMD ["python", "-m", "uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
