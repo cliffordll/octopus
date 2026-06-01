@@ -346,7 +346,7 @@ it("lists conversations without sidebar filters and identifies their selected ag
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([
-        { id: "chat-1", title: "发布计划", status: "active", preferredAgentId: "agent-1" },
+        { id: "chat-1", title: "发布计划", status: "active", preferredAgentId: "agent-1", latestReplyPreview: "这是最近一条回答，会在会话列表里只显示一行", unreadCount: 99 },
         { id: "chat-2", title: "归档调研", status: "archived", preferredAgentId: null },
         { id: "chat-3", title: "设计讨论", status: "resolved", preferredAgentId: "agent-2" },
       ]);
@@ -370,10 +370,13 @@ it("lists conversations without sidebar filters and identifies their selected ag
     "href",
     "/orgs/org-1/approvals",
   );
-  expect(await within(messageNavigation).findByText("Builder")).toBeInTheDocument();
+  expect(await within(messageNavigation).findByText("这是最近一条回答，会在会话列表里只显示一行")).toBeInTheDocument();
   expect(messageNavigation).toHaveTextContent("发布计划");
   expect(messageNavigation).toHaveTextContent("归档调研");
   expect(messageNavigation).toHaveTextContent("设计讨论");
+  expect(messageNavigation).toHaveTextContent("Designer");
+  expect(within(messageNavigation).queryByText("99 未读")).not.toBeInTheDocument();
+  expect(messageNavigation.querySelector(".chat-conversation-list")).toBeInTheDocument();
   expect(screen.queryByLabelText("搜索对话")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("状态")).not.toBeInTheDocument();
   expect(within(messageNavigation).queryByLabelText("智能体")).not.toBeInTheDocument();
@@ -563,6 +566,8 @@ it("shows the user's message immediately after clicking send", async () => {
   const messageThread = screen.getByTestId("chat-message-thread");
   expect(await within(messageThread).findByText("Thinking", { exact: false })).toBeInTheDocument();
   expect(within(messageThread).getByText("Builder")).toBeInTheDocument();
+  expect(within(messageThread).queryByText("message")).not.toBeInTheDocument();
+  expect(within(messageThread).queryByText("completed")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toHaveValue("");
 
   resolvePost(respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201));

@@ -236,19 +236,19 @@ export function ChatPage() {
                   </span>
                 )}
                 <div className="chat-message-body">
-                  <strong>
-                    {message.role === "user"
-                      ? "你"
-                      : message.role === "assistant"
+                  {message.role !== "user" && (
+                    <strong>
+                      {message.role === "assistant"
                         ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
                         : "系统"}
-                  </strong>
-                  <div className="meta-line">
-                    <Badge>{message.kind ?? "message"}</Badge>
-                    <Badge>{message.status}</Badge>
-                    {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
-                    {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
-                  </div>
+                    </strong>
+                  )}
+                  {(message.approvalId || (typeof message.turnVariant === "number" && message.turnVariant > 0)) && (
+                    <div className="meta-line">
+                      {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
+                      {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
+                    </div>
+                  )}
                   <p>{message.body}</p>
                   {message.attachments && message.attachments.length > 0 && (
                     <div className="chat-attachment-list">
