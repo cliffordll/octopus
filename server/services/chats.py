@@ -825,14 +825,7 @@ class ChatService:
                     "routedAgentId": conversation.routed_agent_id,
                     "primaryIssueId": conversation.primary_issue_id,
                 },
-                "contextLinks": [
-                    {
-                        "entityType": link["entityType"],
-                        "entityId": link["entityId"],
-                        "metadata": link.get("metadata"),
-                    }
-                    for link in context_links
-                ],
+                "contextLinks": [_context_link_summary(link) for link in context_links],
                 "recentMessages": [
                     {
                         "id": row.id,
@@ -1203,6 +1196,27 @@ def _is_unread(
     if user_state is None or row.last_message_at is None:
         return False
     return row.last_message_at > user_state.last_read_at
+
+
+def _context_link_summary(link: ChatContextLink) -> dict[str, Any]:
+    """Flatten a hydrated context link for the assistant prompt envelope.
+
+    Mirrors upstream ``chat-assistant.helpers.ts:158-166`` ``contextSummary``:
+    surfaces the linked entity's label/identifier/status/description/priority so
+    the runtime can reason about the referenced issue/project/agent.
+    """
+
+    entity = link.get("entity")
+    entity_data = entity if isinstance(entity, dict) else {}
+    return {
+        "entityType": link["entityType"],
+        "entityId": link["entityId"],
+        "label": entity_data.get("label"),
+        "identifier": entity_data.get("identifier"),
+        "status": entity_data.get("status"),
+        "description": entity_data.get("description"),
+        "priority": entity_data.get("priority"),
+    }
 
 
 def _linked_entity(

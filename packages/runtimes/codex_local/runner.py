@@ -47,6 +47,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             }
         )
     if context.env:
+        explicit_env_keys.update(context.env)
         env.update(context.env)
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
     if not _string(env.get("CODEX_HOME")):
