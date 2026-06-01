@@ -27,3 +27,12 @@ export function respond(body: unknown, status = 200): Promise<Response> {
     }),
   );
 }
+
+export function respondStream(events: unknown[], status = 201): Promise<Response> {
+  return Promise.resolve(
+    new Response(events.map((event) => JSON.stringify(event)).join("\n"), {
+      status,
+      headers: { "Content-Type": "application/x-ndjson" },
+    }),
+  );
+}

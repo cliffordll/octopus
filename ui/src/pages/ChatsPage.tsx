@@ -8,16 +8,6 @@ import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "请求失败";
-}
-
-function hasAssistantReply(messages: Array<{ role: string }>) {
-  return messages.some((message) => message.role === "assistant");
-}
-
-const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
-
 function skillLabel(entry: Record<string, unknown>) {
   const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
   return typeof value === "string" && value.trim() ? value.trim() : "skill";
@@ -96,25 +86,13 @@ export function ChatsPage() {
       queryClient.setQueryData(["chat", chat.id], chat);
       queryClient.setQueryData(["chat-messages", chat.id], [optimisticMessage]);
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-      try {
-        const created = await chatsApi.addMessage(chat.id, { body: draft });
-        return {
-          chat,
-          messages: created.messages,
-          firstMessageError: hasAssistantReply(created.messages) ? null : missingAssistantReplyMessage,
-        };
-      } catch (error) {
-        return { chat, messages: [optimisticMessage], firstMessageError: errorMessage(error) };
-      }
+      return { chat, initialMessage: draft };
     },
-    onSuccess: ({ chat, messages, firstMessageError }) => {
+    onSuccess: ({ chat, initialMessage }) => {
       queryClient.setQueryData(["chat", chat.id], chat);
-      if (messages) {
-        queryClient.setQueryData(["chat-messages", chat.id], messages);
-        setBody("");
-      }
+      setBody("");
       navigate(`/orgs/${orgId}/chats/${chat.id}`, {
-        state: firstMessageError ? { sendError: `首条消息发送失败：${firstMessageError}` } : undefined,
+        state: { initialMessage },
       });
     },
   });
