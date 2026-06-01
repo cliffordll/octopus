@@ -375,6 +375,60 @@ it("validates opencode local model before saving agent configuration", async () 
   );
 });
 
+it("tests agent runtime availability from configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: { model: "gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/codex_local/test-environment" && init?.method === "POST") {
+      return respond({ agentRuntimeType: "codex_local", status: "pass", checks: [{ id: "cwd", label: "CWD", status: "pass", message: "ok" }] });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
+  expect(screen.getByText("CWD")).toBeInTheDocument();
+  expect(screen.getByText("ok")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/adapters/codex_local/test-environment",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
+    }),
+  );
+});
+
+it("shows runtime test failures from configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/opencode_local/test-environment" && init?.method === "POST") {
+      return respond({
+        agentRuntimeType: "opencode_local",
+        status: "failed",
+        checks: [{ id: "auth", label: "认证", status: "failed", message: "missing key", hint: "配置 provider key" }],
+      });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时不可用")).toBeInTheDocument();
+  expect(screen.getByText("认证")).toBeInTheDocument();
+  expect(screen.getByText("missing key")).toBeInTheDocument();
+  expect(screen.getByText("配置 provider key")).toBeInTheDocument();
+});
+
 it("shows configuration revisions, rolls back, and resets runtime session", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -404,6 +458,9 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
   expect(await screen.findByText("revision-1")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "回滚" }));
   await userEvent.click(screen.getByRole("button", { name: "重置会话" }));
+  const resetDialog = screen.getByRole("dialog", { name: "重置会话" });
+  expect(resetDialog).toHaveTextContent("Builder");
+  await userEvent.click(within(resetDialog).getByRole("button", { name: "确认重置" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/config-revisions/revision-1/rollback",
@@ -456,7 +513,7 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
 });
 
-it("manages runtime adapter probes and skills from configuration", async () => {
+it("manages skills from agent configuration", async () => {
   const agent = {
     id: "agent-1",
     orgId: "org-1",
@@ -580,13 +637,10 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
-  expect(await screen.findByText("GPT-5")).toBeInTheDocument();
-  expect(await screen.findByText("not configured")).toBeInTheDocument();
-  expect(await screen.findByText("Set model and cwd before running.")).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
-  expect(await screen.findByText("CWD")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "基础配置" })).toBeInTheDocument();
+  expect(screen.queryByText("Runtime Adapter")).not.toBeInTheDocument();
+  expect(screen.queryByText("运行环境")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "测试环境" })).not.toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
@@ -629,13 +683,6 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.type(within(dialog).getByLabelText("技能内容"), "schema_version: 1\nprompt: handle it");
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/adapters/codex_local/test-environment",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
-    }),
-  );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/skills/sync",
     expect.objectContaining({

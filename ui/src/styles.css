@@ -2894,6 +2894,20 @@ button.danger {
   padding: 10px 12px;
 }
 
+.success-notice {
+  background: #10291c;
+  border: 1px solid #2c7a4b;
+  border-radius: 6px;
+  color: #a8f0c1;
+  margin: 12px 0;
+  padding: 10px 12px;
+}
+
+.error-notice.compact,
+.success-notice.compact {
+  margin: 0;
+}
+
 .chat-error-link {
   color: #f4c5ca;
   display: block;
@@ -3184,6 +3198,42 @@ pre {
 .agent-property-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.agent-runtime-test-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.agent-runtime-test-row > button {
+  flex: 0 0 auto;
+}
+
+.agent-runtime-test-row .error-notice,
+.agent-runtime-test-row .success-notice {
+  flex: 1;
+}
+
+.agent-runtime-test-row ul {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.agent-runtime-test-row li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-runtime-test-row small {
+  color: inherit;
+  opacity: .78;
 }
 
 .agent-permission-grid {
@@ -4724,7 +4774,9 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: calc(100vh - 56px);
+  height: calc(100vh - 48px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-thread-header {
@@ -4916,9 +4968,10 @@ pre {
   flex: 1;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 22px;
+  margin-bottom: 0;
+  min-height: 0;
   overflow-y: auto;
-  min-height: 230px;
+  padding-right: 4px;
 }
 
 .chat-message {
