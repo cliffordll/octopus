@@ -429,6 +429,37 @@ it("shows runtime test failures from configuration", async () => {
   expect(screen.getByText("配置 provider key")).toBeInTheDocument();
 });
 
+it("treats runtime warnings as available when no checks fail", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "kimik/kimi-k2.5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/opencode_local/test-environment" && init?.method === "POST") {
+      return respond({
+        agentRuntimeType: "opencode_local",
+        status: "warning",
+        checks: [
+          { id: "cwd", label: "Working directory", status: "ok", message: "No cwd configured; runtime will use the server process cwd." },
+          { id: "command", label: "OpenCode CLI command", status: "ok", message: "Runtime command is resolvable." },
+          { id: "auth", label: "Authentication", status: "warning", message: "No API key env was provided; runtime may rely on local CLI login." },
+          { id: "model", label: "OpenCode model", status: "ok", message: "Configured model: kimik/kimi-k2.5" },
+        ],
+      });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
+  expect(screen.getByText("Authentication")).toBeInTheDocument();
+  expect(screen.getByText("warning")).toBeInTheDocument();
+  expect(screen.queryByText("智能体运行时不可用")).not.toBeInTheDocument();
+});
+
 it("shows configuration revisions, rolls back, and resets runtime session", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

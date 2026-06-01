@@ -45,7 +45,7 @@ function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): 
 function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
   if (!result) return false;
   const status = result.status.toLowerCase();
-  const statusPassed = ["ok", "pass", "passed", "success", "succeeded"].includes(status);
+  const statusPassed = ["ok", "pass", "passed", "success", "succeeded", "warning"].includes(status);
   const hasFailedCheck = result.checks.some((check) => ["failed", "fail", "error"].includes((check.status ?? "").toLowerCase()));
   return statusPassed && !hasFailedCheck;
 }

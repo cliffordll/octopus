@@ -260,9 +260,45 @@ it("opens the conversation when the first reply request fails", async () => {
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
 
   expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getByText("请规划部署")).toBeInTheDocument();
   expect(await screen.findByText("首条消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "打开已创建的对话" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toHaveTextContent("请规划部署");
+});
+
+it("shows the first user message immediately after creating a conversation", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
+    }
+    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+      return respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201);
+    }
+    if (path === "/api/chats/chat-2" && init?.method === "GET") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-2/messages" && init?.method === "GET") {
+      return respond([]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats");
+  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.type(screen.getByLabelText("消息"), "你好");
+  await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
+
+  expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getByText("你好")).toBeInTheDocument();
 });
 
 it("opens the cached created conversation when the first reply fails and detail reload errors", async () => {
@@ -303,7 +339,7 @@ it("opens the cached created conversation when the first reply fails and detail 
 
   expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
   expect(await screen.findByText(/已打开本地缓存的对话/)).toBeInTheDocument();
-  expect(await screen.findByText("No messages yet.")).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getByText("请规划部署")).toBeInTheDocument();
 });
 
 it("lists conversations without sidebar filters and identifies their selected agent", async () => {
