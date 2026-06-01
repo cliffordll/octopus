@@ -24,6 +24,8 @@ MANAGED_INSTRUCTIONS_RUNTIME_TYPES = {
 
 _ENTRY_FILE = "SOUL.md"
 _MEMORY_FILE = "MEMORY.md"
+_DEFAULT_BUNDLE_FILES = ("MEMORY.md", "HEARTBEAT.md", _ENTRY_FILE, "TOOLS.md")
+_ONBOARDING_ROOT = Path(__file__).resolve().parents[1] / "onboarding"
 _PROMPT_TEMPLATE_FILE = "promptTemplate.legacy.md"
 _EXPLICIT_INSTRUCTIONS_KEYS = (
     "instructionsRootPath",
@@ -337,9 +339,17 @@ class AgentInstructionsService:
         root.mkdir(parents=True, exist_ok=True)
         entry_file = str(state["entryFile"])
         entry = _resolve_path_within_root(root, entry_file)
-        if not entry.exists():
+        files = _default_bundle(row.role)
+        legacy_instructions = _legacy_instructions(row, state)
+        if legacy_instructions:
+            files[entry_file] = legacy_instructions
+        _write_bundle(root, files)
+        if not entry.exists() or entry.stat().st_size == 0:
             entry.parent.mkdir(parents=True, exist_ok=True)
-            entry.write_text(_legacy_instructions(row, state), encoding="utf-8")
+            entry.write_text(
+                files.get(entry_file) or files.get(_ENTRY_FILE) or "",
+                encoding="utf-8",
+            )
         return _apply_bundle_config(
             dict(row.agent_runtime_config),
             mode="managed",
@@ -350,6 +360,8 @@ class AgentInstructionsService:
 
     async def _reconcile_bundle(self, row: Agent) -> Agent:
         state = _bundle_state(row)
+        if state["mode"] == "managed" and isinstance(state["rootPath"], Path):
+            _write_bundle(state["rootPath"], _default_bundle(row.role))
         if (
             state["mode"] == "managed"
             and state["rootPath"] is None
@@ -369,17 +381,26 @@ class AgentInstructionsService:
 
 
 def _default_bundle(role: str) -> dict[str, str]:
-    soul = (
+    bundle_role = "ceo" if role == "ceo" else "default"
+    fallback_soul = (
         "# SOUL.md -- CEO Persona\n\nYou are the CEO.\n"
-        if role == "ceo"
+        if bundle_role == "ceo"
         else "# SOUL.md -- Agent Persona\n\nYou are an agent in this organization.\n"
     )
-    return {
-        "MEMORY.md": "# MEMORY.md\n\nDurable memory starts empty.\n",
+    fallback = {
+        "MEMORY.md": "# MEMORY.md\n\nRecord stable preferences, operating patterns, and lessons learned here.\n",
         "HEARTBEAT.md": "# HEARTBEAT.md\n\nUse heartbeat runs to inspect and advance assigned work.\n",
-        _ENTRY_FILE: soul,
+        _ENTRY_FILE: fallback_soul,
         "TOOLS.md": "# TOOLS.md\n\nUse the available control-plane and runtime tools.\n",
     }
+    files: dict[str, str] = {}
+    for file_name in _DEFAULT_BUNDLE_FILES:
+        path = _ONBOARDING_ROOT / bundle_role / file_name
+        try:
+            files[file_name] = path.read_text(encoding="utf-8")
+        except OSError:
+            files[file_name] = fallback[file_name]
+    return files
 
 
 def _write_bundle(root: Path, files: dict[str, str]) -> None:
@@ -387,7 +408,7 @@ def _write_bundle(root: Path, files: dict[str, str]) -> None:
     for relative_path, content in files.items():
         target = root / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
+        if not target.exists() or target.stat().st_size == 0:
             target.write_text(content, encoding="utf-8")
 
 

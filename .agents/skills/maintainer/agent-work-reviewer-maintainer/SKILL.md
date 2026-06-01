@@ -1,4 +1,4 @@
-﻿---
+---
 name: agent-work-reviewer-maintainer
 description: Review Octopus agent work. Use for review/第一性原理/PM review of Codex sessions, PRs, commits, UI, releases, regressions, or agent outcomes. For functional or UI reviews, prefer running the real Octopus scenario with Browser or Computer Use when available instead of judging only from diffs.
 ---
