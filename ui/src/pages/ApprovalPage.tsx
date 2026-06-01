@@ -54,7 +54,7 @@ export function ApprovalPage() {
   const isActionable = approval.data?.status === "pending";
   const currentPayload = approval.data ? formatPayload(approval.data.payload) : "{}";
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/approvals`}>返回审批管理</Link>

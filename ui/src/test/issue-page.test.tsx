@@ -68,6 +68,33 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
       return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
     }
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") {
+      return respond([
+        {
+          id: "attachment-1",
+          orgId: "org-1",
+          issueId: "issue-1",
+          issueCommentId: null,
+          assetId: "asset-1",
+          usage: "evidence",
+          provider: "local",
+          objectKey: "issue/attachments/note.txt",
+          contentType: "text/plain",
+          byteSize: 12,
+          sha256: "abc",
+          originalFilename: "note.txt",
+          createdAt: "",
+          updatedAt: "",
+          contentPath: "/api/assets/asset-1/content",
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/issues/issue-1/attachments" && init?.method === "POST") {
+      return respond({ id: "attachment-2", originalFilename: "upload.txt" }, 201);
+    }
+    if (path === "/api/attachments/attachment-1" && init?.method === "DELETE") {
+      return respond({}, 204);
+    }
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -83,6 +110,8 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
+  expect(await screen.findByRole("region", { name: "Attachments" })).toHaveTextContent("note.txt");
+  expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: "实现登录流程", identifier: "OCT-1", status: "in_review" },
@@ -93,6 +122,19 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/comments",
     expect.objectContaining({ method: "POST" }),
+  );
+
+  await userEvent.upload(screen.getByLabelText("附件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
+  await userEvent.click(screen.getByRole("button", { name: "上传附件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/issues/issue-1/attachments",
+    expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "删除" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/attachments/attachment-1",
+    expect.objectContaining({ method: "DELETE" }),
   );
 
   await userEvent.click(screen.getByRole("button", { name: "Approve Review" }));

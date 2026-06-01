@@ -142,7 +142,7 @@ export function GoalPage() {
   if (goal.error) return <ErrorNotice error={goal.error} />;
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <Link className="back-link" to={`/orgs/${orgId}/goals`}>返回 Goals</Link>

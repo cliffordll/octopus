@@ -82,6 +82,24 @@ export interface IssueComment {
   updatedAt: string;
 }
 
+export interface IssueAttachment {
+  id: string;
+  orgId: string;
+  issueId: string;
+  issueCommentId: string | null;
+  assetId: string;
+  usage: string;
+  provider: string;
+  objectKey: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  originalFilename: string | null;
+  createdAt: string;
+  updatedAt: string;
+  contentPath: string;
+}
+
 export interface IssueFilters {
   status?: IssueStatus;
   assigneeAgentId?: string;
@@ -715,6 +733,7 @@ export interface AgentSkillAnalytics {
 }
 
 export interface AgentInstructionsFileSummary {
+  content?: string;
   path: string;
   size: number;
   language: string;
@@ -887,8 +906,28 @@ export interface ChatMessage {
   chatTurnId?: string | null;
   turnVariant?: number;
   supersededAt?: string | null;
+  attachments?: ChatAttachment[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ChatAttachment {
+  id: string;
+  orgId: string;
+  conversationId: string;
+  messageId: string;
+  assetId: string;
+  provider: string;
+  objectKey: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  originalFilename: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  contentPath: string;
 }
 
 export interface ChatContextLink {

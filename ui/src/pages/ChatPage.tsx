@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
@@ -21,12 +21,39 @@ function sendNoticeMessage(value: string) {
   return value.startsWith("首条消息发送失败：") ? value : `消息发送失败：${value}`;
 }
 
+function agentAvatarLabel(name: string | null | undefined) {
+  return (name?.trim() || "智能体").slice(0, 1).toUpperCase();
+}
+
+function hasAssistantReply(messages: ChatMessage[]) {
+  return messages.some((message) => message.role === "assistant");
+}
+
+const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
+
+function skillLabel(entry: Record<string, unknown>) {
+  const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
+  return typeof value === "string" && value.trim() ? value.trim() : "skill";
+}
+
+function agentOptionLabel(agent: { name?: string | null; role?: string | null } | null | undefined, fallback: string) {
+  if (!agent?.name) return fallback;
+  return agent.role ? `${agent.name} (${agent.role})` : agent.name;
+}
+
+function focusLeftElement(event: ReactFocusEvent<HTMLElement>) {
+  return !(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget);
+}
+
 export function ChatPage() {
   const { orgId = "", chatId = "" } = useParams();
   const [body, setBody] = useState("");
   const [agentId, setAgentId] = useState("");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
+  const [thinkingChatId, setThinkingChatId] = useState<string | null>(null);
+  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
+  const skillDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,10 +68,6 @@ export function ChatPage() {
   });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const chatAgentList = useMemo(
-    () => agentList.filter((agent) => agent.status !== "terminated" || agent.id === chat.data?.preferredAgentId),
-    [agentList, chat.data?.preferredAgentId],
-  );
   useEffect(() => {
     setAgentId(chat.data?.preferredAgentId ?? "");
   }, [chat.data?.id, chat.data?.preferredAgentId]);
@@ -57,6 +80,25 @@ export function ChatPage() {
     queryFn: () => chatsApi.listMessages(chatId),
     staleTime: 1000,
   });
+  const selectedAgentSkills = useQuery({
+    queryKey: ["agent-skills", agentId],
+    queryFn: () => agentsApi.skills(agentId),
+    enabled: Boolean(agentId),
+  });
+  useEffect(() => {
+    if (!skillDropdownOpen) return;
+    function closeWhenOutside(event: Event) {
+      if (event.target instanceof Node && !skillDropdownRef.current?.contains(event.target)) {
+        setSkillDropdownOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("focusin", closeWhenOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("focusin", closeWhenOutside);
+    };
+  }, [skillDropdownOpen]);
   const visibleMessages = useMemo(() => {
     const persisted = messages.data ?? [];
     const persistedUserBodies = new Set(
@@ -75,15 +117,25 @@ export function ChatPage() {
   const agentNameById = useMemo(() => new Map(agentList.map((agent) => [agent.id, agent.name])), [agentList]);
   const boundChatAgentName = chat.data?.preferredAgentId ? agentNameById.get(chat.data.preferredAgentId) ?? null : null;
   const selectedAgent = agentList.find((agent) => agent.id === agentId);
+  const selectedAgentName = selectedAgent?.name ?? boundChatAgentName ?? "智能体";
+  const selectedAgentControlLabel = agentOptionLabel(selectedAgent, selectedAgentName);
+  const projectContext = chat.data?.contextLinks?.find((link) => link.entityType === "project");
+  const skillEntries = selectedAgentSkills.data && !Array.isArray(selectedAgentSkills.data) && Array.isArray(selectedAgentSkills.data.entries)
+    ? selectedAgentSkills.data.entries
+    : [];
+  const desiredSkills = selectedAgentSkills.data && !Array.isArray(selectedAgentSkills.data) && Array.isArray(selectedAgentSkills.data.desiredSkills)
+    ? selectedAgentSkills.data.desiredSkills
+    : [];
   const selectedChatAgentUnavailable = selectedAgent?.status === "terminated";
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const send = useMutation({
     mutationFn: async () => {
       const draft = body.trim();
+      const targetChatId = startsNewConversation ? null : chatId;
       const optimisticMessage: ChatMessage = {
         id: `pending-${Date.now()}`,
         orgId,
-        conversationId: startsNewConversation ? undefined : chatId,
+        conversationId: targetChatId ?? undefined,
         role: "user",
         kind: "message",
         body: draft,
@@ -91,6 +143,7 @@ export function ChatPage() {
         createdAt: new Date().toISOString(),
       };
       setOptimisticMessages((current) => [...current, optimisticMessage]);
+      setThinkingChatId(targetChatId);
       setBody("");
       setSendNotice(null);
       if (startsNewConversation) {
@@ -106,12 +159,16 @@ export function ChatPage() {
       return { chat: null, messages: created.messages };
     },
     onSuccess: (created) => {
+      setThinkingChatId(null);
       setSendNotice(null);
+      const missingAssistantReply = !hasAssistantReply(created.messages);
       if (created.chat) {
         queryClient.setQueryData(["chat", created.chat.id], created.chat);
         queryClient.setQueryData(["chat-messages", created.chat.id], created.messages);
         void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-        navigate(`/orgs/${orgId}/chats/${created.chat.id}`);
+        navigate(`/orgs/${orgId}/chats/${created.chat.id}`, {
+          state: missingAssistantReply ? { sendError: `首条消息发送失败：${missingAssistantReplyMessage}` } : undefined,
+        });
         return;
       }
       queryClient.setQueryData<ChatMessage[]>(["chat-messages", chatId], (current = []) => {
@@ -119,8 +176,12 @@ export function ChatPage() {
         created.messages.forEach((message) => next.set(message.id, message));
         return Array.from(next.values());
       });
+      if (missingAssistantReply) setSendNotice(missingAssistantReplyMessage);
     },
-    onError: (error) => setSendNotice(displayError(error)),
+    onError: (error) => {
+      setThinkingChatId(null);
+      setSendNotice(displayError(error));
+    },
   });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -133,7 +194,7 @@ export function ChatPage() {
   }
   if (chat.error && !chat.data) return <ErrorNotice error={chat.error} />;
   return (
-    <ChatsWorkspace orgId={orgId}>
+    <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       {chat.data && (
         <section className="chat-thread-shell">
           <header className="chat-thread-header">
@@ -163,25 +224,53 @@ export function ChatPage() {
             )}
             {visibleMessages.map((message) => (
               <article className={`chat-message ${message.role}`} key={message.id}>
-                <strong>
-                  {message.role === "user"
-                    ? "你"
-                    : message.role === "assistant"
-                      ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
-                      : "系统"}
-                </strong>
-                <div className="meta-line">
-                  <Badge>{message.kind ?? "message"}</Badge>
-                  <Badge>{message.status}</Badge>
-                  {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
-                  {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
-                </div>
-                <p>{message.body}</p>
-                {message.structuredPayload && (
-                  <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
+                {message.role === "assistant" && (
+                  <span aria-hidden="true" className="chat-agent-avatar">
+                    {agentAvatarLabel(message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName)}
+                  </span>
                 )}
+                <div className="chat-message-body">
+                  <strong>
+                    {message.role === "user"
+                      ? "你"
+                      : message.role === "assistant"
+                        ? (message.replyingAgentId ? agentNameById.get(message.replyingAgentId) : boundChatAgentName) ?? "智能体"
+                        : "系统"}
+                  </strong>
+                  <div className="meta-line">
+                    <Badge>{message.kind ?? "message"}</Badge>
+                    <Badge>{message.status}</Badge>
+                    {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
+                    {typeof message.turnVariant === "number" && message.turnVariant > 0 && <Badge>变体 {message.turnVariant}</Badge>}
+                  </div>
+                  <p>{message.body}</p>
+                  {message.attachments && message.attachments.length > 0 && (
+                    <div className="chat-attachment-list">
+                      {message.attachments.map((attachment) => (
+                        <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
+                          {attachment.originalFilename ?? attachment.id}
+                          <span>{attachment.byteSize} bytes</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {message.structuredPayload && (
+                    <pre className="json-block">{JSON.stringify(message.structuredPayload, null, 2)}</pre>
+                  )}
+                </div>
               </article>
             ))}
+            {send.isPending && thinkingChatId === chatId && (
+              <article aria-live="polite" className="chat-message assistant thinking">
+                <span aria-hidden="true" className="chat-agent-avatar">{agentAvatarLabel(selectedAgentName)}</span>
+                <div className="chat-message-body">
+                  <strong>{selectedAgentName}</strong>
+                  <p className="chat-thinking-text">
+                    Thinking<span aria-hidden="true" className="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+                  </p>
+                </div>
+              </article>
+            )}
             {sendNotice && (
               <article className="chat-message system">
                 <strong>系统</strong>
@@ -206,16 +295,46 @@ export function ChatPage() {
                 当前选择的智能体不能用于消息回复，请切换到可运行智能体。
               </div>
             )}
-            <div className="chat-compose-actions">
-              <div className="chat-composer-toolbar">
-                <select aria-label="对话智能体" value={agentId} onChange={(event) => setAgentId(event.target.value)} required>
-                  <option value="">选择智能体</option>
-                  {chatAgentList.map((agent) => (
-                    <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
-                  ))}
+            {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
+            <div className="chat-context-controls chat-context-controls-readonly" aria-label="当前对话上下文">
+              <label aria-label="当前项目">
+                <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
+                  <option value={projectContext?.entityId ?? ""}>
+                    {projectContext?.entity?.label ?? (projectContext ? projectContext.entityId : "未关联项目")}
+                  </option>
                 </select>
-              </div>
-              <button disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">发送</button>
+              </label>
+              <label aria-label="当前智能体" className="chat-agent-readonly-field">
+                <select aria-label="对话智能体" disabled value={agentId}>
+                  <option value={agentId}>{selectedAgentControlLabel}</option>
+                </select>
+              </label>
+              <details
+                className="chat-skill-dropdown"
+                onBlur={(event) => {
+                  if (focusLeftElement(event)) setSkillDropdownOpen(false);
+                }}
+                onToggle={(event) => setSkillDropdownOpen(event.currentTarget.open)}
+                open={skillDropdownOpen}
+                ref={skillDropdownRef}
+              >
+                <summary>技能列表</summary>
+                <div className="chat-skill-list">
+                  {desiredSkills.map((skill) => (
+                    <span className="chat-skill-chip active" key={`desired-${skill}`}>{skill}</span>
+                  ))}
+                  {skillEntries.map((entry) => (
+                    <span className="chat-skill-chip" key={skillLabel(entry)}>{skillLabel(entry)}</span>
+                  ))}
+                  {agentId && selectedAgentSkills.isSuccess && desiredSkills.length === 0 && skillEntries.length === 0 && (
+                    <span className="muted">暂无技能</span>
+                  )}
+                  {!agentId && <span className="muted">未选择智能体</span>}
+                </div>
+              </details>
+              <button className="chat-create-submit" disabled={!agentId || selectedChatAgentUnavailable || send.isPending} type="submit">
+                发送
+              </button>
             </div>
           </form>
         </section>

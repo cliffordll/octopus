@@ -24,6 +24,8 @@ MANAGED_INSTRUCTIONS_RUNTIME_TYPES = {
 
 _ENTRY_FILE = "SOUL.md"
 _MEMORY_FILE = "MEMORY.md"
+_DEFAULT_BUNDLE_FILES = ("MEMORY.md", "HEARTBEAT.md", _ENTRY_FILE, "TOOLS.md")
+_ONBOARDING_ROOT = Path(__file__).resolve().parents[1] / "onboarding"
 _PROMPT_TEMPLATE_FILE = "promptTemplate.legacy.md"
 _EXPLICIT_INSTRUCTIONS_KEYS = (
     "instructionsRootPath",
@@ -160,6 +162,7 @@ class AgentInstructionsService:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:
             return None
+        row = await self._reconcile_bundle(row)
         return _bundle(row)
 
     async def update_bundle(
@@ -174,6 +177,7 @@ class AgentInstructionsService:
         if row is None:
             return None
         state = _bundle_state(row)
+        exported_files = _export_files(row)
         mode = payload.get("mode") or state["mode"] or "managed"
         entry_file = _normalize_relative_file_path(
             payload.get("entryFile") or state["entryFile"]
@@ -192,10 +196,18 @@ class AgentInstructionsService:
                     "External instructions bundles require an absolute rootPath"
                 )
         root.mkdir(parents=True, exist_ok=True)
+        existing_files = _list_files(root) if root.is_dir() else []
+        if not existing_files and exported_files:
+            _write_bundle(root, exported_files)
         entry_path = _resolve_path_within_root(root, entry_file)
         if not entry_path.exists():
             entry_path.parent.mkdir(parents=True, exist_ok=True)
-            entry_path.write_text("", encoding="utf-8")
+            entry_path.write_text(
+                exported_files.get(entry_file)
+                or exported_files.get(str(state["entryFile"]))
+                or "",
+                encoding="utf-8",
+            )
         config = _apply_bundle_config(
             dict(row.agent_runtime_config),
             mode=str(mode),
@@ -233,6 +245,7 @@ class AgentInstructionsService:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:
             return None
+        row = await self._reconcile_bundle(row)
         return _read_file(row, relative_path)
 
     async def write_file(
@@ -326,9 +339,17 @@ class AgentInstructionsService:
         root.mkdir(parents=True, exist_ok=True)
         entry_file = str(state["entryFile"])
         entry = _resolve_path_within_root(root, entry_file)
-        if not entry.exists():
+        files = _default_bundle(row.role)
+        legacy_instructions = _legacy_instructions(row, state)
+        if legacy_instructions:
+            files[entry_file] = legacy_instructions
+        _write_bundle(root, files)
+        if not entry.exists() or entry.stat().st_size == 0:
             entry.parent.mkdir(parents=True, exist_ok=True)
-            entry.write_text("", encoding="utf-8")
+            entry.write_text(
+                files.get(entry_file) or files.get(_ENTRY_FILE) or "",
+                encoding="utf-8",
+            )
         return _apply_bundle_config(
             dict(row.agent_runtime_config),
             mode="managed",
@@ -337,19 +358,49 @@ class AgentInstructionsService:
             clear_legacy_prompt_template=bool(payload.get("clearLegacyPromptTemplate")),
         )
 
+    async def _reconcile_bundle(self, row: Agent) -> Agent:
+        state = _bundle_state(row)
+        if state["mode"] == "managed" and isinstance(state["rootPath"], Path):
+            _write_bundle(state["rootPath"], _default_bundle(row.role))
+        if (
+            state["mode"] == "managed"
+            and state["rootPath"] is None
+            and (
+                state["legacyPromptTemplateActive"]
+                or state["legacyBootstrapPromptTemplateActive"]
+            )
+        ):
+            config = await self._ensure_writable_bundle(
+                row, {"clearLegacyPromptTemplate": True}
+            )
+            updated = await update_agent(
+                self._session, row.id, {"agent_runtime_config": config}
+            )
+            return updated or row
+        return row
+
 
 def _default_bundle(role: str) -> dict[str, str]:
-    soul = (
+    bundle_role = "ceo" if role == "ceo" else "default"
+    fallback_soul = (
         "# SOUL.md -- CEO Persona\n\nYou are the CEO.\n"
-        if role == "ceo"
+        if bundle_role == "ceo"
         else "# SOUL.md -- Agent Persona\n\nYou are an agent in this organization.\n"
     )
-    return {
-        "MEMORY.md": "# MEMORY.md\n\nDurable memory starts empty.\n",
+    fallback = {
+        "MEMORY.md": "# MEMORY.md\n\nRecord stable preferences, operating patterns, and lessons learned here.\n",
         "HEARTBEAT.md": "# HEARTBEAT.md\n\nUse heartbeat runs to inspect and advance assigned work.\n",
-        _ENTRY_FILE: soul,
+        _ENTRY_FILE: fallback_soul,
         "TOOLS.md": "# TOOLS.md\n\nUse the available control-plane and runtime tools.\n",
     }
+    files: dict[str, str] = {}
+    for file_name in _DEFAULT_BUNDLE_FILES:
+        path = _ONBOARDING_ROOT / bundle_role / file_name
+        try:
+            files[file_name] = path.read_text(encoding="utf-8")
+        except OSError:
+            files[file_name] = fallback[file_name]
+    return files
 
 
 def _write_bundle(root: Path, files: dict[str, str]) -> None:
@@ -357,8 +408,40 @@ def _write_bundle(root: Path, files: dict[str, str]) -> None:
     for relative_path, content in files.items():
         target = root / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
+        if not target.exists() or target.stat().st_size == 0:
             target.write_text(content, encoding="utf-8")
+
+
+def _export_files(row: Agent) -> dict[str, str]:
+    state = _bundle_state(row)
+    root = state["rootPath"]
+    if isinstance(root, Path) and root.is_dir():
+        files = {
+            relative_path: _resolve_path_within_root(root, relative_path).read_text(
+                encoding="utf-8"
+            )
+            for relative_path in _list_files(root)
+        }
+        if files:
+            return files
+    content = _legacy_instructions(row, state)
+    return {
+        str(state["entryFile"]): content
+        or "_No SOUL instructions were resolved from current agent config._"
+    }
+
+
+def _legacy_instructions(row: Agent, state: dict[str, Any]) -> str:
+    config = state["config"]
+    file_path = _string(config.get(_FILE_KEY))
+    if file_path:
+        try:
+            resolved = _resolve_instructions_file_path(file_path, config)
+            if resolved.is_file():
+                return resolved.read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+    return _string(config.get(_PROMPT_KEY)) or ""
 
 
 def _string(value: Any) -> str | None:

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { projectsApi } from "../api/projects";
 import type { ProjectStatus } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -8,23 +8,17 @@ import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
 
-export function ProjectsPage() {
-  const { orgId = "" } = useParams();
+export function ProjectCreateDialog({ onClose, orgId }: { onClose: () => void; orgId: string }) {
   const [name, setName] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
-  const [dialogOpen, setDialogOpen] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const projects = useQuery({
-    queryKey: ["projects", orgId],
-    queryFn: () => projectsApi.list(orgId),
-  });
   const create = useMutation({
     mutationFn: () => projectsApi.create(orgId, { name: name.trim(), status }),
     onSuccess: (project) => {
       setName("");
       setStatus("backlog");
-      setDialogOpen(false);
+      onClose();
       void queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
       navigate(`/orgs/${orgId}/projects/${project.id}`);
     },
@@ -34,8 +28,52 @@ export function ProjectsPage() {
     if (name.trim()) create.mutate();
   }
   return (
-    <OrgWorkspace orgId={orgId}>
-      {projects.isSuccess && projects.data.length > 0 && (
+    <div aria-label="Add Project" aria-modal="true" className="modal-backdrop" role="dialog">
+      <form className="panel form task-modal task-create-modal project-create-dialog" onSubmit={submit}>
+        <div className="task-modal-header">
+          <div>
+            <p className="eyebrow">Project</p>
+            <h2>Add Project</h2>
+          </div>
+          <button className="secondary small-button" onClick={onClose} type="button">Close</button>
+        </div>
+        <label>
+          Project Name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+        </label>
+        <label>
+          Project Status
+          <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
+            {STATUSES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        {create.error && <ErrorNotice error={create.error} />}
+        <div className="task-modal-actions">
+          <button className="secondary" onClick={onClose} type="button">Cancel</button>
+          <button disabled={create.isPending} type="submit">Create Project</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+export function ProjectsPage() {
+  const { orgId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const shouldOpenCreate = searchParams.get("create") === "1";
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const navigate = useNavigate();
+  const projects = useQuery({
+    queryKey: ["projects", orgId],
+    queryFn: () => projectsApi.list(orgId),
+  });
+  function closeDialog() {
+    setDialogOpen(false);
+    if (shouldOpenCreate) navigate(`/orgs/${orgId}/projects`);
+  }
+  return (
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+      {projects.isSuccess && projects.data.length > 0 && !shouldOpenCreate && (
         <Navigate replace to={`/orgs/${orgId}/projects/${projects.data[0]!.id}`} />
       )}
       <header className="page-header">
@@ -53,34 +91,7 @@ export function ProjectsPage() {
           <button type="button" onClick={() => setDialogOpen(true)}>Add Project</button>
         </section>
       )}
-      {dialogOpen && (
-        <div aria-label="Add Project" aria-modal="true" className="task-modal-backdrop" role="dialog">
-          <form className="task-modal task-create-modal project-create-dialog" onSubmit={submit}>
-            <div className="task-modal-header">
-              <div>
-                <p className="eyebrow">Project</p>
-                <h2>Add Project</h2>
-              </div>
-              <button className="secondary small-button" onClick={() => setDialogOpen(false)} type="button">Close</button>
-            </div>
-            <label>
-              Project Name
-              <input value={name} onChange={(event) => setName(event.target.value)} required />
-            </label>
-            <label>
-              Project Status
-              <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
-                {STATUSES.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
-            {create.error && <ErrorNotice error={create.error} />}
-            <div className="task-modal-actions">
-              <button className="secondary" onClick={() => setDialogOpen(false)} type="button">Cancel</button>
-              <button disabled={create.isPending} type="submit">Create Project</button>
-            </div>
-          </form>
-        </div>
-      )}
+      {(dialogOpen || shouldOpenCreate) && <ProjectCreateDialog onClose={closeDialog} orgId={orgId} />}
     </OrgWorkspace>
   );
 }

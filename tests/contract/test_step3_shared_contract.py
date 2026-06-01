@@ -254,8 +254,11 @@ def test_validate_list_org_approvals_query_invalid_status_raises() -> None:
 
 
 def test_validate_resolve_approval_empty_ok() -> None:
+    # Upstream `resolveApprovalSchema.decidedByUserId.default("board")` in
+    # `packages/shared/src/validators/approval.ts:15` applies the board
+    # default when the caller omits the field.
     result = validate_resolve_approval({})
-    assert result == {}
+    assert result == {"decidedByUserId": "board"}
 
 
 def test_validate_resolve_approval_invalid_note_type_raises() -> None:

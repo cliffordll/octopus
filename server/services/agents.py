@@ -71,7 +71,7 @@ from .agent_instructions import (
     materialize_default_instructions_for_new_agent,
     normalize_instructions_paths,
 )
-from .organization_skills import organization_skills_root
+from .organization_skills import OrganizationSkillService, organization_skills_root
 from .agent_names import pick_unique_agent_name
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -246,6 +246,10 @@ def _apply_desired_skills_to_entries(
         entry["desired"] = is_desired
         if is_desired and entry.get("state") == "available":
             entry["state"] = "configured"
+
+
+def _organization_skill_selection_key(key: str) -> str:
+    return key if key.startswith("org:") else f"org:{key}"
 
 
 def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
@@ -529,6 +533,7 @@ class AgentService:
             _runtime_config_with_context(row), desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
+        await self._merge_organization_skill_entries(row, snapshot, desired_skills)
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
 
@@ -562,6 +567,8 @@ class AgentService:
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
             _runtime_config_with_context(existing), desired_skills
         )
+        snapshot["desiredSkills"] = desired_skills
+        await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         return cast(AgentSkillSnapshot, snapshot)
 
@@ -585,6 +592,8 @@ class AgentService:
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
             _runtime_config_with_context(existing), desired_skills
         )
+        snapshot["desiredSkills"] = desired_skills
+        await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
         _apply_desired_skills_to_entries(snapshot, desired_skills)
         await insert_activity_log(
             self._session,
@@ -604,6 +613,74 @@ class AgentService:
             },
         )
         return cast(AgentSkillSnapshot, snapshot)
+
+    async def _merge_organization_skill_entries(
+        self, row: AgentRow, snapshot: dict[str, Any], desired_skills: list[str]
+    ) -> None:
+        entries = snapshot.get("entries")
+        if not isinstance(entries, list):
+            return
+        existing_refs = {
+            value
+            for entry in entries
+            if isinstance(entry, dict)
+            for value in (
+                entry.get("key"),
+                entry.get("selectionKey"),
+                entry.get("runtimeName"),
+            )
+            if isinstance(value, str) and value
+        }
+        desired = set(desired_skills)
+        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
+        for skill in org_skills:
+            key = str(skill["key"])
+            slug = str(skill["slug"])
+            if skill.get("sourceBadge") == "built-in":
+                continue
+            if key in existing_refs or slug in existing_refs:
+                continue
+            selection_key = _organization_skill_selection_key(key)
+            metadata = skill.get("metadata")
+            source_kind = (
+                metadata.get("sourceKind")
+                if isinstance(metadata, dict)
+                and isinstance(metadata.get("sourceKind"), str)
+                else "organization_managed"
+            )
+            source_label = skill.get("sourceLabel")
+            is_desired = (
+                selection_key in desired
+                or key in desired
+                or slug in desired
+                or f"org:{key}" in desired
+            )
+            entries.append(
+                {
+                    "key": key,
+                    "selectionKey": selection_key,
+                    "runtimeName": slug,
+                    "sourceRole": slug,
+                    "description": skill.get("description"),
+                    "desired": is_desired,
+                    "configurable": True,
+                    "alwaysEnabled": False,
+                    "managed": True,
+                    "state": "configured" if is_desired else "available",
+                    "sourceClass": "organization",
+                    "sourceBadge": skill.get("sourceBadge"),
+                    "sourceLabel": source_label,
+                    "origin": source_kind,
+                    "originLabel": source_label or "Organization skill",
+                    "locationLabel": "Organization skill",
+                    "readOnly": not bool(skill.get("editable")),
+                    "sourcePath": skill.get("sourcePath"),
+                    "targetPath": None,
+                    "workspaceEditPath": skill.get("workspaceEditPath"),
+                    "detail": skill.get("editableReason"),
+                }
+            )
+        entries.sort(key=lambda entry: str(entry.get("key", "")))
 
     async def create_private_skill(
         self,

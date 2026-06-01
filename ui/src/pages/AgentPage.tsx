@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
@@ -49,6 +49,126 @@ function parseCsv(value: string): string[] {
     .filter(Boolean);
 }
 
+type InstructionDoc = {
+  content: string;
+  editable: boolean;
+  isEntryFile: boolean;
+  key: string;
+  name: string;
+  path: string;
+  source: string;
+  virtual: boolean;
+};
+
+type InstructionFileTreeNode = {
+  children: Map<string, InstructionFileTreeNode>;
+  files: InstructionDoc[];
+  name: string;
+  path: string;
+};
+
+function createInstructionFileTreeNode(name: string, path: string): InstructionFileTreeNode {
+  return { children: new Map(), files: [], name, path };
+}
+
+function buildInstructionFileTree(files: InstructionDoc[]): InstructionFileTreeNode {
+  const root = createInstructionFileTreeNode("", "");
+  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    const parts = file.path.split("/").filter(Boolean);
+    if (parts.length <= 1) {
+      root.files.push(file);
+      continue;
+    }
+    let node = root;
+    for (const segment of parts.slice(0, -1)) {
+      const path = node.path ? `${node.path}/${segment}` : segment;
+      let child = node.children.get(segment);
+      if (!child) {
+        child = createInstructionFileTreeNode(segment, path);
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
+    node.files.push(file);
+  }
+  return root;
+}
+
+function instructionFileDirectoryAncestors(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return [];
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function instructionFileTreeCount(node: InstructionFileTreeNode): number {
+  let count = node.files.length;
+  for (const child of node.children.values()) count += instructionFileTreeCount(child);
+  return count;
+}
+
+function InstructionFileTree({
+  expandedDirs,
+  files,
+  onSelect,
+  onToggle,
+  selectedPath,
+}: {
+  expandedDirs: Set<string>;
+  files: InstructionDoc[];
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+  selectedPath: string;
+}) {
+  const tree = buildInstructionFileTree(files);
+  function renderFile(file: InstructionDoc, level: number) {
+    return (
+      <button
+        className={`instruction-file-button ${selectedPath === file.path ? "selected" : ""}`}
+        key={file.path}
+        onClick={() => onSelect(file.path)}
+        style={{ "--instruction-file-depth": level } as CSSProperties}
+        type="button"
+      >
+        <span className="instruction-file-label">
+          <span className="instruction-file-icon" aria-hidden="true">F</span>
+          <span>{file.path.split("/").at(-1) ?? file.path}</span>
+        </span>
+      </button>
+    );
+  }
+  function renderNode(node: InstructionFileTreeNode, level = 0) {
+    const directories = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      <>
+        {node.files.map((file) => renderFile(file, level))}
+        {directories.map((directory) => {
+          const expanded = expandedDirs.has(directory.path);
+          return (
+            <div className="instruction-directory" key={directory.path}>
+              <button
+                aria-expanded={expanded}
+                className="instruction-directory-button"
+                onClick={() => onToggle(directory.path)}
+                style={{ "--instruction-file-depth": level } as CSSProperties}
+                type="button"
+              >
+                <span className="instruction-file-label">
+                  <span className="instruction-directory-icon" aria-hidden="true">D</span>
+                  <span>{directory.name}</span>
+                </span>
+                <small>{instructionFileTreeCount(directory)}</small>
+                <span className="instruction-directory-toggle" aria-hidden="true">{expanded ? "v" : ">"}</span>
+              </button>
+              {expanded && <div className="instruction-directory-children">{renderNode(directory, level + 1)}</div>}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+  return <div className="instruction-file-tree">{renderNode(tree)}</div>;
+}
+
 function formatRunTime(value?: string | null): string {
   return value || "无";
 }
@@ -76,16 +196,40 @@ function skillField(entry: Record<string, unknown>, keys: string[], fallback = "
   return fallback;
 }
 
-function skillListField(entry: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = entry[key];
-    if (Array.isArray(value)) {
-      const items = value.map((item) => String(item)).filter(Boolean);
-      if (items.length > 0) return items.join(", ");
-    }
-    if (typeof value === "string" && value.trim()) return value.trim();
+function skillNestedString(entry: Record<string, unknown>, path: string[]): string {
+  let current: unknown = entry;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return "";
+    current = (current as Record<string, unknown>)[key];
   }
-  return "-";
+  return typeof current === "string" && current.trim() ? current.trim() : "";
+}
+
+function normalizeSkillSource(value: string): string {
+  return value.trim().toLowerCase().replaceAll("-", "_");
+}
+
+function skillSourceCandidates(entry: Record<string, unknown>): string[] {
+  const keys = ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "locationLabel", "selectionKey"];
+  return [
+    skillNestedString(entry, ["metadata", "sourceKind"]),
+    ...keys.map((key) => skillField(entry, [key], "")),
+  ]
+    .map(normalizeSkillSource)
+    .filter(Boolean);
+}
+
+function skillSourceKind(entry: Record<string, unknown>): string {
+  return skillSourceCandidates(entry)[0] ?? "";
+}
+
+function isCommunitySkillEntry(entry: Record<string, unknown>): boolean {
+  return skillSourceCandidates(entry).some((sourceKind) => (
+    sourceKind === "community"
+    || sourceKind === "community_preset"
+    || sourceKind.includes("/community/")
+    || sourceKind.includes("\\community\\")
+  ));
 }
 
 function nestedSkillField(entry: Record<string, unknown>, keys: string[]): string {
@@ -102,7 +246,7 @@ function nestedSkillField(entry: Record<string, unknown>, keys: string[]): strin
 
 function descriptionFromMarkdown(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "";
-  const lines = value.split(/\r?\n/);
+  const lines = value.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() === "---") {
     for (const line of lines.slice(1)) {
       const trimmed = line.trim();
@@ -135,7 +279,7 @@ function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string
   if (explicit) return explicit;
   if (booleanSkillField(entry, "alwaysEnabled")) return "每次智能体运行都会自动加载。";
   if (enabled) return "当前智能体已使用该技能，后续运行可加载。";
-  return "已安装，当前智能体尚未使用。";
+  return "";
 }
 
 function hasJsonObject(value: Record<string, unknown> | null | undefined): value is Record<string, unknown> {
@@ -174,9 +318,14 @@ function skillAliases(entry: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-function skillSourceGroup(entry: Record<string, unknown>): "组织技能" | "外部技能" {
-  const sourceClass = skillField(entry, ["sourceClass", "source", "scope", "kind"], "runtime").toLowerCase();
-  return sourceClass === "bundled" || sourceClass === "organization" ? "组织技能" : "外部技能";
+type SkillSourceGroup = "built-in" | "community" | "组织技能" | "外部技能";
+
+function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
+  const sourceClass = skillSourceKind(entry);
+  if (isBuiltInSkillEntry(entry)) return "built-in";
+  if (isCommunitySkillEntry(entry)) return "community";
+  if (sourceClass === "organization") return "组织技能";
+  return "外部技能";
 }
 
 function skillState(entry: Record<string, unknown>): string {
@@ -184,15 +333,26 @@ function skillState(entry: Record<string, unknown>): string {
 }
 
 function skillSourceLabel(entry: Record<string, unknown>): string {
-  return skillField(entry, ["selectionKey", "sourceClass", "source", "origin", "scope", "kind"], "runtime");
+  if (isCommunitySkillEntry(entry)) return "community";
+  return skillNestedString(entry, ["metadata", "sourceKind"])
+    || skillField(entry, ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "selectionKey"], "runtime");
 }
 
 function skillDisplaySourceText(value: string | null | undefined, bundled: boolean): string {
-  if (bundled) return "系统内置";
+  if (bundled) return "built-in";
   if (!value) return "-";
-  const normalized = value.toLowerCase();
-  if (normalized.includes("bundled")) return "系统内置";
+  const normalized = normalizeSkillSource(value);
+  if (normalized === "community_preset") return "community";
   return value;
+}
+
+function isBuiltInSkillEntry(entry: Record<string, unknown>): boolean {
+  const sourceClass = skillSourceKind(entry);
+  return ["bundled", "built_in", "octopus_bundled", "system_bundled", "rudder_bundled"].includes(sourceClass);
+}
+
+function visibleSkillWarning(warning: string): boolean {
+  return !/^skillsRootPath does not exist:/i.test(warning.trim());
 }
 
 function AgentRunDetail({
@@ -396,6 +556,7 @@ export function AgentPage() {
   const [taskTitle, setTaskTitle] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
+  const [expandedInstructionDirs, setExpandedInstructionDirs] = useState<Set<string>>(new Set());
   const [showInstructionForm, setShowInstructionForm] = useState(false);
   const [newInstructionName, setNewInstructionName] = useState("");
   const [instructionDraft, setInstructionDraft] = useState("");
@@ -629,12 +790,15 @@ export function AgentPage() {
   const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
+  const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
+  const communitySkillEntries = skillEntries.filter((entry) => !isBuiltInSkillEntry(entry) && isCommunitySkillEntry(entry));
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
+  const skillWarnings = (skills.data?.warnings ?? []).filter(visibleSkillWarning);
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
-  const instructionDocs = instructionsBundle.data
+  const instructionDocs: InstructionDoc[] = instructionsBundle.data
     ? bundleFiles.map((file) => ({
-      content: "",
+      content: typeof file.content === "string" ? file.content : "",
       editable: file.editable,
       isEntryFile: file.isEntryFile,
       key: file.path,
@@ -650,10 +814,29 @@ export function AgentPage() {
     queryFn: () => agentsApi.readInstructionFile(agentId, selectedInstruction!.path),
     enabled: activeTab === "profile" && bundleFiles.length > 0 && Boolean(selectedInstruction?.path),
   });
-  const selectedInstructionContent = selectedBundleFile.data?.content ?? selectedInstruction?.content ?? "";
+  const selectedFileContent = selectedBundleFile.data?.content;
+  const selectedInstructionContent = selectedFileContent?.trim() ? selectedFileContent : (selectedInstruction?.content ?? selectedFileContent ?? "");
+  useEffect(() => {
+    if (!selectedInstruction?.path) return;
+    const ancestors = instructionFileDirectoryAncestors(selectedInstruction.path);
+    if (ancestors.length === 0) return;
+    setExpandedInstructionDirs((current) => {
+      const next = new Set(current);
+      for (const ancestor of ancestors) next.add(ancestor);
+      return next.size === current.size ? current : next;
+    });
+  }, [selectedInstruction?.path]);
   useEffect(() => {
     setInstructionDraft(selectedInstructionContent);
   }, [selectedInstructionContent]);
+  function toggleInstructionDir(path: string) {
+    setExpandedInstructionDirs((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
   function defaultInstructionName() {
     const names = new Set(instructionDocs.map((doc) => doc.name.toLowerCase()));
     if (!names.has("NEW.md".toLowerCase())) return "NEW.md";
@@ -704,7 +887,7 @@ export function AgentPage() {
   }
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
-    <AgentsWorkspace orgId={orgId}>
+    <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header agent-page-header">
         <div className="agent-header-identity">
           <div className="agent-avatar-lg">{agent.data?.name?.slice(0, 1).toUpperCase() ?? "A"}</div>
@@ -807,9 +990,9 @@ export function AgentPage() {
             {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
             {deleteInstruction.error && <ErrorNotice error={deleteInstruction.error} />}
             <div className="agent-instructions-grid">
-              <aside aria-label="Instruction files" className="instruction-files-card">
+              <aside aria-label="说明文件列表" className="instruction-files-card">
                 <div className="instruction-card-header">
-                  <h2>Files</h2>
+                  <h2>文件</h2>
                   <button
                     aria-expanded={showInstructionForm}
                     aria-label="新增文件"
@@ -832,20 +1015,15 @@ export function AgentPage() {
                     </div>
                   </form>
                 )}
-                <ul className="instruction-file-list">
-                  {instructionDocs.map((doc) => (
-                    <li
-                      className={selectedInstruction?.key === doc.key ? "selected" : undefined}
-                      key={doc.key}
-                    >
-                      <button onClick={() => setSelectedInstructionKey(doc.key)} type="button">
-                        <code>{doc.name}</code>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <InstructionFileTree
+                  expandedDirs={expandedInstructionDirs}
+                  files={instructionDocs}
+                  onSelect={setSelectedInstructionKey}
+                  onToggle={toggleInstructionDir}
+                  selectedPath={selectedInstruction?.path ?? ""}
+                />
               </aside>
-              <article aria-label="Instruction content" className="instruction-content-card">
+              <article aria-label="说明文件内容" className="instruction-content-card">
                 {selectedInstruction ? (
                   <>
                     <textarea
@@ -1113,7 +1291,7 @@ export function AgentPage() {
             {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
             <div className="agent-skills-library">
               {skillsAnalytics.data && (
-                <section className="agent-skill-tags-card">
+                <section className="agent-skill-tags-card agent-skill-analytics-card">
                   <div className="agent-skill-source-heading">
                     <h3>使用分析</h3>
                     <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
@@ -1126,6 +1304,8 @@ export function AgentPage() {
                 </section>
               )}
               {[
+                { label: "built-in", rows: builtInSkillEntries },
+                { label: "community", rows: communitySkillEntries },
                 { label: "组织技能", rows: organizationSkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },
               ].map((group) => (
@@ -1141,47 +1321,62 @@ export function AgentPage() {
                       const name = skillEntryName(entry);
                       const actionName = skillActionName(entry);
                       const enabled = skillEnabled(entry, desiredSkillRows);
-                      const isBundled = skillField(entry, ["sourceClass", "source", "origin"], "").toLowerCase() === "bundled";
+                      const isBundled = isBuiltInSkillEntry(entry);
                       const description = skillDescription(entry) || skillField(entry, ["detail"], "");
-                      const tags = skillListField(entry, ["tags", "categories"]);
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
                       const originLabel = skillField(entry, ["originLabel"], "");
-                      const locationLabel = skillField(entry, ["locationLabel"], "");
+                      const sourceText = skillDisplaySourceText(originLabel || sourceLabel, isBundled);
                       const loadNote = skillLoadNote(entry, enabled);
                       const state = skillState(entry);
+                      const toggleSelectedSkill = () => setSelectedSkillKey(selected ? "" : key);
+                      const onSkillKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggleSelectedSkill();
+                      };
+                      const stopSkillActionClick = (event: MouseEvent) => event.stopPropagation();
                       return (
                         <article className={`agent-skill-tag ${selected ? "selected" : ""}`} key={key}>
-                          <button className="agent-skill-tag-main" onClick={() => setSelectedSkillKey(selected ? "" : key)} type="button">
+                          <div
+                            className="agent-skill-tag-main"
+                            onClick={toggleSelectedSkill}
+                            onKeyDown={onSkillKeyDown}
+                            role="button"
+                            tabIndex={0}
+                          >
                             <span className="agent-skill-tag-title-row">
                               <code>{name}</code>
-                              <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
+                              <span className="agent-skill-title-actions">
+                                <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
+                                {isBundled ? (
+                                  <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={(event) => { stopSkillActionClick(event); forkSkill(entry); }} type="button">派生</button>
+                                ) : (
+                                  <>
+                                    <button
+                                      className="secondary small-button"
+                                      disabled={enableSkills.isPending || syncSkills.isPending}
+                                      onClick={(event) => {
+                                        stopSkillActionClick(event);
+                                        if (enabled) disableSkill(actionName);
+                                        else enableSkill(actionName);
+                                      }}
+                                      type="button"
+                                    >
+                                      {enabled ? "取消使用" : "使用"}
+                                    </button>
+                                    <button className="danger small-button" disabled onClick={stopSkillActionClick} type="button">删除</button>
+                                  </>
+                                )}
+                              </span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
-                            <span className="agent-skill-tag-note">{loadNote}</span>
+                            {loadNote && <span className="agent-skill-tag-note">{loadNote}</span>}
                             <span className="agent-skill-tag-facts">
-                              <span><small>来源</small>{skillDisplaySourceText(originLabel || sourceLabel, isBundled)}</span>
-                              <span><small>状态</small>{state}</span>
-                              <span><small>版本</small>{version ? `v${version}` : "-"}</span>
-                              <span><small>{locationLabel ? "位置" : "标签"}</small>{locationLabel || tags}</span>
+                              {!isCommunitySkillEntry(entry) && <span>{sourceText}</span>}
+                              <span>{state}</span>
+                              <span>{version ? `v${version}` : "-"}</span>
                             </span>
-                          </button>
-                          <div className="agent-skill-row-actions">
-                            {isBundled ? (
-                              <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={() => forkSkill(entry)} type="button">派生</button>
-                            ) : (
-                              <>
-                                <button
-                                  className="secondary small-button"
-                                  disabled={enableSkills.isPending || syncSkills.isPending}
-                                  onClick={() => (enabled ? disableSkill(actionName) : enableSkill(actionName))}
-                                  type="button"
-                                >
-                                  {enabled ? "取消使用" : "使用"}
-                                </button>
-                                <button className="danger small-button" disabled type="button">删除</button>
-                              </>
-                            )}
                           </div>
                         </article>
                       );
@@ -1190,7 +1385,7 @@ export function AgentPage() {
                 </section>
               ))}
             </div>
-            {skills.data?.warnings?.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
+            {skillWarnings.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             {skillDialogOpen && (
               <div aria-modal="true" className="modal-backdrop" role="dialog">
                 <section className="panel task-modal skill-create-dialog">

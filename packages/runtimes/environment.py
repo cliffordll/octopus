@@ -6,6 +6,25 @@ from typing import Any
 from urllib.parse import urlparse
 
 
+_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+_BLOCKING_PROXY_VALUES = {
+    "http://127.0.0.1:9",
+    "https://127.0.0.1:9",
+    "socks5://127.0.0.1:9",
+    "http://localhost:9",
+    "https://localhost:9",
+    "socks5://localhost:9",
+}
+
+
 def local_cli_environment_checks(
     *,
     config: dict[str, Any],
@@ -94,6 +113,38 @@ def _cwd_check(config: dict[str, Any]) -> dict[str, str | None]:
         "message": f"Working directory exists: {cwd}",
         "hint": None,
     }
+
+
+def resolve_runtime_executable(command: str) -> str:
+    """Best-effort resolution of a CLI command name to an absolute path.
+
+    On Windows, plain command names such as ``codex`` map to wrappers like
+    ``codex.CMD`` that ``asyncio.create_subprocess_exec`` cannot launch
+    without the explicit extension. Using ``shutil.which`` mirrors the same
+    PATHEXT-aware lookup the test-environment helper already performs.
+    When ``shutil.which`` cannot resolve the name (e.g. tests that monkeypatch
+    subprocess startup with a fake command) the original value is returned so
+    the caller's existing error path keeps working.
+    """
+    return shutil.which(command) or command
+
+
+def clear_inherited_blocking_proxy_env(
+    env: dict[str, str], *, explicit_keys: set[str] | None = None
+) -> None:
+    """Remove known sandbox blackhole proxy settings from runtime children.
+
+    Codex-hosted development shells commonly set proxy variables to
+    ``127.0.0.1:9`` to prevent network access. Local runtime adapters inherit the
+    server process environment, so those values make child CLIs fail even when
+    the user did not configure a proxy for the agent. Explicit agent runtime env
+    always wins and is left untouched.
+    """
+    explicit = explicit_keys or set()
+    for key in _PROXY_ENV_KEYS:
+        value = _string(env.get(key))
+        if key not in explicit and value and value.lower() in _BLOCKING_PROXY_VALUES:
+            env.pop(key, None)
 
 
 def _command_check(command: str, label: str) -> dict[str, str | None]:

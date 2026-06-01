@@ -408,9 +408,57 @@ def _skill_description(skill_file: Path) -> str | None:
         lines = skill_file.read_text(encoding="utf-8").splitlines()
     except OSError:
         return None
+    frontmatter = _frontmatter_value(lines, "description")
+    if frontmatter:
+        return frontmatter
     for line in lines:
         value = line.strip()
-        if not value or value.startswith("#"):
+        if (
+            not value
+            or value == "---"
+            or value.startswith("#")
+            or _looks_like_yaml_field(value)
+        ):
             continue
         return value
     return None
+
+
+def _frontmatter_value(lines: list[str], key: str) -> str | None:
+    if not lines or _strip_bom(lines[0]).strip() != "---":
+        return None
+    index = 1
+    while index < len(lines):
+        line = lines[index]
+        value = line.strip()
+        if value == "---":
+            return None
+        name, separator, raw_value = value.partition(":")
+        if separator and name.strip() == key:
+            text = raw_value.strip().strip("\"'")
+            if text in {">", "|"}:
+                folded: list[str] = []
+                index += 1
+                while index < len(lines):
+                    nested = lines[index]
+                    if nested.strip() == "---":
+                        break
+                    if nested and not nested[:1].isspace():
+                        break
+                    stripped = nested.strip()
+                    if stripped:
+                        folded.append(stripped)
+                    index += 1
+                return (" " if text == ">" else "\n").join(folded) or None
+            return text or None
+        index += 1
+    return None
+
+
+def _looks_like_yaml_field(value: str) -> bool:
+    name, separator, _ = value.partition(":")
+    return bool(separator and name.strip().replace("-", "_").isidentifier())
+
+
+def _strip_bom(value: str) -> str:
+    return value.removeprefix("\ufeff")

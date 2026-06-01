@@ -138,6 +138,25 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
     }
 
 
+@pytest.mark.asyncio
+async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
+    db_path = tmp_path / "journal-mode.db"
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(text("PRAGMA journal_mode"))
+            assert result.scalar_one() == "truncate"
+            await conn.execute(
+                text(
+                    "create table write_check "
+                    "(id integer primary key, value text not null)"
+                )
+            )
+            await conn.execute(text("insert into write_check(value) values ('ok')"))
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     eng = create_database_engine("sqlite+aiosqlite:///:memory:")

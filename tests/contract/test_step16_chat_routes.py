@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Organization
+from packages.database.schema import Agent, Base, Organization
 from server.app import create_app
 
 
@@ -189,3 +189,69 @@ async def test_chat_crud_filters_and_user_state(
     assert detail["isUnread"] is False
     assert detail["lastReadAt"] is not None
     assert detail["latestReplyPreview"] is None
+
+
+async def test_chat_runtime_descriptor_uses_selected_agent(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Codex CEO",
+                role="ceo",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={"model": "gpt-5-codex"},
+            )
+        )
+        await session.commit()
+
+    create_code, chat = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/chats",
+        json={"title": "Agent chat", "preferredAgentId": agent_id},
+    )
+
+    assert create_code == 201
+    assert chat["chatRuntime"] == {
+        "sourceType": "agent",
+        "sourceLabel": "Codex CEO",
+        "runtimeAgentId": agent_id,
+        "agentRuntimeType": "codex_local",
+        "model": "gpt-5-codex",
+        "available": True,
+        "error": None,
+    }
+
+
+async def test_chat_create_normalizes_legacy_org_issue_creation_mode(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="legacy-chat-mode",
+                name="Legacy Chat Mode",
+                issue_prefix="LCM",
+                default_chat_issue_creation_mode="manual",
+            )
+        )
+        await session.commit()
+
+    create_code, chat = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/chats",
+        json={"title": "Legacy mode chat"},
+    )
+
+    assert create_code == 201
+    assert chat["issueCreationMode"] == "manual_approval"

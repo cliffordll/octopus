@@ -5,7 +5,7 @@ import { agentsApi } from "../api/agents";
 import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent, OrganizationResource, OrganizationSkillListItem, ProjectDetail, ProjectWorkspace } from "../api/types";
+import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, ProjectDetail, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 
@@ -243,7 +243,7 @@ export function OrganizationStructurePage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>
@@ -320,10 +320,7 @@ export function OrganizationStructurePage() {
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 
 function organizationResourceKindLabel(kind: OrganizationResource["kind"]): string {
-  if (kind === "directory") return "目录";
-  if (kind === "file") return "文件";
-  if (kind === "connector_object") return "连接器对象";
-  return "链接";
+  return kind;
 }
 
 function organizationResourceKindIcon(kind: OrganizationResource["kind"]): string {
@@ -408,7 +405,7 @@ export function OrganizationResourcesPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <section className="org-resource-hero">
         <div className="org-resource-hero-copy">
           <p className="org-resource-eyebrow">
@@ -530,30 +527,190 @@ function skillFilePath(skill: OrganizationSkillListItem): string {
   return skill.fileInventory.find((file) => file.path === "SKILL.md")?.path ?? skill.fileInventory[0]?.path ?? "SKILL.md";
 }
 
-const DEFAULT_SKILL_MARKDOWN = "Use this skill when it is relevant to the current task.";
-
-function isBundledOrganizationSkill(skill: OrganizationSkillListItem): boolean {
-  const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : null;
-  return sourceKind?.includes("bundled") === true || skill.sourceBadge === "bundled";
+function encodeSkillFileRoute(path: string): string {
+  return path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
-function organizationSkillSourceText(value: string | null | undefined, bundled: boolean, fallback = "系统内置"): string {
-  if (bundled) return "系统内置";
+const DEFAULT_SKILL_MARKDOWN = "Use this skill when it is relevant to the current task.";
+
+type SkillFileTreeNode = {
+  children: Map<string, SkillFileTreeNode>;
+  files: OrganizationSkillFileInventoryEntry[];
+  name: string;
+  path: string;
+};
+
+function createSkillFileTreeNode(name: string, path: string): SkillFileTreeNode {
+  return { children: new Map(), files: [], name, path };
+}
+
+function buildSkillFileTree(files: OrganizationSkillFileInventoryEntry[]): SkillFileTreeNode {
+  const root = createSkillFileTreeNode("", "");
+  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
+    const parts = file.path.split("/").filter(Boolean);
+    if (parts.length <= 1) {
+      root.files.push(file);
+      continue;
+    }
+    let node = root;
+    for (const segment of parts.slice(0, -1)) {
+      const path = node.path ? `${node.path}/${segment}` : segment;
+      let child = node.children.get(segment);
+      if (!child) {
+        child = createSkillFileTreeNode(segment, path);
+        node.children.set(segment, child);
+      }
+      node = child;
+    }
+    node.files.push(file);
+  }
+  return root;
+}
+
+function skillFileDirectoryAncestors(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return [];
+  return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
+
+function skillFileTreeCount(node: SkillFileTreeNode): number {
+  let count = node.files.length;
+  for (const child of node.children.values()) count += skillFileTreeCount(child);
+  return count;
+}
+
+function SkillFileTree({
+  expandedDirs,
+  files,
+  onSelect,
+  onToggle,
+  selectedPath,
+}: {
+  expandedDirs: Set<string>;
+  files: OrganizationSkillFileInventoryEntry[];
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+  selectedPath: string;
+}) {
+  const tree = buildSkillFileTree(files);
+  function renderFile(file: OrganizationSkillFileInventoryEntry, level: number) {
+    return (
+      <button
+        className={`organization-skill-file-button ${selectedPath === file.path ? "selected" : ""}`}
+        key={file.path}
+        onClick={() => onSelect(file.path)}
+        style={{ "--skill-file-depth": level } as React.CSSProperties}
+        type="button"
+      >
+        <span className="organization-skill-file-label">
+          <span className="organization-skill-file-icon" aria-hidden="true">F</span>
+          <span>{file.path.split("/").at(-1) ?? file.path}</span>
+        </span>
+      </button>
+    );
+  }
+  function renderNode(node: SkillFileTreeNode, level = 0) {
+    const directories = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return (
+      <>
+        {node.files.map((file) => renderFile(file, level))}
+        {directories.map((directory) => {
+          const expanded = expandedDirs.has(directory.path);
+          return (
+            <div className="organization-skill-directory" key={directory.path} style={{ "--skill-file-depth": level } as React.CSSProperties}>
+              <button
+                aria-expanded={expanded}
+                className="organization-skill-directory-button"
+                onClick={() => onToggle(directory.path)}
+                type="button"
+              >
+                <span className="organization-skill-file-label">
+                  <span className="organization-skill-directory-icon" aria-hidden="true">D</span>
+                  <span>{directory.name}</span>
+                </span>
+                <small>{skillFileTreeCount(directory)}</small>
+                <span className="organization-skill-directory-toggle" aria-hidden="true">{expanded ? "v" : ">"}</span>
+              </button>
+              {expanded && <div className="organization-skill-directory-children">{renderNode(directory, level + 1)}</div>}
+            </div>
+          );
+        })}
+      </>
+    );
+  }
+  return <div className="organization-skill-file-tree">{renderNode(tree)}</div>;
+}
+
+function organizationSkillString(skill: OrganizationSkillListItem, key: keyof OrganizationSkillListItem): string {
+  const value = skill[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizedOrganizationSkillSource(value: string): string {
+  return value.trim().toLowerCase().replaceAll("-", "_");
+}
+
+function organizationSkillSourceCandidates(skill: OrganizationSkillListItem): string[] {
+  const sourceKind = typeof skill.metadata?.sourceKind === "string" ? skill.metadata.sourceKind : "";
+  return [
+    sourceKind
+    || "",
+    organizationSkillString(skill, "sourceBadge"),
+    organizationSkillString(skill, "sourceLocator"),
+    organizationSkillString(skill, "sourcePath"),
+    organizationSkillString(skill, "sourceLabel"),
+  ]
+    .map(normalizedOrganizationSkillSource)
+    .filter(Boolean);
+}
+
+function organizationSkillSourceKind(skill: OrganizationSkillListItem): string {
+  return organizationSkillSourceCandidates(skill)[0] ?? "";
+}
+
+function isBuiltInOrganizationSkill(skill: OrganizationSkillListItem): boolean {
+  const sourceKind = organizationSkillSourceKind(skill);
+  return sourceKind === "built_in"
+    || sourceKind === "octopus_bundled"
+    || sourceKind === "system_bundled"
+    || sourceKind === "rudder_bundled"
+    || sourceKind.includes("bundled")
+    || skill.sourceBadge === "built-in"
+    || skill.sourceBadge === "bundled";
+}
+
+function isCommunityOrganizationSkill(skill: OrganizationSkillListItem): boolean {
+  return organizationSkillSourceCandidates(skill).some((sourceKind) => (
+    sourceKind === "community"
+    || sourceKind === "community_preset"
+    || sourceKind.includes("/community/")
+    || sourceKind.includes("\\community\\")
+  ));
+}
+
+function organizationSkillSourceText(value: string | null | undefined, builtIn: boolean, fallback = "built-in"): string {
+  if (builtIn) return "built-in";
   if (!value) return fallback;
-  const normalized = value.toLowerCase();
-  if (normalized.includes("bundled")) return "系统内置";
+  if (normalizedOrganizationSkillSource(value) === "community_preset") return "community";
   return value;
 }
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
-    { title: "内置技能", rows: skills.filter(isBundledOrganizationSkill) },
-    { title: "本地组织技能", rows: skills.filter((skill) => !isBundledOrganizationSkill(skill)) },
+    { title: "built-in", rows: skills.filter(isBuiltInOrganizationSkill) },
+    { title: "community", rows: skills.filter(isCommunityOrganizationSkill) },
+    {
+      title: "local",
+      rows: skills.filter((skill) => !isBuiltInOrganizationSkill(skill) && !isCommunityOrganizationSkill(skill)),
+    },
   ];
 }
 
 export function OrganizationSkillsPage() {
-  const { orgId = "", skillId = "" } = useParams();
+  const params = useParams();
+  const orgId = params.orgId ?? "";
+  const skillId = params.skillId ?? "";
+  const routeFilePath = params["*"] ?? "";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const skills = useQuery({
@@ -563,6 +720,7 @@ export function OrganizationSkillsPage() {
   const skillRows = Array.isArray(skills.data) ? skills.data : [];
   const [skillFilter, setSkillFilter] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [expandedSkillDirs, setExpandedSkillDirs] = useState<Record<string, string[]>>({});
   const [selectedPathBySkill, setSelectedPathBySkill] = useState<Record<string, string>>({});
   const selectedSkill = skillRows.find((skill) => skill.id === skillId) ?? skillRows[0];
   const filteredSkillRows = skillRows.filter((skill) => {
@@ -577,7 +735,7 @@ export function OrganizationSkillsPage() {
   const [newDescription, setNewDescription] = useState("");
   const [newMarkdown, setNewMarkdown] = useState(DEFAULT_SKILL_MARKDOWN);
   const [draftContent, setDraftContent] = useState("");
-  const selectedPath = selectedSkill ? (selectedPathBySkill[selectedSkill.id] ?? skillFilePath(selectedSkill)) : "SKILL.md";
+  const selectedPath = selectedSkill ? (routeFilePath || selectedPathBySkill[selectedSkill.id] || skillFilePath(selectedSkill)) : "SKILL.md";
   const filteredSkillSections = organizationSkillSections(filteredSkillRows);
   const skillDetail = useQuery({
     queryKey: ["organization-skill", orgId, selectedSkill?.id],
@@ -600,9 +758,32 @@ export function OrganizationSkillsPage() {
   }, [skillFile.data]);
 
   useEffect(() => {
+    if (!selectedSkill) return;
+    const ancestors = skillFileDirectoryAncestors(selectedPath);
+    if (ancestors.length === 0) return;
+    setExpandedSkillDirs((current) => {
+      const existing = new Set(current[selectedSkill.id] ?? []);
+      let changed = false;
+      for (const ancestor of ancestors) {
+        if (!existing.has(ancestor)) {
+          existing.add(ancestor);
+          changed = true;
+        }
+      }
+      return changed ? { ...current, [selectedSkill.id]: Array.from(existing) } : current;
+    });
+  }, [selectedPath, selectedSkill]);
+
+  useEffect(() => {
     if (!skills.isSuccess || skillId || !selectedSkill) return;
     navigate(`/orgs/${orgId}/skills/${selectedSkill.id}`, { replace: true });
   }, [navigate, orgId, selectedSkill, skillId, skills.isSuccess]);
+
+  useEffect(() => {
+    if (!skills.isSuccess || !selectedSkill || routeFilePath) return;
+    const defaultPath = selectedPathBySkill[selectedSkill.id] ?? skillFilePath(selectedSkill);
+    navigate(`/orgs/${orgId}/skills/${selectedSkill.id}/files/${encodeSkillFileRoute(defaultPath)}`, { replace: true });
+  }, [navigate, orgId, routeFilePath, selectedPathBySkill, selectedSkill, skills.isSuccess]);
 
   const createSkill = useMutation({
     mutationFn: () => organizationSkillsApi.create(orgId, {
@@ -641,8 +822,25 @@ export function OrganizationSkillsPage() {
     if (newName.trim()) createSkill.mutate();
   }
 
+  function toggleSkillDirectory(skillId: string, path: string) {
+    setExpandedSkillDirs((current) => {
+      const existing = new Set(current[skillId] ?? []);
+      if (existing.has(path)) {
+        existing.delete(path);
+      } else {
+        existing.add(path);
+      }
+      return { ...current, [skillId]: Array.from(existing) };
+    });
+  }
+
+  function selectSkillFile(skillId: string, path: string) {
+    setSelectedPathBySkill((current) => ({ ...current, [skillId]: path }));
+    navigate(`/orgs/${orgId}/skills/${skillId}/files/${encodeSkillFileRoute(path)}`);
+  }
+
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       {skills.error && <ErrorNotice error={skills.error} />}
       <div className="organization-skills-shell">
         <aside className="organization-skills-sidebar">
@@ -650,7 +848,7 @@ export function OrganizationSkillsPage() {
             <div>
               <h1>技能</h1>
               <p>{skillRows.length} 个可用</p>
-              <p>当前组织的内置、社区预设和导入技能。</p>
+              <p>当前组织的内置、社区和导入技能。</p>
             </div>
             <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button" aria-label="添加技能">+</button>
           </div>
@@ -675,12 +873,12 @@ export function OrganizationSkillsPage() {
                   <button
                     className={`organization-skill-list-card ${selectedSkill?.id === skill.id ? "selected" : ""}`}
                     key={skill.id}
-                    onClick={() => navigate(`/orgs/${orgId}/skills/${skill.id}`)}
+                    onClick={() => navigate(`/orgs/${orgId}/skills/${skill.id}/files/${encodeSkillFileRoute(skillFilePath(skill))}`)}
                     type="button"
                   >
                     <span className="organization-skill-list-card-title">
                       <strong>{skill.name}</strong>
-                      <small>{organizationSkillSourceText(skill.sourceBadge, isBundledOrganizationSkill(skill))}</small>
+                      <small>{organizationSkillSourceText(skill.sourceBadge, isBuiltInOrganizationSkill(skill))}</small>
                     </span>
                     {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
                     <span className="organization-skill-list-card-meta">
@@ -700,13 +898,13 @@ export function OrganizationSkillsPage() {
                 <div>
                   <div className="organization-skill-title-row">
                     <h2>{selectedSkill.name}</h2>
-                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</Badge>
+                    <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
                     <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                   </div>
                   <p>{selectedSkill.description || "未填写描述"}</p>
-                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBundledOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
+                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBuiltInOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
                   {!selectedSkill.editable && selectedSkill.editableReason && (
-                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBundledOrganizationSkill(selectedSkill))}</p>
+                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBuiltInOrganizationSkill(selectedSkill))}</p>
                   )}
                 </div>
                 <div className="row-actions">
@@ -727,7 +925,7 @@ export function OrganizationSkillsPage() {
               <div className="organization-skill-info-grid">
                 <div>
                   <span>来源</span>
-                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBundledOrganizationSkill(selectedSkill))}</strong>
+                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</strong>
                 </div>
                 <div>
                   <span>来源路径</span>
@@ -761,19 +959,13 @@ export function OrganizationSkillsPage() {
                     <h3>文件</h3>
                     <span>{selectedSkill.fileInventory.length}</span>
                   </div>
-                  {selectedSkill.fileInventory.map((file) => (
-                    <button
-                      className={selectedPath === file.path ? "selected" : ""}
-                      key={file.path}
-                      onClick={() =>
-                        setSelectedPathBySkill((current) => ({ ...current, [selectedSkill.id]: file.path }))
-                      }
-                      type="button"
-                    >
-                      <span>{file.path}</span>
-                      <small>{file.kind}</small>
-                    </button>
-                  ))}
+                  <SkillFileTree
+                    expandedDirs={new Set(expandedSkillDirs[selectedSkill.id] ?? [])}
+                    files={selectedSkill.fileInventory}
+                    selectedPath={selectedPath}
+                    onSelect={(path) => selectSkillFile(selectedSkill.id, path)}
+                    onToggle={(path) => toggleSkillDirectory(selectedSkill.id, path)}
+                  />
                 </aside>
                 <div className="organization-skill-file-panel">
                   <div className="organization-skill-file-toolbar">
@@ -1118,7 +1310,7 @@ export function OrganizationWorkspacesPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>
@@ -1250,11 +1442,14 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
   );
 }
 
-export function OrgWorkspace({ orgId, children }: PropsWithChildren<{ orgId: string }>) {
+export function OrgWorkspace({ children, contentClassName = "", orgId }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
+  const isFullBleed = contentClassName.split(" ").includes("org-content-full");
   return (
     <div className="org-workspace">
       <OrgNavigation orgId={orgId} />
-      <div className="org-content">{children}</div>
+      <div className={`org-content ${contentClassName}`}>
+        {isFullBleed ? children : <div className="tertiary-detail-frame">{children}</div>}
+      </div>
     </div>
   );
 }

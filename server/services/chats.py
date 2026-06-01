@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any, Awaitable, Callable, Sequence, cast
+import json
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from packages.database.queries.chats import (
     delete_project_context_links,
     get_conversation,
     get_conversation_user_state,
+    get_latest_incoming_message_preview,
     get_message,
     list_attachments_for_messages,
     list_conversations,
@@ -45,6 +47,7 @@ from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
 from packages.shared.constants.chat import (
     ChatConversationStatus,
     ChatIssueCreationMode,
+    CHAT_ISSUE_CREATION_MODES,
     ChatMessageKind,
     CHAT_MESSAGE_KINDS,
     ChatMessageRole,
@@ -58,6 +61,7 @@ from packages.shared.types.chat import (
     ChatLinkedEntity,
     ChatMessage,
     ChatPrimaryIssueSummary,
+    ChatRuntimeDescriptor,
     ChatStreamTranscriptEntry,
     ConvertChatToIssuePayload,
     CreateChatAttachmentPayload,
@@ -135,7 +139,8 @@ class ChatService:
                 "summary": payload.get("summary"),
                 "preferred_agent_id": preferred_agent_id,
                 "issue_creation_mode": payload.get(
-                    "issueCreationMode", org.default_chat_issue_creation_mode
+                    "issueCreationMode",
+                    _chat_issue_creation_mode(org.default_chat_issue_creation_mode),
                 ),
                 "plan_mode": payload.get("planMode", False),
                 "created_by_user_id": actor_id if actor_type == "board" else None,
@@ -656,7 +661,13 @@ class ChatService:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
             raise ChatAvailabilityError(str(exc)) from exc
-        config = {**agent.agent_runtime_config, "promptTemplate": payload["body"]}
+        # Mirror upstream `chat-assistant.helpers.ts:154-208 buildPrompt`: ship
+        # the adapter a JSON envelope with conversation metadata, context links
+        # and the most recent 12 non-superseded messages so multi-turn agents
+        # can see prior history. The trailing user message is included via the
+        # `addMessage` flush above, so it is part of the slice.
+        prompt_payload = await self._build_assistant_prompt(conversation, user_message)
+        config = {**agent.agent_runtime_config, "promptTemplate": prompt_payload}
         runtime_context = config.get("_octopus")
         if not isinstance(runtime_context, dict):
             runtime_context = {}
@@ -782,6 +793,55 @@ class ChatService:
             return approval.id
         return None
 
+    async def _build_assistant_prompt(
+        self,
+        conversation: ChatConversationRow,
+        latest_user_message: ChatMessageRow,
+    ) -> str:
+        """Build the JSON envelope passed to the runtime adapter as ``promptTemplate``.
+
+        Mirrors upstream ``chat-assistant.helpers.ts:154-208`` ``buildPrompt``:
+        ships ``conversation`` metadata, hydrated ``contextLinks`` and the most
+        recent 12 non-superseded messages (oldest first). The trailing entry is
+        the message the agent should respond to.
+        """
+
+        messages = await list_messages(self._session, conversation.id)
+        recent = [row for row in messages if row.superseded_at is None][-12:]
+        if not any(row.id == latest_user_message.id for row in recent):
+            recent.append(latest_user_message)
+            recent = recent[-12:]
+        context_links = await self._context_links_for_conversation(conversation.id)
+        return json.dumps(
+            {
+                "conversation": {
+                    "id": conversation.id,
+                    "title": conversation.title,
+                    "status": conversation.status,
+                    "summary": conversation.summary,
+                    "planMode": conversation.plan_mode,
+                    "issueCreationMode": conversation.issue_creation_mode,
+                    "preferredAgentId": conversation.preferred_agent_id,
+                    "routedAgentId": conversation.routed_agent_id,
+                    "primaryIssueId": conversation.primary_issue_id,
+                },
+                "contextLinks": [_context_link_summary(link) for link in context_links],
+                "recentMessages": [
+                    {
+                        "id": row.id,
+                        "role": row.role,
+                        "kind": row.kind,
+                        "status": row.status,
+                        "body": row.body,
+                        "structuredPayload": row.structured_payload,
+                    }
+                    for row in recent
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     async def _to_conversation(
         self,
         row: ChatConversationRow,
@@ -799,19 +859,24 @@ class ChatService:
         is_unread = _is_unread(row, user_state)
         context_links = await self._context_links_for_conversation(row.id)
         primary_issue = await self._primary_issue_summary(row.primary_issue_id)
+        latest_reply_preview = await get_latest_incoming_message_preview(
+            self._session, row.id
+        )
+        if latest_reply_preview is not None and len(latest_reply_preview) > 140:
+            latest_reply_preview = latest_reply_preview[:140]
         return {
             "id": row.id,
             "orgId": row.org_id,
             "status": cast(ChatConversationStatus, row.status),
             "title": row.title,
             "summary": row.summary,
-            "latestReplyPreview": None,
+            "latestReplyPreview": latest_reply_preview,
             "searchPreview": None,
             "preferredAgentId": row.preferred_agent_id,
             "routedAgentId": row.routed_agent_id,
             "primaryIssueId": row.primary_issue_id,
             "primaryIssue": primary_issue,
-            "issueCreationMode": cast(ChatIssueCreationMode, row.issue_creation_mode),
+            "issueCreationMode": _chat_issue_creation_mode(row.issue_creation_mode),
             "planMode": row.plan_mode,
             "createdByUserId": row.created_by_user_id,
             "lastMessageAt": _iso(row.last_message_at),
@@ -824,17 +889,45 @@ class ChatService:
             "needsAttention": is_unread,
             "resolvedAt": _iso(row.resolved_at),
             "contextLinks": context_links,
-            "chatRuntime": {
+            "chatRuntime": await self._chat_runtime_descriptor(row),
+            "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    async def _chat_runtime_descriptor(
+        self, row: ChatConversationRow
+    ) -> ChatRuntimeDescriptor:
+        agent_id = row.routed_agent_id or row.preferred_agent_id
+        if agent_id is None:
+            return {
                 "sourceType": "none",
                 "sourceLabel": "No runtime selected",
-                "runtimeAgentId": row.preferred_agent_id,
+                "runtimeAgentId": None,
                 "agentRuntimeType": None,
                 "model": None,
                 "available": False,
                 "error": None,
-            },
-            "createdAt": row.created_at.isoformat(),
-            "updatedAt": row.updated_at.isoformat(),
+            }
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None or agent.org_id != row.org_id:
+            return {
+                "sourceType": "agent",
+                "sourceLabel": "Missing chat agent",
+                "runtimeAgentId": agent_id,
+                "agentRuntimeType": None,
+                "model": None,
+                "available": False,
+                "error": "Selected chat agent was not found.",
+            }
+        available = agent.status != "terminated"
+        return {
+            "sourceType": "agent",
+            "sourceLabel": agent.name,
+            "runtimeAgentId": agent.id,
+            "agentRuntimeType": agent.agent_runtime_type,
+            "model": _string(agent.agent_runtime_config.get("model")),
+            "available": available,
+            "error": None if available else "Selected chat agent is terminated.",
         }
 
     async def _context_links_for_conversation(
@@ -993,6 +1086,18 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _string(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _chat_issue_creation_mode(value: object) -> ChatIssueCreationMode:
+    if value == "manual":
+        return "manual_approval"
+    if isinstance(value, str) and value in CHAT_ISSUE_CREATION_MODES:
+        return cast(ChatIssueCreationMode, value)
+    return "manual_approval"
+
+
 def _assistant_kind(value: object) -> str:
     if isinstance(value, str) and value in CHAT_MESSAGE_KINDS:
         return value
@@ -1091,6 +1196,27 @@ def _is_unread(
     if user_state is None or row.last_message_at is None:
         return False
     return row.last_message_at > user_state.last_read_at
+
+
+def _context_link_summary(link: ChatContextLink) -> dict[str, Any]:
+    """Flatten a hydrated context link for the assistant prompt envelope.
+
+    Mirrors upstream ``chat-assistant.helpers.ts:158-166`` ``contextSummary``:
+    surfaces the linked entity's label/identifier/status/description/priority so
+    the runtime can reason about the referenced issue/project/agent.
+    """
+
+    entity = link.get("entity")
+    entity_data = entity if isinstance(entity, dict) else {}
+    return {
+        "entityType": link["entityType"],
+        "entityId": link["entityId"],
+        "label": entity_data.get("label"),
+        "identifier": entity_data.get("identifier"),
+        "status": entity_data.get("status"),
+        "description": entity_data.get("description"),
+        "priority": entity_data.get("priority"),
+    }
 
 
 def _linked_entity(
