@@ -60,13 +60,13 @@ it("groups issues by status and creates issues for an organization", async () =>
   expect(issueSummary).not.toBeNull();
   expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("1");
   expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("1");
-  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "评审中" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "已取消" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "todo" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "in_progress" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "in_review" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "done" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "blocked" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "cancelled" })).toBeInTheDocument();
 
   expect(screen.queryByLabelText("任务名称")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
@@ -224,8 +224,8 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
-  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "todo" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "整理草稿" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-draft",
@@ -237,8 +237,8 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "关注中" }));
   expect(within(taskNavigation).getByRole("link", { name: "关注中" })).toHaveClass("active");
-  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "backlog" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "blocked" })).toBeInTheDocument();
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "空项目" }));
   expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveClass("active");

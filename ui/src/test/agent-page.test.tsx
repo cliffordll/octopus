@@ -56,10 +56,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
         legacyPromptTemplateActive: false,
         legacyBootstrapPromptTemplateActive: false,
         files: [
-          { path: "SOUL.md", size: 20, language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
-          { path: "AGENTS.md", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
-          { path: "TOOLS.md", size: 11, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
-          { path: "MEMORY.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "SOUL.md", size: 20, content: "Ship product changes", language: "markdown", markdown: true, isEntryFile: true, editable: true, deprecated: false, virtual: false },
+          { path: "AGENTS.md", size: 14, content: "Agent contract", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "TOOLS.md", size: 11, content: "Tool policy", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
+          { path: "MEMORY.md", size: 13, content: "Memory policy", language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
           { path: "NOTES.md", size: 13, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false },
         ],
       });
@@ -113,20 +113,21 @@ it("controls an agent from its overview and shows runtime status", async () => {
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "说明" }));
   const instructionsPanel = screen.getByRole("region", { name: "Managed Instructions" });
-  expect(await within(instructionsPanel).findByRole("heading", { name: "Files" })).toBeInTheDocument();
-  expect(within(instructionsPanel).getByRole("button", { name: "SOUL.md" }).closest("li")).toHaveClass("selected");
+  expect(await within(instructionsPanel).findByRole("heading", { name: "文件" })).toBeInTheDocument();
+  expect(within(instructionsPanel).getByRole("button", { name: "SOUL.md" })).toHaveClass("selected");
   expect(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" })).toBeInTheDocument();
   expect(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" })).toBeInTheDocument();
   expect(within(instructionsPanel).getByRole("button", { name: "MEMORY.md" })).toBeInTheDocument();
   expect(within(instructionsPanel).getByRole("button", { name: "NOTES.md" })).toBeInTheDocument();
-  expect(within(screen.getByRole("complementary", { name: "Instruction files" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
-  const instructionContent = screen.getByRole("article", { name: "Instruction content" });
+  expect(within(screen.getByRole("complementary", { name: "说明文件列表" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
+  const instructionContent = screen.getByRole("article", { name: "说明文件内容" });
   expect(await within(instructionContent).findByDisplayValue(/Ship product changes/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
   expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
+  expect(await within(instructionContent).findByDisplayValue(/Agent contract/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "TOOLS.md" }));
   expect(await within(instructionContent).findByDisplayValue(/Tool policy/)).toBeInTheDocument();
-  const instructionFiles = screen.getByRole("complementary", { name: "Instruction files" });
+  const instructionFiles = screen.getByRole("complementary", { name: "说明文件列表" });
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "新增文件" }));
   expect(within(instructionFiles).getByLabelText("文件名")).toHaveValue("NEW.md");
   expect(within(instructionFiles).queryByLabelText("路径")).not.toBeInTheDocument();
@@ -268,24 +269,41 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
         },
       ]);
     }
+    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") {
+      return respond([
+        {
+          id: 1,
+          orgId: "org-1",
+          runId: "run-1",
+          agentId: "agent-1",
+          seq: 1,
+          eventType: "runtime.stderr",
+          stream: "stderr",
+          level: "error",
+          message: "model missing",
+          payload: { phase: "adapter" },
+          createdAt: "2026-05-29T01:00:01Z",
+        },
+      ]);
+    }
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
-      if (path === "/api/heartbeat-runs/run-1/events") {
-        return respond([
-          { id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "runtime.stderr", stream: "stderr", level: "error", message: "model missing", payload: { phase: "adapter" }, createdAt: "2026-05-29T01:00:01Z" },
-        ]);
-      }
-      return respond([{
-        id: "run-1",
-        status: "failed",
-        invocationSource: "on_demand",
-        error: "Runtime failed",
-        errorCode: "runtime_error",
-        stdoutExcerpt: "boot ok",
-        stderrExcerpt: "model missing",
-        usageJson: { inputTokens: 12 },
-        resultJson: { summary: "failed summary" },
-        contextSnapshot: { workspace: { executionWorkspaceId: "workspace-1" } },
-      }]);
+      return respond([
+        {
+          id: "run-1",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "failed",
+          invocationSource: "on_demand",
+          error: "Runtime failed",
+          errorCode: "runtime_error",
+          stdoutExcerpt: "boot ok",
+          stderrExcerpt: "model missing",
+          contextSnapshot: { workspace: { executionWorkspaceId: "workspace-1" } },
+          resultJson: { summary: "failed" },
+          usageJson: { inputTokens: 10, outputTokens: 2 },
+          createdAt: "2026-05-29T01:00:00Z",
+        },
+      ]);
     }
     return respond({ ...agent, name: "Builder 2" });
   });
@@ -429,7 +447,8 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
-  expect(screen.getByText("组织技能")).toBeInTheDocument();
+  expect(screen.getByText("built-in")).toBeInTheDocument();
+  expect(screen.getByText("community")).toBeInTheDocument();
   expect(screen.getByText("外部技能")).toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
@@ -513,6 +532,18 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             markdown: "---\ndescription: Deploy safely from frontmatter\n---\n\nDeploy carefully.",
           },
           {
+            key: "organization/org-1/deep-research",
+            selectionKey: "org:organization/org-1/deep-research",
+            runtimeName: "deep-research",
+            sourceClass: "organization",
+            sourceBadge: "community",
+            origin: "community_preset",
+            originLabel: "Community preset",
+            state: "available",
+            enabled: false,
+            description: "Research deeply.",
+          },
+          {
             key: "debug",
             selectionKey: "external:debug",
             runtimeName: "Debug",
@@ -525,8 +556,20 @@ it("manages runtime adapter probes and skills from configuration", async () => {
             description: "Debug failures",
             prompt: "Debug carefully.",
           },
+          {
+            key: "deep-research",
+            selectionKey: "skills/deep-research",
+            runtimeName: "Deep Research",
+            sourceLocator: "server/skills/community/deep-research",
+            state: "available",
+            enabled: false,
+            description: "Research deeply",
+          },
         ],
-        warnings: ["debug missing from managed home"],
+        warnings: [
+          "skillsRootPath does not exist: D:\\coding\\octopus\\.octopus\\workspaces\\org_16793a83-0fdd-4e35-84d7-7204f7f23663\\skills",
+          "debug missing from managed home",
+        ],
       });
     }
     if (path === "/api/agents/agent-1/skills/analytics?windowDays=30" && init?.method === "GET") {
@@ -548,11 +591,18 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
+  expect(await screen.findByText("deep-research")).toBeInTheDocument();
+  expect(await screen.findByText("Research deeply.")).toBeInTheDocument();
   expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
+  expect(screen.queryByText(/skillsRootPath does not exist/)).not.toBeInTheDocument();
   expect(await screen.findByText("installed")).toBeInTheDocument();
-  expect(await screen.findByText("external")).toBeInTheDocument();
+  expect((await screen.findAllByText("external")).length).toBeGreaterThanOrEqual(1);
   expect(await screen.findByText("missing")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
@@ -560,13 +610,17 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
   expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
-  expect(screen.getByText("系统内置")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByText("Deep Research")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "取消使用" }));
   await userEvent.click(screen.getByText("Debug"));
-  await userEvent.click(screen.getByRole("button", { name: "使用" }));
+  const debugSkill = screen.getByText("Debug").closest("article");
+  expect(debugSkill).not.toBeNull();
+  await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
   await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");

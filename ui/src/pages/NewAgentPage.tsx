@@ -45,8 +45,7 @@ function parseCsv(value: string): string[] {
     .filter(Boolean);
 }
 
-export function NewAgentPage() {
-  const { orgId = "" } = useParams();
+export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; orgId: string }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState<AgentRole>("engineer");
   const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
@@ -82,6 +81,7 @@ export function NewAgentPage() {
       }),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
+      onCreated?.();
       navigate(`/orgs/${orgId}/agents/${agent.id}/configuration`);
     },
   });
@@ -98,13 +98,6 @@ export function NewAgentPage() {
     }
   }
   return (
-    <AgentsWorkspace orgId={orgId}>
-      <header className="page-header">
-        <div>
-          <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
-          <h1>{isFirstAgent ? "创建 CEO" : "新建智能体"}</h1>
-        </div>
-      </header>
       <form className="panel form agent-create-form" onSubmit={submit}>
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
         <label>
@@ -174,6 +167,45 @@ export function NewAgentPage() {
           {isFirstAgent ? "创建 CEO" : "新建智能体"}
         </button>
       </form>
+  );
+}
+
+export function AgentCreateDialog({ onClose, orgId }: { onClose: () => void; orgId: string }) {
+  return (
+    <div
+      aria-label="创建智能体"
+      aria-modal="true"
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      role="dialog"
+    >
+      <section className="panel task-modal task-create-modal agent-create-dialog">
+        <div className="task-modal-header">
+          <div>
+            <p className="eyebrow">Agents</p>
+            <h2>创建智能体</h2>
+          </div>
+          <button className="secondary small-button" onClick={onClose} type="button">关闭</button>
+        </div>
+        <AgentCreateForm onCreated={onClose} orgId={orgId} />
+      </section>
+    </div>
+  );
+}
+
+export function NewAgentPage() {
+  const { orgId = "" } = useParams();
+  return (
+    <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
+      <header className="page-header">
+        <div>
+          <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
+          <h1>新建智能体</h1>
+        </div>
+      </header>
+      <AgentCreateForm orgId={orgId} />
     </AgentsWorkspace>
   );
 }

@@ -69,6 +69,7 @@ logs/
 tmp/
 pytest-tmp/
 .octopus/
+.octopus-test-tmp/
 
 # ─── 本地参考用的上游参考实现源码副本(对照实现,不进仓库) ──
 upstream-reference/

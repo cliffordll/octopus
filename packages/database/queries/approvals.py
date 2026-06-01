@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schema import Approval, IssueApproval
+from ..schema import Approval, ApprovalComment, Issue, IssueApproval
 
 
 async def create_approval(session: AsyncSession, fields: Mapping[str, Any]) -> Approval:
@@ -62,6 +62,60 @@ async def update_approval(
         .returning(Approval)
     )
     return result.scalar_one_or_none()
+
+
+async def list_approval_comments(
+    session: AsyncSession, approval_id: str
+) -> Sequence[ApprovalComment]:
+    """Return comments for an approval ordered oldest-first.
+
+    Mirrors upstream `services/approvals.ts:241-255` ``listComments``.
+    """
+
+    result = await session.execute(
+        select(ApprovalComment)
+        .where(ApprovalComment.approval_id == approval_id)
+        .order_by(ApprovalComment.created_at)
+    )
+    return result.scalars().all()
+
+
+async def create_approval_comment(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    approval_id: str,
+    body: str,
+    author_agent_id: str | None,
+    author_user_id: str | None,
+) -> ApprovalComment:
+    row = ApprovalComment(
+        org_id=org_id,
+        approval_id=approval_id,
+        body=body,
+        author_agent_id=author_agent_id,
+        author_user_id=author_user_id,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_issues_for_approval(
+    session: AsyncSession, approval_id: str
+) -> Sequence[Issue]:
+    """Return issues linked to ``approval_id`` ordered oldest link first.
+
+    Mirrors upstream `services/issue-approvals.ts:115-144` ``listIssuesForApproval``.
+    """
+
+    result = await session.execute(
+        select(Issue)
+        .join(IssueApproval, IssueApproval.issue_id == Issue.id)
+        .where(IssueApproval.approval_id == approval_id)
+        .order_by(IssueApproval.created_at)
+    )
+    return result.scalars().all()
 
 
 async def link_issues_to_approval(

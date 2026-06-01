@@ -20,6 +20,7 @@ from .chats import (
     ChatMessage,
 )
 from .approvals import Approval
+from .approval_comments import ApprovalComment
 from .issue_approvals import IssueApproval
 from .issue_comments import IssueComment
 from .issues import Issue, IssueAttachment
@@ -56,6 +57,7 @@ __all__ = [
     "ChatConversationUserState",
     "ChatMessage",
     "Approval",
+    "ApprovalComment",
     "IssueApproval",
     "IssueComment",
     "Issue",

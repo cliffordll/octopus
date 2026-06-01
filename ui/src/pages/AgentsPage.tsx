@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -18,10 +18,9 @@ export function AgentsPage() {
   }
 
   return (
-    <AgentsWorkspace orgId={orgId}>
+    <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Agents</p><h1>智能体</h1></div>
-        <Link className="button" to={`/orgs/${orgId}/agents/new`}>新建智能体</Link>
       </header>
       <nav aria-label="智能体详情导航" className="detail-tabs">
         <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => setActiveTab("dashboard")} type="button">概览</button>

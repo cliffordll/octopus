@@ -55,7 +55,7 @@ export function GoalsPage() {
   }
 
   return (
-    <OrgWorkspace orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div><p className="eyebrow">Goals</p><h1>目标</h1></div>
         <button type="button" onClick={() => setDialogOpen(true)}>New Goal</button>
