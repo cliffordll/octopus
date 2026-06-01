@@ -733,6 +733,7 @@ export interface AgentSkillAnalytics {
 }
 
 export interface AgentInstructionsFileSummary {
+  content?: string;
   path: string;
   size: number;
   language: string;
