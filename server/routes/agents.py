@@ -14,6 +14,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from packages.shared.api_paths.agents import (
+    AGENT_ARCHIVE_PATH,
     AGENT_CONFIGURATION_PATH,
     AGENT_CONFIG_REVISIONS_PATH,
     AGENT_CONFIG_REVISION_PATH,
@@ -223,6 +224,7 @@ async def _lifecycle_action(
     await _get_agent_or_404(agent_id, request=request, service=service)
     actor = require_actor_identity(request)
     method = {
+        "archive": service.terminate_agent,
         "pause": service.pause_agent,
         "resume": service.resume_agent,
         "terminate": service.terminate_agent,
@@ -240,6 +242,18 @@ async def _lifecycle_action(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return agent
+
+
+@router.post(AGENT_ARCHIVE_PATH)
+async def archive_agent_route(
+    id: str,
+    request: Request,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> Agent:
+    return await _lifecycle_action(
+        id, action="archive", request=request, service=service
+    )
 
 
 @router.post(AGENT_PAUSE_PATH)

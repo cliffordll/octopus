@@ -596,6 +596,7 @@ class ChatService:
         *,
         cancel_event: Any | None = None,
         on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        commit_after_user_message: bool = False,
     ) -> CreatedChatMessages:
         conversation = await get_conversation(self._session, conversation_id)
         if conversation is None:
@@ -657,6 +658,8 @@ class ChatService:
             await on_stream_event(
                 {"type": "ack", "userMessage": self._to_message(user_message)}
             )
+        if commit_after_user_message:
+            await self._session.commit()
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
@@ -742,6 +745,8 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, assistant_message.created_at
         )
+        if commit_after_user_message:
+            await self._session.commit()
         return {
             "messages": [
                 self._to_message(user_message),
@@ -798,12 +803,12 @@ class ChatService:
         conversation: ChatConversationRow,
         latest_user_message: ChatMessageRow,
     ) -> str:
-        """Build the JSON envelope passed to the runtime adapter as ``promptTemplate``.
+        """Build the chat prompt passed to the runtime adapter as ``promptTemplate``.
 
-        Mirrors upstream ``chat-assistant.helpers.ts:154-208`` ``buildPrompt``:
-        ships ``conversation`` metadata, hydrated ``contextLinks`` and the most
-        recent 12 non-superseded messages (oldest first). The trailing entry is
-        the message the agent should respond to.
+        Mirrors the upstream composition pattern: explicit chat-scene
+        instructions first, then a JSON ``Conversation input`` envelope with
+        conversation metadata, hydrated ``contextLinks`` and the most recent 12
+        non-superseded messages.
         """
 
         messages = await list_messages(self._session, conversation.id)
@@ -812,7 +817,7 @@ class ChatService:
             recent.append(latest_user_message)
             recent = recent[-12:]
         context_links = await self._context_links_for_conversation(conversation.id)
-        return json.dumps(
+        envelope = json.dumps(
             {
                 "conversation": {
                     "id": conversation.id,
@@ -826,6 +831,14 @@ class ChatService:
                     "primaryIssueId": conversation.primary_issue_id,
                 },
                 "contextLinks": [_context_link_summary(link) for link in context_links],
+                "latestUserMessage": {
+                    "id": latest_user_message.id,
+                    "role": latest_user_message.role,
+                    "kind": latest_user_message.kind,
+                    "status": latest_user_message.status,
+                    "body": latest_user_message.body,
+                    "structuredPayload": latest_user_message.structured_payload,
+                },
                 "recentMessages": [
                     {
                         "id": row.id,
@@ -840,6 +853,25 @@ class ChatService:
             },
             ensure_ascii=False,
             indent=2,
+        )
+        return "\n\n".join(
+            [
+                "You are the selected agent, replying inside Octopus's chat scene.",
+                (
+                    "Reply to the latest user message only. Use recentMessages "
+                    "only as conversation context."
+                ),
+                (
+                    "Do not summarize or analyze the JSON envelope unless the "
+                    "latest user message explicitly asks you to do that."
+                ),
+                (
+                    "Always reply in the same language as the latest user "
+                    "message unless it explicitly asks for another language."
+                ),
+                "Conversation input:",
+                envelope,
+            ]
         )
 
     async def _to_conversation(
