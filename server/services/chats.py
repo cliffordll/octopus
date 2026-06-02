@@ -891,12 +891,15 @@ class ChatService:
                 ),
                 (
                     "If the latest user message asks to create a task, issue, "
-                    "work item, or ticket, do not create it directly. Return a "
-                    'single JSON object with summary, kind="issue_proposal", '
+                    "work item, or ticket, do not create it directly. Do not "
+                    "create files. Do not run commands. Return a single JSON "
+                    'object with summary, kind="issue_proposal", '
                     "and structuredPayload.issueProposal containing title, "
                     "description, priority, assigneeAgentId, projectId, goalId, "
-                    "or parentId when known. The UI/server will use "
-                    "/api/chats/{id}/convert-to-issue after user confirmation."
+                    "or parentId when known. auto_create is a server-side issue "
+                    "conversion mode, not permission for you to execute the "
+                    "requested task. The UI/server will convert the proposal "
+                    "according to the conversation issueCreationMode."
                 ),
                 "Conversation input:",
                 envelope,
