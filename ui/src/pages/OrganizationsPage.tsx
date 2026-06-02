@@ -10,7 +10,7 @@ export function OrganizationsPage() {
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [brandColor, setBrandColor] = useState("");
   const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
-  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("manual_approval");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const organizations = useQuery({
@@ -24,7 +24,7 @@ export function OrganizationsPage() {
       setBudgetMonthlyCents("");
       setBrandColor("");
       setRequireBoardApprovalForNewAgents(false);
-      setDefaultChatIssueCreationMode("disabled");
+      setDefaultChatIssueCreationMode("manual_approval");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
       navigate(`/orgs/${organization.id}/agents/new`);
     },
@@ -97,9 +97,8 @@ export function OrganizationsPage() {
               value={defaultChatIssueCreationMode}
               onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
             >
-              <option value="disabled">disabled</option>
-              <option value="manual">manual</option>
-              <option value="automatic">automatic</option>
+              <option value="manual_approval">手动确认</option>
+              <option value="auto_create">自动创建</option>
             </select>
           </label>
           {create.error && <ErrorNotice error={create.error} />}
