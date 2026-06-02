@@ -211,6 +211,7 @@ image-push:
       #   -t "${RELEASE_IMAGE}" \
       #   .
       docker push "${RELEASE_IMAGE}"
+      docker pull "${RELEASE_IMAGE}"
   rules:
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
       when: manual
