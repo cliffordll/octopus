@@ -1,0 +1,100 @@
+# OpenCode Provider/Model 配置
+
+本文说明 OpenCode 上游方案和 Octopus 当前 server 端改造边界。
+
+## 上游方案
+
+上游 Rudder 没有为 OpenCode provider/model 建专门表。
+
+持久化字段只有：
+
+```text
+agents.agent_runtime_type
+agents.agent_runtime_config.model
+```
+
+OpenCode 的 provider、baseURL、认证和模型目录来自 OpenCode 自己的 home：
+
+```text
+用户 OpenCode home
+-> opencode models
+-> agents.agent_runtime_config.model
+-> Rudder-managed OpenCode home
+```
+
+## Octopus 当前方案
+
+Octopus server 增加组织级手动维护能力：
+
+```text
+runtime_providers
+runtime_models
+agents.agent_runtime_config.model
+```
+
+边界：
+
+- server 支持 provider CRUD。
+- server 支持 model CRUD。
+- server 不提供 `/models/refresh`。
+- server 不主动请求模型服务 `/models`。
+- 模型列表是否更新，需要用户或上层管理流程显式维护。
+- provider 的 `api_key` 开发期明文保存，API 返回脱敏。
+
+## 配置流程
+
+```text
+1. 创建 provider：
+   POST /api/orgs/{orgId}/runtime-providers
+
+2. 手动添加模型：
+   POST /api/orgs/{orgId}/runtime-providers/{providerId}/models?runtimeType=opencode_local
+
+3. 创建或编辑智能体时选择模型：
+   agents.agent_runtime_config.model = provider/model
+
+4. 执行时 runtime adapter 读取组织 provider/model 配置。
+
+5. `opencode_local` adapter 执行前将配置渲染到 managed OpenCode home：
+   .octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
+```
+
+## OpenCode 配置含义
+
+OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 会在执行前从
+`runtime_providers` 和 `runtime_models` 生成 managed home 内的 OpenCode 配置，
+不长期修改用户全局 OpenCode 配置。
+
+示例目标文件：
+
+```text
+.octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
+```
+
+示例内容：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "kimi": {
+      "name": "Kimi",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.moonshot.cn/v1",
+        "apiKey": "resolved-secret"
+      },
+      "models": {
+        "kimik/kimi-k2.5": {
+          "name": "Kimi K2.5"
+        }
+      }
+    }
+  }
+}
+```
+
+## 当前边界
+
+当前 `opencode_local` 已支持从 DB provider/model 生成 managed home 配置。
+`codex_local`、`claude_local` 的 provider/model 渲染仍属于后续 runtime adapter 深化。
