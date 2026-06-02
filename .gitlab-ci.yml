@@ -215,6 +215,7 @@ image-push:
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
       when: manual
 
+# ceshi
 # deploy-dev:
 #   stage: deploy_dev
 #   extends: .kubectl_job
