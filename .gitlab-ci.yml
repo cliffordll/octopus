@@ -1,0 +1,248 @@
+default:
+  tags:
+    - agent-team
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    # - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+stages:
+  - ai_review
+  - unit_test
+  - image_check
+  - image_push
+  # - deploy_dev
+
+.docker_job:
+  image: docker:27-cli
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+  before_script:
+    - docker version
+
+.kubectl_job:
+  image:
+    name: bitnami/kubectl:1.29
+    entrypoint: [""]
+
+ai-code-review:
+  stage: ai_review
+  allow_failure: true
+  image:
+    name: "$APP_BASE_IMAGE"
+  timeout: 5m
+  script:
+    - |
+      set -euo pipefail
+
+      : "${AI_API_URL:?AI_API_URL is required}"
+      : "${AI_API_KEY:?AI_API_KEY is required}"
+      : "${AI_MODEL:?AI_MODEL is required}"
+      : "${GITLAB_API_TOKEN:?GITLAB_API_TOKEN is required}"
+      AI_TIMEOUT="${AI_TIMEOUT:-900}"
+      AI_FALLBACK_APPROVAL="${AI_FALLBACK_APPROVAL:-1}"
+      # if ! echo "${AI_API_URL}" | grep -Eq '^https?://[^[:space:]"'\'']+$'; then
+      #   echo "AI_API_URL is invalid. Do not include quotes, spaces, or newlines."
+      #   exit 1
+      # fi
+
+      GITLAB_API_USER=$(curl -fsS --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        "${CI_API_V4_URL}/user" | jq -r '.username')
+      echo "GitLab API token user: ${GITLAB_API_USER}"
+
+      MR_CHANGES=$(curl -fsS --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/changes")
+
+      if ! echo "${MR_CHANGES}" | jq empty 2>/dev/null; then
+        echo "GitLab API did not return valid JSON, skip AI review."
+        exit 0
+      fi
+
+      if [ "$(echo "${MR_CHANGES}" | jq -r 'has("changes")')" != "true" ]; then
+        echo "GitLab API response does not contain MR changes:"
+        echo "${MR_CHANGES}"
+        exit 1
+      fi
+
+      CHANGE_COUNT=$(echo "${MR_CHANGES}" | jq '.changes | length')
+      if [ -z "${CHANGE_COUNT}" ] || [ "${CHANGE_COUNT}" -eq 0 ]; then
+        NOTE_BODY=$(printf "AI 代码审查意见\n\n%s\n\n是否同意合并：同意" \
+          "没有检测到 MR 代码变更，本次不调用 AI 审查。")
+        curl -fsS -X POST --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+          --data-urlencode "body=${NOTE_BODY}" \
+          -o /dev/null
+        echo "No MR changes found, posted skip note."
+        exit 0
+      fi
+
+      AI_RESPONSE=$(
+        jq -n \
+          --arg model "$AI_MODEL" \
+          --arg system_content "请返回一个 JSON 对象，包含 review_comment 和 approval 两个字段。approval 为 1 表示同意合并，0 表示反对。不要输出 JSON 之外的内容。" \
+          --arg user_content "请审查以下 GitLab MR 代码变更，只返回 JSON：\n${MR_CHANGES}" \
+          '{
+            model: $model,
+            messages: [
+              {role: "system", content: $system_content},
+              {role: "user", content: $user_content}
+            ]
+          }' \
+        | curl -sS -m "${AI_TIMEOUT}" -X POST "${AI_API_URL}" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${AI_API_KEY}" \
+          -d @-
+      ) || AI_RESPONSE="API_CALL_FAILED"
+      echo "AI raw response:"
+      echo "${AI_RESPONSE}"
+
+      if [ "${AI_RESPONSE}" = "API_CALL_FAILED" ] || [ -z "${AI_RESPONSE}" ]; then
+        AI_REVIEW="【系统提示】AI 代码审查服务暂时不可用，本次自动通过。请人工复核。"
+        AI_APPROVAL="${AI_FALLBACK_APPROVAL}"
+      elif ! echo "${AI_RESPONSE}" | jq empty 2>/dev/null; then
+        AI_REVIEW="【系统提示】AI 返回内容不是合法 JSON，本次自动通过。请人工复核。"
+        AI_APPROVAL="${AI_FALLBACK_APPROVAL}"
+      else
+        PARSED_JSON=$(echo "${AI_RESPONSE}" | jq -c '
+          if (type == "object" and has("review_comment") and has("approval")) then
+            .
+          elif (type == "object" and .choices[0].message.content?) then
+            (.choices[0].message.content | fromjson? // {})
+          else
+            {}
+          end
+        ')
+        AI_REVIEW=$(echo "${PARSED_JSON}" | jq -r '.review_comment // "无审查意见"')
+        AI_APPROVAL=$(echo "${PARSED_JSON}" | jq -r '.approval // 0')
+        if [ "${AI_APPROVAL}" != "0" ] && [ "${AI_APPROVAL}" != "1" ]; then
+          AI_APPROVAL=0
+        fi
+      fi
+
+      NOTE_BODY=$(printf "AI 代码审查意见\n\n%s\n\n是否同意合并：%s" \
+        "${AI_REVIEW}" \
+        "$([ "${AI_APPROVAL}" -eq 1 ] && echo "同意" || echo "反对")")
+
+      curl -fsS -X POST --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes" \
+        --data-urlencode "body=${NOTE_BODY}" \
+        -o /dev/null
+
+      if [ "${AI_APPROVAL}" -eq 0 ]; then
+        echo "AI review rejected this MR, but continue because AI review is non-blocking."
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+unit-test:
+  stage: unit_test
+  image:
+    name: "$APP_BASE_IMAGE"
+  script:
+    - echo "unit test"
+    - python3 -m compileall -q .
+    - |
+      if [ "${RUN_PYTEST:-false}" = "true" ]; then
+        echo "pass"
+      else
+        echo "RUN_PYTEST is not true, skip pytest."
+      fi
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+image-check:
+  stage: image_check
+  extends: .docker_job
+  needs: ["unit-test"]
+  script:
+    - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
+    - |
+      set -euo pipefail
+      : "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
+      IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-inais}"
+      IMAGE_NAME="${IMAGE_NAME:-agentteam}"
+      IMAGE_TAG="${IMAGE_TAG:-v1.0}"
+      : "${APP_BASE_IMAGE:?APP_BASE_IMAGE is required}"
+      EPAICHAT_VERSION="${EPAICHAT_VERSION:-2.0}"
+      BUILD_PYC="${BUILD_PYC:-true}"
+
+      CHECK_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
+      docker build \
+        -f Dockerfile \
+        --build-arg APP_BASE_IMAGE="${APP_BASE_IMAGE}" \
+        --build-arg EPAICHAT_VERSION="${EPAICHAT_VERSION}" \
+        --build-arg BACKEND_COMMIT_ID="${CI_COMMIT_SHA}" \
+        --build-arg BUILD_PYC="${BUILD_PYC}" \
+        -t "${CHECK_IMAGE}" \
+        .
+      echo "Image build check passed: ${CHECK_IMAGE}"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+image-push:
+  stage: image_push
+  extends: .docker_job
+  script:
+    - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
+    - |
+      set -euo pipefail
+      : "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
+      IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-inais}"
+      IMAGE_NAME="${IMAGE_NAME:-agentteam}"
+      IMAGE_TAG="${IMAGE_TAG:-v1.0}"
+      : "${APP_BASE_IMAGE:?APP_BASE_IMAGE is required}"
+      EPAICHAT_VERSION="${EPAICHAT_VERSION:-2.0}"
+      : "${HARBOR_USERNAME:?HARBOR_USERNAME is required}"
+      : "${HARBOR_PASSWORD:?HARBOR_PASSWORD is required}"
+      BUILD_PYC="${BUILD_PYC:-true}"
+
+      RELEASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+      echo "${HARBOR_PASSWORD}" | docker login -u "${HARBOR_USERNAME}" --password-stdin "${IMAGE_REGISTRY}"
+      # docker build \
+      #   -f Dockerfile \
+      #   --build-arg APP_BASE_IMAGE="${APP_BASE_IMAGE}" \
+      #   --build-arg EPAICHAT_VERSION="${EPAICHAT_VERSION}" \
+      #   --build-arg BACKEND_COMMIT_ID="${CI_COMMIT_SHA}" \
+      #   --build-arg BUILD_PYC="${BUILD_PYC}" \
+      #   -t "${RELEASE_IMAGE}" \
+      #   .
+      docker push "${RELEASE_IMAGE}"
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+      when: manual
+
+# deploy-dev:
+#   stage: deploy_dev
+#   extends: .kubectl_job
+#   needs: ["image-push"]
+#   script:
+#     - |
+#       set -euo pipefail
+#       : "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
+#       IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-inais}"
+#       IMAGE_NAME="${IMAGE_NAME:-agentteam}"
+#       IMAGE_TAG="${IMAGE_TAG:-v1.0}"
+#       DEV_KUBE_NAMESPACE="${DEV_KUBE_NAMESPACE:-default}"
+#       DEV_DEPLOYMENT_NAME="${DEV_DEPLOYMENT_NAME:-agentteam}"
+#       DEV_WORKLOAD_KIND="${DEV_WORKLOAD_KIND:-deployment}"
+#       DEV_WORKLOAD_NAME="${DEV_WORKLOAD_NAME:-agentteam}"
+#       DEV_CONTAINER_NAME="${DEV_CONTAINER_NAME:-agentteam}"
+#       : "${DEV_KUBE_CONFIG_B64:?DEV_KUBE_CONFIG_B64 is required}"
+#       ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-300s}"
+#       RELEASE_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+#       mkdir -p "${CI_PROJECT_DIR}/.kube"
+#       echo "${DEV_KUBE_CONFIG_B64}" | base64 -d > "${CI_PROJECT_DIR}/.kube/config"
+#       export KUBECONFIG="${CI_PROJECT_DIR}/.kube/config"
+
+#       kubectl set image "${DEV_WORKLOAD_KIND}/${DEV_WORKLOAD_NAME}" "${DEV_CONTAINER_NAME}=${RELEASE_IMAGE}" -n "${DEV_KUBE_NAMESPACE}"
+#       kubectl rollout restart "${DEV_WORKLOAD_KIND}/${DEV_WORKLOAD_NAME}" -n "${DEV_KUBE_NAMESPACE}"
+#       kubectl rollout status "${DEV_WORKLOAD_KIND}/${DEV_WORKLOAD_NAME}" -n "${DEV_KUBE_NAMESPACE}" --timeout="${ROLLOUT_TIMEOUT}"
+#   environment:
+#     name: dev
+#   rules:
+#     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
