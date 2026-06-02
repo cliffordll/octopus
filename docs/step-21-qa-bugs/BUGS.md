@@ -47,6 +47,8 @@
 | BUG-21-024 | fixed | P1 | 是 | run 输出可读性不足，任务详情页缺少稳定过程输出契约 | Step 21 | process run events 已覆盖 queued/started/invoke/spawn/log/final，seq 连续 |
 | BUG-21-025 | fixed | P2 | 否 | 缺少按 issueId 执行任务的服务端专用入口和幂等语义 | Step 21 | `test_issue_execute_route_queues_assigned_issue_idempotently` |
 | BUG-21-026 | fixed | P2 | 否 | 任务详情缺少输出产物和附件的统一聚合契约 | Step 21 | `test_issue_detail_surfaces_work_products_with_asset_content_alongside_attachments` |
+| BUG-21-027 | fixed | P1 | 是 | run 成功后缺少上游式 issue close-out governance | Step 21 | `test_successful_issue_run_without_closeout_queues_passive_followup` |
+| BUG-21-028 | fixed | P1 | 是 | chat `auto_create` issue proposal 没有自动落成任务 | Step 21 | `test_auto_create_chat_issue_proposal_creates_issue` |
 
 ## 记录模板
 
@@ -512,6 +514,41 @@
 - 处理归属：Step 21。补 contract test，确认现有实现是否已满足；若缺字段或聚合路径再修 server，不改 UI/CLI。
 - 修复记录：新增 issue task detail 聚合验收：issue 上传附件后可通过 `/attachments` 获取并下载；runtime work product 带 content 时自动归档为 asset，issue detail 返回 `workProducts.assetId/contentPath/summary`，并可下载产物内容。现有 server 实现满足该 contract，无需新增业务代码。
 - 验证证据：`uv run pytest tests/contract/test_step19_storage.py::test_issue_detail_surfaces_work_products_with_asset_content_alongside_attachments -q` passed；相关目标回归 3 passed。
+
+### BUG-21-027: run 成功后缺少上游式 issue close-out governance
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。用户会看到 run 已成功但 issue 一直停留在 `in_progress`，如果没有 close-out governance，就无法区分“任务还在执行”与“执行结束但未关闭任务”。
+- 影响范围：`server/services/heartbeat.py`、`server/routes/issues.py`、`server/services/issues.py`、assignment run、agent close-out 权限、issue 状态可见性。
+- 复现步骤：
+  1. 创建 assigned issue。
+  2. 执行 issue run，让 runtime 成功退出。
+  3. 不调用 `PATCH /api/issues/{issueId}` close-out。
+  4. 查看 issue status 和后续 wakeup。
+- 预期行为：对齐上游：run 成功不应无条件自动把 issue 改为 `done`；agent 必须通过 `PATCH /api/issues/{id}` 明确 close-out。如果成功 run 结束后 issue 仍是 `todo/in_progress` 且没有 close-out signal，server 应 queue 同 agent 的 `issue_passive_followup`，要求 agent 补 progress comment / done / blocked / handoff。
+- 实际行为（修复前）：Python server 只更新 run 状态；不会限制非 checkout owner agent 直接把 issue 标 done，也不会在 run 成功但 issue 未 close-out 时触发 passive follow-up。
+- 初步根因：Step 21 补了 checkout/context/execute，但未迁移上游 close-out governance 和 agent checkout ownership guard。
+- 处理归属：Step 21。先补 server contract：agent close-out 权限和 passive follow-up；不做 run succeeded 自动 done。
+- 修复记录：已补 agent close-out guard：agent actor 只有当前 assignee 才能把 issue 标为 `done`。已补 heartbeat close-out governance：issue run 成功后，如果 issue 仍是 `todo/in_progress` 且不是 passive follow-up 自身，则 queue 同 agent 的 `issue_passive_followup`，不自动把 issue 改为 `done`。
+- 验证证据：`uv run pytest tests/contract/test_step8_issue_management.py::test_agent_cannot_mark_issue_done_without_checkout_ownership tests/contract/test_step11_agent_management.py::test_successful_issue_run_without_closeout_queues_passive_followup -q` 2 passed。
+
+### BUG-21-028: chat `auto_create` issue proposal 没有自动落成任务
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。用户在 chat 中要求“创建一个任务”时，assistant 已返回 `issue_proposal`，但任务列表没有新增 issue，导致“对话创建任务”链路断开。
+- 影响范围：`server/services/chats.py`、chat assistant issue proposal、conversation `issueCreationMode=auto_create`、任务列表可见性。
+- 复现步骤：
+  1. 创建 `issueCreationMode=auto_create` 的 chat conversation。
+  2. selected agent 返回 `kind="issue_proposal"`，或返回 summary 内嵌 JSON envelope。
+  3. 查看 `/api/orgs/{orgId}/issues`。
+- 预期行为：对齐上游 `server/src/routes/chats.ts`：当 conversation 非 plan mode 且 `issueCreationMode === "auto_create"` 时，server 保存 `issue_proposal` assistant message 后立即 `convertToIssue`，创建 issue、绑定 `primaryIssueId`，并追加 `issue_created` system message。`manual_approval` 仍只创建 `chat_issue_creation` approval，等待确认。
+- 实际行为（修复前）：Python server 始终只创建 proposal approval；即使 conversation 是 `auto_create`，也不会自动创建 issue。
+- 初步根因：Step 16/21 迁移了 proposal 持久化和 `POST /api/chats/{id}/convert-to-issue`，但遗漏上游 `auto_create` 分支。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：`ChatService.add_message_and_reply()` 在 `issue_proposal + auto_create + 非 planMode` 时跳过 approval，保存 assistant proposal 后调用既有 `convert_to_issue()`，返回消息中包含 `issue_created` system message。manual approval 路径保持不变。
+- 验证证据：`uv run pytest tests/contract/test_step16_chat_assistant_routes.py tests/contract/test_step16_chat_proposal_routes.py tests/contract/test_step16_chat_stream_routes.py -q` 12 passed；`ruff check` 和 `pyright` 通过。
 
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 
