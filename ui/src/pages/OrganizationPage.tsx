@@ -16,7 +16,7 @@ export function OrganizationPage() {
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [brandColor, setBrandColor] = useState("");
   const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
-  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("manual_approval");
   const queryClient = useQueryClient();
   const organization = useQuery({
     queryKey: ["organization", orgId],
@@ -29,7 +29,7 @@ export function OrganizationPage() {
       setBudgetMonthlyCents(String(organization.data.budgetMonthlyCents ?? ""));
       setBrandColor(organization.data.brandColor ?? "");
       setRequireBoardApprovalForNewAgents(Boolean(organization.data.requireBoardApprovalForNewAgents));
-      setDefaultChatIssueCreationMode(organization.data.defaultChatIssueCreationMode ?? "disabled");
+      setDefaultChatIssueCreationMode(organization.data.defaultChatIssueCreationMode ?? "manual_approval");
     }
   }, [organization.data]);
   const update = useMutation({
@@ -93,9 +93,8 @@ export function OrganizationPage() {
             value={defaultChatIssueCreationMode}
             onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
           >
-            <option value="disabled">disabled</option>
-            <option value="manual">manual</option>
-            <option value="automatic">automatic</option>
+            <option value="manual_approval">手动确认</option>
+            <option value="auto_create">自动创建</option>
           </select>
         </label>
         {update.error && <ErrorNotice error={update.error} />}
