@@ -7,6 +7,7 @@ import type {
   IssueFilters,
   IssueListItem,
   IssueReviewDecision,
+  HeartbeatRun,
   UpdateIssuePayload,
 } from "./types";
 
@@ -34,6 +35,10 @@ export const issuesApi = {
     jsonRequest<IssueDetail>(`/api/orgs/${encodeURIComponent(orgId)}/issues`, "POST", payload),
   update: (issueId: string, payload: UpdateIssuePayload): Promise<IssueDetail> =>
     jsonRequest<IssueDetail>(issueRoot(issueId), "PATCH", payload),
+  execute: (issueId: string): Promise<HeartbeatRun> =>
+    jsonRequest<HeartbeatRun>(`${issueRoot(issueId)}/execute`, "POST", {}),
+  listRuns: (issueId: string): Promise<HeartbeatRun[]> =>
+    request<HeartbeatRun[]>(`${issueRoot(issueId)}/heartbeat-runs`, { method: "GET" }),
   listComments: (issueId: string): Promise<IssueComment[]> =>
     request<IssueComment[]>(`${issueRoot(issueId)}/comments`, { method: "GET" }),
   listAttachments: (issueId: string): Promise<IssueAttachment[]> =>

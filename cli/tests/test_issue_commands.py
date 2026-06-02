@@ -164,6 +164,26 @@ def test_issue_get_json_outputs_work_products() -> None:
     assert "exec-1" in output.getvalue()
 
 
+def test_issue_execute_and_runs_use_issue_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/heartbeat-runs"):
+            return httpx.Response(200, json=[{"id": "run-1", "status": "queued"}])
+        return httpx.Response(202, json={"id": "run-1", "status": "queued"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["issue", "execute", "issue-1"], client=client) == 0
+    assert main(["issue", "runs", "issue-1"], client=client) == 0
+
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/issues/issue-1/execute"
+    assert requests[0].read() == b"{}"
+    assert requests[1].method == "GET"
+    assert requests[1].url.path == "/api/issues/issue-1/heartbeat-runs"
+
+
 def test_issue_comment_and_review_post_payloads() -> None:
     requests: list[httpx.Request] = []
 

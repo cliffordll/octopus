@@ -439,6 +439,11 @@ export interface IssueWorkProduct {
   type: string;
   provider: string;
   externalId: string | null;
+  assetId?: string | null;
+  contentPath?: string | null;
+  contentType?: string | null;
+  byteSize?: number | null;
+  sha256?: string | null;
   title: string;
   url: string | null;
   status: string;
@@ -842,6 +847,11 @@ export interface HeartbeatRun {
   id: string;
   orgId: string;
   agentId: string;
+  issueId?: string | null;
+  issueIdentifier?: string | null;
+  issueTitle?: string | null;
+  projectId?: string | null;
+  goalId?: string | null;
   invocationSource: string;
   triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
