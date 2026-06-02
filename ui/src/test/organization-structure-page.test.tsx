@@ -153,7 +153,7 @@ it("loads organization settings from the avatar destination route", async () => 
         name: "核心团队",
         description: "核心组织",
         requireBoardApprovalForNewAgents: true,
-        defaultChatIssueCreationMode: "manual",
+        defaultChatIssueCreationMode: "manual_approval",
       });
     }
     if (path === "/api/orgs/org-1" && init?.method === "PATCH") {
@@ -170,9 +170,9 @@ it("loads organization settings from the avatar destination route", async () => 
 
   expect(await screen.findByDisplayValue("核心团队")).toBeInTheDocument();
   expect(screen.getByLabelText("新建智能体需要审批")).toBeChecked();
-  expect(screen.getByLabelText("默认聊天任务创建模式")).toHaveValue("manual");
+  expect(screen.getByLabelText("默认聊天任务创建模式")).toHaveValue("manual_approval");
   await userEvent.click(screen.getByLabelText("新建智能体需要审批"));
-  await userEvent.selectOptions(screen.getByLabelText("默认聊天任务创建模式"), "disabled");
+  await userEvent.selectOptions(screen.getByLabelText("默认聊天任务创建模式"), "auto_create");
   await userEvent.click(screen.getByRole("button", { name: "保存组织" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1",
@@ -181,11 +181,18 @@ it("loads organization settings from the avatar destination route", async () => 
       body: expect.stringContaining('"requireBoardApprovalForNewAgents":false'),
     }),
   );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"defaultChatIssueCreationMode":"auto_create"'),
+    }),
+  );
+  expect(screen.getByRole("button", { name: "保存组织" })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "归档组织" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/archive",
     expect.objectContaining({ method: "POST" }),
   );
-  expect(screen.getByRole("button", { name: "保存组织" })).toBeInTheDocument();
-  expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
 });

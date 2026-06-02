@@ -18,6 +18,7 @@ class OrganizationDetail(OrganizationSummary):
     issueCounter: int
     budgetMonthlyCents: int
     spentMonthlyCents: int
+    defaultChatIssueCreationMode: str
     brandColor: str | None
     createdAt: str
     updatedAt: str
