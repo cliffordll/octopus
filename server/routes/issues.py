@@ -33,7 +33,10 @@ from ..dependencies.access import (
     require_actor_identity,
     require_organization_access,
 )
+from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
+from ..services.heartbeat import HeartbeatService
+from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.issues import IssueService
 from ..storage import StorageService, get_storage_service
 
@@ -97,6 +100,7 @@ async def create_issue_route(
     orgId: str,
     _: None = Depends(require_organization_access),
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
     try:
@@ -107,12 +111,22 @@ async def create_issue_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    return await service.create_issue(
+    issue = await service.create_issue(
         orgId,
         payload,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
     )
+    await queue_issue_assignment_wakeup(
+        heartbeat,
+        issue,
+        reason="issue_assigned",
+        mutation="create",
+        context_source="issue.create",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+    )
+    return issue
 
 
 @router.get(ISSUE_DETAIL_PATH)

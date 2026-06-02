@@ -20,7 +20,10 @@ from sqlalchemy.pool import StaticPool
 from packages.database.clients import async_transaction
 from packages.database.schema import (
     ActivityLog,
+    Agent,
+    AgentWakeupRequest,
     Base,
+    HeartbeatRun,
     Issue,
     IssueComment,
     Organization,
@@ -155,6 +158,78 @@ async def test_create_issue_route_returns_200_and_persists(
         result = await verify.execute(select(Issue).where(Issue.org_id == org_id))
         rows = result.scalars().all()
     assert len(rows) == 1
+
+
+async def test_create_assigned_issue_queues_assignment_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Issue Owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Assigned task",
+            "status": "todo",
+            "priority": "high",
+            "assigneeAgentId": agent_id,
+        },
+    )
+
+    assert code == 200
+    assert body["assigneeAgentId"] == agent_id
+
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent_id
+                )
+            )
+        ).scalar_one()
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+            )
+        ).scalar_one()
+
+    assert wakeup.source == "assignment"
+    assert wakeup.trigger_detail == "system"
+    assert wakeup.reason == "issue_assigned"
+    assert wakeup.payload == {"issueId": body["id"], "mutation": "create"}
+    assert run.status == "queued"
+    assert run.invocation_source == "assignment"
+    assert run.trigger_detail == "system"
+    assert run.context_snapshot == {
+        "triggeredBy": "user",
+        "actorId": "local-board",
+        "forceFreshSession": False,
+        "issueId": body["id"],
+        "source": "issue.create",
+        "wakeSource": "assignment",
+        "wakeReason": "issue_assigned",
+        "issue": {
+            "id": body["id"],
+            "title": "Assigned task",
+            "description": None,
+            "status": "todo",
+            "priority": "high",
+        },
+    }
 
 
 async def test_update_issue_route_returns_200_and_updates(
