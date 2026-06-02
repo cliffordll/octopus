@@ -15,7 +15,6 @@ import type {
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
-  LogReadResult,
   ProjectDetail,
   UpdateIssuePayload,
   WorkspaceOperation,
@@ -78,6 +77,11 @@ function runSummary(run: HeartbeatRun | null): string {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return run.status;
+}
+
+function formatIssueTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
 }
 
 function IssuePropertiesPanel({
@@ -252,8 +256,14 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
                 <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
+                {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
+                {product.contentType && <div><dt>类型</dt><dd>{product.contentType}</dd></div>}
+                {product.byteSize !== undefined && product.byteSize !== null && <div><dt>大小</dt><dd>{product.byteSize} bytes</dd></div>}
               </dl>
-              {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+              <div className="issue-work-product-actions">
+                {product.contentPath && <a className="button secondary small-button" href={product.contentPath}>下载产物</a>}
+                {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+              </div>
             </article>
           ))}
         </div>
@@ -262,13 +272,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
   );
 }
 
-function buildIssueWakeReason(issue: IssueDetail): string {
-  return `执行任务 ${issue.identifier ?? issue.id}: ${issue.title}`;
-}
-
 interface IssueRunPanelData {
   events: UseQueryResult<HeartbeatRunEvent[], Error>;
-  log: UseQueryResult<LogReadResult, Error>;
   operations: UseQueryResult<WorkspaceOperation[], Error>;
   run: UseQueryResult<HeartbeatRun, Error>;
 }
@@ -305,7 +310,6 @@ function IssueRunOutputPanel({
       </div>
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
-      {data.log.error && <ErrorNotice error={data.log.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
       <dl className="issue-run-summary">
         <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
@@ -315,39 +319,49 @@ function IssueRunOutputPanel({
       </dl>
       <p className="issue-run-summary-text">{runSummary(run)}</p>
       {(run?.stdoutExcerpt || run?.stderrExcerpt) && (
-        <div className="issue-run-output-grid">
-          {run.stdoutExcerpt && <pre className="run-excerpt">{run.stdoutExcerpt}</pre>}
-          {run.stderrExcerpt && <pre className="run-excerpt error">{run.stderrExcerpt}</pre>}
+        <div className="issue-run-stream-list">
+          {run.stdoutExcerpt && (
+            <article className="agent-run-event">
+              <div className="agent-run-event-header">
+                <strong>stdout</strong>
+                <Badge>输出</Badge>
+              </div>
+              <pre className="run-excerpt inline">{run.stdoutExcerpt}</pre>
+            </article>
+          )}
+          {run.stderrExcerpt && (
+            <article className="agent-run-event">
+              <div className="agent-run-event-header">
+                <strong>stderr</strong>
+                <Badge>错误</Badge>
+              </div>
+              <pre className="run-excerpt error inline">{run.stderrExcerpt}</pre>
+            </article>
+          )}
         </div>
       )}
-      <div className="issue-run-output-grid">
-        <section className="issue-run-output-block">
-          <h3>事件</h3>
-          {data.events.isLoading && <p className="muted">加载事件中...</p>}
-          {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
-          {events.length > 0 && (
-            <div className="agent-run-events">
-              {events.map((event) => (
-                <article className="agent-run-event" key={event.id}>
-                  <div className="agent-run-event-header">
-                    <span>#{event.seq}</span>
-                    <strong>{event.eventType}</strong>
-                    {event.level && <Badge>{event.level}</Badge>}
-                    {event.stream && <Badge>{event.stream}</Badge>}
-                  </div>
-                  {event.message && <p>{event.message}</p>}
-                  {hasJsonObject(event.payload) && <pre className="agent-run-json">{formattedJson(event.payload)}</pre>}
-                  <small className="muted">{event.createdAt}</small>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-        <section className="issue-run-output-block">
-          <h3>日志</h3>
-          {data.log.data?.content ? <pre className="agent-run-json">{data.log.data.content}</pre> : <p className="muted">暂无日志。</p>}
-        </section>
-      </div>
+      <section className="issue-run-output-block issue-run-events-flat">
+        <h3>事件</h3>
+        {data.events.isLoading && <p className="muted">加载事件中...</p>}
+        {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+        {events.length > 0 && (
+          <div className="agent-run-events">
+            {events.map((event) => (
+              <article className="agent-run-event" key={event.id}>
+                <div className="agent-run-event-header">
+                  <span>#{event.seq}</span>
+                  <strong>{event.eventType}</strong>
+                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.stream && <Badge>{event.stream}</Badge>}
+                </div>
+                {event.message && <pre className="issue-run-event-log">{event.message}</pre>}
+                {hasJsonObject(event.payload) && <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>}
+                <small className="muted">{event.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
       <section className="issue-run-output-block">
         <h3>工作区操作</h3>
         {data.operations.isLoading && <p className="muted">加载工作区操作中...</p>}
@@ -361,9 +375,9 @@ function IssueRunOutputPanel({
                   <Badge>{operation.status}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
-                {operation.command && <p>{operation.command}</p>}
-                {operation.stderrExcerpt && <pre className="run-excerpt error">{operation.stderrExcerpt}</pre>}
-                {operation.stdoutExcerpt && <pre className="run-excerpt">{operation.stdoutExcerpt}</pre>}
+                {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
+                {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
+                {operation.stdoutExcerpt && <pre className="run-excerpt inline">{operation.stdoutExcerpt}</pre>}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
               </article>
             ))}
@@ -379,7 +393,9 @@ export function IssuePage() {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [attachmentUploadNotice, setAttachmentUploadNotice] = useState("");
   const [attachmentUsage, setAttachmentUsage] = useState("attachment");
+  const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
   const [currentRunId, setCurrentRunId] = useState(() => {
@@ -399,15 +415,32 @@ export function IssuePage() {
     queryKey: ["issue-attachments", issueId],
     queryFn: () => issuesApi.listAttachments(issueId),
   });
+  const issueRuns = useQuery({
+    queryKey: ["issue-heartbeat-runs", issueId],
+    queryFn: () => issuesApi.listRuns(issueId),
+    enabled: Boolean(issueId),
+    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? 3000 : false,
+  });
   useEffect(() => {
     if (!orgId || !issueId) return;
     setCurrentRunId(localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "");
   }, [orgId, issueId]);
   useEffect(() => {
+    if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
+    const latestRun = issueRuns.data[0];
+    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRun.id);
+    setCurrentRunId(latestRun.id);
+  }, [currentRunId, issueRuns.data, issueId, orgId]);
+  useEffect(() => {
     if (!reviewNotice) return;
     const timer = window.setTimeout(() => setReviewNotice(""), 3000);
     return () => window.clearTimeout(timer);
   }, [reviewNotice]);
+  useEffect(() => {
+    if (!executeNotice) return;
+    const timer = window.setTimeout(() => setExecuteNotice(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [executeNotice]);
   useEffect(() => {
     setReviewNotice("");
   }, [issue.data?.reviewerAgentId, issue.data?.status]);
@@ -451,24 +484,16 @@ export function IssuePage() {
       if (issue.data.status !== "in_progress") {
         await issuesApi.update(issue.data.id, { status: "in_progress" });
       }
-      return heartbeatApi.wakeup(issue.data.assigneeAgentId, {
-        source: "assignment",
-        triggerDetail: "manual",
-        reason: buildIssueWakeReason(issue.data),
-        payload: {
-          issueId: issue.data.id,
-          projectId: issue.data.projectId,
-          goalId: issue.data.goalId,
-        },
-        idempotencyKey: `issue:${issue.data.id}:manual-execute`,
-      });
+      return issuesApi.execute(issue.data.id);
     },
     onSuccess: async (run) => {
+      setExecuteNotice("");
       localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
       setCurrentRunId(run.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["issues", orgId] }),
+        queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
       ]);
     },
@@ -485,12 +510,6 @@ export function IssuePage() {
     enabled: Boolean(currentRunId),
     refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
   });
-  const runLog = useQuery({
-    queryKey: ["heartbeat-run-log", currentRunId],
-    queryFn: () => heartbeatApi.getLog(currentRunId),
-    enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
-  });
   const runWorkspaceOperations = useQuery({
     queryKey: ["heartbeat-run-workspace-operations", currentRunId],
     queryFn: () => heartbeatApi.listWorkspaceOperations(currentRunId),
@@ -501,6 +520,7 @@ export function IssuePage() {
     mutationFn: () => heartbeatApi.cancel(currentRunId),
     onSuccess: (run) => {
       queryClient.setQueryData(["heartbeat-run", currentRunId], run);
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
     },
   });
@@ -510,6 +530,7 @@ export function IssuePage() {
       localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
       setCurrentRunId(run.id);
       queryClient.setQueryData(["heartbeat-run", run.id], run);
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
     },
   });
@@ -529,9 +550,13 @@ export function IssuePage() {
       });
     },
     onSuccess: () => {
+      setAttachmentUploadNotice(`已上传 ${attachmentFile?.name ?? "附件"}`);
       setAttachmentFile(null);
       setAttachmentUsage("attachment");
       void queryClient.invalidateQueries({ queryKey: ["issue-attachments", issueId] });
+    },
+    onMutate: () => {
+      setAttachmentUploadNotice("");
     },
   });
   const deleteAttachment = useMutation({
@@ -553,6 +578,7 @@ export function IssuePage() {
   }
   function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
     setAttachmentFile(event.target.files?.[0] ?? null);
+    setAttachmentUploadNotice("");
   }
   function submitAttachment(event: FormEvent) {
     event.preventDefault();
@@ -582,8 +608,21 @@ export function IssuePage() {
     setReviewNotice("");
     updateIssue.mutate({ status: "in_review" });
   }
+  function executeCurrentIssue() {
+    if (uploadAttachment.isPending) {
+      setExecuteNotice("附件上传中，上传完成后再执行任务。");
+      return;
+    }
+    if (!issue.data?.assigneeAgentId) {
+      setExecuteNotice("请先分配负责人，再执行任务。");
+      return;
+    }
+    setExecuteNotice("");
+    executeIssue.mutate();
+  }
   if (issue.error) return <ErrorNotice error={issue.error} />;
   const agentList = Array.isArray(agents.data) ? agents.data : [];
+  const agentsById = new Map(agentList.map((agent) => [agent.id, agent]));
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   return (
@@ -610,10 +649,18 @@ export function IssuePage() {
                 <h1>{issue.data.title}</h1>
                 <div className="issue-header-actions">
                   <button
-                    disabled={executeIssue.isPending || !issue.data.assigneeAgentId}
-                    title={issue.data.assigneeAgentId ? "触发负责人执行当前任务" : "请先分配负责人"}
+                    aria-disabled={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "true" : undefined}
+                    className={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "is-disabled" : undefined}
+                    disabled={executeIssue.isPending}
+                    title={
+                      uploadAttachment.isPending
+                        ? "附件上传中，上传完成后再执行任务"
+                        : issue.data.assigneeAgentId
+                          ? "触发负责人执行当前任务"
+                          : "请先分配负责人"
+                    }
                     type="button"
-                    onClick={() => executeIssue.mutate()}
+                    onClick={executeCurrentIssue}
                   >
                     执行任务
                   </button>
@@ -626,6 +673,7 @@ export function IssuePage() {
               <p className="issue-description">{issue.data.description || "暂无描述"}</p>
             </div>
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
+            {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
 
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">
@@ -690,7 +738,6 @@ export function IssuePage() {
               <IssueRunOutputPanel
                 data={{
                   events: runEvents,
-                  log: runLog,
                   operations: runWorkspaceOperations,
                   run: runDetail,
                 }}
@@ -712,6 +759,12 @@ export function IssuePage() {
               {attachments.error && <ErrorNotice error={attachments.error} />}
               {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
               {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
+              {uploadAttachment.isPending && attachmentFile && (
+                <p className="issue-upload-status" role="status">正在上传 {attachmentFile.name}...</p>
+              )}
+              {!uploadAttachment.isPending && attachmentUploadNotice && (
+                <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
+              )}
               {attachments.isSuccess && attachments.data.length === 0 && <p className="muted">暂无附件。</p>}
               {attachments.data && attachments.data.length > 0 && (
                 <div className="issue-attachment-list">
@@ -752,9 +805,12 @@ export function IssuePage() {
             <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>动态</h2>
-                <span className="muted">{comments.data?.length ?? 0} 条评论</span>
+                <span className="muted">
+                  {(comments.data?.length ?? 0) + (issueRuns.data?.length ?? 0)} 条记录
+                </span>
               </div>
               {comments.error && <ErrorNotice error={comments.error} />}
+              {issueRuns.error && <ErrorNotice error={issueRuns.error} />}
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -762,7 +818,28 @@ export function IssuePage() {
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {comments.isSuccess && comments.data.length === 0 && <p className="muted">暂无动态。</p>}
+                {issueRuns.data?.map((run) => (
+                  <button
+                    className={`issue-activity-item issue-run-activity${run.id === currentRunId ? " active" : ""}`}
+                    key={run.id}
+                    onClick={() => {
+                      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
+                      setCurrentRunId(run.id);
+                    }}
+                    type="button"
+                  >
+                    <div className="issue-activity-avatar">R</div>
+                    <span>
+                      <strong>执行任务</strong>
+                      <span className="muted">
+                        {run.status} · {agentName(run.agentId, agentsById)} · {formatIssueTime(run.createdAt)}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {comments.isSuccess && issueRuns.isSuccess && comments.data.length === 0 && issueRuns.data.length === 0 && (
+                  <p className="muted">暂无动态。</p>
+                )}
               </div>
               <form className="form issue-comment-form" onSubmit={submitComment}>
                 <label>

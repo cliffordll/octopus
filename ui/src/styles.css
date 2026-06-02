@@ -1491,6 +1491,13 @@ small {
   gap: 6px;
 }
 
+.issue-work-product-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .workspace-shell-layout {
   display: grid;
   gap: 16px;
@@ -3483,6 +3490,26 @@ button.danger {
   white-space: pre-wrap;
 }
 
+.issue-run-activity {
+  background: #0f1724;
+  color: #d7deea;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.issue-run-activity > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.issue-run-activity.active,
+.issue-run-activity:hover {
+  border-color: #3f7fc4;
+}
+
 .issue-comment-form {
   border-top: 1px solid #202a3b;
   padding-top: 14px;
@@ -3516,6 +3543,22 @@ button.danger {
   gap: 10px;
   grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
   padding-top: 14px;
+}
+
+.issue-upload-status {
+  background: rgb(59 130 246 / 12%);
+  border: 1px solid rgb(59 130 246 / 35%);
+  border-radius: 10px;
+  color: #93c5fd;
+  font-size: 13px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.issue-upload-status.success {
+  background: rgb(34 197 94 / 12%);
+  border-color: rgb(34 197 94 / 35%);
+  color: #86efac;
 }
 
 .issue-work-product-card {
@@ -3702,6 +3745,7 @@ button.danger {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  overflow: hidden;
   padding: 12px;
 }
 
@@ -3709,6 +3753,12 @@ button.danger {
   color: #e8edf5;
   font-size: 14px;
   margin: 0;
+}
+
+.issue-run-stream-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .meta-line, .actions {
@@ -3729,7 +3779,9 @@ button.danger {
 }
 
 .actions button.is-disabled,
-.actions button[aria-disabled="true"] {
+.actions button[aria-disabled="true"],
+.issue-header-actions button.is-disabled,
+.issue-header-actions button[aria-disabled="true"] {
   background: #151b26;
   border: 1px solid #3a4658;
   box-shadow: none;
@@ -3738,7 +3790,9 @@ button.danger {
 }
 
 .actions button.is-disabled:hover,
-.actions button[aria-disabled="true"]:hover {
+.actions button[aria-disabled="true"]:hover,
+.issue-header-actions button.is-disabled:hover,
+.issue-header-actions button[aria-disabled="true"]:hover {
   background: #1b2230;
   border-color: #526074;
   color: #94a3b8;
@@ -3786,6 +3840,11 @@ button.danger {
 .run-excerpt.error {
   border-color: #5a2830;
   color: #ffc7d0;
+}
+
+.run-excerpt.inline {
+  max-width: 100%;
+  white-space: pre;
 }
 
 .description {
@@ -5550,6 +5609,32 @@ pre {
   white-space: pre-wrap;
 }
 
+.issue-run-event-payload {
+  max-width: 100%;
+  white-space: pre;
+}
+
+.issue-run-output .agent-run-json,
+.issue-run-output .run-excerpt,
+.issue-run-event-log {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre;
+}
+
+.issue-run-event-log {
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 10px;
+  color: #dce5f2;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 320px;
+  padding: 12px;
+}
+
 .run-excerpt.error {
   border-color: #5a2c36;
   color: #fecdd3;
@@ -5568,6 +5653,7 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 7px;
+  min-width: 0;
   padding: 10px;
 }
 

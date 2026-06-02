@@ -38,6 +38,16 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     get_parser.add_argument("issue_id")
     get_parser.set_defaults(handler=get_issue)
 
+    execute_parser = actions.add_parser(
+        "execute", help="Queue execution for an assigned issue"
+    )
+    execute_parser.add_argument("issue_id")
+    execute_parser.set_defaults(handler=execute_issue)
+
+    runs_parser = actions.add_parser("runs", help="List heartbeat runs for an issue")
+    runs_parser.add_argument("issue_id")
+    runs_parser.set_defaults(handler=list_issue_runs)
+
     create_parser = actions.add_parser("create", help="Create an issue")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--title", required=True)
@@ -127,6 +137,14 @@ def list_issues(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def get_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/issues/{args.issue_id}")
+
+
+def execute_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("POST", f"/api/issues/{args.issue_id}/execute", json={})
+
+
+def list_issue_runs(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/issues/{args.issue_id}/heartbeat-runs")
 
 
 def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
