@@ -17,6 +17,7 @@ from packages.shared.api_paths.issues import (
     ORG_ISSUE_LIST_PATH,
 )
 from packages.shared.api_paths.organizations import (
+    ORG_ARCHIVE_PATH,
     ORG_DETAIL_PATH,
     ORG_LIST_PATH,
 )
@@ -58,6 +59,7 @@ from packages.shared.validators.organization import (
 def test_org_paths_values() -> None:
     assert ORG_LIST_PATH == "/api/orgs"
     assert ORG_DETAIL_PATH == "/api/orgs/{orgId}"
+    assert ORG_ARCHIVE_PATH == "/api/orgs/{orgId}/archive"
 
 
 def test_issue_paths_values() -> None:
