@@ -118,6 +118,30 @@ class OrgService:
         )
         return _to_detail(updated)
 
+    async def archive(
+        self,
+        org_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> OrganizationDetail | None:
+        updated = await update_organization(
+            self._session, org_id, {"status": "archived"}
+        )
+        if updated is None:
+            return None
+        await insert_activity_log(
+            self._session,
+            org_id=org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="organization.archived",
+            entity_type="organization",
+            entity_id=org_id,
+            details={},
+        )
+        return _to_detail(updated)
+
 
 def _to_detail(row: Organization) -> OrganizationDetail:
     return OrganizationDetail(

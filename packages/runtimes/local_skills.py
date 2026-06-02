@@ -119,6 +119,7 @@ _LOCAL_CLI_CREDENTIAL_HOME_ENTRIES = (
     ".config/gh",
     ".config/gcloud",
     ".config/op",
+    ".config/opencode",
     ".config/vercel",
     ".config/configstore",
     ".docker",
@@ -129,9 +130,17 @@ _LOCAL_CLI_CREDENTIAL_HOME_ENTRIES = (
     ".netrc",
     ".npmrc",
     ".ssh",
+    ".local/share/opencode/auth.json",
     ".vercel",
     "Library/Application Support/gh",
     "Library/Application Support/com.heroku.cli",
+)
+
+_OVERWRITE_MANAGED_HOME_ENTRIES = frozenset(
+    {
+        ".config/opencode",
+        ".local/share/opencode/auth.json",
+    }
 )
 
 
@@ -146,12 +155,18 @@ def _sync_local_cli_credential_home_entries(
         if not source.exists():
             continue
         target = target_home / Path(relative_entry)
-        if _ensure_link_or_copy(source, target):
+        if _ensure_link_or_copy(
+            source,
+            target,
+            overwrite=relative_entry in _OVERWRITE_MANAGED_HOME_ENTRIES,
+        ):
             linked.append(relative_entry)
     return linked
 
 
-def _ensure_link_or_copy(source: Path, target: Path) -> bool:
+def _ensure_link_or_copy(
+    source: Path, target: Path, *, overwrite: bool = False
+) -> bool:
     if target.is_symlink():
         try:
             linked = Path(os.readlink(target))
@@ -162,7 +177,12 @@ def _ensure_link_or_copy(source: Path, target: Path) -> bool:
             return False
         target.unlink(missing_ok=True)
     elif target.exists():
-        return False
+        if not overwrite:
+            return False
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            target.unlink(missing_ok=True)
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         target.symlink_to(source, target_is_directory=source.is_dir())
