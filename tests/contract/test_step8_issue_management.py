@@ -125,10 +125,11 @@ async def _request(
     path: str,
     *,
     json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.request(method, path, json=json)
+        response = await client.request(method, path, json=json, headers=headers)
     try:
         body: Any = response.json()
     except ValueError:
@@ -416,6 +417,40 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
             .all()
         )
     assert len(rows) == 1
+
+
+async def test_agent_cannot_mark_issue_done_without_checkout_ownership(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    owner_id = str(uuid.uuid4())
+    other_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Owned task",
+        status="in_progress",
+        assignee_agent_id=owner_id,
+    )
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(id=owner_id, org_id=org_id, name="Owner", role="engineer"),
+                Agent(id=other_id, org_id=org_id, name="Other", role="engineer"),
+            ]
+        )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "done"},
+        headers={"x-test-agent-id": other_id, "x-test-org-id": org_id},
+    )
+
+    assert code == 403
+    assert "checkout owner" in body["detail"].lower()
 
 
 async def test_issue_comment_routes_create_and_list(

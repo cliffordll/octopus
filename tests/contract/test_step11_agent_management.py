@@ -11,13 +11,13 @@ import uuid
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import BigInteger, Table, text
+from sqlalchemy import BigInteger, Table, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Organization
+from packages.database.schema import AgentWakeupRequest, Base, Organization
 from server.app import create_app
 
 
@@ -685,6 +685,85 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state_code == 200
     assert state["lastRunId"] == run["id"]
     assert state["lastRunStatus"] == "succeeded"
+
+
+async def test_successful_issue_run_without_closeout_queues_passive_followup(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="passive-followup")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Closeout Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('worked')"],
+            },
+        },
+    )
+    _, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Needs closeout",
+            "status": "todo",
+        },
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "update issues set assignee_agent_id = :agent_id where id = :issue_id"
+            ),
+            {"agent_id": agent["id"], "issue_id": issue["id"]},
+        )
+        await session.commit()
+
+    wake_code, run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={
+            "reason": "contract-issue-run",
+            "payload": {
+                "issueId": issue["id"],
+                "wakeReason": "contract-issue-run",
+            },
+        },
+    )
+    assert wake_code == 202
+    await _wait_for_dispatch(app)
+
+    _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
+    assert detail["status"] == "succeeded"
+    issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
+    assert issue_code == 200
+    assert issue_after["status"] == "todo"
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(AgentWakeupRequest)
+                .where(
+                    AgentWakeupRequest.agent_id == agent["id"],
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                )
+                .order_by(AgentWakeupRequest.requested_at)
+            )
+        ).scalars().all()
+
+    assert len(rows) == 1
+    assert rows[0].payload == {
+        "issueId": issue["id"],
+        "originRunId": run["id"],
+        "mutation": "passive_followup",
+    }
+    assert rows[0].status == "queued"
 
 
 async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_usage(

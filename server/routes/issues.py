@@ -348,6 +348,15 @@ async def update_issue_route(
         ) from exc
     try:
         actor = require_actor_identity(request)
+        if (
+            actor.actor_type == "agent"
+            and payload.get("status") == "done"
+            and detail.get("assigneeAgentId") != actor.actor_id
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Only the checkout owner can mark issue done",
+            )
         updated = await service.update_issue(
             id,
             payload,
