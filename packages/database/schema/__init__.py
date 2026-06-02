@@ -30,6 +30,7 @@ from .organization_skills import OrganizationSkill
 from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
+from .runtime_providers import RuntimeModel, RuntimeProvider
 from .workspaces import (
     ExecutionWorkspace,
     IssueWorkProduct,
@@ -70,6 +71,8 @@ __all__ = [
     "ProjectGoal",
     "OrganizationResource",
     "ProjectResourceAttachment",
+    "RuntimeProvider",
+    "RuntimeModel",
     "ProjectWorkspace",
     "ExecutionWorkspace",
     "WorkspaceRuntimeService",
