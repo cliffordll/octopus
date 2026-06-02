@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type F
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
+import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
@@ -22,6 +23,7 @@ export function ChatsPage() {
   const [searchParams] = useSearchParams();
   const requestedAgentId = searchParams.get("agentId") ?? "";
   const [agentId, setAgentId] = useState("");
+  const [issueCreationMode, setIssueCreationMode] = useState<"manual_approval" | "auto_create">("manual_approval");
   const [projectId, setProjectId] = useState("");
   const [body, setBody] = useState("");
   const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
@@ -29,6 +31,7 @@ export function ChatsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const organization = useQuery({ queryKey: ["organization", orgId], queryFn: () => organizationsApi.get(orgId) });
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const selectedAgentSkills = useQuery({
     queryKey: ["agent-skills", agentId],
@@ -63,11 +66,18 @@ export function ChatsPage() {
       setAgentId(requestedAgentId);
     }
   }, [chatAgentList, requestedAgentId]);
+  useEffect(() => {
+    const mode = organization.data?.defaultChatIssueCreationMode;
+    if (mode === "manual_approval" || mode === "auto_create") {
+      setIssueCreationMode(mode);
+    }
+  }, [organization.data?.defaultChatIssueCreationMode]);
   const create = useMutation({
     mutationFn: async () => {
       const draft = body.trim();
       const chat = await chatsApi.create(orgId, {
         title: draft.slice(0, 40) || "新对话",
+        issueCreationMode,
         preferredAgentId: agentId,
         ...(projectId
           ? { contextLinks: [{ entityType: "project", entityId: projectId }] }
@@ -133,6 +143,7 @@ export function ChatsPage() {
             />
           </label>
           {agents.error && <ErrorNotice error={agents.error} />}
+          {organization.error && <ErrorNotice error={organization.error} />}
           {projects.error && <ErrorNotice error={projects.error} />}
           {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
           {create.error ? <ErrorNotice error={create.error} /> : null}
@@ -156,6 +167,16 @@ export function ChatsPage() {
                 {chatAgentList.map((agent) => (
                   <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
                 ))}
+              </select>
+            </label>
+            <label aria-label="任务创建模式选择" className="chat-context-field">
+              <select
+                aria-label="任务创建模式"
+                value={issueCreationMode}
+                onChange={(event) => setIssueCreationMode(event.target.value as "manual_approval" | "auto_create")}
+              >
+                <option value="manual_approval">手动审批</option>
+                <option value="auto_create">自动创建</option>
               </select>
             </label>
             <details

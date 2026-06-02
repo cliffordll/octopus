@@ -62,11 +62,13 @@ it("shows a composer and sends a first message through a selected agent", async 
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "消息导航" })).queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.getByLabelText("项目")).toBeInTheDocument();
+  expect(screen.getByLabelText("任务创建模式")).toHaveValue("manual_approval");
   expect(screen.getByRole("button", { name: "发送并创建对话" })).toBeInTheDocument();
 
   expect(await screen.findByRole("option", { name: "平台项目" })).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText("项目"), "project-1");
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.selectOptions(screen.getByLabelText("任务创建模式"), "auto_create");
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
@@ -84,6 +86,7 @@ it("shows a composer and sends a first message through a selected agent", async 
       method: "POST",
       body: JSON.stringify({
         title: "请规划部署",
+        issueCreationMode: "auto_create",
         preferredAgentId: "agent-1",
         contextLinks: [{ entityType: "project", entityId: "project-1" }],
       }),
@@ -136,7 +139,14 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/chats",
-    expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "第一行\n第二行", preferredAgentId: "agent-1" }) }),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        title: "第一行\n第二行",
+        issueCreationMode: "manual_approval",
+        preferredAgentId: "agent-1",
+      }),
+    }),
   );
 });
 
