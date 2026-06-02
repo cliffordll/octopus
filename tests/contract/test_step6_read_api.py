@@ -161,6 +161,23 @@ async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> No
     assert "createdAt" in body
 
 
+async def test_org_archive_route_sets_archived_status(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            f"/api/orgs/{org_id}/archive",
+            headers={"x-test-actor-type": "board"},
+        )
+
+    assert response.status_code == 200
+    archived = response.json()
+    assert archived["id"] == org_id
+    assert archived["status"] == "archived"
+
+
 async def test_org_detail_missing_actor_returns_503(
     app: FastAPI, session: AsyncSession
 ) -> None:
