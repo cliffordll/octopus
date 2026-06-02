@@ -103,6 +103,12 @@ async def _create_chat(app: FastAPI, org_id: str, agent_id: str) -> dict:
     return body
 
 
+def _prompt_envelope(prompt: str) -> dict[str, Any]:
+    marker = "Conversation input:"
+    assert marker in prompt
+    return json.loads(prompt.split(marker, 1)[1].strip())
+
+
 async def test_first_message_prompt_contains_only_user_turn(
     app: tuple[FastAPI, async_sessionmaker],
     monkeypatch: pytest.MonkeyPatch,
@@ -123,10 +129,15 @@ async def test_first_message_prompt_contains_only_user_turn(
     )
     assert code == 201
     assert len(adapter.captured_prompts) == 1
-    envelope = json.loads(adapter.captured_prompts[0])
+    prompt = adapter.captured_prompts[0]
+    assert "replying inside Octopus's chat scene" in prompt
+    assert "Reply to the latest user message" in prompt
+    assert "Do not summarize or analyze the JSON envelope" in prompt
+    envelope = _prompt_envelope(prompt)
     assert envelope["conversation"]["id"] == chat["id"]
     assert envelope["recentMessages"][-1]["role"] == "user"
     assert envelope["recentMessages"][-1]["body"] == "first user turn"
+    assert envelope["latestUserMessage"]["body"] == "first user turn"
     assert len(envelope["recentMessages"]) == 1
 
 
@@ -158,7 +169,7 @@ async def test_second_message_prompt_includes_prior_turn(
     )
     assert code == 201
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     bodies = [(entry["role"], entry["body"]) for entry in envelope["recentMessages"]]
     assert ("user", "first user turn") in bodies
     assert ("assistant", "assistant reply 1") in bodies
@@ -188,7 +199,7 @@ async def test_prompt_envelope_caps_recent_messages_at_twelve(
             json={"body": f"msg {index}"},
         )
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     assert len(envelope["recentMessages"]) == 12
     # last entry must still be the freshest user message
     assert envelope["recentMessages"][-1]["body"] == "msg 14"
@@ -240,7 +251,7 @@ async def test_prompt_context_links_include_hydrated_entity_fields(
         json={"body": "use the linked issue"},
     )
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     links = envelope["contextLinks"]
     assert len(links) == 1
     link = links[0]

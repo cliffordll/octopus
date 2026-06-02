@@ -77,13 +77,15 @@ def error_text(value: Any) -> str | None:
     if isinstance(value, str):
         return value.strip() or None
     if isinstance(value, dict):
+        data = value.get("data")
+        if isinstance(data, dict):
+            text = string(data.get("message"))
+            if text:
+                return text
         for key in ("message", "error", "name", "code"):
             text = string(value.get(key))
             if text:
                 return text
-        data = value.get("data")
-        if isinstance(data, dict):
-            return string(data.get("message"))
     return None
 
 

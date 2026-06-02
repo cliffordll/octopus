@@ -54,6 +54,7 @@ def test_agent_contract_modules_define_management_boundary() -> None:
         == "/api/orgs/{orgId}/agents/name-suggestion"
     )
     assert paths.AGENT_DETAIL_PATH == "/api/agents/{id}"
+    assert paths.AGENT_ARCHIVE_PATH == "/api/agents/{id}/archive"
     assert paths.AGENT_PAUSE_PATH == "/api/agents/{id}/pause"
     assert paths.AGENT_CONFIGURATION_PATH == "/api/agents/{id}/configuration"
     assert (
@@ -350,6 +351,30 @@ async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     assert terminate_code == 200
     assert terminated["status"] == "terminated"
 
+    list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/agents")
+    assert list_code == 200
+    assert listed == []
+
+
+async def test_agent_archive_route_terminates_and_hides_agent(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-archive")
+    create_code, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "Archive Me", "role": "engineer"},
+    )
+    assert create_code == 201
+
+    archive_code, archived = await _request(
+        app, "POST", f"/api/agents/{created['id']}/archive"
+    )
+
+    assert archive_code == 200
+    assert archived["status"] == "terminated"
     list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/agents")
     assert list_code == 200
     assert listed == []
