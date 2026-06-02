@@ -747,15 +747,19 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
 
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(AgentWakeupRequest)
-                .where(
-                    AgentWakeupRequest.agent_id == agent["id"],
-                    AgentWakeupRequest.reason == "issue_passive_followup",
+            (
+                await session.execute(
+                    select(AgentWakeupRequest)
+                    .where(
+                        AgentWakeupRequest.agent_id == agent["id"],
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                    .order_by(AgentWakeupRequest.requested_at)
                 )
-                .order_by(AgentWakeupRequest.requested_at)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(rows) == 1
     assert rows[0].payload == {
