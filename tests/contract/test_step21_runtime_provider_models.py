@@ -13,7 +13,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Base, Organization
+from packages.database.schema import (
+    Agent,
+    Base,
+    Organization,
+    RuntimeModel,
+    RuntimeProvider,
+)
+from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
 
 
@@ -231,3 +238,110 @@ async def test_model_crud_is_database_only(
 
     assert delete_code == 200
     assert deleted["modelId"] == "kimik/kimi-k2.5"
+
+
+@pytest.mark.parametrize(
+    "runtime_type", ["opencode_local", "codex_local", "claude_local"]
+)
+async def test_chat_runtime_config_includes_database_provider_model(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_type: str,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id = await _seed_org(factory)
+    agent_id = str(uuid.uuid4())
+    captured: dict[str, Any] = {}
+
+    class CapturingAdapter:
+        type = runtime_type
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            captured["config"] = context.config
+            return RuntimeExecutionResult(exit_code=0, result_json={"summary": "reply"})
+
+    async with factory() as session:
+        async with session.begin():
+            session.add(
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="OpenCode Agent",
+                    role="engineer",
+                    status="idle",
+                    agent_runtime_type=runtime_type,
+                    agent_runtime_config={"model": "deepseek/deepseek-v4-flash"},
+                    runtime_config={},
+                )
+            )
+            session.add(
+                RuntimeProvider(
+                    id=str(uuid.uuid4()),
+                    org_id=org_id,
+                    runtime_type=runtime_type,
+                    provider_id="deepseek",
+                    name="DeepSeek",
+                    protocol="openai_chat_completions",
+                    npm_package="@ai-sdk/openai-compatible",
+                    base_url="https://deepseek.example/v1",
+                    api_key="sk-db",
+                    config_json={"timeoutSec": 30},
+                    enabled=True,
+                )
+            )
+            session.add(
+                RuntimeModel(
+                    id=str(uuid.uuid4()),
+                    org_id=org_id,
+                    runtime_type=runtime_type,
+                    provider_id="deepseek",
+                    model_id="deepseek-v4-flash",
+                    display_name="DeepSeek V4 Flash",
+                    metadata_json={},
+                    enabled=True,
+                )
+            )
+
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: CapturingAdapter()
+    )
+
+    chat = await _create_chat(application, org_id, agent_id)
+    code, _ = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json_body={"body": "你好"},
+    )
+
+    assert code == 201
+    runtime_provider = captured["config"]["_octopus"]["runtimeProvider"]
+    assert runtime_provider == {
+        "providerId": "deepseek",
+        "name": "DeepSeek",
+        "protocol": "openai_chat_completions",
+        "npmPackage": "@ai-sdk/openai-compatible",
+        "baseUrl": "https://deepseek.example/v1",
+        "apiKey": "sk-db",
+        "config": {"timeoutSec": 30},
+        "model": {
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+            "metadata": {},
+        },
+    }
+
+
+async def _create_chat(app: FastAPI, org_id: str, agent_id: str) -> dict[str, Any]:
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/chats",
+        json_body={"title": "Runtime provider chat", "preferredAgentId": agent_id},
+    )
+    assert code == 201
+    return body

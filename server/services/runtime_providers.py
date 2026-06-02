@@ -23,6 +23,9 @@ from packages.database.queries.runtime_providers import (
 from packages.database.schema import RuntimeModel, RuntimeProvider
 
 REDACTED_API_KEY = "***REDACTED***"
+MANAGED_RUNTIME_PROVIDER_TYPES = frozenset(
+    {"opencode_local", "codex_local", "claude_local"}
+)
 
 
 class RuntimeProviderService:
@@ -283,6 +286,48 @@ class RuntimeProviderService:
         return row
 
 
+async def inject_runtime_provider_config(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    runtime_type: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    if runtime_type not in MANAGED_RUNTIME_PROVIDER_TYPES:
+        return config
+    model_ref = config.get("model")
+    if not isinstance(model_ref, str) or "/" not in model_ref:
+        return config
+    provider_id, model_id = model_ref.split("/", 1)
+    provider_id = provider_id.strip()
+    model_id = model_id.strip()
+    if not provider_id or not model_id:
+        return config
+    provider = await get_runtime_provider(session, org_id, runtime_type, provider_id)
+    if provider is None:
+        return config
+    if not provider.enabled:
+        raise ValueError(f"Runtime provider is disabled: {provider_id}")
+    model = await get_runtime_model(
+        session, org_id, runtime_type, provider_id, model_id
+    )
+    if model is None:
+        raise ValueError(f"Runtime model is not configured: {model_ref}")
+    if not model.enabled:
+        raise ValueError(f"Runtime model is disabled: {model_ref}")
+
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        runtime_context = {}
+    return {
+        **config,
+        "_octopus": {
+            **runtime_context,
+            "runtimeProvider": _to_execution_provider(provider, model),
+        },
+    }
+
+
 def _provider_create_fields(org_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
@@ -405,4 +450,23 @@ def _to_model(row: RuntimeModel) -> dict[str, Any]:
         "enabled": row.enabled,
         "createdAt": row.created_at.isoformat(),
         "updatedAt": row.updated_at.isoformat(),
+    }
+
+
+def _to_execution_provider(
+    provider: RuntimeProvider, model: RuntimeModel
+) -> dict[str, Any]:
+    return {
+        "providerId": provider.provider_id,
+        "name": provider.name,
+        "protocol": provider.protocol,
+        "npmPackage": provider.npm_package,
+        "baseUrl": provider.base_url,
+        "apiKey": provider.api_key,
+        "config": provider.config_json,
+        "model": {
+            "modelId": model.model_id,
+            "displayName": model.display_name,
+            "metadata": model.metadata_json,
+        },
     }

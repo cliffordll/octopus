@@ -183,14 +183,23 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 
 3. adapter 准备 managed runtime home。
 
-4. 对 opencode_local，后续由 adapter 生成：
+4. 对 `opencode_local`，adapter 执行前生成：
    .octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
 
 5. 启动本地 CLI。
 ```
 
-当前文档描述的 provider/model CRUD 已由 server 支持；把 DB 配置渲染到
-OpenCode/Codex/Claude managed home 属于后续 runtime adapter 深化。
+当前 `opencode_local`、`codex_local`、`claude_local` 已复用 DB
+provider/model 注入逻辑。`opencode_local` 会生成 managed OpenCode 配置；
+`codex_local` 会把 provider `apiKey/baseUrl` 注入为 `OPENAI_API_KEY` /
+`OPENAI_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`；
+`claude_local` 会把 provider `apiKey/baseUrl` 注入为 `ANTHROPIC_API_KEY` /
+`ANTHROPIC_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`。
+`openclaw_gateway` 当前仍是未实现 runtime，占位在 registry 中，没有 runner 可接入。
+
+`opencode_local` 的 managed `.config/opencode` 必须是独立副本，不能 symlink 到
+宿主机 `%USERPROFILE%/.config/opencode`。这样 DB provider/model materialization
+不会污染宿主机全局 OpenCode 配置。
 
 ## 安全要求
 
