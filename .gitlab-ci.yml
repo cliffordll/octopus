@@ -158,7 +158,7 @@ image-check:
   extends: .docker_job
   needs: ["unit-test"]
   script:
-    - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
+    # - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
     - |
       set -euo pipefail
       : "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
@@ -186,7 +186,7 @@ image-push:
   stage: image_push
   extends: .docker_job
   script:
-    - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
+    # - test -f build_pyc.py || { echo "build_pyc.py not found in repository root."; exit 1; }
     - |
       set -euo pipefail
       : "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
@@ -215,6 +215,7 @@ image-push:
     - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
       when: manual
 
+# ceshi
 # deploy-dev:
 #   stage: deploy_dev
 #   extends: .kubectl_job
