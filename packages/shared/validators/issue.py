@@ -9,6 +9,7 @@ from ..constants.issue import (
     ISSUE_STATUSES,
 )
 from ..types.issue import (
+    CheckoutIssuePayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
     ListOrgIssuesQuery,
@@ -134,6 +135,22 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
             raise ValueError("'requestDepth' must be a non-negative integer")
 
     return cast(CreateIssuePayload, payload)
+
+
+def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:
+    _reject_unknown_fields(payload, allowed_fields={"agentId", "expectedStatuses"})
+    agent_id = payload.get("agentId")
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        raise ValueError("'agentId' is required and must be a non-empty string")
+    expected_statuses = payload.get("expectedStatuses")
+    if not isinstance(expected_statuses, list) or not expected_statuses:
+        raise ValueError("'expectedStatuses' is required and must be a non-empty list")
+    for status in expected_statuses:
+        if status not in ISSUE_STATUSES:
+            raise ValueError(
+                f"'expectedStatuses' must contain only {list(ISSUE_STATUSES)}"
+            )
+    return cast(CheckoutIssuePayload, payload)
 
 
 def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
