@@ -13,6 +13,10 @@ Step 20 已经让最小闭环具备基础调试可见性。本步骤暂停新业
 - Organization 创建与读取。
 - Agent 创建、配置、skills snapshot/sync/enable、instructions 路径与文件读取。
 - Chat 或 Issue 触发 agent 执行。
+- 任务详情页需要的 issue -> runs 查询、run -> issue 上下文、执行输出 events/log
+  必须对齐上游，保证 UI 可稳定展示任务执行过程。
+- Issue 分配触发执行后，需补齐上游式 `POST /api/issues/{issueId}/checkout`
+  与 `GET /api/issues/{issueId}/heartbeat-context`，保证真实执行前具备原子领取和紧凑任务上下文。
 - Heartbeat run 创建、执行、事件、日志、失败摘要。
 - Workspace context、workspace operation、work product 或 attachment/storage 引用。
 - Step 20 observability 路径：run log、workspace operation log、run-intelligence list/detail/events/log。

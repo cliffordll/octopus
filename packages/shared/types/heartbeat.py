@@ -14,6 +14,7 @@ class WakeAgentPayload(TypedDict, total=False):
     triggerDetail: WakeupTriggerDetail
     reason: str | None
     payload: dict[str, Any] | None
+    contextSnapshot: dict[str, Any] | None
     idempotencyKey: str | None
     forceFreshSession: bool
 

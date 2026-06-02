@@ -713,10 +713,10 @@ class ChatService:
             raise RuntimeError("Chat request timed out")
         if result.error_message or (result.exit_code or 0) != 0:
             raise RuntimeError(result.error_message or "Chat adapter execution failed")
-        summary = str((result.result_json or {}).get("summary") or "").strip()
+        result_json = _normalized_assistant_result(result.result_json or {})
+        summary = str(result_json.get("summary") or "").strip()
         if not summary:
             raise RuntimeError("Chat adapter returned no assistant reply")
-        result_json = result.result_json or {}
         assistant_kind = _assistant_kind(result_json.get("kind"))
         structured_payload = _with_persisted_transcript(
             _assistant_structured_payload(result_json), transcript
@@ -875,6 +875,15 @@ class ChatService:
                 (
                     "Always reply in the same language as the latest user "
                     "message unless it explicitly asks for another language."
+                ),
+                (
+                    "If the latest user message asks to create a task, issue, "
+                    "work item, or ticket, do not create it directly. Return a "
+                    'single JSON object with summary, kind="issue_proposal", '
+                    "and structuredPayload.issueProposal containing title, "
+                    "description, priority, assigneeAgentId, projectId, goalId, "
+                    "or parentId when known. The UI/server will use "
+                    "/api/chats/{id}/convert-to-issue after user confirmation."
                 ),
                 "Conversation input:",
                 envelope,
@@ -1150,6 +1159,39 @@ def _assistant_structured_payload(
     if isinstance(value, dict):
         return value
     return None
+
+
+def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
+    summary = result_json.get("summary")
+    if not isinstance(summary, str):
+        return result_json
+    parsed = _json_object(summary)
+    if parsed is None:
+        return result_json
+    kind = parsed.get("kind")
+    structured_payload = parsed.get("structuredPayload")
+    parsed_summary = parsed.get("summary")
+    if (
+        kind not in CHAT_MESSAGE_KINDS
+        or not isinstance(structured_payload, dict)
+        or not isinstance(parsed_summary, str)
+        or not parsed_summary.strip()
+    ):
+        return result_json
+    return {
+        **result_json,
+        "summary": parsed_summary.strip(),
+        "kind": kind,
+        "structuredPayload": structured_payload,
+    }
+
+
+def _json_object(value: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value.strip())
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _chat_transcript_from_payload(

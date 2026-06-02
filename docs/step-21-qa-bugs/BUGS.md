@@ -399,6 +399,94 @@
 - 修复记录：新增模块级 `_context_link_summary(link)` helper，从 hydrated link 的 `entity` 字段提取 label/identifier/status/description/priority；`_build_assistant_prompt` 改为调用此 helper。`metadata` 字段移除（上游 contextSummary 不含 metadata，改为对齐 entity 字段）。
 - 验证证据：新增 `tests/contract/test_step21_chat_history_prompt.py::test_prompt_context_links_include_hydrated_entity_fields`（seed 一个 issue 作 contextLink，断言 envelope 含全部 hydration 字段）；`pytest tests/contract/ -q` 全套 299 passed；ruff / pyright 全绿。
 
+### BUG-21-022: 缺少上游 issue checkout 和 heartbeat-context 路由，任务执行缺少原子领取与紧凑上下文
+
+- 状态：open
+- 严重级别：P1
+- 是否阻塞最小闭环：是。当前已能通过 assigned issue 自动 queued wakeup/run，但 runtime 只能依赖 payload 中的 `issueId`；缺少 checkout 会导致真实任务执行前没有上游式原子领取/执行锁，缺少 heartbeat-context 会导致 agent 无法稳定读取紧凑任务上下文。
+- 影响范围：`server/routes/issues.py`、`server/services/issues.py`、`server/services/heartbeat.py`、`server/skills/bundled/control-plane` 的 `issue checkout` / `issue context` 工作流、UI 的任务执行对齐。
+- 复现步骤：
+  1. 创建分配给 agent 的 issue，观察 server 可以生成 `assignment` wakeup/run。
+  2. 请求 `POST /api/issues/{issueId}/checkout`。
+  3. 请求 `GET /api/issues/{issueId}/heartbeat-context`。
+- 预期行为：与上游 `D:\coding\rudder\server\src\routes\issues.mutations.ts:613` 和 `D:\coding\rudder\server\src\routes\issues.ts:551` 对齐；`checkout` 应按 `agentId`、`expectedStatuses`、当前 actor/run id 原子领取 issue，并写入 `checkoutRunId/executionRunId`；`heartbeat-context` 应返回 issue、评论、文档、唤醒评论等紧凑上下文，供 heartbeat runtime 执行前读取。
+- 必须补齐：
+  - `POST /api/issues/{issueId}/checkout`。
+  - `GET /api/issues/{issueId}/heartbeat-context`。
+  - checkout 成功后按上游语义可把 issue 切到 `in_progress`，并用 `checkoutRunId/executionRunId` 防止多个 run/agent 同时处理同一任务。
+  - actor 为 agent 时只能 checkout 自己；board/user 代 checkout 时按上游判断是否需要额外 wake assignee。
+- 实际行为：当前 Python server 没有这两个路由；onboarding 和 bundled control-plane skill 已要求 checkout/context，但 API 不存在，UI 暂时只能调用已支持的 wakeup。
+- 初步根因：Step 11/13/15 已实现 wakeup/run/workspace 基线，但未迁移上游 issue lifecycle 的 checkout/context 子路由；`checkout_run_id` 字段已存在，说明 schema 留位但 service/route 缺实现。
+- 处理归属：Step 21。优先补齐 server contract，不改 UI/CLI；UI 可在接口存在后对接。
+- 修复记录：待处理。
+- 验证证据：`rg "checkout|heartbeat-context" server packages docs tests` 显示仅 docs/skills/schema 留痕，无 Python route/service/test；上游对应路由存在于 `D:\coding\rudder`。
+
+### BUG-21-023: 任务详情页缺少 issue -> runs 查询和稳定 run/issue 关联
+
+- 状态：open
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务可以触发 run，但 UI 无法稳定从 issue 找到相关 run，任务详情页无法展示“这个任务的执行过程”。
+- 影响范围：`server/routes/issues.py`、`server/services/heartbeat.py`、`packages/database/schema/heartbeat.py`、`packages/database/queries/heartbeat.py`、UI 任务详情页。
+- 复现步骤：
+  1. 创建 assigned issue 并触发 heartbeat run。
+  2. 尝试按 issueId 查询该 issue 关联过的 heartbeat runs。
+  3. 读取 `GET /api/heartbeat-runs/{runId}`，检查 response 是否直接带 issue 摘要字段。
+- 预期行为：与上游 issue/run 可见性对齐，server 提供 issue -> runs 查询；run 与 issue 有稳定关联，不能只依赖一次性临时 payload。至少支持：
+  - `GET /api/issues/{issueId}/heartbeat-runs` 或上游等价 `GET /api/issues/{id}/runs`。
+  - 返回 `runId/status/agentId/createdAt/startedAt/finishedAt/error/summary`。
+  - `GET /api/heartbeat-runs/{runId}` 返回 `issueId`、`issueIdentifier`、`issueTitle`、`projectId`、`goalId`，供 UI 不再二次猜测。
+  - run 创建时将 issue 关联持久化；可选方案为新增 `heartbeat_runs.issue_id`，或保持上游式 `context_snapshot.issueId` 但必须有 query/helper 封装，避免 UI 直接依赖 JSON 内部结构。
+- 实际行为：当前 wakeup payload/contextSnapshot 已可携带 `issueId`，`run_intelligence` 也能按 `context_snapshot.issueId` 过滤；但没有 issue-scoped runs API，也没有在 heartbeat run response 顶层返回 issue 摘要。
+- 初步根因：Step 11/13 建立 run 基线时只提供 org/agent scoped run 查询；Step 20 observability 提供 run 详情、events、log、workspace operations，但未补 issue-scoped run 聚合。
+- 处理归属：Step 21。优先按上游以 `context_snapshot.issueId` 建立 server 查询封装；是否新增物理 `issue_id` 字段需结合 migration 成本和上游证据决定。
+- 修复记录：待处理。
+- 验证证据：`rg "issues/:id/runs|issues/{issueId}/heartbeat-runs|live-runs" server packages tests` 当前无 Python route；上游存在 `server/src/routes/activity.ts:80`、`server/src/routes/agents.management-routes.ts:1390` 等 issue-scoped run 查询。
+
+### BUG-21-024: run 输出可读性不足，任务详情页缺少稳定过程输出契约
+
+- 状态：open
+- 严重级别：P1
+- 是否阻塞最小闭环：是。UI 任务详情页需要展示任务执行过程，但 server 目前只具备基础 run/events/log API，尚未明确执行期间持续可读、关键事件完整性和增量 log 稳定性验收。
+- 影响范围：`server/services/heartbeat.py`、`server/services/logs.py`、`server/routes/agents.py`、`server/routes/workspace_operations.py`、`tests/contract/test_step20_observability.py`、任务详情页输出展示。
+- 复现步骤：
+  1. 创建 assigned issue 并触发 run。
+  2. 在 run 执行期间持续读取 `GET /api/heartbeat-runs/{runId}`、`/events`、`/log`、`/workspace-operations`。
+  3. 检查是否能看到 queued、started、stdout/stderr、workspace/tool 操作、completed/failed/cancelled/timed_out 和 error message。
+  4. 使用 `GET /api/heartbeat-runs/{runId}/log?offset=...&limitBytes=...` 增量读取，检查 `content/nextOffset/eof`。
+- 预期行为：对齐上游三层输出模型：DB 结构化 events、local_file NDJSON run log、实时/轮询可读输出。至少支持：
+  - `GET /api/heartbeat-runs/{runId}` 在执行期间持续可读。
+  - `GET /api/heartbeat-runs/{runId}/events?afterSeq=...&limit=...` 在执行期间持续可读。
+  - `GET /api/heartbeat-runs/{runId}/log?offset=...&limitBytes=...` 返回 `content`、`nextOffset`、`eof`，并可增量读取。
+  - `GET /api/heartbeat-runs/{runId}/workspace-operations` 在执行期间持续可读。
+  - events 至少覆盖 `queued`、`started`、runtime stdout/stderr 摘要、tool/workspace operation、`completed/failed/cancelled/timed_out`、error message。
+- 实际行为：当前已有 run 详情、events、log、workspace-operations 基础接口；`HeartbeatService._execute_run` 会写 `lifecycle` 和 stdout/stderr log event，但缺少明确 queued event、完整状态事件矩阵和执行期间持续可读 contract；log 增量语义需补测试确认。
+- 初步根因：Step 20 主要补 observability 路径，未按任务详情页场景建立端到端输出契约。
+- 处理归属：Step 21。优先补 contract tests 和最小 server 行为；WebSocket/live event 可后置，当前 UI 可先用轮询 `/events` 和 `/log`。
+- 修复记录：待处理。
+- 验证证据：`test_step20_observability.py` 已覆盖单点 log/workspace operation 读取，但没有 issue-scoped run 输出过程和执行期间持续读取场景。
+
+### BUG-21-025: 缺少按 issueId 执行任务的服务端专用入口和幂等语义
+
+- 状态：open
+- 严重级别：P2
+- 是否阻塞最小闭环：否。assigned issue 自动 wakeup 已能触发 run，但 UI 仍需要自己组合“创建/分配/唤醒”；专用 execute 接口可以降低 UI 耦合。
+- 影响范围：`server/routes/issues.py`、`server/services/issues.py`、`server/services/heartbeat.py`、UI 任务详情页执行按钮。
+- 复现步骤：
+  1. 已有一个分配给 agent 的 issue。
+  2. UI 想触发该 issue 执行，只能自行决定是否 PATCH issue、再调用 agent wakeup。
+  3. 连续点击执行按钮时，server 没有 issue-scoped 幂等响应。
+- 预期行为：提供上游兼容边界之外的 server 组合入口，或确认使用上游 checkout+wakeup 组合。建议接口：
+  - `POST /api/issues/{issueId}/execute`。
+  - 校验 issue 存在、组织访问、assignee 可执行。
+  - 可选执行 checkout/状态切换。
+  - 创建 wakeup/run 并返回 run。
+  - 连续点击执行时返回已有 queued/running run、返回 409，或支持 `idempotencyKey`。
+- 实际行为：当前没有 issue-scoped execute 入口；只有 agent-scoped wakeup。
+- 初步根因：早期 run 能力围绕 agent wakeup 建立，缺少 UI 任务详情页的 issue-centric 操作封装。
+- 处理归属：Step 21 或 Step 25。若严格上游对齐，先实现 checkout/context/issue runs；`execute` 可作为 Octopus server 组合 API 后置。
+- 修复记录：待处理。
+- 验证证据：`rg "issues/.*/execute|execute_issue|issue execute" server packages tests` 当前无对应实现。
+
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 
 - 状态：open

@@ -564,6 +564,7 @@ class HeartbeatService:
                     "actorId": actor_id,
                     "forceFreshSession": payload.get("forceFreshSession", False),
                     **self._payload_context(payload.get("payload")),
+                    **self._payload_context_snapshot(payload.get("contextSnapshot")),
                 },
             },
         )
@@ -1116,6 +1117,11 @@ class HeartbeatService:
             if isinstance(value, str) and value:
                 context[target_key] = value
         return context
+
+    def _payload_context_snapshot(
+        self, context_snapshot: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        return dict(context_snapshot) if isinstance(context_snapshot, dict) else {}
 
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
         return heartbeat_run_to_data(row)
