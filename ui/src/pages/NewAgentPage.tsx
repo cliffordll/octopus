@@ -2,11 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
-import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { runtimeModelLabel, runtimeModelReference } from "../utils/runtimeModels";
+import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const RUNTIMES: AgentRuntimeType[] = [
@@ -31,13 +30,9 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
 }
 
 function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntimeType, model: string): Record<string, unknown> {
-  if (runtime !== "opencode_local") return config;
+  if (!supportsRuntimeModels(runtime)) return config;
   const trimmed = model.trim() || (typeof config.model === "string" ? config.model.trim() : "");
-  const [provider, modelName] = trimmed.split("/", 2);
-  if (!trimmed || !provider?.trim() || !modelName?.trim()) {
-    throw new Error("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。");
-  }
-  return { ...config, model: trimmed };
+  return { ...config, model: validateModelReference(trimmed) };
 }
 
 function parseCsv(value: string): string[] {
@@ -55,7 +50,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const [capabilities, setCapabilities] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
-  const [opencodeModel, setOpencodeModel] = useState("");
+  const [runtimeModel, setRuntimeModel] = useState("");
   const [metadata, setMetadata] = useState("{}");
   const [configurationError, setConfigurationError] = useState("");
   const [desiredSkills, setDesiredSkills] = useState("");
@@ -66,19 +61,12 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     queryKey: ["agent-name-suggestion", orgId],
     queryFn: () => agentsApi.nameSuggestion(orgId),
   });
-  const opencodeModels = useQuery({
-    queryKey: ["runtime-model-options", orgId, "opencode_local"],
-    queryFn: async () => {
-      const providers = await runtimeProvidersApi.listProviders(orgId, "opencode_local");
-      const enabledProviders = providers.filter((provider) => provider.enabled !== false);
-      const groups = await Promise.all(
-        enabledProviders.map((provider) => runtimeProvidersApi.listModels(orgId, "opencode_local", provider.providerId)),
-      );
-      return groups.flat().filter((model) => model.enabled !== false);
-    },
-    enabled: runtime === "opencode_local" && Boolean(orgId),
+  const runtimeModels = useQuery({
+    queryKey: ["runtime-model-options", orgId, runtime],
+    queryFn: () => listRuntimeModelOptions(orgId, runtime),
+    enabled: supportsRuntimeModels(runtime) && Boolean(orgId),
   });
-  const modelOptions: RuntimeModel[] = opencodeModels.data ?? [];
+  const modelOptions: RuntimeModel[] = runtimeModels.data ?? [];
   const isFirstAgent = agents.isSuccess && agents.data.length === 0;
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
   const create = useMutation({
@@ -89,7 +77,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
         agentRuntimeType: runtime,
-        agentRuntimeConfig: mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, opencodeModel),
+        agentRuntimeConfig: mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, runtimeModel),
         ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
         ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
@@ -105,7 +93,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     if (!name.trim()) return;
     try {
       setConfigurationError("");
-      mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, opencodeModel);
+      mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, runtimeModel);
       if (metadata.trim() && metadata.trim() !== "{}") readJsonObject(metadata, "Metadata");
       create.mutate();
     } catch (error) {
@@ -150,11 +138,11 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
             {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
-        {runtime === "opencode_local" && (
+        {supportsRuntimeModels(runtime) && (
           <label>
-            OpenCode model
+            模型配置
             {modelOptions.length > 0 ? (
-              <select value={opencodeModel} onChange={(event) => setOpencodeModel(event.target.value)}>
+              <select value={runtimeModel} onChange={(event) => setRuntimeModel(event.target.value)}>
                 <option value="">选择模型</option>
                 {modelOptions.map((model) => (
                   <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
@@ -164,9 +152,9 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
               </select>
             ) : (
               <input
-                placeholder="openai/gpt-5"
-                value={opencodeModel}
-                onChange={(event) => setOpencodeModel(event.target.value)}
+                placeholder="provider/model"
+                value={runtimeModel}
+                onChange={(event) => setRuntimeModel(event.target.value)}
               />
             )}
           </label>

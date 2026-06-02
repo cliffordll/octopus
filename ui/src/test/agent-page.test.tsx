@@ -327,7 +327,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
   await userEvent.clear(screen.getByLabelText("月度预算（cents）"));
   await userEvent.type(screen.getByLabelText("月度预算（cents）"), "1000");
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"gpt"}' } });
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -372,7 +372,7 @@ it("validates opencode local model before saving agent configuration", async () 
   expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
-  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/agents/agent-1",
     expect.objectContaining({ method: "PATCH" }),
@@ -410,7 +410,7 @@ it("warns when the configured opencode model is not in organization runtime mode
 });
 
 it("tests agent runtime availability from configuration", async () => {
-  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: { model: "gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
@@ -432,7 +432,7 @@ it("tests agent runtime availability from configuration", async () => {
     "/api/orgs/org-1/adapters/codex_local/test-environment",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
+      body: JSON.stringify({ agentRuntimeConfig: { model: "openai/gpt-5" } }),
     }),
   );
 });

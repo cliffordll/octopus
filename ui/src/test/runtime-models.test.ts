@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runtimeModelLabel, runtimeModelReference } from "../utils/runtimeModels";
+import { MODEL_PROVIDER_RUNTIMES, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 describe("runtime model references", () => {
   it("uses the server provider id when model id is provider-local", () => {
@@ -23,5 +23,18 @@ describe("runtime model references", () => {
 
     expect(runtimeModelReference(model)).toBe("deepseek/deepseek-v4-flash");
     expect(runtimeModelLabel(model)).toBe("deepseek/deepseek-v4-flash");
+  });
+
+  it("supports provider models for local and gateway runtimes", () => {
+    expect(MODEL_PROVIDER_RUNTIMES).toEqual([
+      "opencode_local",
+      "codex_local",
+      "claude_local",
+      "openclaw_gateway",
+    ]);
+    expect(supportsRuntimeModels("codex_local")).toBe(true);
+    expect(supportsRuntimeModels("claude_local")).toBe(true);
+    expect(supportsRuntimeModels("openclaw_gateway")).toBe(true);
+    expect(supportsRuntimeModels("process")).toBe(false);
   });
 });
