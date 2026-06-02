@@ -65,6 +65,11 @@ OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 会在
 `runtime_providers` 和 `runtime_models` 生成 managed home 内的 OpenCode 配置，
 不长期修改用户全局 OpenCode 配置。
 
+`opencode_local` 可以复制宿主机 OpenCode 配置作为 managed home 的基础配置，
+但 `.config/opencode` 必须是 managed home 内的独立副本，不能是指向宿主机配置
+目录的 symlink。执行前写入 DB provider/model 时，只允许修改 managed home，不
+允许写回 `%USERPROFILE%/.config/opencode/opencode.json`。
+
 示例目标文件：
 
 ```text
@@ -97,4 +102,6 @@ OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 会在
 ## 当前边界
 
 当前 `opencode_local` 已支持从 DB provider/model 生成 managed home 配置。
-`codex_local`、`claude_local` 的 provider/model 渲染仍属于后续 runtime adapter 深化。
+`codex_local`、`claude_local` 也已复用 DB provider/model 注入逻辑，但二者
+按各自 CLI 约定使用环境变量传递 provider 连接信息，而不是生成 OpenCode
+配置文件。
