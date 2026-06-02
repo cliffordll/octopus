@@ -23,6 +23,9 @@ from packages.database.queries.runtime_providers import (
 from packages.database.schema import RuntimeModel, RuntimeProvider
 
 REDACTED_API_KEY = "***REDACTED***"
+MANAGED_RUNTIME_PROVIDER_TYPES = frozenset(
+    {"opencode_local", "codex_local", "claude_local"}
+)
 
 
 class RuntimeProviderService:
@@ -290,7 +293,7 @@ async def inject_runtime_provider_config(
     runtime_type: str,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    if runtime_type != "opencode_local":
+    if runtime_type not in MANAGED_RUNTIME_PROVIDER_TYPES:
         return config
     model_ref = config.get("model")
     if not isinstance(model_ref, str) or "/" not in model_ref:
