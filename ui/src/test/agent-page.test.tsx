@@ -357,12 +357,19 @@ it("validates opencode local model before saving agent configuration", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
+    }
     return respond({ ...agent, agentRuntimeType: "opencode_local" });
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
+  expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
@@ -371,15 +378,35 @@ it("validates opencode local model before saving agent configuration", async () 
     expect.objectContaining({ method: "PATCH" }),
   );
 
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
+  await userEvent.selectOptions(await screen.findByLabelText("模型配置"), "deepseek/deepseek-v4-flash");
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1",
     expect.objectContaining({
       method: "PATCH",
-      body: expect.stringContaining('"model":"openai/gpt-5"'),
+      body: expect.stringContaining('"model":"deepseek/deepseek-v4-flash"'),
     }),
   );
+});
+
+it("warns when the configured opencode model is not in organization runtime models", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "local/deepseek-v4-flash" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByText(/当前配置的模型不在组织模型列表中：local\/deepseek-v4-flash/)).toBeInTheDocument();
 });
 
 it("tests agent runtime availability from configuration", async () => {
@@ -408,6 +435,21 @@ it("tests agent runtime availability from configuration", async () => {
       body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
     }),
   );
+});
+
+it("shows a model configuration input for opencode agents without configured models", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") return respond([]);
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByLabelText("模型配置")).toHaveValue("openai/gpt-5");
 });
 
 it("shows runtime test failures from configuration", async () => {
@@ -715,10 +757,10 @@ it("manages skills from agent configuration", async () => {
   await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
-  await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
-  await userEvent.type(within(dialog).getByLabelText("Short name"), "incident-response");
-  await userEvent.type(within(dialog).getByLabelText("描述"), "Handle incidents");
-  await userEvent.type(within(dialog).getByLabelText("技能内容"), "schema_version: 1\nprompt: handle it");
+  fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "Incident Response" } });
+  fireEvent.change(within(dialog).getByLabelText("Short name"), { target: { value: "incident-response" } });
+  fireEvent.change(within(dialog).getByLabelText("描述"), { target: { value: "Handle incidents" } });
+  fireEvent.change(within(dialog).getByLabelText("技能内容"), { target: { value: "schema_version: 1\nprompt: handle it" } });
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(

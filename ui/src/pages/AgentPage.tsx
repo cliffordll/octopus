@@ -4,10 +4,12 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
+import { runtimeProvidersApi } from "../api/runtimeProviders";
+import type { AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { runtimeModelLabel, runtimeModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const RUNTIMES: AgentRuntimeType[] = [
@@ -29,6 +31,14 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function readJsonObjectSafe(value: string): Record<string, unknown> {
+  try {
+    return readJsonObject(value, "Agent runtime config");
+  } catch {
+    return {};
+  }
 }
 
 function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
@@ -597,6 +607,18 @@ export function AgentPage() {
     queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
     enabled: activeTab === "configuration" && Boolean(orgId && runtime),
   });
+  const opencodeModels = useQuery({
+    queryKey: ["runtime-model-options", orgId, "opencode_local"],
+    queryFn: async () => {
+      const providers = await runtimeProvidersApi.listProviders(orgId, "opencode_local");
+      const enabledProviders = providers.filter((provider) => provider.enabled !== false);
+      const groups = await Promise.all(
+        enabledProviders.map((provider) => runtimeProvidersApi.listModels(orgId, "opencode_local", provider.providerId)),
+      );
+      return groups.flat().filter((model) => model.enabled !== false);
+    },
+    enabled: activeTab === "configuration" && runtime === "opencode_local" && Boolean(orgId),
+  });
   const skills = useQuery({
     queryKey: ["agent-skills", agentId],
     queryFn: () => agentsApi.skills(agentId),
@@ -766,6 +788,24 @@ export function AgentPage() {
     setConfigurationError(null);
     testRuntime.mutate();
   }
+  function selectRuntimeModel(modelId: string) {
+    try {
+      const config = readJsonObject(agentRuntimeConfig, "Agent runtime config");
+      setAgentRuntimeConfig(JSON.stringify({ ...config, model: modelId }, null, 2));
+      setConfigurationError(null);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
+    }
+  }
+  function setRuntimeModelInput(modelId: string) {
+    try {
+      const config = readJsonObjectSafe(agentRuntimeConfig);
+      setAgentRuntimeConfig(JSON.stringify({ ...config, model: modelId }, null, 2));
+      setConfigurationError(null);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
+    }
+  }
   const canChat = agent.data?.status !== "terminated";
   const runRows = Array.isArray(runs.data) ? runs.data : [];
   const sortedRuns = useMemo(
@@ -795,6 +835,13 @@ export function AgentPage() {
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const runtimeAvailable = runtimeTestPassed(runtimeTestResult);
+  const runtimeModelOptions: RuntimeModel[] = opencodeModels.data ?? [];
+  const selectedRuntimeModel =
+    runtime === "opencode_local"
+      ? (readJsonObjectSafe(agentRuntimeConfig).model as string | undefined) ?? ""
+      : "";
+  const selectedRuntimeModelKnown =
+    !selectedRuntimeModel || runtimeModelOptions.some((model) => runtimeModelReference(model) === selectedRuntimeModel);
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
@@ -1120,6 +1167,32 @@ export function AgentPage() {
                           {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
                         </select>
                       </label>
+                      {runtime === "opencode_local" && (
+                        <label className="agent-property-row">
+                          <span>模型配置</span>
+                          {runtimeModelOptions.length > 0 ? (
+                            <select value={selectedRuntimeModel} onChange={(event) => selectRuntimeModel(event.target.value)}>
+                              <option value="">选择模型</option>
+                              {runtimeModelOptions.map((model) => (
+                                <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
+                                  {runtimeModelLabel(model)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              placeholder="provider/model"
+                              value={selectedRuntimeModel}
+                              onChange={(event) => setRuntimeModelInput(event.target.value)}
+                            />
+                          )}
+                          {runtimeModelOptions.length > 0 && !selectedRuntimeModelKnown && (
+                            <small className="field-warning">
+                              当前配置的模型不在组织模型列表中：{selectedRuntimeModel}。请从下拉列表重新选择后保存。
+                            </small>
+                          )}
+                        </label>
+                      )}
                       <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
                     </div>
                     <div className="agent-runtime-test-row">

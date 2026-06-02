@@ -2,9 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
-import type { AgentRole, AgentRuntimeType } from "../api/types";
+import { runtimeProvidersApi } from "../api/runtimeProviders";
+import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { runtimeModelLabel, runtimeModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const RUNTIMES: AgentRuntimeType[] = [
@@ -64,6 +66,19 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     queryKey: ["agent-name-suggestion", orgId],
     queryFn: () => agentsApi.nameSuggestion(orgId),
   });
+  const opencodeModels = useQuery({
+    queryKey: ["runtime-model-options", orgId, "opencode_local"],
+    queryFn: async () => {
+      const providers = await runtimeProvidersApi.listProviders(orgId, "opencode_local");
+      const enabledProviders = providers.filter((provider) => provider.enabled !== false);
+      const groups = await Promise.all(
+        enabledProviders.map((provider) => runtimeProvidersApi.listModels(orgId, "opencode_local", provider.providerId)),
+      );
+      return groups.flat().filter((model) => model.enabled !== false);
+    },
+    enabled: runtime === "opencode_local" && Boolean(orgId),
+  });
+  const modelOptions: RuntimeModel[] = opencodeModels.data ?? [];
   const isFirstAgent = agents.isSuccess && agents.data.length === 0;
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
   const create = useMutation({
@@ -138,11 +153,22 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         {runtime === "opencode_local" && (
           <label>
             OpenCode model
-            <input
-              placeholder="openai/gpt-5"
-              value={opencodeModel}
-              onChange={(event) => setOpencodeModel(event.target.value)}
-            />
+            {modelOptions.length > 0 ? (
+              <select value={opencodeModel} onChange={(event) => setOpencodeModel(event.target.value)}>
+                <option value="">选择模型</option>
+                {modelOptions.map((model) => (
+                  <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
+                    {runtimeModelLabel(model)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                placeholder="openai/gpt-5"
+                value={opencodeModel}
+                onChange={(event) => setOpencodeModel(event.target.value)}
+              />
+            )}
           </label>
         )}
         <label>
