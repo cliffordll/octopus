@@ -21,9 +21,9 @@ it("shows an issue and records comments and review decisions", async () => {
     projectId: null,
     goalId: null,
     parentId: null,
-    assigneeAgentId: null,
+    assigneeAgentId: "agent-1",
     assigneeUserId: null,
-    reviewerAgentId: null,
+    reviewerAgentId: "agent-1",
     reviewerUserId: null,
     originKind: "manual",
     originId: null,
@@ -63,7 +63,19 @@ it("shows an issue and records comments and review decisions", async () => {
       return respond([issue]);
     }
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
+      return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") {
+      return respond([{ id: "goal-1", orgId: "org-1", title: "提升体验", level: "organization", status: "active", parentId: null, ownerAgentId: null }]);
+    }
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") {
       return respond([]);
+    }
+    if (path === "/api/agents/agent-1/wakeup" && init?.method === "POST") {
+      return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "queued" }, 202);
     }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
       return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
@@ -92,6 +104,9 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/orgs/org-1/issues/issue-1/attachments" && init?.method === "POST") {
       return respond({ id: "attachment-2", originalFilename: "upload.txt" }, 201);
     }
+    if (path === "/api/orgs/org-1/issues" && init?.method === "POST") {
+      return respond({ ...issue, id: "issue-child", identifier: "OCT-2", title: "新增子任务", parentId: "issue-1" }, 201);
+    }
     if (path === "/api/attachments/attachment-1" && init?.method === "DELETE") {
       return respond({}, 204);
     }
@@ -101,16 +116,26 @@ it("shows an issue and records comments and review decisions", async () => {
 
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: "实现登录流程" })).toBeInTheDocument();
-  const properties = screen.getByRole("region", { name: "Issue properties" });
-  expect(properties).toHaveTextContent("Properties");
-  expect(properties).toHaveTextContent("Number");
-  expect(properties).toHaveTextContent("Depth");
-  expect(properties).toHaveTextContent("Started");
-  expect(properties).toHaveTextContent("Completed");
+  const properties = screen.getByRole("region", { name: "任务属性" });
+  expect(properties).toHaveTextContent("属性");
+  expect(properties).toHaveTextContent("编号");
+  expect(properties).toHaveTextContent("层级");
+  expect(properties).toHaveTextContent("已启动");
+  expect(properties).toHaveTextContent("已完成");
+  await userEvent.selectOptions(screen.getByLabelText("状态"), "in_progress");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }),
+  );
+  await userEvent.selectOptions(screen.getByLabelText("优先级"), "critical");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ priority: "critical" }) }),
+  );
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
-  expect(await screen.findByRole("region", { name: "Attachments" })).toHaveTextContent("note.txt");
+  expect(await screen.findByRole("region", { name: "附件" })).toHaveTextContent("note.txt");
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
@@ -124,7 +149,7 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.upload(screen.getByLabelText("附件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
+  await userEvent.upload(screen.getByLabelText("附件文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
   await userEvent.click(screen.getByRole("button", { name: "上传附件" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues/issue-1/attachments",
@@ -137,9 +162,141 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "Approve Review" }));
+  await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/review-decision",
+    expect.objectContaining({ method: "POST" }),
+  );
+
+  await userEvent.type(screen.getByLabelText("子任务名称"), "新增子任务");
+  await userEvent.click(screen.getByRole("button", { name: "添加子任务" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/issues",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        title: "新增子任务",
+        parentId: "issue-1",
+        projectId: null,
+        goalId: null,
+        assigneeAgentId: "agent-1",
+        reviewerAgentId: "agent-1",
+        priority: "high",
+        status: "todo",
+      }),
+    }),
+  );
+});
+
+it("executes an assigned issue through agent wakeup", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "实现登录流程",
+    description: "接入页面",
+    status: "todo",
+    priority: "high",
+    projectId: "project-1",
+    goalId: "goal-1",
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
+      return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
+    }
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") {
+      return respond([{ id: "goal-1", orgId: "org-1", title: "提升体验", level: "organization", status: "active", parentId: null, ownerAgentId: null }]);
+    }
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1" && init?.method === "PATCH") {
+      return respond({ ...issue, status: "in_progress", startedAt: "2026-06-02T10:00:00Z" });
+    }
+    if (path === "/api/agents/agent-1/wakeup" && init?.method === "POST") {
+      return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "queued" }, 202);
+    }
+    if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") {
+      return respond({
+        id: "run-1",
+        orgId: "org-1",
+        agentId: "agent-1",
+        invocationSource: "assignment",
+        triggerDetail: "manual",
+        status: "queued",
+        stdoutExcerpt: "queued output",
+        resultJson: { summary: "等待执行" },
+      });
+    }
+    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") {
+      return respond([{ id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.queued", message: "已入队", createdAt: "2026-06-02T10:00:00Z" }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
+      return respond({ content: "raw output", eof: false, nextOffset: 10 });
+    }
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
+      return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output" }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1/cancel" && init?.method === "POST") {
+      return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "cancelled" });
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  await userEvent.click(await screen.findByRole("button", { name: "执行任务" }));
+  expect(screen.getByRole("button", { name: "通过评审" })).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("button", { name: "请求修改" })).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("button", { name: "标记待评审" })).toHaveAttribute("aria-disabled", "true");
+  await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
+  expect(screen.getByRole("status")).toHaveTextContent("请先设置 Reviewer，当前任务不能评审。");
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/wakeup",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        source: "assignment",
+        triggerDetail: "manual",
+        reason: "执行任务 OCT-1: 实现登录流程",
+        payload: {
+          issueId: "issue-1",
+          projectId: "project-1",
+          goalId: "goal-1",
+        },
+        idempotencyKey: "issue:issue-1:manual-execute",
+      }),
+    }),
+  );
+  expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
+  expect(await screen.findByText("已入队")).toBeInTheDocument();
+  expect(screen.getByText("raw output")).toBeInTheDocument();
+  expect(screen.getByText("workspace output")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "取消运行" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-1/cancel",
     expect.objectContaining({ method: "POST" }),
   );
 });
