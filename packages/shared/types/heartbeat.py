@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from packages.shared.constants.heartbeat import (
     HeartbeatInvocationSource,
@@ -50,6 +50,11 @@ class HeartbeatRun(TypedDict):
     retryOfRunId: str | None
     processLossRetryCount: int
     contextSnapshot: dict[str, Any] | None
+    issueId: NotRequired[str | None]
+    issueIdentifier: NotRequired[str | None]
+    issueTitle: NotRequired[str | None]
+    projectId: NotRequired[str | None]
+    goalId: NotRequired[str | None]
     createdAt: str
     updatedAt: str
 

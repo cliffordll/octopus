@@ -41,6 +41,7 @@ from packages.database.schema import (
     Agent as AgentRow,
     HeartbeatRun as HeartbeatRunRow,
     HeartbeatRunEvent as HeartbeatRunEventRow,
+    Issue as IssueRow,
 )
 from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
 from packages.shared.constants.heartbeat import (
@@ -175,7 +176,30 @@ class HeartbeatService:
 
     async def get(self, run_id: str) -> HeartbeatRun | None:
         row = await get_run(self._session, run_id)
-        return self._to_run(row) if row is not None else None
+        return await self._to_run_with_issue_context(row) if row is not None else None
+
+    async def list_for_issue(self, issue_id: str) -> list[dict[str, Any]] | None:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None:
+            return None
+        rows = await list_runs(self._session, issue.org_id)
+        return [
+            self._to_issue_run_summary(row, issue)
+            for row in rows
+            if _issue_id_from_context(row.context_snapshot) == issue.id
+        ]
+
+    async def get_active_for_issue(self, issue_id: str) -> HeartbeatRun | None:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None:
+            return None
+        rows = await list_runs(self._session, issue.org_id)
+        for row in rows:
+            if row.status in {"queued", "running"} and (
+                _issue_id_from_context(row.context_snapshot) == issue.id
+            ):
+                return await self._to_run_with_issue_context(row)
+        return None
 
     async def list_events(
         self, run_id: str, *, after_seq: int = 0, limit: int = 200
@@ -569,6 +593,19 @@ class HeartbeatService:
             },
         )
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
+        await self._append_event(
+            run,
+            1,
+            "lifecycle",
+            stream="system",
+            message="run queued",
+            level="info",
+            payload={
+                "status": "queued",
+                "source": payload.get("source", "on_demand"),
+                "triggerDetail": payload.get("triggerDetail", "manual"),
+            },
+        )
         return run
 
     async def _start_if_capacity(
@@ -598,8 +635,9 @@ class HeartbeatService:
         self, agent: AgentRow, running: HeartbeatRunRow, *, prepared: bool = False
     ) -> HeartbeatRunRow:
         if not prepared:
-            await self._prepare_execution(agent, running)
-        sequence = 3
+            sequence = await self._prepare_execution(agent, running)
+        else:
+            sequence = await self._next_event_sequence(running.id)
         cancellation = asyncio.Event()
         self._cancel_events[running.id] = cancellation
 
@@ -857,7 +895,7 @@ class HeartbeatService:
 
     async def _prepare_execution(
         self, agent: AgentRow, running: HeartbeatRunRow
-    ) -> None:
+    ) -> int:
         now = datetime.now(UTC)
         await update_wakeup_request(
             self._session,
@@ -867,17 +905,19 @@ class HeartbeatService:
         await update_agent(
             self._session, agent.id, {"status": "running", "last_heartbeat_at": now}
         )
+        sequence = await self._next_event_sequence(running.id)
         await self._append_event(
-            running, 1, "lifecycle", message="run started", level="info"
+            running, sequence, "lifecycle", message="run started", level="info"
         )
         await self._append_event(
             running,
-            2,
+            sequence + 1,
             "adapter.invoke",
             message="adapter invocation",
             level="info",
             payload={"agentRuntimeType": agent.agent_runtime_type},
         )
+        return sequence + 2
 
     async def _prepare_workspace_context(
         self, running: HeartbeatRunRow
@@ -1126,6 +1166,45 @@ class HeartbeatService:
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
         return heartbeat_run_to_data(row)
 
+    async def _to_run_with_issue_context(self, row: HeartbeatRunRow) -> HeartbeatRun:
+        data = heartbeat_run_to_data(row)
+        issue_id = _issue_id_from_context(row.context_snapshot)
+        if issue_id is None:
+            return data
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or issue.org_id != row.org_id:
+            data["issueId"] = issue_id
+            data["issueIdentifier"] = None
+            data["issueTitle"] = None
+            data["projectId"] = None
+            data["goalId"] = None
+            return data
+        data["issueId"] = issue.id
+        data["issueIdentifier"] = issue.identifier
+        data["issueTitle"] = issue.title
+        data["projectId"] = issue.project_id
+        data["goalId"] = issue.goal_id
+        return data
+
+    def _to_issue_run_summary(
+        self, row: HeartbeatRunRow, issue: IssueRow
+    ) -> dict[str, Any]:
+        return {
+            "runId": row.id,
+            "status": row.status,
+            "agentId": row.agent_id,
+            "createdAt": row.created_at.isoformat(),
+            "startedAt": row.started_at.isoformat() if row.started_at else None,
+            "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
+            "error": row.error,
+            "summary": _run_summary(row.result_json),
+            "issueId": issue.id,
+            "issueIdentifier": issue.identifier,
+            "issueTitle": issue.title,
+            "projectId": issue.project_id,
+            "goalId": issue.goal_id,
+        }
+
     def _to_event(self, row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
         return heartbeat_event_to_data(row)
 
@@ -1167,6 +1246,22 @@ def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
         "createdAt": row.created_at.isoformat(),
         "updatedAt": row.updated_at.isoformat(),
     }
+
+
+def _issue_id_from_context(context_snapshot: dict[str, Any] | None) -> str | None:
+    snapshot = context_snapshot if isinstance(context_snapshot, dict) else {}
+    value = snapshot.get("issueId") or snapshot.get("primaryIssueId")
+    return value if isinstance(value, str) and value else None
+
+
+def _run_summary(result_json: dict[str, Any] | None) -> str | None:
+    if not isinstance(result_json, dict):
+        return None
+    for key in ("summary", "result", "message"):
+        value = result_json.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
