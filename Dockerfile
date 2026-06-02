@@ -11,18 +11,18 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
 #   ca-certificates/curl —— TLS 与 NodeSource 安装脚本
 #   nodejs              —— claude/codex/opencode/openclaw 四个 runtime CLI 是 npm 包
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git \
- && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
- && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # Agent runtime CLI：由服务端作为子进程拉起，命令名需在 PATH 上可解析
 # （runner 用 shutil.which("opencode") 解析）。只装实际启用的 runtime 即可裁剪。
 RUN npm install -g --omit=dev \
-      opencode-ai \
-      @anthropic-ai/claude-code@latest \
-      @openai/codex@latest \
-      openclaw@latest
+    opencode-ai \
+    @anthropic-ai/claude-code@latest \
+    @openai/codex@latest \
+    openclaw@latest
 
 WORKDIR /app
 
