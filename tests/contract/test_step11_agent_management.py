@@ -663,10 +663,20 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert events_code == 200
     assert [event["eventType"] for event in events] == [
         "lifecycle",
+        "lifecycle",
         "adapter.invoke",
         "lifecycle",
         "log",
         "lifecycle",
+    ]
+    assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
+    assert [event["message"].strip() for event in events] == [
+        "run queued",
+        "run started",
+        "adapter invocation",
+        events[3]["message"].strip(),
+        "adapter-ok",
+        "run succeeded",
     ]
 
     state_code, state = await _request(
