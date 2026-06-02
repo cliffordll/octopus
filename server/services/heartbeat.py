@@ -835,6 +835,8 @@ class HeartbeatService:
                 agent.id,
                 {"status": "idle" if final_status == "succeeded" else "error"},
             )
+            if final_status == "succeeded":
+                await self._queue_issue_passive_followup_if_needed(agent, final)
             await self._append_event(
                 final,
                 sequence,
@@ -1019,6 +1021,61 @@ class HeartbeatService:
             stdout_excerpt=stdout_excerpt,
             stderr_excerpt=stderr_excerpt,
             metadata=metadata,
+        )
+
+    async def _queue_issue_passive_followup_if_needed(
+        self, agent: AgentRow, final: HeartbeatRunRow
+    ) -> None:
+        context = final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
+        if context.get("wakeReason") == "issue_passive_followup":
+            return
+        issue_id = _issue_id_from_context(context)
+        if issue_id is None:
+            return
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or issue.org_id != final.org_id:
+            return
+        if issue.assignee_agent_id != agent.id or issue.status not in {
+            "todo",
+            "in_progress",
+        }:
+            return
+        await self.wakeup(
+            agent.id,
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "reason": "issue_passive_followup",
+                "idempotencyKey": f"issue:{issue.id}:passive-followup:{final.id}",
+                "payload": {
+                    "issueId": issue.id,
+                    "originRunId": final.id,
+                    "mutation": "passive_followup",
+                },
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "source": "issue.passive_followup",
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_passive_followup",
+                    "passiveFollowup": {
+                        "originRunId": final.id,
+                        "previousRunId": final.id,
+                        "attempt": 1,
+                        "maxAttempts": 1,
+                        "reason": "closeout_missing",
+                    },
+                    "issue": {
+                        "id": issue.id,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "status": issue.status,
+                        "priority": issue.priority,
+                    },
+                },
+            },
+            actor_type="system",
+            actor_id="heartbeat_closeout_governance",
+            execute_immediately=False,
         )
 
     async def _next_event_sequence(self, run_id: str) -> int:
