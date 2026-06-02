@@ -623,6 +623,57 @@ export interface UpdateAgentPayload {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface RuntimeProvider {
+  orgId?: string;
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  name?: string | null;
+  protocol?: string | null;
+  npmPackage?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  hasApiKey?: boolean;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RuntimeModel {
+  orgId?: string;
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  modelId: string;
+  displayName?: string | null;
+  metadata?: Record<string, unknown>;
+  enabled?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateRuntimeProviderPayload {
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  name?: string | null;
+  protocol?: string | null;
+  npmPackage?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "runtimeType" | "providerId">>;
+
+export interface CreateRuntimeModelPayload {
+  modelId: string;
+  displayName?: string | null;
+  metadata?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export type UpdateRuntimeModelPayload = Partial<Omit<CreateRuntimeModelPayload, "modelId">>;
+
 export interface AgentRuntimeState {
   agentId: string;
   orgId?: string;
