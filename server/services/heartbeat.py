@@ -59,6 +59,7 @@ from packages.shared.types.heartbeat import (
 
 from .agents import AgentConflictError
 from .logs import LogReadResult, read_local_file_log
+from .runtime_providers import inject_runtime_provider_config
 from .workspaces import WorkspaceService
 
 
@@ -684,6 +685,12 @@ class HeartbeatService:
                     and "cwd" not in runtime_config
                 ):
                     runtime_config["cwd"] = workspace_data["cwd"]
+            runtime_config = await inject_runtime_provider_config(
+                self._session,
+                org_id=agent.org_id,
+                runtime_type=agent.agent_runtime_type,
+                config=runtime_config,
+            )
             result = await adapter.execute(
                 RuntimeExecutionContext(
                     run_id=running.id,

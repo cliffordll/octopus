@@ -55,15 +55,15 @@ agents.agent_runtime_config.model
 
 4. 执行时 runtime adapter 读取组织 provider/model 配置。
 
-5. 后续 adapter 将配置渲染到 managed OpenCode home：
+5. `opencode_local` adapter 执行前将配置渲染到 managed OpenCode home：
    .octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
 ```
 
 ## OpenCode 配置含义
 
-OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 后续要做的是从
+OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 会在执行前从
 `runtime_providers` 和 `runtime_models` 生成 managed home 内的 OpenCode 配置，
-而不是长期修改用户全局 OpenCode 配置。
+不长期修改用户全局 OpenCode 配置。
 
 示例目标文件：
 
@@ -94,7 +94,7 @@ OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 后续
 }
 ```
 
-## 当前未完成
+## 当前边界
 
-当前 server 端已能维护 provider/model 数据，但还没有把这些数据物理渲染到
-OpenCode managed home。该部分属于后续 `opencode_local` runtime adapter 深化。
+当前 `opencode_local` 已支持从 DB provider/model 生成 managed home 配置。
+`codex_local`、`claude_local` 的 provider/model 渲染仍属于后续 runtime adapter 深化。

@@ -183,14 +183,14 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 
 3. adapter 准备 managed runtime home。
 
-4. 对 opencode_local，后续由 adapter 生成：
+4. 对 `opencode_local`，adapter 执行前生成：
    .octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
 
 5. 启动本地 CLI。
 ```
 
-当前文档描述的 provider/model CRUD 已由 server 支持；把 DB 配置渲染到
-OpenCode/Codex/Claude managed home 属于后续 runtime adapter 深化。
+当前 `opencode_local` 已支持把 DB provider/model 配置渲染到 managed home。
+`codex_local`、`claude_local` 的 provider/model 渲染仍属于后续 runtime adapter 深化。
 
 ## 安全要求
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 import sys
 import uuid
@@ -1341,6 +1342,97 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
         assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
 
 
+async def test_opencode_execute_materializes_database_provider_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_config = operator_home / ".config" / "opencode" / "opencode.json"
+    operator_config.parent.mkdir(parents=True)
+    operator_config.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "local": {
+                        "name": "Wrong Local",
+                        "models": {"deepseek-v4-flash": {"name": "Wrong"}},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful OpenCode process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={
+                "command": "opencode-test",
+                "model": "deepseek/deepseek-v4-flash",
+                "_octopus": {
+                    "runtimeProvider": {
+                        "providerId": "deepseek",
+                        "name": "DeepSeek",
+                        "protocol": "openai_chat_completions",
+                        "npmPackage": "@ai-sdk/openai-compatible",
+                        "baseUrl": "https://deepseek.example/v1",
+                        "apiKey": "sk-db",
+                        "config": {},
+                        "model": {
+                            "modelId": "deepseek-v4-flash",
+                            "displayName": "DeepSeek V4 Flash",
+                            "metadata": {},
+                        },
+                    }
+                },
+            },
+        )
+    )
+
+    managed_config_path = (
+        tmp_path
+        / ".octopus"
+        / "runtime-homes"
+        / "opencode_local"
+        / "org-14"
+        / "agent-14"
+        / "home"
+        / ".config"
+        / "opencode"
+        / "opencode.json"
+    )
+    managed_config = json.loads(managed_config_path.read_text(encoding="utf-8"))
+    provider = managed_config["provider"]["deepseek"]
+    assert provider["name"] == "DeepSeek"
+    assert provider["npm"] == "@ai-sdk/openai-compatible"
+    assert provider["options"]["baseURL"] == "https://deepseek.example/v1"
+    assert provider["options"]["apiKey"] == "sk-db"
+    assert provider["models"]["deepseek-v4-flash"]["name"] == "DeepSeek V4 Flash"
+
+
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1392,6 +1484,9 @@ async def _noop_log(stream: str, chunk: str) -> None:
 def _runtime_context_for_env(
     *, command: str, config: dict[str, Any]
 ) -> RuntimeExecutionContext:
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        runtime_context = {}
     return RuntimeExecutionContext(
         run_id="run-14",
         agent_id="agent-14",
@@ -1400,6 +1495,7 @@ def _runtime_context_for_env(
         config={
             **config,
             "_octopus": {
+                **runtime_context,
                 "taskId": "task-1",
                 "wakeReason": "assignment",
             },
