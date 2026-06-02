@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
+from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from packages.shared.api_paths.issue_attachments import (
@@ -11,18 +13,24 @@ from packages.shared.api_paths.issue_attachments import (
     ISSUE_ATTACHMENTS_PATH,
     ORG_ISSUE_ATTACHMENTS_PATH,
 )
+from packages.shared.api_paths.heartbeat import ISSUE_HEARTBEAT_RUNS_PATH
 from packages.shared.api_paths.issues import (
+    ISSUE_CHECKOUT_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DETAIL_PATH,
+    ISSUE_EXECUTE_PATH,
+    ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ORG_ISSUE_LIST_PATH,
 )
+from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
 from packages.shared.types.issue import IssueDetail, IssueListItem
 from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.validators.issue import (
     validate_create_issue,
     validate_create_issue_comment,
+    validate_checkout_issue,
     validate_list_org_issues_query,
     validate_record_issue_review_decision,
     validate_update_issue,
@@ -33,11 +41,28 @@ from ..dependencies.access import (
     require_actor_identity,
     require_organization_access,
 )
+from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
-from ..services.issues import IssueService
+from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
+from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
+
+
+def _schedule_dispatch(request: Request, agent_id: str) -> None:
+    async def dispatch_after_commit() -> None:
+        # Let the request-scoped transaction close before the dispatcher claims
+        # the queued run with a separate session.
+        await asyncio.sleep(0.05)
+        await dispatch_queued_agent(request.app.state.session_factory, agent_id)
+
+    task = asyncio.create_task(dispatch_after_commit())
+    tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
+    tasks.add(task)
+    request.app.state.heartbeat_dispatch_tasks = tasks
+    task.add_done_callback(tasks.discard)
 
 
 @router.get(ISSUE_LIST_MISSING_ORG_PATH)
@@ -97,6 +122,7 @@ async def create_issue_route(
     orgId: str,
     _: None = Depends(require_organization_access),
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
     try:
@@ -107,12 +133,22 @@ async def create_issue_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    return await service.create_issue(
+    issue = await service.create_issue(
         orgId,
         payload,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
     )
+    await queue_issue_assignment_wakeup(
+        heartbeat,
+        issue,
+        reason="issue_assigned",
+        mutation="create",
+        context_source="issue.create",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+    )
+    return issue
 
 
 @router.get(ISSUE_DETAIL_PATH)
@@ -129,6 +165,164 @@ async def get_issue_route(
         )
     assert_organization_access(request, detail["orgId"])
     return detail
+
+
+@router.get(ISSUE_HEARTBEAT_RUNS_PATH)
+async def list_issue_heartbeat_runs_route(
+    issueId: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> list[dict[str, Any]]:
+    detail = await service.get_by_id(issueId)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    runs = await heartbeat.list_for_issue(issueId)
+    assert runs is not None
+    return runs
+
+
+@router.get(ISSUE_HEARTBEAT_CONTEXT_PATH)
+async def get_issue_heartbeat_context_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+) -> dict[str, Any]:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    context = await service.get_heartbeat_context(id)
+    assert context is not None
+    return context
+
+
+@router.post(ISSUE_CHECKOUT_PATH)
+async def checkout_issue_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    body: dict[str, Any] = Body(...),
+) -> IssueDetail:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        payload = validate_checkout_issue(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    actor = require_actor_identity(request)
+    if actor.actor_type == "agent" and actor.actor_id != payload["agentId"]:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Agent actor cannot checkout for another agent",
+        )
+    try:
+        updated = await service.checkout_issue(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except IssueCheckoutConflictError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if updated is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    await queue_issue_assignment_wakeup(
+        heartbeat,
+        updated,
+        reason="issue_checked_out",
+        mutation="checkout",
+        context_source="issue.checkout",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+    )
+    return updated
+
+
+@router.post(ISSUE_EXECUTE_PATH, response_model=None)
+async def execute_issue_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> HeartbeatRun | JSONResponse:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    assignee_agent_id = detail.get("assigneeAgentId")
+    if not assignee_agent_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Issue must be assigned to an agent before execution",
+        )
+    active = await heartbeat.get_active_for_issue(id)
+    if active is not None:
+        return active
+
+    actor = require_actor_identity(request)
+    payload: WakeAgentPayload = {
+        "source": "assignment",
+        "triggerDetail": "system",
+        "reason": "issue_execute",
+        "idempotencyKey": f"issue:{id}:execute",
+        "payload": {"issueId": id, "mutation": "execute"},
+        "contextSnapshot": {
+            "issueId": id,
+            "source": "issue.execute",
+            "wakeSource": "assignment",
+            "wakeReason": "issue_execute",
+            "issue": {
+                "id": id,
+                "title": detail["title"],
+                "description": detail.get("description"),
+                "status": detail["status"],
+                "priority": detail["priority"],
+            },
+        },
+    }
+    run = await heartbeat.wakeup(
+        assignee_agent_id,
+        payload,
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        execute_immediately=False,
+    )
+    if run is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Issue assignee is not invokable",
+        )
+    enriched = await heartbeat.get(run["id"])
+    assert enriched is not None
+    if enriched["status"] == "queued":
+        _schedule_dispatch(request, enriched["agentId"])
+    return JSONResponse(enriched, status_code=http_status.HTTP_202_ACCEPTED)
 
 
 @router.patch(ISSUE_DETAIL_PATH)

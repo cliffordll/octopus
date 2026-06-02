@@ -171,6 +171,7 @@ async def test_step20_upstream_observability_paths_are_exposed() -> None:
     from packages.shared.api_paths import workspace_operations
 
     assert heartbeat.HEARTBEAT_RUN_LOG_PATH == "/api/heartbeat-runs/{runId}/log"
+    assert heartbeat.ISSUE_HEARTBEAT_RUNS_PATH == "/api/issues/{issueId}/heartbeat-runs"
     assert (
         heartbeat.HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH
         == "/api/heartbeat-runs/{runId}/workspace-operations"
@@ -222,6 +223,40 @@ async def test_heartbeat_run_log_and_workspace_operation_routes(
     assert op_log_headers["cache-control"] == "no-cache, no-store, must-revalidate"
     assert "provision" in op_log_body["content"]
     assert op_log_body["eof"] is True
+
+
+async def test_issue_heartbeat_runs_route_returns_task_execution_summary(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root = app
+    org_id, agent_id, issue_id, run_id = await _seed_observed_run(factory, root)
+
+    code, _, runs = await _request(
+        application, "GET", f"/api/issues/{issue_id}/heartbeat-runs"
+    )
+    detail_code, _, detail = await _request(
+        application, "GET", f"/api/heartbeat-runs/{run_id}"
+    )
+
+    assert code == 200
+    assert len(runs) == 1
+    assert runs[0]["runId"] == run_id
+    assert runs[0]["status"] == "failed"
+    assert runs[0]["agentId"] == agent_id
+    assert runs[0]["issueId"] == issue_id
+    assert runs[0]["issueIdentifier"] is None
+    assert runs[0]["issueTitle"] == "Observed issue"
+    assert runs[0]["summary"] == "failed"
+    assert runs[0]["error"] == "adapter exploded"
+
+    assert detail_code == 200
+    assert detail["id"] == run_id
+    assert detail["issueId"] == issue_id
+    assert detail["issueTitle"] == "Observed issue"
+    assert detail["issueIdentifier"] is None
+    assert detail["projectId"] is None
+    assert detail["goalId"] is None
+    assert detail["contextSnapshot"]["issueId"] == issue_id
 
 
 async def test_run_intelligence_routes_return_upstream_observed_run_shape(

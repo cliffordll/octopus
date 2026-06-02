@@ -207,3 +207,31 @@ provider/model 注入逻辑。`opencode_local` 会生成 managed OpenCode 配置
 - API 不返回明文 `api_key`，只返回 `***REDACTED***` 和 `hasApiKey`。
 - 后续正式方案需要迁移到 secret 引用或加密存储。
 - 删除 provider 会同时删除该 provider 下的 runtime models。
+
+## Chat 创建任务
+
+Chat runtime prompt 明确要求：当用户要求创建任务、issue、work item 或 ticket
+时，智能体不得直接创建 issue，而应返回 `issue_proposal` JSON envelope：
+
+```json
+{
+  "summary": "我可以为你创建这个任务。",
+  "kind": "issue_proposal",
+  "structuredPayload": {
+    "issueProposal": {
+      "title": "分析 rudder 源码",
+      "description": "分析 rudder 源码并整理核心架构。",
+      "priority": "medium"
+    }
+  }
+}
+```
+
+server 会把该 envelope 保存为 `issue_proposal` assistant message，并创建
+`chat_issue_creation` approval。真正创建 issue 仍通过：
+
+```text
+POST /api/chats/{id}/convert-to-issue
+```
+
+这样保留用户确认边界，避免普通对话自动落库创建任务。
