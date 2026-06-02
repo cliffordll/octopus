@@ -298,15 +298,125 @@ small {
 }
 
 .settings-dialog {
+  background: #0b1018;
+  border-color: #273244;
   max-height: min(760px, calc(100vh - 56px));
   max-width: 960px;
-  overflow: auto;
+  overflow: hidden;
   width: min(960px, calc(100vw - 48px));
+}
+
+.settings-dialog .modal-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.settings-dialog .modal-header h2 {
+  margin: 0;
+}
+
+.settings-dialog .modal-header .eyebrow {
+  margin: 0 0 4px;
+}
+
+.settings-dialog .modal-header .ghost {
+  align-self: flex-start;
 }
 
 .runtime-settings {
   display: grid;
+  gap: 10px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.runtime-provider-heading {
+  align-items: center;
+  display: grid;
+  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 0;
+}
+
+.runtime-provider-heading .runtime-type-select {
+  flex-shrink: 0;
+  justify-self: end;
+}
+
+.organization-settings-panel {
+  display: grid;
   gap: 16px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: min(560px, calc(100vh - 180px));
+  min-height: 420px;
+}
+
+.settings-section-nav {
+  background: #070b11;
+  border: 1px solid #273244;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 8px;
+}
+
+.settings-section-nav button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #c5d1e4;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  text-align: left;
+}
+
+.settings-section-nav button:hover,
+.settings-section-nav button.active {
+  background: #111827;
+  border-color: #273244;
+}
+
+.settings-section-nav strong {
+  color: #e6edf7;
+  font-size: 13px;
+}
+
+.settings-section-nav span {
+  color: #8b99ad;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.settings-section-content {
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-empty-section {
+  align-content: start;
+  background: #0b1018;
+  border: 1px solid #273244;
+  border-radius: 14px;
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  padding: 18px;
+}
+
+.settings-empty-section h3,
+.settings-empty-section p {
+  margin: 0;
+}
+
+.settings-section-content > .runtime-settings {
+  height: 100%;
+  overflow: hidden;
 }
 
 .runtime-settings-grid {
@@ -316,10 +426,13 @@ small {
 }
 
 .runtime-settings-column {
-  border: 1px solid #e4e8f0;
+  align-content: start;
+  background: #0b1018;
+  border: 1px solid #273244;
   border-radius: 14px;
   display: grid;
   gap: 12px;
+  grid-template-rows: auto minmax(0, 1fr);
   padding: 14px;
 }
 
@@ -336,11 +449,65 @@ small {
 }
 
 .runtime-settings-title h4 {
+  color: #e6edf7;
   margin: 0;
+}
+
+.runtime-provider-title-line {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-section-heading-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-section-heading-copy .eyebrow {
+  margin: 0;
+}
+
+.runtime-provider-title-line h3,
+.runtime-provider-title-line p {
+  margin: 0;
+}
+
+.runtime-provider-title-line p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-type-select {
+  align-items: center;
+  color: #8b99ad;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.runtime-type-select select,
+.runtime-provider-dialog input,
+.runtime-provider-dialog select {
+  background: #070b11;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  color: #e6edf7;
+}
+
+.runtime-provider-dialog input:focus,
+.runtime-provider-dialog select:focus,
+.runtime-type-select select:focus {
+  border-color: #3a4659;
+  outline: none;
 }
 
 .runtime-provider-list,
 .runtime-model-list {
+  align-content: start;
   display: grid;
   gap: 8px;
   max-height: 220px;
@@ -348,16 +515,19 @@ small {
 }
 
 .runtime-provider-section {
-  min-height: 420px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .runtime-provider-group-list {
-  max-height: 520px;
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .runtime-provider-group {
-  background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
-  border: 1px solid #334155;
+  background: #0f1723;
+  border: 1px solid transparent;
   border-radius: 12px;
   display: grid;
   gap: 10px;
@@ -365,7 +535,7 @@ small {
 }
 
 .runtime-provider-group:hover {
-  border-color: #475569;
+  border-color: #273244;
 }
 
 .runtime-provider-group-header {
@@ -394,8 +564,8 @@ small {
 
 .icon-menu-button {
   align-items: center;
-  background: #1e293b;
-  border: 1px solid #475569;
+  background: #111827;
+  border: 1px solid #273244;
   border-radius: 999px;
   color: #e2e8f0;
   display: inline-flex;
@@ -410,14 +580,14 @@ small {
 
 .icon-menu-button:hover:not(:disabled),
 .icon-menu-button[aria-expanded="true"] {
-  background: #334155;
-  border-color: #64748b;
+  background: #151c2a;
+  border-color: #3a4659;
   color: #f8fafc;
 }
 
 .runtime-action-popover {
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: #0b1018;
+  border: 1px solid #273244;
   border-radius: 10px;
   box-shadow: 0 16px 32px rgb(0 0 0 / 28%);
   display: grid;
@@ -434,18 +604,19 @@ small {
   background: transparent;
   border: 0;
   border-radius: 8px;
-  color: #e2e8f0;
+  color: #c5d1e4;
   display: flex;
   font-size: 12px;
-  justify-content: flex-start;
+  justify-content: flex-end;
   min-height: 30px;
   padding: 0 10px;
-  text-align: left;
+  text-align: right;
+  width: 100%;
 }
 
 .runtime-action-popover button:hover:not(:disabled) {
-  background: #1e293b;
-  color: #f8fafc;
+  background: #151c2a;
+  color: #fff;
 }
 
 .runtime-action-popover button.danger {
@@ -479,9 +650,9 @@ small {
 }
 
 .runtime-provider-list .runtime-provider-actions .icon-menu-button {
-  background: #1e293b;
-  border-color: #475569;
-  color: #e2e8f0;
+  background: #111827;
+  border-color: #273244;
+  color: #c5d1e4;
   display: inline-flex;
   gap: 0;
   padding: 0 10px;
@@ -490,9 +661,9 @@ small {
 
 .runtime-provider-list .runtime-provider-actions .icon-menu-button:hover:not(:disabled),
 .runtime-provider-list .runtime-provider-actions .icon-menu-button[aria-expanded="true"] {
-  background: #334155;
-  border-color: #64748b;
-  color: #f8fafc;
+  background: #151c2a;
+  border-color: #3a4659;
+  color: #fff;
 }
 
 .runtime-model-create-button:hover:not(:disabled) {
@@ -512,7 +683,7 @@ small {
 .runtime-provider-group-header span,
 .runtime-provider-group-header small,
 .runtime-provider-group-header em {
-  color: #cbd5e1;
+  color: #8b99ad;
   font-size: 12px;
   font-style: normal;
 }
@@ -523,16 +694,16 @@ small {
 
 .runtime-provider-group .runtime-model-list article {
   align-items: flex-start;
-  background: #0f172a;
-  border-color: #334155;
-  color: #e5e7eb;
+  background: #070b11;
+  border-color: transparent;
+  color: #e6edf7;
   display: flex;
   gap: 12px;
   justify-content: space-between;
 }
 
 .runtime-provider-group .runtime-model-list span {
-  color: #94a3b8;
+  color: #8b99ad;
 }
 
 .runtime-model-title-line,
@@ -579,7 +750,7 @@ small {
 }
 
 .runtime-model-id {
-  color: #94a3b8;
+  color: #8b99ad;
   max-width: 320px;
 }
 
@@ -611,18 +782,29 @@ small {
   text-align: center;
 }
 
+.runtime-provider-list .runtime-model-actions .icon-action-button {
+  font-size: 13px;
+  height: 22px;
+  padding: 0;
+  width: 24px;
+}
+
+.runtime-model-actions .icon-action-button span {
+  line-height: 1;
+}
+
 .runtime-model-actions .small-button {
   font-weight: 500;
 }
 
 .runtime-provider-group .secondary.small-button {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: #111827;
+  color: #c5d1e4;
 }
 
 .runtime-provider-group .secondary.small-button:hover:not(:disabled) {
-  background: #334155;
-  color: #f8fafc;
+  background: #151c2a;
+  color: #fff;
 }
 
 .runtime-provider-group .secondary.danger.small-button {
@@ -637,10 +819,10 @@ small {
 
 .runtime-provider-list button,
 .runtime-model-list article {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: #070b11;
+  border: 1px solid transparent;
   border-radius: 10px;
-  color: #1f2937;
+  color: #e6edf7;
   display: grid;
   gap: 3px;
   padding: 10px;
@@ -648,36 +830,56 @@ small {
 }
 
 .runtime-provider-list button.selected {
-  background: #fff7ed;
-  border-color: #fb923c;
+  background: #151c2a;
+  border-color: #3a4659;
+}
+
+.runtime-provider-list button:hover,
+.runtime-model-list article:hover {
+  border-color: #273244;
 }
 
 .runtime-provider-list span,
 .runtime-model-list span {
-  color: #64748b;
+  color: #8b99ad;
   font-size: 12px;
 }
 
 .runtime-provider-list small,
 .runtime-provider-list em {
-  color: #64748b;
+  color: #8b99ad;
   font-size: 11px;
   font-style: normal;
 }
 
 .runtime-settings-form {
-  border-top: 1px solid #e4e8f0;
+  border-top: 1px solid #273244;
   display: grid;
   gap: 10px;
   padding-top: 12px;
 }
 
 .runtime-provider-dialog {
+  background: #0b1018;
+  border-color: #273244;
   max-width: 520px;
   width: min(520px, calc(100vw - 48px));
 }
 
 @media (max-width: 900px) {
+  .organization-settings-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-section-nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .settings-section-nav button {
+    min-width: 140px;
+  }
+
   .runtime-settings-grid {
     grid-template-columns: 1fr;
   }
@@ -2762,11 +2964,12 @@ small {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 150px;
+  min-width: 0;
   padding: 6px;
   position: absolute;
-  right: 4px;
+  right: 0;
   top: 32px;
+  width: min(190px, 100%);
   z-index: 20;
 }
 
@@ -2778,7 +2981,9 @@ small {
   cursor: pointer;
   font-size: 12px;
   padding: 7px 8px;
-  text-align: left;
+  justify-content: flex-end;
+  text-align: right;
+  width: 100%;
 }
 
 .chat-conversation-menu button:hover {
@@ -2790,21 +2995,25 @@ small {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .chat-conversation-menu input {
   background: #070b11;
   border: 1px solid #273244;
   border-radius: 7px;
+  box-sizing: border-box;
   color: #e6edf7;
   font-size: 12px;
+  min-width: 0;
   padding: 7px 8px;
-  width: 180px;
+  width: 100%;
 }
 
 .chat-conversation-menu-actions {
   display: flex;
   gap: 6px;
+  justify-content: flex-end;
 }
 
 .context-action-notice {

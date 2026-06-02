@@ -4,7 +4,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
 import { ProjectCreateDialog } from "../pages/ProjectsPage";
-import { RuntimeProviderSettings } from "./RuntimeProviderSettings";
+import { OrganizationSettingsPanel } from "./OrganizationSettingsPanel";
 
 function organizationTarget(pathname: string, orgId: string) {
   const section = pathname.match(
@@ -218,15 +218,15 @@ export function AppShell() {
           <div aria-label="设置" aria-modal="true" className="panel settings-dialog" role="dialog">
             <div className="modal-header">
               <div>
+                <p className="eyebrow">Settings</p>
                 <h2>设置</h2>
-                <p className="muted">维护当前组织的运行时 provider 和 model。</p>
               </div>
               <button aria-label="关闭设置" className="ghost" onClick={() => setSettingsOpen(false)} type="button">
                 关闭
               </button>
             </div>
             {selectedOrganizationId ? (
-              <RuntimeProviderSettings orgId={selectedOrganizationId} />
+              <OrganizationSettingsPanel orgId={selectedOrganizationId} />
             ) : (
               <p className="muted">请选择组织后再配置模型供应商。</p>
             )}
