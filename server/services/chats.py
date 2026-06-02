@@ -721,13 +721,21 @@ class ChatService:
         structured_payload = _with_persisted_transcript(
             _assistant_structured_payload(result_json), transcript
         )
-        approval_id = await self._create_proposal_approval(
-            conversation,
-            kind=assistant_kind,
-            structured_payload=structured_payload,
-            requested_by_user_id=conversation.created_by_user_id,
-            replying_agent_id=agent.id,
+        should_auto_create_issue = (
+            assistant_kind == "issue_proposal"
+            and _chat_issue_creation_mode(conversation.issue_creation_mode)
+            == "auto_create"
+            and not conversation.plan_mode
         )
+        approval_id = None
+        if not should_auto_create_issue:
+            approval_id = await self._create_proposal_approval(
+                conversation,
+                kind=assistant_kind,
+                structured_payload=structured_payload,
+                requested_by_user_id=conversation.created_by_user_id,
+                replying_agent_id=agent.id,
+            )
         assistant_message_at = max(
             datetime.now(UTC), user_message_at + timedelta(microseconds=1)
         )
@@ -752,14 +760,19 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, assistant_message.created_at
         )
+        messages = [self._to_message(user_message), self._to_message(assistant_message)]
+        if should_auto_create_issue:
+            converted = await self.convert_to_issue(
+                conversation.id,
+                {"messageId": assistant_message.id},
+                actor_type="agent",
+                actor_id=agent.id,
+            )
+            if converted is not None:
+                messages.append(converted["systemMessage"])
         if commit_after_user_message:
             await self._session.commit()
-        return {
-            "messages": [
-                self._to_message(user_message),
-                self._to_message(assistant_message),
-            ]
-        }
+        return {"messages": messages}
 
     async def _create_proposal_approval(
         self,
