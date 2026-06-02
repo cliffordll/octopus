@@ -1026,7 +1026,9 @@ class HeartbeatService:
     async def _queue_issue_passive_followup_if_needed(
         self, agent: AgentRow, final: HeartbeatRunRow
     ) -> None:
-        context = final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
+        context = (
+            final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
+        )
         if context.get("wakeReason") == "issue_passive_followup":
             return
         issue_id = _issue_id_from_context(context)
