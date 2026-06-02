@@ -120,6 +120,7 @@ it("creates the first agent as the organization CEO", async () => {
 
   await userEvent.type(screen.getByLabelText("智能体名称"), "Founder");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
+  await userEvent.type(await screen.findByLabelText("模型配置"), "openai/gpt-5");
   await userEvent.click(screen.getByRole("button", { name: "创建 CEO" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -130,13 +131,13 @@ it("creates the first agent as the organization CEO", async () => {
         name: "Founder",
         role: "ceo",
         agentRuntimeType: "codex_local",
-        agentRuntimeConfig: {},
+        agentRuntimeConfig: { model: "openai/gpt-5" },
       }),
     }),
   );
 });
 
-it("requires provider/model when creating an opencode local agent", async () => {
+it("requires provider/model when creating a model-provider runtime agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
@@ -158,13 +159,13 @@ it("requires provider/model when creating an opencode local agent", async () => 
   await userEvent.type(await screen.findByLabelText("智能体名称"), "OpenCode Agent");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "opencode_local");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
-  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/orgs/org-1/agents",
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.selectOptions(await screen.findByLabelText("OpenCode model"), "deepseek/deepseek-v4-flash");
+  await userEvent.selectOptions(await screen.findByLabelText("模型配置"), "deepseek/deepseek-v4-flash");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/agents",
@@ -193,6 +194,9 @@ it("manages runtime providers and models from settings", async () => {
         { providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
         { providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=codex_local" && init?.method === "GET") {
+      return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
@@ -227,15 +231,18 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
+  expect(dialog.getByRole("button", { name: /供应商/ })).toHaveClass("active");
+  expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
+  expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
-  expect(kimiProvider.queryByRole("button", { name: "编辑 Provider" })).not.toBeInTheDocument();
+  expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
   expect(kimiProvider.getByRole("button", { name: "Kimi 更多操作" })).toBeInTheDocument();
-  expect(kimiProvider.getByRole("button", { name: "编辑" })).toBeInTheDocument();
+  expect(kimiProvider.getByRole("button", { name: "禁用" })).toBeInTheDocument();
   expect(kimiProvider.getByRole("button", { name: "删除" })).toBeInTheDocument();
   expect(dialog.queryByLabelText("Provider ID")).not.toBeInTheDocument();
 
@@ -255,7 +262,7 @@ it("manages runtime providers and models from settings", async () => {
   );
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "Kimi 更多操作" }));
-  await userEvent.click(kimiProvider.getByRole("menuitem", { name: "编辑 Provider" }));
+  await userEvent.click(kimiProvider.getByRole("menuitem", { name: "编辑" }));
   const providerEditDialog = within(screen.getByRole("dialog", { name: "编辑 Provider" }));
   await userEvent.clear(providerEditDialog.getByLabelText("Provider 名称"));
   await userEvent.type(providerEditDialog.getByLabelText("Provider 名称"), "Kimi Updated");
@@ -265,6 +272,16 @@ it("manages runtime providers and models from settings", async () => {
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"name":"Kimi Updated"'),
+    }),
+  );
+
+  await userEvent.click(kimiProvider.getByRole("button", { name: "Kimi 更多操作" }));
+  await userEvent.click(kimiProvider.getByRole("menuitem", { name: "禁用" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"enabled":false'),
     }),
   );
 
@@ -295,6 +312,15 @@ it("manages runtime providers and models from settings", async () => {
     }),
   );
 
+  await userEvent.click(kimiProvider.getByRole("button", { name: "禁用" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"enabled":false'),
+    }),
+  );
+
   await userEvent.click(kimiProvider.getByRole("button", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
@@ -302,10 +328,16 @@ it("manages runtime providers and models from settings", async () => {
   );
 
   await userEvent.click(openrouterProvider.getByRole("button", { name: "OpenRouter 更多操作" }));
-  await userEvent.click(openrouterProvider.getByRole("menuitem", { name: "删除 Provider" }));
+  await userEvent.click(openrouterProvider.getByRole("menuitem", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/runtime-providers/openrouter?runtimeType=opencode_local",
     expect.objectContaining({ method: "DELETE" }),
+  );
+
+  await userEvent.selectOptions(dialog.getByLabelText("运行时"), "codex_local");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers?runtimeType=codex_local",
+    expect.objectContaining({ method: "GET" }),
   );
 });
 

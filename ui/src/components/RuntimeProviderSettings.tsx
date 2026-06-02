@@ -2,14 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRuntimeType, RuntimeModel, RuntimeProvider } from "../api/types";
+import { MODEL_PROVIDER_RUNTIMES } from "../utils/runtimeModels";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
-const RUNTIME_TYPE: AgentRuntimeType = "opencode_local";
 const DEFAULT_PROTOCOL = "openai_chat_completions";
 
 export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const queryClient = useQueryClient();
+  const [runtimeType, setRuntimeType] = useState<AgentRuntimeType>("opencode_local");
   const [providerId, setProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -23,8 +24,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const [editingModel, setEditingModel] = useState<{ providerId: string; model: RuntimeModel } | null>(null);
 
   const providers = useQuery({
-    queryKey: ["runtime-providers", orgId, RUNTIME_TYPE],
-    queryFn: () => runtimeProvidersApi.listProviders(orgId, RUNTIME_TYPE),
+    queryKey: ["runtime-providers", orgId, runtimeType],
+    queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
     enabled: Boolean(orgId),
   });
   const providerRows = providers.data ?? [];
@@ -32,7 +33,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const createProvider = useMutation({
     mutationFn: () =>
       runtimeProvidersApi.createProvider(orgId, {
-        runtimeType: RUNTIME_TYPE,
+        runtimeType,
         providerId: providerId.trim(),
         name: providerName.trim() || providerId.trim(),
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
@@ -47,14 +48,14 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       setApiKey("");
       setProtocol(DEFAULT_PROTOCOL);
       setProviderDialogOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, RUNTIME_TYPE] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
   const updateProvider = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateProvider(orgId, RUNTIME_TYPE, editingProvider!.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, editingProvider!.providerId, {
         name: providerName.trim() || editingProvider!.providerId,
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
         baseUrl: baseUrl.trim() || null,
@@ -63,14 +64,25 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       }),
     onSuccess: () => {
       clearProviderForm();
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, RUNTIME_TYPE] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+    },
+  });
+
+  const toggleProvider = useMutation({
+    mutationFn: (provider: RuntimeProvider) =>
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, provider.providerId, {
+        enabled: provider.enabled === false,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
   const createModel = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.createModel(orgId, RUNTIME_TYPE, modelDialogProviderId, {
+      runtimeProvidersApi.createModel(orgId, runtimeType, modelDialogProviderId, {
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
         enabled: true,
@@ -79,14 +91,14 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       setModelId("");
       setModelName("");
       setModelDialogProviderId("");
-      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, RUNTIME_TYPE, modelDialogProviderId] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, modelDialogProviderId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
   const updateModel = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateModel(orgId, RUNTIME_TYPE, editingModel!.providerId, editingModel!.model.modelId, {
+      runtimeProvidersApi.updateModel(orgId, runtimeType, editingModel!.providerId, editingModel!.model.modelId, {
         displayName: modelName.trim() || editingModel!.model.modelId,
         enabled: editingModel!.model.enabled !== false,
       }),
@@ -94,26 +106,37 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       const providerId = editingModel?.providerId;
       clearModelForm();
       if (providerId) {
-        void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, RUNTIME_TYPE, providerId] });
+        void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, providerId] });
       }
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+    },
+  });
+
+  const toggleModel = useMutation({
+    mutationFn: ({ model, providerId }: { model: RuntimeModel; providerId: string }) =>
+      runtimeProvidersApi.updateModel(orgId, runtimeType, providerId, model.modelId, {
+        enabled: model.enabled === false,
+      }),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, variables.providerId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
   const deleteProvider = useMutation({
-    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, RUNTIME_TYPE, provider.providerId),
+    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, runtimeType, provider.providerId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, RUNTIME_TYPE] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
   const deleteModel = useMutation({
     mutationFn: ({ model, providerId }: { model: RuntimeModel; providerId: string }) =>
-      runtimeProvidersApi.deleteModel(orgId, RUNTIME_TYPE, providerId, model.modelId),
+      runtimeProvidersApi.deleteModel(orgId, runtimeType, providerId, model.modelId),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, RUNTIME_TYPE, variables.providerId] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, RUNTIME_TYPE] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, variables.providerId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
     },
   });
 
@@ -170,6 +193,10 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     deleteModel.mutate({ providerId, model });
   }
 
+  function toggleModelEnabled(providerId: string, model: RuntimeModel) {
+    toggleModel.mutate({ providerId, model });
+  }
+
   function submitProvider(event: FormEvent) {
     event.preventDefault();
     if (editingProvider) {
@@ -190,12 +217,29 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
 
   return (
     <section className="runtime-settings" aria-label="模型供应商设置">
-      <div className="panel-heading">
-        <div>
+      <div className="panel-heading runtime-provider-heading">
+        <div className="settings-section-heading-copy">
           <p className="eyebrow">Runtime Providers</p>
-          <h3>模型供应商</h3>
+          <div className="runtime-provider-title-line">
+            <h3>模型供应商</h3>
+            <p className="muted">维护当前组织的运行时 provider 和 model。</p>
+          </div>
         </div>
-        <Badge>{RUNTIME_TYPE}</Badge>
+        <label className="runtime-type-select">
+          运行时
+          <select
+            value={runtimeType}
+            onChange={(event) => {
+              clearProviderForm();
+              clearModelForm();
+              setRuntimeType(event.target.value as AgentRuntimeType);
+            }}
+          >
+            {MODEL_PROVIDER_RUNTIMES.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </label>
       </div>
       <section className="runtime-settings-column runtime-provider-section">
         <div className="runtime-settings-title">
@@ -216,8 +260,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
               onDeleteProvider={() => confirmDeleteProvider(provider)}
               onEditModel={(model) => openModelEdit(provider.providerId, model)}
               onEditProvider={() => openProviderEdit(provider)}
+              onToggleModel={(model) => toggleModelEnabled(provider.providerId, model)}
+              onToggleProvider={() => toggleProvider.mutate(provider)}
               orgId={orgId}
               provider={provider}
+              runtimeType={runtimeType}
             />
           ))}
         </div>
@@ -225,6 +272,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       {providers.error && <ErrorNotice error={providers.error} />}
       {deleteProvider.error && <ErrorNotice error={deleteProvider.error} />}
       {deleteModel.error && <ErrorNotice error={deleteModel.error} />}
+      {toggleProvider.error && <ErrorNotice error={toggleProvider.error} />}
+      {toggleModel.error && <ErrorNotice error={toggleModel.error} />}
       {providerDialogOpen && (
         <div
           className="modal-backdrop"
@@ -406,20 +455,26 @@ function ProviderModelGroup({
   onDeleteProvider,
   onEditModel,
   onEditProvider,
+  onToggleModel,
+  onToggleProvider,
   orgId,
   provider,
+  runtimeType,
 }: {
   onCreateModel: () => void;
   onDeleteModel: (model: RuntimeModel) => void;
   onDeleteProvider: () => void;
   onEditModel: (model: RuntimeModel) => void;
   onEditProvider: () => void;
+  onToggleModel: (model: RuntimeModel) => void;
+  onToggleProvider: () => void;
   orgId: string;
   provider: RuntimeProvider;
+  runtimeType: AgentRuntimeType;
 }) {
   const models = useQuery({
-    queryKey: ["runtime-models", orgId, RUNTIME_TYPE, provider.providerId],
-    queryFn: () => runtimeProvidersApi.listModels(orgId, RUNTIME_TYPE, provider.providerId),
+    queryKey: ["runtime-models", orgId, runtimeType, provider.providerId],
+    queryFn: () => runtimeProvidersApi.listModels(orgId, runtimeType, provider.providerId),
     enabled: Boolean(orgId && provider.providerId),
   });
   const providerName = provider.name || provider.providerId;
@@ -472,7 +527,17 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  编辑 Provider
+                  编辑
+                </button>
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    onToggleProvider();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  {provider.enabled === false ? "启用" : "禁用"}
                 </button>
                 <button
                   className="danger"
@@ -483,7 +548,7 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  删除 Provider
+                  删除
                 </button>
               </div>
             )}
@@ -500,8 +565,33 @@ function ProviderModelGroup({
                   <Badge>{model.enabled === false ? "disabled" : "enabled"}</Badge>
                 </div>
                 <div className="runtime-model-actions">
-                  <button className="secondary small-button" onClick={() => onEditModel(model)} type="button">编辑</button>
-                  <button className="secondary danger small-button" onClick={() => onDeleteModel(model)} type="button">删除</button>
+                  <button
+                    aria-label={model.enabled === false ? "启用" : "禁用"}
+                    className="secondary icon-action-button small-button"
+                    onClick={() => onToggleModel(model)}
+                    title={model.enabled === false ? "启用" : "禁用"}
+                    type="button"
+                  >
+                    <span aria-hidden="true">{model.enabled === false ? "▶" : "⏸"}</span>
+                  </button>
+                  <button
+                    aria-label="编辑"
+                    className="secondary icon-action-button small-button"
+                    onClick={() => onEditModel(model)}
+                    title="编辑"
+                    type="button"
+                  >
+                    <span aria-hidden="true">✎</span>
+                  </button>
+                  <button
+                    aria-label="删除"
+                    className="secondary danger icon-action-button small-button"
+                    onClick={() => onDeleteModel(model)}
+                    title="删除"
+                    type="button"
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
                 </div>
               </div>
               <span className="runtime-model-id">{model.modelId}</span>
