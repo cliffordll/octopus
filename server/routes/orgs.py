@@ -6,6 +6,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from packages.shared.api_paths.issues import ORG_ISSUE_LIST_MISSING_ORG_PATH
 from packages.shared.api_paths.organizations import (
+    ORG_ARCHIVE_PATH,
     ORG_DETAIL_PATH,
     ORG_LIST_PATH,
     ORG_RESOURCE_DETAIL_PATH,
@@ -139,6 +140,27 @@ async def update_org_resource(
             detail="Organization resource not found",
         )
     return updated
+
+
+@router.post(ORG_ARCHIVE_PATH)
+async def archive_org(
+    request: Request,
+    orgId: str,
+    _: None = Depends(require_board_access),
+    service: OrgService = Depends(get_org_service),
+) -> OrganizationDetail:
+    actor = require_actor_identity(request)
+    archived = await service.archive(
+        orgId,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if archived is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+    return archived
 
 
 @router.delete(ORG_RESOURCE_DETAIL_PATH)
