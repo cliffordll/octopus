@@ -37,6 +37,9 @@ def test_agent_create_lifecycle_and_invoke_use_existing_routes() -> None:
     )
     assert main(["agent", "pause", "agent-1"], client=client, stdout=io.StringIO()) == 0
     assert (
+        main(["agent", "archive", "agent-1"], client=client, stdout=io.StringIO()) == 0
+    )
+    assert (
         main(["agent", "invoke", "agent-1"], client=client, stdout=io.StringIO()) == 0
     )
     assert requests[0].url.path == "/api/orgs/org-1/agents"
@@ -45,7 +48,8 @@ def test_agent_create_lifecycle_and_invoke_use_existing_routes() -> None:
         == b'{"name":"Builder","role":"engineer","agentRuntimeType":"process","agentRuntimeConfig":{}}'
     )
     assert requests[1].url.path == "/api/agents/agent-1/pause"
-    assert requests[2].url.path == "/api/agents/agent-1/heartbeat/invoke"
+    assert requests[2].url.path == "/api/agents/agent-1/archive"
+    assert requests[3].url.path == "/api/agents/agent-1/heartbeat/invoke"
 
 
 def test_agent_bootstrap_ceo_only_creates_for_empty_organization() -> None:

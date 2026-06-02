@@ -54,6 +54,10 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     _add_policy_arguments(update_parser)
     update_parser.set_defaults(handler=update_organization)
 
+    archive_parser = actions.add_parser("archive", help="Archive an organization")
+    archive_parser.add_argument("org_id")
+    archive_parser.set_defaults(handler=archive_organization)
+
     resource_list_parser = actions.add_parser(
         "resource-list", help="List organization resources"
     )
@@ -180,6 +184,10 @@ def update_organization(args: argparse.Namespace, client: ApiClient) -> Any:
     if not payload:
         raise ValueError("At least one update field is required.")
     return client.request("PATCH", f"/api/orgs/{args.org_id}", json=payload)
+
+
+def archive_organization(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("POST", f"/api/orgs/{args.org_id}/archive", json={})
 
 
 def _json_object_or_none(value: str | None) -> dict[str, Any] | None:

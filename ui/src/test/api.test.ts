@@ -33,13 +33,21 @@ afterEach(() => {
 
 describe("organization API", () => {
   it("lists organizations", async () => {
-    const fetchMock = vi.fn().mockReturnValue(jsonResponse([{ id: "org-1", name: "Core" }]));
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "org-1", name: "Core" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "org-1", name: "Core", status: "archived" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(organizationsApi.list()).resolves.toEqual([{ id: "org-1", name: "Core" }]);
+    await organizationsApi.archive("org-1");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/orgs",
       expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/orgs/org-1/archive",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
@@ -264,6 +272,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "revision-1" }))
       .mockReturnValueOnce(jsonResponse({ id: "agent-1" }))
       .mockReturnValueOnce(jsonResponse({ agentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ id: "agent-1", status: "terminated" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "queued" }, 202));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -274,6 +283,7 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.configRevision("agent-1", "revision-1");
     await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
     await agentsApi.resetSession("agent-1", { taskKey: "task-1" });
+    await agentsApi.archive("agent-1");
     await heartbeatApi.wakeup("agent-1", {
       source: "on_demand",
       triggerDetail: "manual",
@@ -302,6 +312,11 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
+      "/api/agents/agent-1/archive",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
       "/api/agents/agent-1/wakeup",
       expect.objectContaining({
         method: "POST",

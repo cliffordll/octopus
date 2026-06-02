@@ -159,6 +159,9 @@ it("loads organization settings from the avatar destination route", async () => 
     if (path === "/api/orgs/org-1" && init?.method === "PATCH") {
       return respond({ id: "org-1", name: "核心团队" });
     }
+    if (path === "/api/orgs/org-1/archive" && init?.method === "POST") {
+      return respond({ id: "org-1", name: "核心团队", status: "archived" });
+    }
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -177,6 +180,11 @@ it("loads organization settings from the avatar destination route", async () => 
       method: "PATCH",
       body: expect.stringContaining('"requireBoardApprovalForNewAgents":false'),
     }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "归档组织" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/archive",
+    expect.objectContaining({ method: "POST" }),
   );
   expect(screen.getByRole("button", { name: "保存组织" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();

@@ -82,6 +82,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "DELETE") {
       return respond({ path: new URL(`http://local${path}`).searchParams.get("path"), content: "", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
     }
+    if (path === "/api/agents/agent-1/archive" && init?.method === "POST") return respond({ ...agent, status: "terminated" });
     return respond({ ...agent, status: "paused" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -99,6 +100,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "暂停" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "恢复" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
+  expect(within(header!).getByRole("button", { name: "归档" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "唤醒" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行心跳" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
@@ -165,6 +167,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
   await userEvent.click(screen.getByRole("button", { name: "唤醒" }));
   await userEvent.click(screen.getByRole("button", { name: "运行心跳" }));
+  await userEvent.click(screen.getByRole("button", { name: "归档" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/pause",
     expect.objectContaining({ method: "POST" }),
@@ -175,6 +178,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
   );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/heartbeat/invoke",
+    expect.objectContaining({ method: "POST" }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/archive",
     expect.objectContaining({ method: "POST" }),
   );
 });

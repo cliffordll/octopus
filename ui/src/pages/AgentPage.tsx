@@ -630,7 +630,7 @@ export function AgentPage() {
     setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
   const action = useMutation({
-    mutationFn: (operation: "pause" | "resume" | "terminate") => agentsApi[operation](agentId),
+    mutationFn: (operation: "pause" | "resume" | "terminate" | "archive") => agentsApi[operation](agentId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
@@ -929,6 +929,7 @@ export function AgentPage() {
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
             <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("archive")}>归档</button>
             <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
