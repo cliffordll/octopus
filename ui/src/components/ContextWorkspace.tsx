@@ -85,6 +85,19 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
     setChatActionNotice("聊天 ID 已复制");
     setOpenMenuId(null);
   }
+  useEffect(() => {
+    if (!openMenuId) return;
+    function closeMenuOnOutsidePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const row = target.closest("[data-chat-conversation-row]");
+      if (row?.getAttribute("data-chat-id") === openMenuId) return;
+      setOpenMenuId(null);
+      setRenamingChatId(null);
+    }
+    document.addEventListener("pointerdown", closeMenuOnOutsidePointerDown);
+    return () => document.removeEventListener("pointerdown", closeMenuOnOutsidePointerDown);
+  }, [openMenuId]);
   return (
     <ContextWorkspace
       contentClassName={contentClassName}
@@ -117,7 +130,7 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
                 const menuOpen = openMenuId === chat.id;
                 const renaming = renamingChatId === chat.id;
                 return (
-                  <div className="chat-conversation-row" key={chat.id}>
+                  <div className="chat-conversation-row" data-chat-conversation-row data-chat-id={chat.id} key={chat.id}>
                     <NavLink to={`/orgs/${orgId}/chats/${chat.id}`}>
                       <span aria-hidden="true" className="context-entry-icon">C</span>
                       <span className="context-item-copy">
