@@ -74,6 +74,7 @@ from packages.shared.types.chat import (
     UpdateChatConversationUserStatePayload,
 )
 from .issues import IssueService
+from .runtime_providers import inject_runtime_provider_config
 
 
 class ChatAvailabilityError(ValueError):
@@ -678,6 +679,12 @@ class ChatService:
             **runtime_context,
             "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
         }
+        config = await inject_runtime_provider_config(
+            self._session,
+            org_id=agent.org_id,
+            runtime_type=agent.agent_runtime_type,
+            config=config,
+        )
         transcript: list[ChatStreamTranscriptEntry] = []
 
         async def capture_stream_event(event: dict[str, Any]) -> None:
