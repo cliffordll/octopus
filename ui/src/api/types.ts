@@ -68,6 +68,9 @@ export interface IssueDetail extends IssueListItem {
   requestDepth: number;
   startedAt: string | null;
   completedAt: string | null;
+  cancelledAt?: string | null;
+  createdByAgentId?: string | null;
+  createdByUserId?: string | null;
   workProducts?: IssueWorkProduct[];
   createdAt: string;
 }
@@ -116,6 +119,7 @@ export interface CreateIssuePayload {
   priority?: IssuePriority;
   projectId?: string | null;
   goalId?: string | null;
+  parentId?: string | null;
   assigneeAgentId?: string | null;
   assigneeUserId?: string | null;
   reviewerAgentId?: string | null;
@@ -127,6 +131,13 @@ export interface UpdateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  projectId?: string | null;
+  goalId?: string | null;
+  parentId?: string | null;
+  assigneeAgentId?: string | null;
+  assigneeUserId?: string | null;
+  reviewerAgentId?: string | null;
+  reviewerUserId?: string | null;
 }
 
 export type GoalLevel = "organization" | "team" | "agent" | "task";
