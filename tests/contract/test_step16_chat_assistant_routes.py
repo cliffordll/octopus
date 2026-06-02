@@ -21,8 +21,12 @@ class FakeChatAdapter:
 
     def __init__(self, replies: list[dict[str, Any]]) -> None:
         self._replies = replies
+        self.captured_prompts: list[str] = []
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+        prompt = context.config.get("promptTemplate")
+        if isinstance(prompt, str):
+            self.captured_prompts.append(prompt)
         reply = self._replies.pop(0)
         return RuntimeExecutionResult(exit_code=0, result_json=reply)
 
@@ -153,6 +157,54 @@ async def test_assistant_reply_persists_kind_structured_payload_and_approval(
     assert approval is not None
     assert approval.type == "chat_issue_creation"
     assert approval.payload["chatConversationId"] == chat["id"]
+    prompt = adapter.captured_prompts[0]
+    assert "issue_proposal" in prompt
+    assert "issueProposal" in prompt
+    assert "convert-to-issue" in prompt
+
+
+async def test_assistant_json_text_issue_proposal_is_persisted(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": (
+                    '{"summary":"我可以为你创建这个任务。",'
+                    '"kind":"issue_proposal",'
+                    '"structuredPayload":{"issueProposal":{'
+                    '"title":"分析 rudder 源码",'
+                    '"description":"分析 rudder 源码并整理核心架构。",'
+                    '"priority":"medium"}}}'
+                )
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "我想分析一下rudder源码，你能帮我创建一个任务吗？"},
+    )
+
+    assert code == 201
+    assistant_message = result["messages"][1]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["body"] == "我可以为你创建这个任务。"
+    assert assistant_message["structuredPayload"]["issueProposal"] == {
+        "title": "分析 rudder 源码",
+        "description": "分析 rudder 源码并整理核心架构。",
+        "priority": "medium",
+    }
+    assert assistant_message["approvalId"] is not None
 
 
 async def test_edit_user_message_supersedes_previous_turn_variant(
