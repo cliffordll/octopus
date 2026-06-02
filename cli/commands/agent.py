@@ -184,6 +184,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         ("pause", pause_agent),
         ("resume", resume_agent),
         ("terminate", terminate_agent),
+        ("archive", archive_agent),
         ("invoke", invoke_agent),
     ):
         action = actions.add_parser(name)
@@ -503,6 +504,10 @@ def resume_agent(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def terminate_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("POST", f"/api/agents/{args.agent_id}/terminate", json={})
+
+
+def archive_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("POST", f"/api/agents/{args.agent_id}/archive", json={})
 
 
 def invoke_agent(args: argparse.Namespace, client: ApiClient) -> Any:

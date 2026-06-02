@@ -88,6 +88,22 @@ def test_organization_commands_support_budget_and_brand_color() -> None:
     )
 
 
+def test_organization_archive_posts_archive_route() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "org-1", "status": "archived"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+
+    assert main(["organization", "archive", "org-1"], client=client) == 0
+
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/orgs/org-1/archive"
+    assert requests[0].read() == b"{}"
+
+
 def test_organization_commands_support_policy_fields() -> None:
     requests: list[httpx.Request] = []
 

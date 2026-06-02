@@ -129,4 +129,6 @@ export const agentsApi = {
     jsonRequest<Agent>(`${agentRoot(agentId)}/resume`, "POST", {}),
   terminate: (agentId: string): Promise<Agent> =>
     jsonRequest<Agent>(`${agentRoot(agentId)}/terminate`, "POST", {}),
+  archive: (agentId: string): Promise<Agent> =>
+    jsonRequest<Agent>(`${agentRoot(agentId)}/archive`, "POST", {}),
 };

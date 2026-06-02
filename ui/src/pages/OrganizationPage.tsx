@@ -11,6 +11,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 
 export function OrganizationPage() {
   const { orgId = "" } = useParams();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
@@ -43,6 +44,14 @@ export function OrganizationPage() {
         defaultChatIssueCreationMode,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization", orgId] }),
+  });
+  const archive = useMutation({
+    mutationFn: () => organizationsApi.archive(orgId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["organization", orgId], updated);
+      void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      navigate("/organizations");
+    },
   });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -99,7 +108,18 @@ export function OrganizationPage() {
           </select>
         </label>
         {update.error && <ErrorNotice error={update.error} />}
-        <button type="submit">保存组织</button>
+        {archive.error && <ErrorNotice error={archive.error} />}
+        <div className="form-actions">
+          <button type="submit">保存组织</button>
+          <button
+            className="danger"
+            disabled={organization.data?.status === "archived" || archive.isPending}
+            type="button"
+            onClick={() => archive.mutate()}
+          >
+            归档组织
+          </button>
+        </div>
       </form>
     </div>
   );
