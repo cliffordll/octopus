@@ -8,6 +8,7 @@ import { messengerApi } from "../api/messenger";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 import { request } from "../api/client";
+import { runtimeProvidersApi } from "../api/runtimeProviders";
 
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
@@ -61,6 +62,91 @@ describe("organization API", () => {
       status: 403,
       message: "Board access required",
     });
+  });
+});
+
+describe("runtime provider API", () => {
+  it("manages organization runtime providers and models", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ providerId: "kimi", runtimeType: "opencode_local" }]))
+      .mockReturnValueOnce(jsonResponse({ providerId: "kimi", runtimeType: "opencode_local" }, 201))
+      .mockReturnValueOnce(jsonResponse({ providerId: "kimi", enabled: false }))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2", displayName: "Kimi K2" }))
+      .mockReturnValueOnce(jsonResponse([{ modelId: "kimi/k2", displayName: "Kimi K2" }]))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2", enabled: false }))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runtimeProvidersApi.listProviders("org-1", "opencode_local");
+    await runtimeProvidersApi.createProvider("org-1", {
+      runtimeType: "opencode_local",
+      providerId: "kimi",
+      name: "Kimi",
+      protocol: "openai_chat_completions",
+      baseUrl: "https://api.moonshot.cn/v1",
+      apiKey: "secret",
+      enabled: true,
+    });
+    await runtimeProvidersApi.updateProvider("org-1", "opencode_local", "kimi", { enabled: false });
+    await runtimeProvidersApi.createModel("org-1", "opencode_local", "kimi", {
+      modelId: "kimi/k2",
+      displayName: "Kimi K2",
+      enabled: true,
+    });
+    await runtimeProvidersApi.listModels("org-1", "opencode_local", "kimi");
+    await runtimeProvidersApi.updateModel("org-1", "opencode_local", "kimi", "kimi/k2", { enabled: false });
+    await runtimeProvidersApi.deleteModel("org-1", "opencode_local", "kimi", "kimi/k2");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/runtime-providers",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          runtimeType: "opencode_local",
+          providerId: "kimi",
+          name: "Kimi",
+          protocol: "openai_chat_completions",
+          baseUrl: "https://api.moonshot.cn/v1",
+          apiKey: "secret",
+          enabled: true,
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ modelId: "kimi/k2", displayName: "Kimi K2", enabled: true }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
 
