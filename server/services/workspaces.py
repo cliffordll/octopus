@@ -4,6 +4,7 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, cast
 
 from sqlalchemy import update
@@ -15,7 +16,9 @@ from packages.database.queries.workspaces import (
     create_issue_work_product,
     create_workspace_operation,
     create_workspace_runtime_service,
+    delete_issue_work_product,
     get_execution_workspace_by_id,
+    get_issue_work_product,
     get_workspace_operation,
     list_execution_workspaces,
     list_issue_work_products,
@@ -24,6 +27,7 @@ from packages.database.queries.workspaces import (
     list_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
+    update_issue_work_product,
     update_workspace_operation,
     update_workspace_runtime_service,
 )
@@ -57,6 +61,25 @@ def _iso(value: datetime | None) -> str | None:
 
 def _as_record(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+_WORK_PRODUCT_UPDATE_COLUMNS = {
+    "projectId": "project_id",
+    "executionWorkspaceId": "execution_workspace_id",
+    "runtimeServiceId": "runtime_service_id",
+    "type": "type",
+    "provider": "provider",
+    "externalId": "external_id",
+    "title": "title",
+    "url": "url",
+    "status": "status",
+    "reviewState": "review_state",
+    "isPrimary": "is_primary",
+    "healthStatus": "health_status",
+    "summary": "summary",
+    "metadata": "metadata_json",
+    "createdByRunId": "created_by_run_id",
+}
 
 
 def _parse_project_policy(value: Any) -> dict[str, Any] | None:
@@ -440,6 +463,56 @@ class WorkspaceService:
     ) -> list[IssueWorkProductData]:
         rows = await list_issue_work_products(self._session, issue_id)
         return [self._to_work_product(row) for row in rows]
+
+    async def get_work_product(self, product_id: str) -> IssueWorkProductData | None:
+        row = await get_issue_work_product(self._session, product_id)
+        return self._to_work_product(row) if row is not None else None
+
+    async def create_work_product_for_issue(
+        self,
+        *,
+        org_id: str,
+        issue_id: str,
+        project_id: str | None,
+        payload: Mapping[str, Any],
+    ) -> IssueWorkProductData:
+        row = await create_issue_work_product(
+            self._session,
+            {
+                "org_id": org_id,
+                "issue_id": issue_id,
+                "project_id": payload.get("projectId", project_id),
+                "execution_workspace_id": payload.get("executionWorkspaceId"),
+                "runtime_service_id": payload.get("runtimeServiceId"),
+                "type": payload["type"],
+                "provider": payload["provider"],
+                "external_id": payload.get("externalId"),
+                "title": payload["title"],
+                "url": payload.get("url"),
+                "status": payload.get("status", "active"),
+                "review_state": payload.get("reviewState", "none"),
+                "is_primary": payload.get("isPrimary", False),
+                "health_status": payload.get("healthStatus", "unknown"),
+                "summary": payload.get("summary"),
+                "metadata_json": payload.get("metadata"),
+                "created_by_run_id": payload.get("createdByRunId"),
+            },
+        )
+        return self._to_work_product(row)
+
+    async def update_work_product(
+        self, product_id: str, payload: Mapping[str, Any]
+    ) -> IssueWorkProductData | None:
+        fields: dict[str, Any] = {}
+        for source, column in _WORK_PRODUCT_UPDATE_COLUMNS.items():
+            if source in payload:
+                fields[column] = payload[source]
+        row = await update_issue_work_product(self._session, product_id, fields)
+        return self._to_work_product(row) if row is not None else None
+
+    async def delete_work_product(self, product_id: str) -> IssueWorkProductData | None:
+        row = await delete_issue_work_product(self._session, product_id)
+        return self._to_work_product(row) if row is not None else None
 
     async def persist_run_work_products(
         self,

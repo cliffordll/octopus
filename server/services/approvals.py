@@ -48,6 +48,7 @@ from packages.shared.types.approval import (
     ResolveApprovalPayload,
     ResubmitApprovalPayload,
 )
+from packages.shared.types.chat import ConvertChatToIssuePayload
 from packages.shared.types.issue import IssueListItem
 from .chats import ChatService
 
@@ -384,7 +385,7 @@ class ApprovalService:
         conversation_id = approval.payload.get("chatConversationId")
         if not isinstance(conversation_id, str) or not conversation_id:
             return
-        payload: dict[str, Any] = {}
+        payload: ConvertChatToIssuePayload = {}
         message_id = approval.payload.get("chatMessageId")
         if not isinstance(message_id, str) or not message_id:
             message = await get_message_by_approval_id(self._session, approval.id)

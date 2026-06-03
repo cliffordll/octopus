@@ -49,6 +49,7 @@
 | BUG-21-026 | fixed | P2 | 否 | 任务详情缺少输出产物和附件的统一聚合契约 | Step 21 | `test_issue_detail_surfaces_work_products_with_asset_content_alongside_attachments` |
 | BUG-21-027 | fixed | P1 | 是 | run 成功后缺少上游式 issue close-out governance | Step 21 | `test_successful_issue_run_without_closeout_queues_passive_followup` |
 | BUG-21-028 | fixed | P1 | 是 | chat `auto_create` issue proposal 没有自动落成任务 | Step 21 | `test_auto_create_chat_issue_proposal_creates_issue` |
+| BUG-21-029 | fixed | P2 | 否 | issue documents 与 work-products 只有聚合/预留，缺上游独立 API | Step 21 | `pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed |
 
 ## 记录模板
 
@@ -65,6 +66,36 @@
 - 处理归属：
 - 修复记录：
 - 验证证据：
+
+### BUG-21-029: issue documents 与 work-products 缺上游独立 API
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。attachments/approvals 已可用，issue detail 已能聚合 `workProducts`，但 UI 侧栏和 agent/control-plane 需要独立 documents/work-products API 才能完整对齐上游。
+- 影响范围：issue 详情侧栏 `documents`、`work-products`；control-plane skill 中 `issue documents` 命令；后续 plugin host 的 `issues.documents.*` 能力。
+- 复现步骤：
+  1. 打开 issue 详情侧栏，查看 `documents` 与 `work-products`。
+  2. 请求 `GET /api/issues/{issueId}/documents` 或 `GET /api/issues/{issueId}/work-products`。
+  3. 观察当前 server 缺少独立 API 或只能从 issue detail 间接读取 `workProducts`。
+- 预期行为：参考上游 `D:\coding\rudder\server\src\routes\issues.ts`：
+  - `GET /api/issues/:id/documents`
+  - `GET /api/issues/:id/documents/:key`
+  - `PUT /api/issues/:id/documents/:key`
+  - `GET /api/issues/:id/documents/:key/revisions`
+  - `DELETE /api/issues/:id/documents/:key`
+  - `GET /api/issues/:id/work-products`
+  - `POST /api/issues/:id/work-products`
+  - `PATCH /api/work-products/:id`
+  - `DELETE /api/work-products/:id`
+- 实际行为（修复前）：`documents` 没有 schema/query/service/routes；`workProducts` 只有 issue detail 聚合和 runtime 持久化入口，没有独立 CRUD routes。
+- 初步根因：Step 15/19 先实现 workspace work product 持久化与 storage 聚合，未把上游 issue documents 和 work-product route surface 一起迁入；Step 21 侧栏审查暴露出 UI 预留入口缺 server 能力。
+- 处理归属：Step 21。该缺口属于最小闭环调试与任务详情数据完整性，不应推迟到 plugins。
+- 修复记录：
+  - 新增 `documents`、`document_revisions`、`issue_documents` schema 与 migration。
+  - 新增 issue document shared type、validator、query、service 与 routes，支持 key 规范化、revision、baseRevisionId 冲突保护和 board-only delete。
+  - 新增 work-product create/update/delete/list route，并复用现有 `IssueWorkProduct` model 与 `WorkspaceService` 转换逻辑。
+  - `GET /api/issues/{id}` 增加 `documentSummaries`，继续保留 `workProducts` 聚合。
+- 验证证据：`pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed；`pyright server packages tests/contract/test_step21_issue_documents_work_products.py` 0 errors；目标 `ruff check` passed。
 
 ### BUG-21-001: 智能体说明文件右侧内容显示为空需确认 server 读取语义
 
