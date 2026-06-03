@@ -345,6 +345,7 @@ def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
                 "opencode_local",
                 "--model",
                 "openai/gpt-5",
+                "--skip-opencode-permissions",
             ],
             client=client,
         )
@@ -353,7 +354,39 @@ def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
     assert requests[0].read() == (
         b'{"name":"OpenCode Agent","role":"engineer",'
         b'"agentRuntimeType":"opencode_local",'
-        b'"agentRuntimeConfig":{"model":"openai/gpt-5"}}'
+        b'"agentRuntimeConfig":{"model":"openai/gpt-5",'
+        b'"extraArgs":["--dangerously-skip-permissions"]}}'
+    )
+
+
+def test_agent_update_merges_runtime_extra_args() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-1"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "update",
+                "agent-1",
+                "--runtime",
+                "opencode_local",
+                "--runtime-config",
+                '{"model":"openai/gpt-5","extraArgs":["--verbose"]}',
+                "--skip-opencode-permissions",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert requests[0].read() == (
+        b'{"agentRuntimeType":"opencode_local","agentRuntimeConfig":'
+        b'{"model":"openai/gpt-5","extraArgs":["--verbose",'
+        b'"--dangerously-skip-permissions"]}}'
     )
 
 

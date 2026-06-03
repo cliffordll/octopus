@@ -4417,6 +4417,22 @@ pre {
   width: 100%;
 }
 
+.agent-toggle-row > div {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.agent-toggle-row input[type="checkbox"] {
+  margin-top: 2px;
+  width: auto;
+}
+
+.agent-toggle-row small {
+  color: #8f9bad;
+  line-height: 1.5;
+}
+
 .agent-property-actions {
   display: flex;
   justify-content: flex-end;

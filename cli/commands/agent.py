@@ -61,6 +61,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     adapter_test_parser.add_argument("--org-id", required=True)
     adapter_test_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     adapter_test_parser.add_argument("--runtime-config", default="{}")
+    adapter_test_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    adapter_test_parser.add_argument("--skip-opencode-permissions", action="store_true")
     adapter_test_parser.set_defaults(handler=test_adapter_environment)
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
@@ -140,6 +142,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     create_parser.add_argument("--runtime-config", default="{}")
     create_parser.add_argument("--model")
+    create_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    create_parser.add_argument("--skip-opencode-permissions", action="store_true")
     create_parser.add_argument("--icon")
     create_parser.add_argument("--desired-skill", action="append", default=[])
     create_parser.add_argument("--metadata")
@@ -151,6 +155,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     hire_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     hire_parser.add_argument("--runtime-config", default="{}")
     hire_parser.add_argument("--model")
+    hire_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    hire_parser.add_argument("--skip-opencode-permissions", action="store_true")
     hire_parser.add_argument("--icon")
     hire_parser.add_argument("--desired-skill", action="append", default=[])
     hire_parser.add_argument("--metadata")
@@ -169,6 +175,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     update_parser.add_argument("--runtime", choices=RUNTIMES)
     update_parser.add_argument("--runtime-config")
     update_parser.add_argument("--model")
+    update_parser.add_argument("--runtime-extra-arg", action="append")
+    update_parser.add_argument("--skip-opencode-permissions", action="store_true")
     update_parser.add_argument("--budget-monthly-cents", type=int)
     update_parser.add_argument("--replace-agent-runtime-config", action="store_true")
     update_parser.add_argument("--status")
@@ -198,6 +206,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     bootstrap_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     bootstrap_parser.add_argument("--runtime-config", default="{}")
     bootstrap_parser.add_argument("--model")
+    bootstrap_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    bootstrap_parser.add_argument("--skip-opencode-permissions", action="store_true")
     bootstrap_parser.set_defaults(handler=bootstrap_ceo)
     for name, handler in (
         ("pause", pause_agent),
@@ -219,11 +229,19 @@ def _json_object(value: str) -> dict[str, Any]:
 
 
 def _runtime_config(
-    runtime: str | None, value: str, model: str | None = None
+    runtime: str | None,
+    value: str,
+    model: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     config = _json_object(value)
     if model is not None:
         config["model"] = model
+    if extra_args:
+        existing = config.get("extraArgs")
+        merged = list(existing) if isinstance(existing, list) else []
+        merged.extend(extra_args)
+        config["extraArgs"] = merged
     if runtime == "opencode_local":
         configured_model = config.get("model")
         if not isinstance(configured_model, str) or "/" not in configured_model:
@@ -237,6 +255,13 @@ def _runtime_config(
             )
         config["model"] = configured_model.strip()
     return config
+
+
+def _runtime_extra_args(args: argparse.Namespace) -> list[str]:
+    extra_args = list(args.runtime_extra_arg or [])
+    if getattr(args, "skip_opencode_permissions", False):
+        extra_args.append("--dangerously-skip-permissions")
+    return extra_args
 
 
 def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -271,7 +296,11 @@ def test_adapter_environment(args: argparse.Namespace, client: ApiClient) -> Any
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/adapters/{args.runtime}/test-environment",
-        json={"agentRuntimeConfig": _json_object(args.runtime_config)},
+        json={
+            "agentRuntimeConfig": _runtime_config(
+                args.runtime, args.runtime_config, extra_args=_runtime_extra_args(args)
+            )
+        },
     )
 
 
@@ -413,7 +442,7 @@ def _agent_create_payload(args: argparse.Namespace) -> dict[str, Any]:
         "role": args.role,
         "agentRuntimeType": args.runtime,
         "agentRuntimeConfig": _runtime_config(
-            args.runtime, args.runtime_config, args.model
+            args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
         ),
     }
     if args.icon:
@@ -468,10 +497,16 @@ def update_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["desiredSkills"] = args.desired_skill
     if args.runtime_config is not None:
         payload["agentRuntimeConfig"] = _runtime_config(
-            args.runtime, args.runtime_config, args.model
+            args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
         )
-    elif args.model is not None:
-        payload["agentRuntimeConfig"] = _runtime_config(args.runtime, "{}", args.model)
+    elif (
+        args.model is not None
+        or args.runtime_extra_arg
+        or args.skip_opencode_permissions
+    ):
+        payload["agentRuntimeConfig"] = _runtime_config(
+            args.runtime, "{}", args.model, _runtime_extra_args(args)
+        )
     if args.metadata is not None:
         payload["metadata"] = _json_object(args.metadata)
     if args.replace_agent_runtime_config:
@@ -542,7 +577,7 @@ def bootstrap_ceo(args: argparse.Namespace, client: ApiClient) -> Any:
             "role": "ceo",
             "agentRuntimeType": args.runtime,
             "agentRuntimeConfig": _runtime_config(
-                args.runtime, args.runtime_config, args.model
+                args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
             ),
         },
     )
