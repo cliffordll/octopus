@@ -365,6 +365,7 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
 
 function IssueDocumentsPanel({ issueId }: { issueId: string }) {
   const queryClient = useQueryClient();
+  const [documentsHidden, setDocumentsHidden] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [draftKey, setDraftKey] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
@@ -435,88 +436,101 @@ function IssueDocumentsPanel({ issueId }: { issueId: string }) {
     <section aria-label="任务文档" className="issue-section-card">
       <div className="issue-section-heading">
         <h2>任务文档</h2>
-        <span className="muted">{documents.data?.length ?? 0}</span>
-      </div>
-      <p className="muted issue-work-product-hint">
-        文档由 server 按任务保存，支持查看正文、编辑保存、查看历史版本和删除。
-      </p>
-      {documents.error && <ErrorNotice error={documents.error} />}
-      <div className="issue-documents-layout">
-        <aside className="issue-document-list" aria-label="文档列表">
-          <button className="secondary small-button" onClick={startNewDocument} type="button">新建文档</button>
-          {documents.isLoading && <p className="muted">加载文档中...</p>}
-          {documents.isSuccess && documents.data.length === 0 && <p className="muted">暂无文档。</p>}
-          {documents.data?.map((item) => (
-            <button
-              className={selectedKey === item.key ? "active" : ""}
-              key={item.id}
-              onClick={() => setSelectedKey(item.key)}
-              type="button"
-            >
-              <strong>{item.title || item.key}</strong>
-              <span>{item.key} · v{item.latestRevisionNumber}</span>
-            </button>
-          ))}
-        </aside>
-        <div className="issue-document-editor">
-          {document.error && <ErrorNotice error={document.error} />}
-          <div className="issue-document-fields">
-            <label>
-              文档 key
-              <input
-                disabled={Boolean(document.data)}
-                placeholder="plan"
-                value={draftKey}
-                onChange={(event) => setDraftKey(event.target.value)}
-              />
-            </label>
-            <label>
-              标题
-              <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
-            </label>
-          </div>
-          <label>
-            正文
-            <textarea
-              className="issue-document-body"
-              placeholder="输入 Markdown 文档内容"
-              value={draftBody}
-              onChange={(event) => setDraftBody(event.target.value)}
-            />
-          </label>
-          <label>
-            变更说明
-            <input value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} />
-          </label>
-          <div className="issue-work-product-actions">
-            <button disabled={!canSave || saveDocument.isPending} onClick={() => saveDocument.mutate()} type="button">
-              保存文档
-            </button>
-            <button
-              className="danger small-button"
-              disabled={!selectedKey || deleteDocument.isPending}
-              onClick={() => deleteDocument.mutate()}
-              type="button"
-            >
-              删除文档
-            </button>
-          </div>
-          {saveDocument.error && <ErrorNotice error={saveDocument.error} />}
-          {deleteDocument.error && <ErrorNotice error={deleteDocument.error} />}
-          <details className="storage-object-details">
-            <summary>历史版本</summary>
-            {revisions.error && <ErrorNotice error={revisions.error} />}
-            {revisions.isLoading && selectedKey && <p className="muted">加载历史版本中...</p>}
-            {revisions.data?.map((revision) => (
-              <article className="issue-document-revision" key={revision.id}>
-                <strong>v{revision.revisionNumber}</strong>
-                <span>{revision.changeSummary || "无变更说明"} · {formatDateTime(revision.createdAt)}</span>
-              </article>
-            ))}
-            {revisions.isSuccess && revisions.data.length === 0 && <p className="muted">暂无历史版本。</p>}
-          </details>
+        <div className="issue-section-heading-actions">
+          <span className="muted">{documents.data?.length ?? 0}</span>
+          <button
+            className="secondary small-button"
+            onClick={() => setDocumentsHidden((value) => !value)}
+            type="button"
+          >
+            {documentsHidden ? "显示" : "隐藏"}
+          </button>
         </div>
       </div>
+      {!documentsHidden && (
+        <>
+          <p className="muted issue-work-product-hint">
+            文档由 server 按任务保存，支持查看正文、编辑保存、查看历史版本和删除。
+          </p>
+          {documents.error && <ErrorNotice error={documents.error} />}
+          <div className="issue-documents-layout">
+            <aside className="issue-document-list" aria-label="文档列表">
+              <button className="secondary small-button" onClick={startNewDocument} type="button">新建文档</button>
+              {documents.isLoading && <p className="muted">加载文档中...</p>}
+              {documents.isSuccess && documents.data.length === 0 && <p className="muted">暂无文档。</p>}
+              {documents.data?.map((item) => (
+                <button
+                  className={selectedKey === item.key ? "active" : ""}
+                  key={item.id}
+                  onClick={() => setSelectedKey(item.key)}
+                  type="button"
+                >
+                  <strong>{item.title || item.key}</strong>
+                  <span>{item.key} · v{item.latestRevisionNumber}</span>
+                </button>
+              ))}
+            </aside>
+            <div className="issue-document-editor">
+              {document.error && <ErrorNotice error={document.error} />}
+              <div className="issue-document-fields">
+                <label>
+                  文档 key
+                  <input
+                    disabled={Boolean(document.data)}
+                    placeholder="plan"
+                    value={draftKey}
+                    onChange={(event) => setDraftKey(event.target.value)}
+                  />
+                </label>
+                <label>
+                  标题
+                  <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+                </label>
+              </div>
+              <label>
+                正文
+                <textarea
+                  className="issue-document-body"
+                  placeholder="输入 Markdown 文档内容"
+                  value={draftBody}
+                  onChange={(event) => setDraftBody(event.target.value)}
+                />
+              </label>
+              <label>
+                变更说明
+                <input value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} />
+              </label>
+              <div className="issue-work-product-actions">
+                <button disabled={!canSave || saveDocument.isPending} onClick={() => saveDocument.mutate()} type="button">
+                  保存文档
+                </button>
+                <button
+                  className="danger small-button"
+                  disabled={!selectedKey || deleteDocument.isPending}
+                  onClick={() => deleteDocument.mutate()}
+                  type="button"
+                >
+                  删除文档
+                </button>
+              </div>
+              {saveDocument.error && <ErrorNotice error={saveDocument.error} />}
+              {deleteDocument.error && <ErrorNotice error={deleteDocument.error} />}
+              <details className="storage-object-details">
+                <summary>历史版本</summary>
+                {revisions.error && <ErrorNotice error={revisions.error} />}
+                {revisions.isLoading && selectedKey && <p className="muted">加载历史版本中...</p>}
+                {revisions.data?.map((revision) => (
+                  <article className="issue-document-revision" key={revision.id}>
+                    <strong>v{revision.revisionNumber}</strong>
+                    <span>{revision.changeSummary || "无变更说明"} · {formatDateTime(revision.createdAt)}</span>
+                  </article>
+                ))}
+                {revisions.isSuccess && revisions.data.length === 0 && <p className="muted">暂无历史版本。</p>}
+              </details>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
