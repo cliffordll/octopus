@@ -30,6 +30,11 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     workspace_parser = actions.add_parser("workspace-operations")
     workspace_parser.add_argument("run_id")
     workspace_parser.set_defaults(handler=list_workspace_operations)
+    workspace_log_parser = actions.add_parser("workspace-operation-log")
+    workspace_log_parser.add_argument("operation_id")
+    workspace_log_parser.add_argument("--offset", type=int)
+    workspace_log_parser.add_argument("--limit-bytes", type=int)
+    workspace_log_parser.set_defaults(handler=get_workspace_operation_log)
     debug_parser = actions.add_parser("debug")
     debug_parser.add_argument("run_id")
     debug_parser.add_argument("--after-seq", type=int)
@@ -95,6 +100,19 @@ def list_workspace_operations(args: argparse.Namespace, client: ApiClient) -> An
         f"/api/heartbeat-runs/{args.run_id}/workspace-operations",
     )
     return {"workspaceOperations": operations}
+
+
+def get_workspace_operation_log(args: argparse.Namespace, client: ApiClient) -> Any:
+    params: dict[str, str] = {}
+    if args.offset is not None:
+        params["offset"] = str(args.offset)
+    if args.limit_bytes is not None:
+        params["limitBytes"] = str(args.limit_bytes)
+    return client.request(
+        "GET",
+        f"/api/workspace-operations/{args.operation_id}/log",
+        params=params or None,
+    )
 
 
 def debug_run(args: argparse.Namespace, client: ApiClient) -> Any:

@@ -82,24 +82,23 @@ export function IssueStatusBoard({
             ) : (
               <div className="project-issue-status-list">
                 {groupedIssues[issueStatus].map((issue) => (
-                  <article className="project-issue-status-row" key={issue.id}>
+                  <Link
+                    aria-label={issue.title}
+                    className="project-issue-status-row"
+                    key={issue.id}
+                    to={`/orgs/${orgId}/issues/${issue.id}`}
+                  >
                     <div className="project-issue-card-topline">
                       <span className="identifier">{issue.identifier ?? "-"}</span>
                       <Badge>{issue.priority}</Badge>
                     </div>
-                    <Link
-                      aria-label={issue.title}
-                      className="project-issue-title"
-                      to={`/orgs/${orgId}/issues/${issue.id}`}
-                    >
-                      {issue.title}
-                    </Link>
+                    <span className="project-issue-title">{issue.title}</span>
                     <dl className="project-issue-card-meta">
                       <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
                       <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById)}</dd></div>
                       {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
                     </dl>
-                  </article>
+                  </Link>
                 ))}
               </div>
             )}

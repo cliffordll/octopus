@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import httpx
 
@@ -121,3 +122,31 @@ def test_approval_decision_and_resubmit_use_existing_endpoints() -> None:
         "/api/approvals/approval-1/approve",
         "/api/approvals/approval-1/resubmit",
     ]
+
+
+def test_approval_issue_and_comment_commands() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/issues"):
+            return httpx.Response(200, json=[{"id": "issue-1"}])
+        if request.method == "POST":
+            return httpx.Response(201, json={"id": "comment-1", "body": "继续"})
+        return httpx.Response(200, json=[])
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["approval", "issues", "approval-1"], client=client) == 0
+    assert main(["approval", "comments", "approval-1"], client=client) == 0
+    assert (
+        main(
+            ["approval", "comment", "approval-1", "--body", "继续"],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/approvals/approval-1/issues"
+    assert requests[1].url.path == "/api/approvals/approval-1/comments"
+    assert requests[2].url.path == "/api/approvals/approval-1/comments"
+    assert json.loads(requests[2].read()) == {"body": "继续"}
