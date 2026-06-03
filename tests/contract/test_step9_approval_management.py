@@ -22,6 +22,8 @@ from packages.database.schema import (
     ActivityLog,
     Approval,
     Base,
+    ChatConversation,
+    ChatMessage,
     Issue,
     IssueApproval,
     Organization,
@@ -143,6 +145,67 @@ async def _seed_approval(
             )
         )
     return approval_id
+
+
+async def _seed_chat_issue_creation_approval(
+    session: AsyncSession,
+    org_id: str,
+    *,
+    include_chat_message_id: bool = True,
+) -> tuple[str, str, str]:
+    conversation_id = str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
+    approval_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            ChatConversation(
+                id=conversation_id,
+                org_id=org_id,
+                title="Create issue chat",
+                created_by_user_id="local-board",
+            )
+        )
+        session.add(
+            ChatMessage(
+                id=message_id,
+                org_id=org_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                kind="issue_proposal",
+                status="completed",
+                body="Create issue?",
+                structured_payload={
+                    "issueProposal": {
+                        "title": "Summarize README",
+                        "description": "Read README and create a title document.",
+                        "priority": "medium",
+                    }
+                },
+                approval_id=approval_id,
+                replying_agent_id="agent-ceo",
+            )
+        )
+        approval_payload: dict[str, Any] = {
+            "chatConversationId": conversation_id,
+            "proposedByAgentId": "agent-ceo",
+            "proposedIssue": {
+                "title": "Summarize README",
+                "description": "Read README and create a title document.",
+                "priority": "medium",
+            },
+        }
+        if include_chat_message_id:
+            approval_payload["chatMessageId"] = message_id
+        session.add(
+            Approval(
+                id=approval_id,
+                org_id=org_id,
+                type="chat_issue_creation",
+                status="pending",
+                payload=approval_payload,
+            )
+        )
+    return approval_id, conversation_id, message_id
 
 
 async def _link_issue_to_approval(
@@ -299,6 +362,70 @@ async def test_approve_approval_route_recovers_linked_issue(
     refreshed_issue = await session.get(Issue, issue_id)
     assert refreshed_issue is not None
     assert refreshed_issue.status == "in_progress"
+
+
+async def test_approve_chat_issue_creation_creates_issue_and_system_message(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    approval_id, conversation_id, message_id = await _seed_chat_issue_creation_approval(
+        session, org_id
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/approvals/{approval_id}/approve",
+        actor_type="board",
+        actor_id="board-chat",
+        json={"decisionNote": "approved"},
+    )
+
+    assert code == 200
+    assert body["status"] == "approved"
+    issue = await session.scalar(select(Issue).where(Issue.org_id == org_id))
+    assert issue is not None
+    assert issue.title == "Summarize README"
+    assert issue.created_by_user_id == "board-chat"
+    assert issue.created_by_agent_id is None
+    conversation = await session.get(ChatConversation, conversation_id)
+    assert conversation is not None
+    assert conversation.primary_issue_id == issue.id
+    system_message = await session.scalar(
+        select(ChatMessage).where(
+            ChatMessage.conversation_id == conversation_id,
+            ChatMessage.kind == "system_event",
+        )
+    )
+    assert system_message is not None
+    assert system_message.structured_payload["eventType"] == "issue_created"
+    assert system_message.structured_payload["sourceMessageId"] == message_id
+
+
+async def test_approve_chat_issue_creation_finds_message_by_approval_id(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    approval_id, _, message_id = await _seed_chat_issue_creation_approval(
+        session, org_id, include_chat_message_id=False
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/approvals/{approval_id}/approve",
+        actor_type="board",
+        actor_id="board-chat",
+        json={},
+    )
+
+    assert code == 200
+    assert body["status"] == "approved"
+    system_message = await session.scalar(
+        select(ChatMessage).where(ChatMessage.kind == "system_event")
+    )
+    assert system_message is not None
+    assert system_message.structured_payload["sourceMessageId"] == message_id
 
 
 async def test_reject_approval_route_returns_200(
