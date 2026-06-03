@@ -151,7 +151,7 @@ it("shows organization skills and edits the selected skill file", async () => {
       });
     }
     if (path === "/api/orgs/org-1/skills/skill-1/update-status" && init?.method === "GET") {
-      return respond({ supported: false, reason: null, trackingRef: null, currentRef: null, latestRef: null, hasUpdate: false });
+      return respond({ supported: true, reason: null, trackingRef: "old", currentRef: "old", latestRef: "new", hasUpdate: true });
     }
     if (path === "/api/orgs/org-1/skills/skill-1/files?path=SKILL.md" && init?.method === "GET") {
       return respond({ skillId: "skill-1", path: "SKILL.md", kind: "markdown", content: "# Review", language: "markdown", markdown: true, editable: true });
@@ -161,6 +161,18 @@ it("shows organization skills and edits the selected skill file", async () => {
     }
     if (path === "/api/orgs/org-1/skills/skill-1/files" && init?.method === "PATCH") {
       return respond({ skillId: "skill-1", path: "SKILL.md", kind: "markdown", content: "# Review\nUpdated", language: "markdown", markdown: true, editable: true });
+    }
+    if (path === "/api/orgs/org-1/skills/skill-1/install-update" && init?.method === "POST") {
+      return respond({ id: "skill-1", name: "Review" });
+    }
+    if (path === "/api/orgs/org-1/skills/import" && init?.method === "POST") {
+      return respond({ id: "skill-1", name: "Review" }, 201);
+    }
+    if (path === "/api/orgs/org-1/skills/scan-local" && init?.method === "POST") {
+      return respond({
+        candidates: [{ sourcePath: "D:/skills/review", slug: "review", name: "Review", description: null, sourceRef: "abc", alreadyImported: true, skillId: "skill-1" }],
+        imported: [],
+      });
     }
     return respond([]);
   });
@@ -184,6 +196,11 @@ it("shows organization skills and edits the selected skill file", async () => {
   await userEvent.click(screen.getByRole("button", { name: /Review/ }));
   expect((await screen.findAllByText("Review code changes")).length).toBeGreaterThanOrEqual(1);
   expect(screen.getByRole("button", { name: /Review/ })).toHaveClass("selected");
+  await userEvent.click(screen.getByRole("button", { name: "安装更新" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/skills/skill-1/install-update",
+    expect.objectContaining({ method: "POST" }),
+  );
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review")).toBeInTheDocument();
   expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review/SKILL.md")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
@@ -209,5 +226,30 @@ it("shows organization skills and edits the selected skill file", async () => {
       body: JSON.stringify({ path: "SKILL.md", content: "# Review\nUpdated" }),
     }),
   );
+
+  await userEvent.click(screen.getByRole("button", { name: "导入" }));
+  await userEvent.type(screen.getByLabelText("来源路径"), "D:/skills/review");
+  await userEvent.type(screen.getByLabelText("Short name"), "review");
+  await userEvent.click(screen.getByRole("button", { name: "导入技能" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/skills/import",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ sourcePath: "D:/skills/review", slug: "review", name: null, description: null, overwrite: false }),
+    }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "扫描" }));
+  await userEvent.type(screen.getByLabelText("根路径"), "D:/skills");
+  await userEvent.click(screen.getByLabelText("扫描后导入"));
+  await userEvent.click(screen.getAllByRole("button", { name: "扫描" }).at(-1)!);
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/skills/scan-local",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ rootPath: "D:/skills", importDiscovered: true, overwrite: false }),
+    }),
+  );
+  expect(await screen.findByText("1 个候选，已导入 0 个。")).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: /技能/ })).toHaveClass("active");
 });

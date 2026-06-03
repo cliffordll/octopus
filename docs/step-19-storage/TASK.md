@@ -141,6 +141,7 @@
 ## 实现记录
 
 - 19A 已建立 `StorageService` / `local_disk` provider、asset 查询与 `GET /api/assets/{assetId}/content`。
+- 19A 扩展支持 `OCTOPUS_STORAGE_PROVIDER=minio|s3` 的 S3-compatible provider；MinIO 使用说明见 `docs/guides/storage.md`，默认仍为 `local_disk`。
 - 19B 已支持 chat attachment multipart 文件上传，同时保留 JSON metadata-only 兼容入口。
 - 19C 已支持 issue attachment 上传、列表、删除和 content 下载，并新增 `issue_attachments` migration。
 - 19D 已支持 runtime/workspace work product `content` 归档为 asset，并返回 `assetId` / `contentPath`。

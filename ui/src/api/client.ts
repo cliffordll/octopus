@@ -8,11 +8,22 @@ export class ApiError extends Error {
   }
 }
 
+export function rootCauseMessage(message: string): string {
+  const value = message.trim();
+  if (!value) return value;
+  const sqliteMatch = value.match(/\(sqlite3\.[^)]+\)\s*([^\r\n[]+)/i);
+  if (sqliteMatch?.[1]?.trim()) return sqliteMatch[1].trim();
+  const sqlalchemyMatch = value.match(/\(sqlalchemy\.[^)]+\)\s*([^\r\n[]+)/i);
+  if (sqlalchemyMatch?.[1]?.trim()) return sqlalchemyMatch[1].trim();
+  const firstLine = value.split(/\r?\n/).find((line) => line.trim());
+  return firstLine?.trim() ?? value;
+}
+
 async function parseError(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { detail?: unknown };
     if (typeof body.detail === "string") {
-      return body.detail;
+      return rootCauseMessage(body.detail);
     }
   } catch {
     // Fall through to the HTTP status when a non-JSON error is returned.

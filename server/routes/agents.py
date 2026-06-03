@@ -35,6 +35,7 @@ from packages.shared.api_paths.agents import (
     AGENT_TASK_SESSIONS_PATH,
     AGENT_TERMINATE_PATH,
     ORG_AGENT_CONFIGURATIONS_PATH,
+    ORG_AGENT_HIRES_PATH,
     ORG_AGENT_LIST_PATH,
     ORG_AGENT_NAME_SUGGESTION_PATH,
     ORG_ADAPTER_METADATA_PATH,
@@ -64,6 +65,7 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentConfigRevision,
     AgentDetail,
+    AgentHireResult,
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
     AgentInstructionsPathResult,
@@ -80,6 +82,7 @@ from packages.shared.validators.agent import (
     validate_agent_skills_enable,
     validate_agent_skills_sync,
     validate_create_agent,
+    validate_hire_agent,
     validate_reset_agent_session,
     validate_test_agent_runtime_environment,
     validate_update_agent,
@@ -154,6 +157,30 @@ async def create_agent_route(
         return await service.create_agent(
             orgId, payload, actor_type=actor.actor_type, actor_id=actor.actor_id
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
+@router.post(ORG_AGENT_HIRES_PATH, status_code=status.HTTP_201_CREATED)
+async def hire_agent_route(
+    request: Request,
+    orgId: str,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_organization_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentHireResult:
+    try:
+        payload = validate_hire_agent(body)
+        actor = require_actor_identity(request)
+        return await service.hire_agent(
+            orgId, payload, actor_type=actor.actor_type, actor_id=actor.actor_id
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)

@@ -27,6 +27,8 @@ it("shows an approval and submits a board decision", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/comments" && init?.method === "GET") return respond([]);
     return respond(approval);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -69,6 +71,8 @@ it("resubmits an approval with edited payload", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/approvals/approval-1/resubmit" && init?.method === "POST") {
       return respond({ ...approval, status: "pending", payload: { action: "new" } });
     }

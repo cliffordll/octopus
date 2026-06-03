@@ -269,6 +269,15 @@ async def get_message(
     return result.scalar_one_or_none()
 
 
+async def get_message_by_approval_id(
+    session: AsyncSession, approval_id: str
+) -> ChatMessage | None:
+    result = await session.execute(
+        select(ChatMessage).where(ChatMessage.approval_id == approval_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_message(
     session: AsyncSession,
     *,

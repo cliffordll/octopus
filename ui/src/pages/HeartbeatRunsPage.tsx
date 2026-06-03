@@ -178,6 +178,7 @@ export function HeartbeatRunsPage() {
               <h1>智能体</h1>
               <p>每个智能体一行。这里用于控制定时心跳策略，并在需要深入检查时跳转到最近运行。</p>
             </div>
+            <Link className="button secondary small-button" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
           </div>
           {rows.length === 0 ? (
             <div className="heartbeat-empty-state">暂无活跃智能体。创建智能体后再管理组织心跳。</div>
