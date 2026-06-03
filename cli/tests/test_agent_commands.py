@@ -512,18 +512,37 @@ def test_agent_instruction_commands_cover_step17_routes() -> None:
         )
         == 0
     )
+    assert (
+        main(
+            [
+                "agent",
+                "instructions-path",
+                "agent-1",
+                "--path",
+                "SOUL.md",
+                "--agent-runtime-config-key",
+                "instructionsPath",
+            ],
+            client=client,
+        )
+        == 0
+    )
 
     assert [request.url.path for request in requests] == [
         "/api/agents/agent-1/instructions-bundle",
         "/api/agents/agent-1/instructions-bundle/file",
         "/api/agents/agent-1/instructions-bundle/file",
         "/api/agents/agent-1/instructions-bundle",
+        "/api/agents/agent-1/instructions-path",
     ]
     assert requests[1].url.params["path"] == "SOUL.md"
     assert requests[2].read() == (
         b'{"path":"SOUL.md","content":"# Soul","clearLegacyPromptTemplate":true}'
     )
     assert requests[3].read() == b'{"mode":"managed","entryFile":"SOUL.md"}'
+    assert requests[4].read() == (
+        b'{"path":"SOUL.md","agentRuntimeConfigKey":"instructionsPath"}'
+    )
 
 
 def test_heartbeat_runs_list_and_events_use_existing_routes() -> None:

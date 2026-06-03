@@ -48,6 +48,22 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     runs_parser.add_argument("issue_id")
     runs_parser.set_defaults(handler=list_issue_runs)
 
+    checkout_parser = actions.add_parser(
+        "checkout", help="Checkout an issue for an agent"
+    )
+    checkout_parser.add_argument("issue_id")
+    checkout_parser.add_argument("--agent-id", required=True)
+    checkout_parser.add_argument(
+        "--expected-status", action="append", required=True, dest="expected_statuses"
+    )
+    checkout_parser.set_defaults(handler=checkout_issue)
+
+    heartbeat_context_parser = actions.add_parser(
+        "heartbeat-context", help="Get issue heartbeat context"
+    )
+    heartbeat_context_parser.add_argument("issue_id")
+    heartbeat_context_parser.set_defaults(handler=get_issue_heartbeat_context)
+
     create_parser = actions.add_parser("create", help="Create an issue")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--title", required=True)
@@ -61,6 +77,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--assignee-user-id")
     create_parser.add_argument("--reviewer-agent-id")
     create_parser.add_argument("--reviewer-user-id")
+    create_parser.add_argument("--created-by-agent-id")
+    create_parser.add_argument("--created-by-user-id")
     create_parser.add_argument("--origin-kind")
     create_parser.add_argument("--origin-id")
     create_parser.add_argument("--request-depth", type=int)
@@ -147,6 +165,21 @@ def list_issue_runs(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/issues/{args.issue_id}/heartbeat-runs")
 
 
+def checkout_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/issues/{args.issue_id}/checkout",
+        json={
+            "agentId": args.agent_id,
+            "expectedStatuses": args.expected_statuses,
+        },
+    )
+
+
+def get_issue_heartbeat_context(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/issues/{args.issue_id}/heartbeat-context")
+
+
 def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {
         key: value
@@ -162,6 +195,8 @@ def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
             "assigneeUserId": args.assignee_user_id,
             "reviewerAgentId": args.reviewer_agent_id,
             "reviewerUserId": args.reviewer_user_id,
+            "createdByAgentId": args.created_by_agent_id,
+            "createdByUserId": args.created_by_user_id,
             "originKind": args.origin_kind,
             "originId": args.origin_id,
             "requestDepth": args.request_depth,
