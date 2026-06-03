@@ -53,6 +53,8 @@ exclude = [
     "upstream-reference",
     "server/skills",
     "**/__pycache__",
+    ".octopus",
+    ".tmp-pytest",
     ".venv",
     ".uv-cache*",
 ]

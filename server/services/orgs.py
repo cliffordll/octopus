@@ -164,6 +164,7 @@ def _to_detail(row: Organization) -> OrganizationDetail:
         issueCounter=row.issue_counter,
         budgetMonthlyCents=row.budget_monthly_cents,
         spentMonthlyCents=row.spent_monthly_cents,
+        requireBoardApprovalForNewAgents=row.require_board_approval_for_new_agents,
         defaultChatIssueCreationMode=_chat_issue_creation_mode(
             row.default_chat_issue_creation_mode
         ),

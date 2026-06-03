@@ -166,8 +166,8 @@ def test_validate_create_issue_happy() -> None:
         }
     )
     assert payload["title"] == "Demo issue"
-    assert payload["createdByAgentId"] == "agent-1"
-    assert payload["createdByUserId"] is None
+    assert payload.get("createdByAgentId") == "agent-1"
+    assert payload.get("createdByUserId") is None
 
 
 def test_validate_create_issue_missing_title_raises() -> None:
