@@ -795,7 +795,11 @@ export function AgentPage() {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
   }
-  const canChat = agent.data?.status !== "terminated";
+  const isPendingApproval = agent.data?.status === "pending_approval";
+  const isTerminated = agent.data?.status === "terminated";
+  const isPaused = agent.data?.status === "paused";
+  const operationalDisabled = isPendingApproval || isTerminated;
+  const canChat = !operationalDisabled;
   const runRows = Array.isArray(runs.data) ? runs.data : [];
   const sortedRuns = useMemo(
     () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
@@ -951,7 +955,7 @@ export function AgentPage() {
         </div>
         {agent.data && (
           <div className="agent-header-actions">
-            <button className="secondary" onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
+            <button className="secondary" disabled={operationalDisabled} onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
             {activeTab === "configuration" && (
               <button className="secondary" disabled={resetSession.isPending} onClick={() => setResetSessionDialogOpen(true)} type="button">
                 重置会话
@@ -962,15 +966,16 @@ export function AgentPage() {
             ) : (
               <button className="secondary" disabled type="button">聊天</button>
             )}
-            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
-            <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
-            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
-            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("archive")}>归档</button>
-            <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
-            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
+            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => action.mutate("pause")}>暂停</button>
+            <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
+            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
+            <button className="secondary" disabled={operationalDisabled || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
+            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
         )}
       </header>
+      {isPendingApproval && <p className="info-notice">该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。</p>}
       {action.error && <ErrorNotice error={action.error} />}
       {invoke.error && <ErrorNotice error={invoke.error} />}
       {wakeup.error && <ErrorNotice error={wakeup.error} />}

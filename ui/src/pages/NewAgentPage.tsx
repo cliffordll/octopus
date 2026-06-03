@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
+import { ApiError } from "../api/client";
+import { organizationsApi } from "../api/organizations";
 import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -57,6 +59,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const [desiredSkills, setDesiredSkills] = useState("");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const organization = useQuery({ queryKey: ["organization", orgId], queryFn: () => organizationsApi.get(orgId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const nameSuggestion = useQuery({
     queryKey: ["agent-name-suggestion", orgId],
@@ -70,6 +73,8 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const modelOptions: RuntimeModel[] = runtimeModels.data ?? [];
   const isFirstAgent = agents.isSuccess && agents.data.length === 0;
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
+  const requiresApproval = Boolean(organization.data?.requireBoardApprovalForNewAgents) && !isFirstAgent;
+  const ceoActorId = agents.data?.find((agent) => agent.role === "ceo" && agent.status !== "terminated")?.id;
   const create = useMutation({
     mutationFn: () =>
       agentsApi.hire(orgId, {
@@ -82,16 +87,12 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         ...(budgetMonthlyDollars.trim() ? { budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars) * 100) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
         ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
-      }),
+      }, ceoActorId),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
       onCreated?.();
-      if (agent.approval) {
-        navigate(`/orgs/${orgId}/approvals/${agent.approval.id}`);
-      } else {
-        navigate(`/orgs/${orgId}/agents/${agent.agent.id}/configuration`);
-      }
+      navigate(`/orgs/${orgId}/agents/${agent.agent.id}/configuration`);
     },
   });
   function submit(event: FormEvent) {
@@ -109,6 +110,8 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   return (
       <form className="panel form agent-create-form" onSubmit={submit}>
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
+        {requiresApproval && <p className="info-notice">当前组织要求审批。创建后智能体将显示为待审批，审批通过后才可用。</p>}
+        {!requiresApproval && !isFirstAgent && <p className="muted">当前组织不要求审批。创建成功后智能体可直接使用。</p>}
         <label>
           智能体名称
           <div className="inline-input-action">
@@ -182,7 +185,11 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           <textarea className="config-editor" value={metadata} onChange={(event) => setMetadata(event.target.value)} />
         </label>
         {configurationError && <p className="error-notice">{configurationError}</p>}
-        {create.error && <ErrorNotice error={create.error} />}
+        {create.error && (
+          create.error instanceof ApiError && create.error.status === 403
+            ? <p className="error-notice">无创建智能体权限</p>
+            : <ErrorNotice error={create.error} />
+        )}
         <button disabled={!agents.isSuccess || create.isPending} type="submit">
           {isFirstAgent ? "创建 CEO" : "新建智能体"}
         </button>

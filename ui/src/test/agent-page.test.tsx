@@ -6,7 +6,7 @@ import { renderApp, respond } from "./render-app";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-}, 10000);
+});
 
 it("controls an agent from its overview and shows runtime status", async () => {
   const agent = {
@@ -184,6 +184,38 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "/api/agents/agent-1/archive",
     expect.objectContaining({ method: "POST" }),
   );
+}, 10000);
+
+it("disables runtime actions for agents pending approval", async () => {
+  const agent = {
+    id: "agent-pending",
+    orgId: "org-1",
+    name: "Reviewer",
+    role: "qa",
+    status: "pending_approval",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-pending" && init?.method === "GET") return respond(agent);
+    if (path === "/api/agents/agent-pending/runtime-state" && init?.method === "GET") {
+      return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
+    }
+    if (path === "/api/orgs/org-1/heartbeat-runs?agentId=agent-pending" && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-pending");
+  expect(await screen.findByRole("heading", { name: "Reviewer" })).toBeInTheDocument();
+  expect(screen.getByText("该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "分配任务" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "聊天" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "唤醒" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "运行心跳" })).toBeDisabled();
 });
 
 it("assigns a task to the current agent from a modal", async () => {
