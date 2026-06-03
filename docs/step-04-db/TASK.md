@@ -55,7 +55,7 @@
 
 ## Server 接入
 
-- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址，默认 SQLite 本地文件。
+- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址，默认 SQLite 本地文件；外部数据库当前推荐 PostgreSQL async 连接串 `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME`。
 - `server/lifespan.py` 管理 engine/session factory 和可选迁移。
 - `server/dependencies/database.py` 提供 request session。
 - resources service 通过 query 层访问数据库，并在 service 内转换成 shared response。
@@ -90,6 +90,17 @@ $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus-auto-demo.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
+
+外部 PostgreSQL 验收示例：
+
+```powershell
+uv add asyncpg
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+uv run alembic upgrade head
+uv run server
+```
+
+当前 migration 和 query 主要按 SQLite/PostgreSQL 路径维护；MySQL 暂未作为支持目标验证。
 
 当前 HTTP 正向资源写入仍受运行时开发 actor 未接入影响，见 Step 5。
 
