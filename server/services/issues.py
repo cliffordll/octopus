@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -128,6 +128,7 @@ class IssueService:
         assignee_agent_id: str | None = None,
         project_id: str | None = None,
         goal_id: str | None = None,
+        parent_id: str | None = None,
         origin_kind: str | None = None,
         origin_id: str | None = None,
     ) -> list[IssueListItem]:
@@ -138,6 +139,7 @@ class IssueService:
             assignee_agent_id=assignee_agent_id,
             project_id=project_id,
             goal_id=goal_id,
+            parent_id=parent_id,
             origin_kind=origin_kind,
             origin_id=origin_id,
         )
@@ -186,6 +188,12 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        await self._apply_parent_values(
+            org_id,
+            values,
+            issue_id=None,
+            explicit_parent="parent_id" in values,
+        )
         if (
             actor_type == "agent"
             and values.get("created_by_agent_id") == actor_id
@@ -245,6 +253,12 @@ class IssueService:
             next_goal_id = default_goal["id"] if default_goal is not None else None
         if next_goal_id != current.goal_id:
             values["goal_id"] = next_goal_id
+        await self._apply_parent_values(
+            current.org_id,
+            values,
+            issue_id=current.id,
+            explicit_parent="parentId" in payload,
+        )
 
         workflow_actions: list[tuple[str, Mapping[str, Any] | None]] = []
         review_decision = payload.get("reviewDecision")
@@ -274,6 +288,8 @@ class IssueService:
         row = await update_issue(self._session, issue_id, values)
         if row is None:
             return None
+        if "parent_id" in values:
+            await self._refresh_descendant_depths(row)
 
         if values and review_decision is None:
             await insert_activity_log(
@@ -298,6 +314,74 @@ class IssueService:
                 details=dict(details) if details is not None else None,
             )
         return await self._to_detail(row)
+
+    async def _apply_parent_values(
+        self,
+        org_id: str,
+        values: dict[str, Any],
+        *,
+        issue_id: str | None,
+        explicit_parent: bool,
+    ) -> None:
+        if not explicit_parent:
+            return
+        parent_id = values.get("parent_id")
+        if parent_id is None:
+            values["request_depth"] = 0
+            return
+        if issue_id is not None and parent_id == issue_id:
+            raise ValueError("Issue cannot be its own parent")
+        parent = await get_issue_by_id(self._session, parent_id)
+        if parent is None or parent.org_id != org_id:
+            raise ValueError("Parent issue not found")
+        if issue_id is not None:
+            await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
+        values["request_depth"] = parent.request_depth + 1
+
+    async def _assert_parent_does_not_cycle(
+        self, issue_id: str, parent_id: str, org_id: str
+    ) -> None:
+        rows = (
+            (await self._session.execute(select(Issue).where(Issue.org_id == org_id)))
+            .scalars()
+            .all()
+        )
+        by_id = {row.id: row for row in rows}
+        cursor: str | None = parent_id
+        while cursor is not None:
+            if cursor == issue_id:
+                raise ValueError("Issue parent cycle is not allowed")
+            parent = by_id.get(cursor)
+            cursor = parent.parent_id if parent is not None else None
+
+    async def _refresh_descendant_depths(self, root: Issue) -> None:
+        rows = (
+            (
+                await self._session.execute(
+                    select(Issue).where(Issue.org_id == root.org_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        children_by_parent: dict[str, list[Issue]] = {}
+        for row in rows:
+            if row.parent_id is not None:
+                children_by_parent.setdefault(row.parent_id, []).append(row)
+
+        stack = [
+            (child, root.request_depth + 1)
+            for child in children_by_parent.get(root.id, [])
+        ]
+        now = datetime.now(UTC)
+        while stack:
+            row, depth = stack.pop()
+            row.request_depth = depth
+            row.updated_at = now
+            stack.extend(
+                (child, depth + 1) for child in children_by_parent.get(row.id, [])
+            )
+        await self._session.flush()
 
     async def checkout_issue(
         self,
