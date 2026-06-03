@@ -19,6 +19,7 @@ from .chats import (
     ChatConversationUserState,
     ChatMessage,
 )
+from .documents import Document, DocumentRevision, IssueDocument
 from .approvals import Approval
 from .approval_comments import ApprovalComment
 from .issue_approvals import IssueApproval
@@ -57,6 +58,9 @@ __all__ = [
     "ChatConversation",
     "ChatConversationUserState",
     "ChatMessage",
+    "Document",
+    "DocumentRevision",
+    "IssueDocument",
     "Approval",
     "ApprovalComment",
     "IssueApproval",

@@ -19,6 +19,7 @@ Step 20 已经让最小闭环具备基础调试可见性。本步骤暂停新业
   与 `GET /api/issues/{issueId}/heartbeat-context`，保证真实执行前具备原子领取和紧凑任务上下文。
 - Heartbeat run 创建、执行、事件、日志、失败摘要。
 - Workspace context、workspace operation、work product 或 attachment/storage 引用。
+- Issue documents 与 work-products 需要按上游独立 API 补齐，不能只停留在 UI 预留或 issue detail 聚合字段。
 - Step 20 observability 路径：run log、workspace operation log、run-intelligence list/detail/events/log。
 
 ## 任务

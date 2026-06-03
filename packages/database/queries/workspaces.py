@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import desc, select, update
+from sqlalchemy import delete, desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.schema import (
@@ -253,6 +253,15 @@ async def list_issue_work_products(
     return result.scalars().all()
 
 
+async def get_issue_work_product(
+    session: AsyncSession, product_id: str
+) -> IssueWorkProduct | None:
+    result = await session.execute(
+        select(IssueWorkProduct).where(IssueWorkProduct.id == product_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_issue_work_product(
     session: AsyncSession, fields: Mapping[str, Any]
 ) -> IssueWorkProduct:
@@ -270,3 +279,43 @@ async def create_issue_work_product(
     session.add(row)
     await session.flush()
     return row
+
+
+async def update_issue_work_product(
+    session: AsyncSession, product_id: str, fields: Mapping[str, Any]
+) -> IssueWorkProduct | None:
+    existing = await get_issue_work_product(session, product_id)
+    if existing is None:
+        return None
+    if fields.get("is_primary"):
+        await session.execute(
+            update(IssueWorkProduct)
+            .where(
+                IssueWorkProduct.org_id == existing.org_id,
+                IssueWorkProduct.issue_id == existing.issue_id,
+                IssueWorkProduct.type == existing.type,
+            )
+            .values(is_primary=False, updated_at=datetime.now(UTC))
+        )
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    await session.execute(
+        update(IssueWorkProduct)
+        .where(IssueWorkProduct.id == product_id)
+        .values(**values)
+    )
+    await session.flush()
+    return await get_issue_work_product(session, product_id)
+
+
+async def delete_issue_work_product(
+    session: AsyncSession, product_id: str
+) -> IssueWorkProduct | None:
+    existing = await get_issue_work_product(session, product_id)
+    if existing is None:
+        return None
+    await session.execute(
+        delete(IssueWorkProduct).where(IssueWorkProduct.id == product_id)
+    )
+    await session.flush()
+    return existing
