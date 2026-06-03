@@ -25,6 +25,7 @@ import {
 import { OrganizationsPage } from "../pages/OrganizationsPage";
 import { ProjectPage } from "../pages/ProjectPage";
 import { ProjectsPage } from "../pages/ProjectsPage";
+import { RunIntelligencePage } from "../pages/RunIntelligencePage";
 
 export function App() {
   return (
@@ -40,6 +41,7 @@ export function App() {
         <Route path="orgs/:orgId/skills/:skillId/files/*" element={<OrganizationSkillsPage />} />
         <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
         <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
+        <Route path="orgs/:orgId/run-intelligence" element={<RunIntelligencePage />} />
         <Route path="orgs/:orgId/workspaces" element={<OrganizationWorkspacesPage />} />
         <Route path="orgs/:orgId/goals" element={<GoalsPage />} />
         <Route path="orgs/:orgId/goals/:goalId" element={<GoalPage />} />

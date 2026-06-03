@@ -289,9 +289,15 @@ function IssueRunOutputPanel({
   onRetry: () => void;
   runId: string;
 }) {
+  const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
   const run = data.run.data ?? null;
   const events = data.events.data ?? [];
   const operations = data.operations.data ?? [];
+  const operationLog = useQuery({
+    queryKey: ["workspace-operation-log", selectedOperationLogId],
+    queryFn: () => heartbeatApi.getWorkspaceOperationLog(selectedOperationLogId),
+    enabled: Boolean(selectedOperationLogId),
+  });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
   return (
@@ -378,6 +384,20 @@ function IssueRunOutputPanel({
                 {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 {operation.stdoutExcerpt && <pre className="run-excerpt inline">{operation.stdoutExcerpt}</pre>}
+                <button
+                  className="secondary small-button"
+                  type="button"
+                  onClick={() => setSelectedOperationLogId(operation.id)}
+                >
+                  查看完整日志
+                </button>
+                {selectedOperationLogId === operation.id && (
+                  <div className="issue-run-operation-log">
+                    {operationLog.isLoading && <p className="muted">加载完整日志中...</p>}
+                    {operationLog.error && <ErrorNotice error={operationLog.error} />}
+                    {operationLog.data?.content && <pre className="issue-run-event-log">{operationLog.data.content}</pre>}
+                  </div>
+                )}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
               </article>
             ))}
@@ -406,6 +426,11 @@ export function IssuePage() {
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
   const issue = useQuery({ queryKey: ["issue", issueId], queryFn: () => issuesApi.get(issueId) });
+  const heartbeatContext = useQuery({
+    queryKey: ["issue-heartbeat-context", issueId],
+    queryFn: () => issuesApi.heartbeatContext(issueId),
+    enabled: Boolean(issueId),
+  });
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const comments = useQuery({
     queryKey: ["comments", issueId],
@@ -496,6 +521,19 @@ export function IssuePage() {
         queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
       ]);
+    },
+  });
+  const checkoutIssue = useMutation({
+    mutationFn: () => {
+      if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
+      return issuesApi.checkout(issue.data.id, {
+        agentId: issue.data.assigneeAgentId,
+        expectedStatuses: [issue.data.status],
+      });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["issue", issueId], updated);
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
   const runDetail = useQuery({
@@ -664,6 +702,15 @@ export function IssuePage() {
                   >
                     执行任务
                   </button>
+                  <button
+                    className="secondary small-button"
+                    disabled={checkoutIssue.isPending || !issue.data.assigneeAgentId}
+                    title={issue.data.assigneeAgentId ? "由当前负责人签出任务" : "请先分配负责人"}
+                    type="button"
+                    onClick={() => checkoutIssue.mutate()}
+                  >
+                    签出任务
+                  </button>
                   <button className="secondary small-button" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
                     复制 ID
                   </button>
@@ -673,7 +720,18 @@ export function IssuePage() {
               <p className="issue-description">{issue.data.description || "暂无描述"}</p>
             </div>
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
+            {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
+
+            <section aria-label="心跳上下文" className="issue-section-card">
+              <div className="issue-section-heading">
+                <h2>心跳上下文</h2>
+                <span className="muted">任务执行时传给运行时的上下文</span>
+              </div>
+              {heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
+              {heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
+              {heartbeatContext.data && <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>}
+            </section>
 
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">

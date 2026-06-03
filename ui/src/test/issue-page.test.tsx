@@ -81,6 +81,9 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
       return respond([]);
     }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
+      return respond({ issueId: "issue-1" });
+    }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
       return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
     }
@@ -246,6 +249,9 @@ it("executes an assigned issue through the issue execution route", async () => {
         },
       ]);
     }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
+      return respond({ issueId: "issue-1" });
+    }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1" && init?.method === "PATCH") {
@@ -345,6 +351,7 @@ it("explains why an unassigned issue cannot be executed", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
