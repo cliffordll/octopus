@@ -64,6 +64,21 @@ class OrganizationSkillUpdateStatus(TypedDict):
     hasUpdate: bool
 
 
+class OrganizationSkillScanCandidate(TypedDict):
+    sourcePath: str
+    slug: str
+    name: str
+    description: str | None
+    sourceRef: str
+    alreadyImported: bool
+    skillId: str | None
+
+
+class OrganizationSkillScanLocalResult(TypedDict):
+    candidates: list[OrganizationSkillScanCandidate]
+    imported: list[OrganizationSkill]
+
+
 class OrganizationSkillFileDetail(TypedDict):
     skillId: str
     path: str
@@ -79,6 +94,20 @@ class OrganizationSkillCreatePayload(TypedDict):
     slug: NotRequired[str | None]
     description: NotRequired[str | None]
     markdown: NotRequired[str | None]
+
+
+class OrganizationSkillImportPayload(TypedDict):
+    sourcePath: str
+    slug: NotRequired[str | None]
+    name: NotRequired[str | None]
+    description: NotRequired[str | None]
+    overwrite: NotRequired[bool]
+
+
+class OrganizationSkillScanLocalPayload(TypedDict):
+    rootPath: str
+    importDiscovered: NotRequired[bool]
+    overwrite: NotRequired[bool]
 
 
 class OrganizationSkillFileUpdatePayload(TypedDict):

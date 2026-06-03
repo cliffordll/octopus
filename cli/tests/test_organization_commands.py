@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import httpx
@@ -86,6 +87,22 @@ def test_organization_commands_support_budget_and_brand_color() -> None:
     assert requests[1].read() == (
         b'{"budgetMonthlyCents":600000,"brandColor":"#2244dd"}'
     )
+
+
+def test_organization_archive_posts_archive_route() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "org-1", "status": "archived"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+
+    assert main(["organization", "archive", "org-1"], client=client) == 0
+
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/orgs/org-1/archive"
+    assert requests[0].read() == b"{}"
 
 
 def test_organization_commands_support_policy_fields() -> None:
@@ -224,6 +241,38 @@ def test_organization_resource_and_skill_commands_cover_step17_routes(
         main(
             [
                 "organization",
+                "skill-import",
+                "--org-id",
+                "org-1",
+                "--source-path",
+                str(tmp_path / "external-skill"),
+                "--slug",
+                "external-review",
+                "--overwrite",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
+                "skill-scan-local",
+                "--org-id",
+                "org-1",
+                "--root-path",
+                str(tmp_path),
+                "--import-discovered",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "organization",
                 "skill-file",
                 "--org-id",
                 "org-1",
@@ -261,6 +310,13 @@ def test_organization_resource_and_skill_commands_cover_step17_routes(
     )
     assert (
         main(
+            ["organization", "skill-install-update", "--org-id", "org-1", "skill-1"],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
             ["organization", "skill-delete", "--org-id", "org-1", "skill-1"],
             client=client,
         )
@@ -275,9 +331,12 @@ def test_organization_resource_and_skill_commands_cover_step17_routes(
         "/api/orgs/org-1/skills",
         "/api/orgs/org-1/skills/skill-1",
         "/api/orgs/org-1/skills",
+        "/api/orgs/org-1/skills/import",
+        "/api/orgs/org-1/skills/scan-local",
         "/api/orgs/org-1/skills/skill-1/files",
         "/api/orgs/org-1/skills/skill-1/files",
         "/api/orgs/org-1/skills/skill-1/update-status",
+        "/api/orgs/org-1/skills/skill-1/install-update",
         "/api/orgs/org-1/skills/skill-1",
     ]
     assert requests[1].read() == (
@@ -287,4 +346,13 @@ def test_organization_resource_and_skill_commands_cover_step17_routes(
     assert requests[6].read() == (
         b'{"name":"Review","slug":"review","markdown":"# Review\\n\\nUse this."}'
     )
-    assert requests[8].read() == b'{"path":"SKILL.md","content":"# Review\\nUpdated"}'
+    assert json.loads(requests[7].read()) == {
+        "sourcePath": str(tmp_path / "external-skill"),
+        "slug": "external-review",
+        "overwrite": True,
+    }
+    assert json.loads(requests[8].read()) == {
+        "rootPath": str(tmp_path),
+        "importDiscovered": True,
+    }
+    assert requests[10].read() == b'{"path":"SKILL.md","content":"# Review\\nUpdated"}'

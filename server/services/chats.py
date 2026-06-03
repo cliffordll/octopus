@@ -73,6 +73,7 @@ from packages.shared.types.chat import (
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
+from packages.shared.types.issue import CreateIssuePayload
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
 
@@ -407,22 +408,30 @@ class ChatService:
         if conversation is None:
             return None
         proposal = await self._issue_proposal_for_conversion(conversation, payload)
+        issue_payload: CreateIssuePayload = {
+            "title": proposal["title"],
+            "description": proposal.get("description"),
+            "priority": proposal.get("priority", "medium"),
+            "createdByAgentId": actor_id if actor_type == "agent" else None,
+            "createdByUserId": actor_id if actor_type == "board" else None,
+            "originKind": "manual",
+            "originId": conversation.id,
+        }
+        for optional_key in (
+            "projectId",
+            "goalId",
+            "parentId",
+            "assigneeAgentId",
+            "assigneeUserId",
+            "reviewerAgentId",
+            "reviewerUserId",
+        ):
+            if optional_key in proposal:
+                issue_payload[optional_key] = proposal[optional_key]
+
         issue = await IssueService(self._session).create_issue(
             conversation.org_id,
-            {
-                "title": proposal["title"],
-                "description": proposal.get("description"),
-                "priority": proposal.get("priority", "medium"),
-                "projectId": proposal.get("projectId"),
-                "goalId": proposal.get("goalId"),
-                "parentId": proposal.get("parentId"),
-                "assigneeAgentId": proposal.get("assigneeAgentId"),
-                "assigneeUserId": proposal.get("assigneeUserId"),
-                "reviewerAgentId": proposal.get("reviewerAgentId"),
-                "reviewerUserId": proposal.get("reviewerUserId"),
-                "originKind": "manual",
-                "originId": conversation.id,
-            },
+            issue_payload,
             actor_type=actor_type,
             actor_id=actor_id,
         )
@@ -455,6 +464,7 @@ class ChatService:
                     "eventType": "issue_created",
                     "issueId": issue["id"],
                     "issueIdentifier": issue["identifier"],
+                    "sourceMessageId": payload.get("messageId"),
                 },
             },
         )
@@ -1203,11 +1213,38 @@ def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
 
 
 def _json_object(value: str) -> dict[str, Any] | None:
-    try:
-        parsed = json.loads(value.strip())
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    candidates = [value.strip(), *_fenced_json_candidates(value)]
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _fenced_json_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    marker = "```"
+    start = 0
+    while True:
+        fence_start = value.find(marker, start)
+        if fence_start == -1:
+            return candidates
+        content_start = fence_start + len(marker)
+        line_end = value.find("\n", content_start)
+        if line_end == -1:
+            return candidates
+        language = value[content_start:line_end].strip().lower()
+        fence_end = value.find(marker, line_end + 1)
+        if fence_end == -1:
+            return candidates
+        if language in {"", "json"}:
+            candidate = value[line_end + 1 : fence_end].strip()
+            if candidate:
+                candidates.append(candidate)
+        start = fence_end + len(marker)
 
 
 def _chat_transcript_from_payload(

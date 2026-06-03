@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, NotRequired, TypedDict
 
 from ..constants.agent import AgentRole, AgentRuntimeType, AgentStatus, PauseReason
+from .approval import ApprovalDetail
 
 
 class AgentPermissions(TypedDict):
@@ -68,6 +69,16 @@ class CreateAgentPayload(TypedDict, total=False):
     budgetMonthlyCents: int
     permissions: NotRequired[AgentPermissions]
     metadata: NotRequired[dict[str, Any] | None]
+
+
+class HireAgentPayload(CreateAgentPayload, total=False):
+    sourceIssueId: NotRequired[str | None]
+    sourceIssueIds: NotRequired[list[str]]
+
+
+class AgentHireResult(TypedDict):
+    agent: Agent
+    approval: ApprovalDetail | None
 
 
 class UpdateAgentPayload(TypedDict, total=False):
