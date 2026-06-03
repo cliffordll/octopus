@@ -46,6 +46,7 @@ from packages.shared.types.issue_attachment import (
     IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
+from .documents import DocumentService
 from .goals import GoalService
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
@@ -605,6 +606,9 @@ class IssueService:
         detail["workProducts"] = await WorkspaceService(
             self._session
         ).list_work_products_for_issue(row.id)
+        detail["documentSummaries"] = await DocumentService(
+            self._session
+        ).list_issue_documents(row.id)
         return detail
 
 
@@ -658,6 +662,7 @@ def _to_detail(row: Issue) -> IssueDetail:
         executionRunId=row.execution_run_id,
         createdAt=row.created_at.isoformat(),
         workProducts=[],
+        documentSummaries=[],
     )
 
 
