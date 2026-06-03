@@ -25,6 +25,7 @@ export function ApprovalPage() {
   const [decisionPayload, setDecisionPayload] = useState("{}");
   const [resubmitPayload, setResubmitPayload] = useState("{}");
   const [commentBody, setCommentBody] = useState("");
+  const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approval = useQuery({
@@ -62,8 +63,10 @@ export function ApprovalPage() {
     mutationFn: () => approvalsApi.addComment(approvalId, { body: commentBody.trim() }),
     onSuccess: () => {
       setCommentBody("");
+      setCommentNotice("评论已添加。评论只记录沟通内容，不会改变审批状态。");
       void queryClient.invalidateQueries({ queryKey: ["approval-comments", approvalId] });
     },
+    onMutate: () => setCommentNotice(null),
   });
   function runAction(action: "approve" | "reject" | "requestRevision" | "resubmit") {
     setFormError(null);
@@ -130,6 +133,9 @@ export function ApprovalPage() {
               </Link>
             ))}
             <h3>评论</h3>
+            <p className="muted approval-comment-hint">
+              评论不会改变审批状态；如需处理审批，请使用右侧同意、拒绝或请求修改。
+            </p>
             {comments.error && <ErrorNotice error={comments.error} />}
             {comments.isLoading && <p className="muted">加载评论中...</p>}
             {!comments.isLoading && (comments.data?.length ?? 0) === 0 && <p className="muted">暂无评论。</p>}
@@ -154,6 +160,7 @@ export function ApprovalPage() {
               />
               <button disabled={addComment.isPending || !commentBody.trim()} type="submit">添加评论</button>
             </form>
+            {commentNotice && <p className="success-notice">{commentNotice}</p>}
             {addComment.error && <ErrorNotice error={addComment.error} />}
           </article>
           <aside className="panel approval-decision-panel">
