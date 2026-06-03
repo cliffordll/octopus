@@ -17,6 +17,8 @@ class IssueListItem(TypedDict):
     goalId: str | None
     assigneeAgentId: str | None
     assigneeUserId: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
     originKind: IssueOriginKind
     originId: str | None
     updatedAt: str
@@ -67,6 +69,8 @@ class CreateIssuePayload(TypedDict):
     assigneeUserId: NotRequired[str | None]
     reviewerAgentId: NotRequired[str | None]
     reviewerUserId: NotRequired[str | None]
+    createdByAgentId: NotRequired[str | None]
+    createdByUserId: NotRequired[str | None]
     originKind: NotRequired[IssueOriginKind]
     originId: NotRequired[str | None]
     requestDepth: NotRequired[int]

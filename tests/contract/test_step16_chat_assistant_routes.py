@@ -266,6 +266,8 @@ async def test_auto_create_chat_issue_proposal_creates_issue(
     assert issues_code == 200
     assert [row["id"] for row in issues] == [issue_id]
     assert issues[0]["title"] == "输出 hello world"
+    assert issues[0]["createdByAgentId"] == agent_id
+    assert issues[0]["assigneeAgentId"] == agent_id
 
 
 async def test_edit_user_message_supersedes_previous_turn_variant(
