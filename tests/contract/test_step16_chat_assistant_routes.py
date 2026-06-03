@@ -215,6 +215,58 @@ async def test_assistant_json_text_issue_proposal_is_persisted(
     assert assistant_message["approvalId"] is not None
 
 
+async def test_assistant_fenced_json_issue_proposal_is_persisted(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": (
+                    "根据 `issueCreationMode` 为 `manual_approval`，我不能直接执行。"
+                    "以下是一个 issue 提案：\n\n"
+                    "```json\n"
+                    '{"summary":"读取 README.md 并总结出标题文档",'
+                    '"kind":"issue_proposal",'
+                    '"structuredPayload":{"issueProposal":{'
+                    '"title":"读取 README.md 并生成标题文档",'
+                    '"description":"读取 D:\\\\opendemo\\\\codexdemo\\\\octopus\\\\README.md 的内容，总结并生成一个标题文档。",'
+                    '"priority":"medium"}}}'
+                    "\n```"
+                )
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "读取 README.md 帮我总结出一个标题文档"},
+    )
+
+    assert code == 201
+    assistant_message = result["messages"][1]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["body"] == "读取 README.md 并总结出标题文档"
+    assert assistant_message["structuredPayload"]["issueProposal"]["title"] == (
+        "读取 README.md 并生成标题文档"
+    )
+    assert assistant_message["approvalId"] is not None
+    async with factory() as session:
+        approval = await session.scalar(
+            select(Approval).where(Approval.id == assistant_message["approvalId"])
+        )
+    assert approval is not None
+    assert approval.type == "chat_issue_creation"
+
+
 async def test_auto_create_chat_issue_proposal_creates_issue(
     app: tuple[FastAPI, async_sessionmaker],
     monkeypatch: pytest.MonkeyPatch,
