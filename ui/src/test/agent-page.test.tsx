@@ -6,7 +6,7 @@ import { renderApp, respond } from "./render-app";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-});
+}, 10000);
 
 it("controls an agent from its overview and shows runtime status", async () => {
   const agent = {

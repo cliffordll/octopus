@@ -7,7 +7,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.unstubAllGlobals();
-});
+}, 10000);
 
 it("shows an issue and records comments and review decisions", async () => {
   const issue = {

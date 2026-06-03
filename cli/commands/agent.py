@@ -144,6 +144,19 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--desired-skill", action="append", default=[])
     create_parser.add_argument("--metadata")
     create_parser.set_defaults(handler=create_agent)
+    hire_parser = actions.add_parser("hire")
+    hire_parser.add_argument("--org-id", required=True)
+    hire_parser.add_argument("--name", required=True)
+    hire_parser.add_argument("--role", required=True, choices=ROLES)
+    hire_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    hire_parser.add_argument("--runtime-config", default="{}")
+    hire_parser.add_argument("--model")
+    hire_parser.add_argument("--icon")
+    hire_parser.add_argument("--desired-skill", action="append", default=[])
+    hire_parser.add_argument("--metadata")
+    hire_parser.add_argument("--source-issue-id")
+    hire_parser.add_argument("--source-issue", action="append", default=[])
+    hire_parser.set_defaults(handler=hire_agent)
     update_parser = actions.add_parser("update")
     update_parser.add_argument("agent_id")
     update_parser.add_argument("--name")
@@ -394,7 +407,7 @@ def update_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> A
     )
 
 
-def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+def _agent_create_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "name": args.name,
         "role": args.role,
@@ -409,9 +422,27 @@ def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["desiredSkills"] = args.desired_skill
     if args.metadata:
         payload["metadata"] = _json_object(args.metadata)
+    return payload
+
+
+def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _agent_create_payload(args)
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/agents",
+        json=payload,
+    )
+
+
+def hire_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _agent_create_payload(args)
+    if args.source_issue_id:
+        payload["sourceIssueId"] = args.source_issue_id
+    if args.source_issue:
+        payload["sourceIssueIds"] = args.source_issue
+    return client.request(
+        "POST",
+        f"/api/orgs/{args.org_id}/agent-hires",
         json=payload,
     )
 
