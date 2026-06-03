@@ -15,6 +15,7 @@ from packages.database.queries.approvals import (
     list_org_approvals,
     update_approval,
 )
+from packages.database.queries.chats import get_message_by_approval_id
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import (
     get_agent_by_id,
@@ -48,6 +49,7 @@ from packages.shared.types.approval import (
     ResubmitApprovalPayload,
 )
 from packages.shared.types.issue import IssueListItem
+from .chats import ChatService
 
 APPROVAL_CREATE_TO_COLUMN: dict[str, str] = {
     "type": "type",
@@ -361,7 +363,44 @@ class ApprovalService:
             actor_type=actor_type,
             actor_id=actor_id,
         )
+        await self._apply_chat_issue_creation_decision(
+            row,
+            status=status,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
         return _to_detail(row)
+
+    async def _apply_chat_issue_creation_decision(
+        self,
+        approval: Approval,
+        *,
+        status: ApprovalStatus,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        if approval.type != "chat_issue_creation" or status != "approved":
+            return
+        conversation_id = approval.payload.get("chatConversationId")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            return
+        payload: dict[str, Any] = {}
+        message_id = approval.payload.get("chatMessageId")
+        if not isinstance(message_id, str) or not message_id:
+            message = await get_message_by_approval_id(self._session, approval.id)
+            if message is not None and message.conversation_id == conversation_id:
+                message_id = message.id
+        if isinstance(message_id, str) and message_id:
+            payload["messageId"] = message_id
+        proposed_issue = approval.payload.get("proposedIssue")
+        if isinstance(proposed_issue, dict):
+            payload["proposal"] = proposed_issue
+        await ChatService(self._session).convert_to_issue(
+            conversation_id,
+            payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
 
     async def _apply_hire_agent_decision(
         self,
