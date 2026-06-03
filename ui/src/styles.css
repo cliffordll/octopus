@@ -3566,11 +3566,18 @@ button.danger {
   gap: 8px;
 }
 
+.issue-header-actions,
+.issue-sidebar-actions {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .issue-title-row {
   align-items: flex-start;
   display: flex;
   gap: 18px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .issue-header-actions > button,
@@ -3592,6 +3599,9 @@ button.danger {
   font-size: var(--text-page);
   line-height: var(--line-tight);
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .issue-description {
@@ -3612,6 +3622,13 @@ button.danger {
 
 .issue-section-heading {
   justify-content: space-between;
+}
+
+.issue-section-heading-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .issue-section-heading h2 {

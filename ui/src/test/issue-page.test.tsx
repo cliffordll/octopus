@@ -1,4 +1,4 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -10,11 +10,12 @@ afterEach(() => {
 }, 10000);
 
 it("shows an issue and records comments and review decisions", async () => {
+  const longIssueTitle = "实现登录流程并处理一个非常长的任务名称用于验证顶部操作按钮不会被标题挤压变形";
   const issue = {
     id: "issue-1",
     orgId: "org-1",
     identifier: "OCT-1",
-    title: "实现登录流程",
+    title: longIssueTitle,
     description: "接入页面",
     status: "in_review",
     priority: "high",
@@ -239,7 +240,9 @@ it("shows an issue and records comments and review decisions", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues/issue-1");
-  expect(await screen.findByRole("heading", { name: "实现登录流程" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: longIssueTitle })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "复制 ID" })[0]).toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: "聊天" })[0]).toBeInTheDocument();
   const properties = screen.getByRole("region", { name: "任务属性" });
   expect(properties).toHaveTextContent("属性");
   expect(properties).toHaveTextContent("编号");
@@ -265,6 +268,10 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("不可下载");
   expect(await screen.findByRole("region", { name: "任务文档" })).toHaveTextContent("执行计划");
+  expect(await screen.findByDisplayValue("## 执行步骤")).toBeInTheDocument();
+  await userEvent.click(within(screen.getByRole("region", { name: "任务文档" })).getByRole("button", { name: "隐藏" }));
+  expect(screen.queryByDisplayValue("## 执行步骤")).not.toBeInTheDocument();
+  await userEvent.click(within(screen.getByRole("region", { name: "任务文档" })).getByRole("button", { name: "显示" }));
   expect(await screen.findByDisplayValue("## 执行步骤")).toBeInTheDocument();
   await userEvent.clear(screen.getByLabelText("标题"));
   await userEvent.type(screen.getByLabelText("标题"), "执行计划更新");
@@ -300,7 +307,7 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
-    { id: "issue-1", title: "实现登录流程", identifier: "OCT-1", status: "in_review" },
+    { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
   ]);
 
   await userEvent.type(screen.getByLabelText("添加评论"), "准备合并");
