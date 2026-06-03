@@ -25,6 +25,7 @@ async def list_org_issues(
     assignee_agent_id: str | None = None,
     project_id: str | None = None,
     goal_id: str | None = None,
+    parent_id: str | None = None,
     origin_kind: str | None = None,
     origin_id: str | None = None,
 ) -> Sequence[Issue]:
@@ -37,6 +38,8 @@ async def list_org_issues(
         stmt = stmt.where(Issue.project_id == project_id)
     if goal_id is not None:
         stmt = stmt.where(Issue.goal_id == goal_id)
+    if parent_id is not None:
+        stmt = stmt.where(Issue.parent_id == parent_id)
     if origin_kind is not None:
         stmt = stmt.where(Issue.origin_kind == origin_kind)
     if origin_id is not None:

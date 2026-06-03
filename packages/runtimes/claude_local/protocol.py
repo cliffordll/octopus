@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..provider_config import model_for_cli
+
 
 def build_args(config: dict[str, Any]) -> list[str]:
     args = _string_list(config.get("extraArgs", config.get("args", [])))
     args.extend(["--print", "-", "--output-format", "stream-json", "--verbose"])
-    model = _string(config.get("model"))
+    model = model_for_cli(config)
     if model:
         args.extend(["--model", model])
     effort = _string(config.get("effort") or config.get("modelReasoningEffort"))

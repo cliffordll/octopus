@@ -3,19 +3,11 @@ import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type F
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
+import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
+import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "请求失败";
-}
-
-function hasAssistantReply(messages: Array<{ role: string }>) {
-  return messages.some((message) => message.role === "assistant");
-}
-
-const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
 
 function skillLabel(entry: Record<string, unknown>) {
   const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
@@ -31,6 +23,7 @@ export function ChatsPage() {
   const [searchParams] = useSearchParams();
   const requestedAgentId = searchParams.get("agentId") ?? "";
   const [agentId, setAgentId] = useState("");
+  const [issueCreationMode, setIssueCreationMode] = useState<"manual_approval" | "auto_create">("manual_approval");
   const [projectId, setProjectId] = useState("");
   const [body, setBody] = useState("");
   const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
@@ -38,6 +31,7 @@ export function ChatsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const organization = useQuery({ queryKey: ["organization", orgId], queryFn: () => organizationsApi.get(orgId) });
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const selectedAgentSkills = useQuery({
     queryKey: ["agent-skills", agentId],
@@ -72,39 +66,43 @@ export function ChatsPage() {
       setAgentId(requestedAgentId);
     }
   }, [chatAgentList, requestedAgentId]);
+  useEffect(() => {
+    const mode = organization.data?.defaultChatIssueCreationMode;
+    if (mode === "manual_approval" || mode === "auto_create") {
+      setIssueCreationMode(mode);
+    }
+  }, [organization.data?.defaultChatIssueCreationMode]);
   const create = useMutation({
     mutationFn: async () => {
       const draft = body.trim();
       const chat = await chatsApi.create(orgId, {
         title: draft.slice(0, 40) || "新对话",
+        issueCreationMode,
         preferredAgentId: agentId,
         ...(projectId
           ? { contextLinks: [{ entityType: "project", entityId: projectId }] }
           : {}),
       });
+      const optimisticMessage: ChatMessage = {
+        id: `pending-${Date.now()}`,
+        orgId,
+        conversationId: chat.id,
+        role: "user",
+        kind: "message",
+        body: draft,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+      };
       queryClient.setQueryData(["chat", chat.id], chat);
+      queryClient.setQueryData(["chat-messages", chat.id], [optimisticMessage]);
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
-      try {
-        const created = await chatsApi.addMessage(chat.id, { body: draft });
-        return {
-          chat,
-          messages: created.messages,
-          draft,
-          firstMessageError: hasAssistantReply(created.messages) ? null : missingAssistantReplyMessage,
-        };
-      } catch (error) {
-        queryClient.setQueryData(["chat-messages", chat.id], []);
-        return { chat, messages: null, draft, firstMessageError: errorMessage(error) };
-      }
+      return { chat, initialMessage: draft };
     },
-    onSuccess: ({ chat, messages, draft, firstMessageError }) => {
+    onSuccess: ({ chat, initialMessage }) => {
       queryClient.setQueryData(["chat", chat.id], chat);
-      if (messages) {
-        queryClient.setQueryData(["chat-messages", chat.id], messages);
-        setBody("");
-      }
+      setBody("");
       navigate(`/orgs/${orgId}/chats/${chat.id}`, {
-        state: firstMessageError ? { sendError: `首条消息发送失败：${firstMessageError}`, draft } : undefined,
+        state: { initialMessage },
       });
     },
   });
@@ -145,6 +143,7 @@ export function ChatsPage() {
             />
           </label>
           {agents.error && <ErrorNotice error={agents.error} />}
+          {organization.error && <ErrorNotice error={organization.error} />}
           {projects.error && <ErrorNotice error={projects.error} />}
           {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
           {create.error ? <ErrorNotice error={create.error} /> : null}
@@ -168,6 +167,16 @@ export function ChatsPage() {
                 {chatAgentList.map((agent) => (
                   <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
                 ))}
+              </select>
+            </label>
+            <label aria-label="任务创建模式选择" className="chat-context-field">
+              <select
+                aria-label="任务创建模式"
+                value={issueCreationMode}
+                onChange={(event) => setIssueCreationMode(event.target.value as "manual_approval" | "auto_create")}
+              >
+                <option value="manual_approval">手动审批</option>
+                <option value="auto_create">自动创建</option>
               </select>
             </label>
             <details

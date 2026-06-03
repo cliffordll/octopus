@@ -229,6 +229,7 @@ async def test_wakeup_executes_process_runtime_and_records_failed_run(
     assert persisted_run.status == "failed"
     assert [event.event_type for event in events] == [
         "lifecycle",
+        "lifecycle",
         "adapter.invoke",
         "error",
     ]

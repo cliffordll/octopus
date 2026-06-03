@@ -27,6 +27,12 @@ ORG_UPDATE_TO_COLUMN: dict[str, str] = {
 }
 
 
+def _chat_issue_creation_mode(value: object) -> str:
+    if value in {"auto_create", "automatic"}:
+        return "auto_create"
+    return "manual_approval"
+
+
 class OrgService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -65,8 +71,8 @@ class OrgService:
             description=cast(str | None, payload.get("description")),
             issue_prefix=org_id[:6].upper(),
             budget_monthly_cents=cast(int, payload.get("budgetMonthlyCents", 0)),
-            default_chat_issue_creation_mode=cast(
-                str, payload.get("defaultChatIssueCreationMode", "manual_approval")
+            default_chat_issue_creation_mode=_chat_issue_creation_mode(
+                payload.get("defaultChatIssueCreationMode", "manual_approval")
             ),
             brand_color=cast(str | None, payload.get("brandColor")),
             require_board_approval_for_new_agents=cast(
@@ -94,7 +100,11 @@ class OrgService:
         actor_id: str,
     ) -> OrganizationDetail | None:
         column_updates = {
-            ORG_UPDATE_TO_COLUMN[key]: value
+            ORG_UPDATE_TO_COLUMN[key]: (
+                _chat_issue_creation_mode(value)
+                if key == "defaultChatIssueCreationMode"
+                else value
+            )
             for key, value in payload.items()
             if key in ORG_UPDATE_TO_COLUMN
         }
@@ -154,6 +164,10 @@ def _to_detail(row: Organization) -> OrganizationDetail:
         issueCounter=row.issue_counter,
         budgetMonthlyCents=row.budget_monthly_cents,
         spentMonthlyCents=row.spent_monthly_cents,
+        requireBoardApprovalForNewAgents=row.require_board_approval_for_new_agents,
+        defaultChatIssueCreationMode=_chat_issue_creation_mode(
+            row.default_chat_issue_creation_mode
+        ),
         brandColor=row.brand_color,
         createdAt=row.created_at.isoformat(),
         updatedAt=row.updated_at.isoformat(),

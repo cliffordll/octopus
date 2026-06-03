@@ -202,7 +202,11 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     # carried in `recentMessages` for the LLM to act on.
     prompt_bytes = captured["prompt"]
     assert isinstance(prompt_bytes, bytes)
-    envelope = json.loads(prompt_bytes.decode("utf-8"))
+    prompt = prompt_bytes.decode("utf-8")
+    assert "Reply to the latest user message only" in prompt
+    marker = "Conversation input:"
+    assert marker in prompt
+    envelope = json.loads(prompt.split(marker, 1)[1].strip())
     assert envelope["conversation"]["id"] == conversation["id"]
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],
