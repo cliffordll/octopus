@@ -20,6 +20,8 @@ export const organizationsApi = {
     jsonRequest<OrganizationDetail>(root, "POST", payload),
   update: (orgId: string, payload: UpdateOrganizationPayload): Promise<OrganizationDetail> =>
     jsonRequest<OrganizationDetail>(`${root}/${encodeURIComponent(orgId)}`, "PATCH", payload),
+  archive: (orgId: string): Promise<OrganizationDetail> =>
+    jsonRequest<OrganizationDetail>(`${root}/${encodeURIComponent(orgId)}/archive`, "POST", {}),
   resources: (orgId: string): Promise<OrganizationResource[]> =>
     request<OrganizationResource[]>(`${root}/${encodeURIComponent(orgId)}/resources`, { method: "GET" }),
   createResource: (orgId: string, payload: CreateOrganizationResourcePayload): Promise<OrganizationResource> =>

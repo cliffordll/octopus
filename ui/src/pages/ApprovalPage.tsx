@@ -23,11 +23,22 @@ export function ApprovalPage() {
   const [decisionNote, setDecisionNote] = useState("");
   const [decisionPayload, setDecisionPayload] = useState("{}");
   const [resubmitPayload, setResubmitPayload] = useState("{}");
+  const [commentBody, setCommentBody] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approval = useQuery({
     queryKey: ["approval", approvalId],
     queryFn: () => approvalsApi.get(approvalId),
+  });
+  const linkedIssues = useQuery({
+    queryKey: ["approval-issues", approvalId],
+    queryFn: () => approvalsApi.listIssues(approvalId),
+    enabled: Boolean(approvalId),
+  });
+  const comments = useQuery({
+    queryKey: ["approval-comments", approvalId],
+    queryFn: () => approvalsApi.listComments(approvalId),
+    enabled: Boolean(approvalId),
   });
   const act = useMutation({
     mutationFn: (action: "approve" | "reject" | "requestRevision" | "resubmit") => {
@@ -45,6 +56,13 @@ export function ApprovalPage() {
     onMutate: () => setFormError(null),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] }),
     onError: (error) => setFormError(error instanceof Error ? error.message : "审批操作失败"),
+  });
+  const addComment = useMutation({
+    mutationFn: () => approvalsApi.addComment(approvalId, { body: commentBody.trim() }),
+    onSuccess: () => {
+      setCommentBody("");
+      void queryClient.invalidateQueries({ queryKey: ["approval-comments", approvalId] });
+    },
   });
   function runAction(action: "approve" | "reject" | "requestRevision" | "resubmit") {
     setFormError(null);
@@ -99,6 +117,43 @@ export function ApprovalPage() {
             )}
             <h3>完整请求</h3>
             <pre>{JSON.stringify(approval.data.payload, null, 2)}</pre>
+            <h3>关联任务</h3>
+            {linkedIssues.error && <ErrorNotice error={linkedIssues.error} />}
+            {linkedIssues.isLoading && <p className="muted">加载关联任务中...</p>}
+            {!linkedIssues.isLoading && (linkedIssues.data?.length ?? 0) === 0 && <p className="muted">暂无关联任务。</p>}
+            {linkedIssues.data?.map((issue) => (
+              <Link className="approval-linked-issue" key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
+                <span>{issue.identifier ?? issue.id.slice(0, 8)}</span>
+                <strong>{issue.title}</strong>
+                <Badge>{issue.status}</Badge>
+              </Link>
+            ))}
+            <h3>评论</h3>
+            {comments.error && <ErrorNotice error={comments.error} />}
+            {comments.isLoading && <p className="muted">加载评论中...</p>}
+            {!comments.isLoading && (comments.data?.length ?? 0) === 0 && <p className="muted">暂无评论。</p>}
+            {comments.data?.map((comment) => (
+              <article className="approval-comment" key={comment.id}>
+                <p>{comment.body}</p>
+                <small className="muted">{comment.authorAgentId ?? comment.authorUserId ?? "unknown"} · {comment.createdAt}</small>
+              </article>
+            ))}
+            <form
+              className="approval-comment-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (commentBody.trim()) addComment.mutate();
+              }}
+            >
+              <textarea
+                aria-label="审批评论"
+                placeholder="添加审批评论"
+                value={commentBody}
+                onChange={(event) => setCommentBody(event.target.value)}
+              />
+              <button disabled={addComment.isPending || !commentBody.trim()} type="submit">添加评论</button>
+            </form>
+            {addComment.error && <ErrorNotice error={addComment.error} />}
           </article>
           <aside className="panel approval-decision-panel">
             <h2>审批决策</h2>

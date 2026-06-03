@@ -11,6 +11,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 
 export function OrganizationPage() {
   const { orgId = "" } = useParams();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
@@ -43,6 +44,14 @@ export function OrganizationPage() {
         defaultChatIssueCreationMode,
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["organization", orgId] }),
+  });
+  const archive = useMutation({
+    mutationFn: () => organizationsApi.archive(orgId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["organization", orgId], updated);
+      void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      navigate("/organizations");
+    },
   });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -98,7 +107,18 @@ export function OrganizationPage() {
           </select>
         </label>
         {update.error && <ErrorNotice error={update.error} />}
-        <button type="submit">保存组织</button>
+        {archive.error && <ErrorNotice error={archive.error} />}
+        <div className="form-actions">
+          <button type="submit">保存组织</button>
+          <button
+            className="danger"
+            disabled={organization.data?.status === "archived" || archive.isPending}
+            type="button"
+            onClick={() => archive.mutate()}
+          >
+            归档组织
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -719,6 +739,8 @@ export function OrganizationSkillsPage() {
   const skillRows = Array.isArray(skills.data) ? skills.data : [];
   const [skillFilter, setSkillFilter] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [expandedSkillDirs, setExpandedSkillDirs] = useState<Record<string, string[]>>({});
   const [selectedPathBySkill, setSelectedPathBySkill] = useState<Record<string, string>>({});
   const selectedSkill = skillRows.find((skill) => skill.id === skillId) ?? skillRows[0];
@@ -733,6 +755,14 @@ export function OrganizationSkillsPage() {
   const [newSlug, setNewSlug] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newMarkdown, setNewMarkdown] = useState(DEFAULT_SKILL_MARKDOWN);
+  const [importSourcePath, setImportSourcePath] = useState("");
+  const [importSlug, setImportSlug] = useState("");
+  const [importName, setImportName] = useState("");
+  const [importDescription, setImportDescription] = useState("");
+  const [importOverwrite, setImportOverwrite] = useState(false);
+  const [scanRootPath, setScanRootPath] = useState("");
+  const [scanImportDiscovered, setScanImportDiscovered] = useState(false);
+  const [scanOverwrite, setScanOverwrite] = useState(false);
   const [draftContent, setDraftContent] = useState("");
   const selectedPath = selectedSkill ? (routeFilePath || selectedPathBySkill[selectedSkill.id] || skillFilePath(selectedSkill)) : "SKILL.md";
   const filteredSkillSections = organizationSkillSections(filteredSkillRows);
@@ -801,6 +831,39 @@ export function OrganizationSkillsPage() {
       void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
     },
   });
+  const importSkill = useMutation({
+    mutationFn: () => organizationSkillsApi.import(orgId, {
+      sourcePath: importSourcePath.trim(),
+      slug: importSlug.trim() || null,
+      name: importName.trim() || null,
+      description: importDescription.trim() || null,
+      overwrite: importOverwrite,
+    }),
+    onSuccess: (skill) => {
+      setImportSourcePath("");
+      setImportSlug("");
+      setImportName("");
+      setImportDescription("");
+      setImportOverwrite(false);
+      setImportOpen(false);
+      navigate(`/orgs/${orgId}/skills/${skill.id}`);
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+    },
+  });
+  const scanLocalSkills = useMutation({
+    mutationFn: () => organizationSkillsApi.scanLocal(orgId, {
+      rootPath: scanRootPath.trim(),
+      importDiscovered: scanImportDiscovered,
+      overwrite: scanOverwrite,
+    }),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+      if (result.imported[0]) {
+        setScanOpen(false);
+        navigate(`/orgs/${orgId}/skills/${result.imported[0].id}`);
+      }
+    },
+  });
   const saveFile = useMutation({
     mutationFn: () => organizationSkillsApi.updateFile(orgId, selectedSkill!.id, { path: selectedPath, content: draftContent }),
     onSuccess: () => {
@@ -815,10 +878,28 @@ export function OrganizationSkillsPage() {
       void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
     },
   });
+  const installUpdate = useMutation({
+    mutationFn: (skillId: string) => organizationSkillsApi.installUpdate(orgId, skillId),
+    onSuccess: (skill) => {
+      void queryClient.invalidateQueries({ queryKey: ["organization-skills", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["organization-skill", orgId, skill.id] });
+      void queryClient.invalidateQueries({ queryKey: ["organization-skill-update-status", orgId, skill.id] });
+    },
+  });
 
   function submitCreateSkill(event: FormEvent) {
     event.preventDefault();
     if (newName.trim()) createSkill.mutate();
+  }
+
+  function submitImportSkill(event: FormEvent) {
+    event.preventDefault();
+    if (importSourcePath.trim()) importSkill.mutate();
+  }
+
+  function submitScanLocalSkills(event: FormEvent) {
+    event.preventDefault();
+    if (scanRootPath.trim()) scanLocalSkills.mutate();
   }
 
   function toggleSkillDirectory(skillId: string, path: string) {
@@ -849,7 +930,11 @@ export function OrganizationSkillsPage() {
               <p>{skillRows.length} 个可用</p>
               <p>当前组织的内置、社区和导入技能。</p>
             </div>
-            <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button" aria-label="添加技能">+</button>
+            <div className="row-actions">
+              <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button">创建</button>
+              <button className="secondary small-button" onClick={() => setImportOpen(true)} type="button">导入</button>
+              <button className="secondary small-button" onClick={() => setScanOpen(true)} type="button">扫描</button>
+            </div>
           </div>
           <label className="organization-skill-search">
             <span>搜索技能</span>
@@ -909,6 +994,14 @@ export function OrganizationSkillsPage() {
                 <div className="row-actions">
                   <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
                   <button
+                    className="secondary small-button"
+                    disabled={installUpdate.isPending || !updateStatus.data?.hasUpdate}
+                    onClick={() => installUpdate.mutate(selectedSkill.id)}
+                    type="button"
+                  >
+                    安装更新
+                  </button>
+                  <button
                     className="danger small-button"
                     disabled={deleteSkill.isPending || !selectedSkill.editable}
                     onClick={() => deleteSkill.mutate(selectedSkill.id)}
@@ -921,6 +1014,7 @@ export function OrganizationSkillsPage() {
               {skillDetail.error && <ErrorNotice error={skillDetail.error} />}
               {skillFile.error && <ErrorNotice error={skillFile.error} />}
               {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
+              {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
               <div className="organization-skill-info-grid">
                 <div>
                   <span>来源</span>
@@ -1014,6 +1108,58 @@ export function OrganizationSkillsPage() {
             <div className="task-modal-actions">
               <button className="secondary" onClick={() => setCreateOpen(false)} type="button">取消</button>
               <button disabled={createSkill.isPending || !newName.trim()} type="submit">创建技能</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {importOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="panel form task-modal skill-create-dialog" onSubmit={submitImportSkill}>
+            <div className="task-modal-header">
+              <div>
+                <h2>导入技能</h2>
+                <p className="muted">从本地技能目录导入到当前组织。</p>
+              </div>
+              <button className="secondary small-button" onClick={() => setImportOpen(false)} type="button">取消</button>
+            </div>
+            <label>来源路径<input value={importSourcePath} onChange={(event) => setImportSourcePath(event.target.value)} required /></label>
+            <label>Short name<input value={importSlug} onChange={(event) => setImportSlug(event.target.value)} placeholder="incident-response" /></label>
+            <label>名称<input value={importName} onChange={(event) => setImportName(event.target.value)} /></label>
+            <label>描述<input value={importDescription} onChange={(event) => setImportDescription(event.target.value)} /></label>
+            <label className="checkbox-row"><input checked={importOverwrite} onChange={(event) => setImportOverwrite(event.target.checked)} type="checkbox" /> 覆盖同名技能</label>
+            {importSkill.error && <ErrorNotice error={importSkill.error} />}
+            <div className="task-modal-actions">
+              <button className="secondary" onClick={() => setImportOpen(false)} type="button">取消</button>
+              <button disabled={importSkill.isPending || !importSourcePath.trim()} type="submit">导入技能</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {scanOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="panel form task-modal skill-create-dialog" onSubmit={submitScanLocalSkills}>
+            <div className="task-modal-header">
+              <div>
+                <h2>扫描本地技能</h2>
+                <p className="muted">扫描目录下的技能，可选择直接导入发现项。</p>
+              </div>
+              <button className="secondary small-button" onClick={() => setScanOpen(false)} type="button">取消</button>
+            </div>
+            <label>根路径<input value={scanRootPath} onChange={(event) => setScanRootPath(event.target.value)} required /></label>
+            <label className="checkbox-row"><input checked={scanImportDiscovered} onChange={(event) => setScanImportDiscovered(event.target.checked)} type="checkbox" /> 扫描后导入</label>
+            <label className="checkbox-row"><input checked={scanOverwrite} onChange={(event) => setScanOverwrite(event.target.checked)} type="checkbox" /> 覆盖同名技能</label>
+            {scanLocalSkills.data && (
+              <div className="organization-skill-scan-result">
+                <p>{scanLocalSkills.data.candidates.length} 个候选，已导入 {scanLocalSkills.data.imported.length} 个。</p>
+                {scanLocalSkills.data.candidates.map((candidate) => (
+                  <span key={candidate.sourcePath}>{candidate.name} · {candidate.alreadyImported ? "已存在" : candidate.sourcePath}</span>
+                ))}
+              </div>
+            )}
+            {scanLocalSkills.error && <ErrorNotice error={scanLocalSkills.error} />}
+            <div className="task-modal-actions">
+              <button className="secondary" onClick={() => setScanOpen(false)} type="button">取消</button>
+              <button disabled={scanLocalSkills.isPending || !scanRootPath.trim()} type="submit">扫描</button>
             </div>
           </form>
         </div>

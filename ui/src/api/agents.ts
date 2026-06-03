@@ -5,6 +5,7 @@ import type {
   AgentConfiguration,
   AgentInstructionsBundle,
   AgentInstructionsFileDetail,
+  AgentInstructionsPathResult,
   AgentDetail,
   AgentRuntimeEnvironmentTestResult,
   AgentRuntimeModel,
@@ -19,6 +20,7 @@ import type {
   RuntimeAdapterMetadata,
   UpdateAgentInstructionsBundlePayload,
   UpdateAgentInstructionsFilePayload,
+  UpdateAgentInstructionsPathPayload,
   UpdateAgentPayload,
 } from "./types";
 
@@ -105,6 +107,11 @@ export const agentsApi = {
     payload: UpdateAgentInstructionsBundlePayload,
   ): Promise<AgentInstructionsBundle> =>
     jsonRequest<AgentInstructionsBundle>(`${agentRoot(agentId)}/instructions-bundle`, "PATCH", payload),
+  updateInstructionsPath: (
+    agentId: string,
+    payload: UpdateAgentInstructionsPathPayload,
+  ): Promise<AgentInstructionsPathResult> =>
+    jsonRequest<AgentInstructionsPathResult>(`${agentRoot(agentId)}/instructions-path`, "PATCH", payload),
   readInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsFileDetail> =>
     request<AgentInstructionsFileDetail>(
       `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
@@ -129,4 +136,6 @@ export const agentsApi = {
     jsonRequest<Agent>(`${agentRoot(agentId)}/resume`, "POST", {}),
   terminate: (agentId: string): Promise<Agent> =>
     jsonRequest<Agent>(`${agentRoot(agentId)}/terminate`, "POST", {}),
+  archive: (agentId: string): Promise<Agent> =>
+    jsonRequest<Agent>(`${agentRoot(agentId)}/archive`, "POST", {}),
 };
