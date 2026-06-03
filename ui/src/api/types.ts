@@ -670,6 +670,16 @@ export interface CreateAgentPayload {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface HireAgentPayload extends CreateAgentPayload {
+  sourceIssueId?: string | null;
+  sourceIssueIds?: string[];
+}
+
+export interface AgentHireResult {
+  agent: Agent;
+  approval: ApprovalDetail | null;
+}
+
 export interface UpdateAgentPayload {
   name?: string;
   title?: string | null;

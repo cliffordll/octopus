@@ -74,6 +74,7 @@ uv run python -m cli agent task-sessions <agent-id>
 
 ```powershell
 uv run python -m cli agent create --org-id <org-id> --name Builder --role engineer --runtime codex_local
+uv run python -m cli agent hire --org-id <org-id> --name Builder --role engineer --runtime codex_local --source-issue-id <issue-id>
 uv run python -m cli agent pause <agent-id>
 uv run python -m cli agent resume <agent-id>
 uv run python -m cli agent terminate <agent-id>

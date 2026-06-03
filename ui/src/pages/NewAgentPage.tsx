@@ -72,7 +72,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
   const create = useMutation({
     mutationFn: () =>
-      agentsApi.create(orgId, {
+      agentsApi.hire(orgId, {
         name: name.trim(),
         role: effectiveRole,
         ...(title.trim() ? { title: title.trim() } : {}),
@@ -85,8 +85,13 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
       }),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
       onCreated?.();
-      navigate(`/orgs/${orgId}/agents/${agent.id}/configuration`);
+      if (agent.approval) {
+        navigate(`/orgs/${orgId}/approvals/${agent.approval.id}`);
+      } else {
+        navigate(`/orgs/${orgId}/agents/${agent.agent.id}/configuration`);
+      }
     },
   });
   function submit(event: FormEvent) {
