@@ -110,6 +110,24 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     skill_create_parser.add_argument("--markdown")
     skill_create_parser.add_argument("--markdown-file")
     skill_create_parser.set_defaults(handler=create_skill)
+    skill_import_parser = actions.add_parser(
+        "skill-import", help="Import an organization skill from a local path"
+    )
+    skill_import_parser.add_argument("--org-id", required=True)
+    skill_import_parser.add_argument("--source-path", required=True)
+    skill_import_parser.add_argument("--slug")
+    skill_import_parser.add_argument("--name")
+    skill_import_parser.add_argument("--description")
+    skill_import_parser.add_argument("--overwrite", action="store_true")
+    skill_import_parser.set_defaults(handler=import_skill)
+    skill_scan_local_parser = actions.add_parser(
+        "skill-scan-local", help="Scan local organization skills"
+    )
+    skill_scan_local_parser.add_argument("--org-id", required=True)
+    skill_scan_local_parser.add_argument("--root-path", required=True)
+    skill_scan_local_parser.add_argument("--import-discovered", action="store_true")
+    skill_scan_local_parser.add_argument("--overwrite", action="store_true")
+    skill_scan_local_parser.set_defaults(handler=scan_local_skills)
     skill_file_parser = actions.add_parser(
         "skill-file", help="Read an organization skill file"
     )
@@ -135,6 +153,12 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     skill_status_parser.add_argument("--org-id", required=True)
     skill_status_parser.add_argument("skill_id")
     skill_status_parser.set_defaults(handler=get_skill_update_status)
+    skill_install_update_parser = actions.add_parser(
+        "skill-install-update", help="Install an organization skill update"
+    )
+    skill_install_update_parser.add_argument("--org-id", required=True)
+    skill_install_update_parser.add_argument("skill_id")
+    skill_install_update_parser.set_defaults(handler=install_skill_update)
     skill_delete_parser = actions.add_parser(
         "skill-delete", help="Delete an organization skill"
     )
@@ -273,6 +297,34 @@ def create_skill(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("POST", f"/api/orgs/{args.org_id}/skills", json=payload)
 
 
+def import_skill(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = {
+        key: value
+        for key, value in {
+            "sourcePath": args.source_path,
+            "slug": args.slug,
+            "name": args.name,
+            "description": args.description,
+            "overwrite": args.overwrite if args.overwrite else None,
+        }.items()
+        if value is not None
+    }
+    return client.request(
+        "POST", f"/api/orgs/{args.org_id}/skills/import", json=payload
+    )
+
+
+def scan_local_skills(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload: dict[str, Any] = {"rootPath": args.root_path}
+    if args.import_discovered:
+        payload["importDiscovered"] = True
+    if args.overwrite:
+        payload["overwrite"] = True
+    return client.request(
+        "POST", f"/api/orgs/{args.org_id}/skills/scan-local", json=payload
+    )
+
+
 def read_skill_file(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request(
         "GET",
@@ -296,6 +348,14 @@ def get_skill_update_status(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request(
         "GET",
         f"/api/orgs/{args.org_id}/skills/{args.skill_id}/update-status",
+    )
+
+
+def install_skill_update(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/orgs/{args.org_id}/skills/{args.skill_id}/install-update",
+        json={},
     )
 
 
