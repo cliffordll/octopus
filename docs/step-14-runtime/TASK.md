@@ -1,6 +1,6 @@
 # Step 14: Runtime Adapter 扩展
 
-状态：收尾验证
+状态：已完成
 
 ## 上游依据
 

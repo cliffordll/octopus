@@ -21,12 +21,12 @@
 
 | ID | 状态 | 级别 | 阻塞闭环 | 标题 | 归属 | 验证证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| BUG-21-001 | open | P1 | 待确认 | 智能体说明文件右侧内容显示为空需确认 server 读取语义 | Step 21 | 待复现 |
+| BUG-21-001 | fixed | P1 | 待确认 | 智能体说明文件右侧内容显示为空需确认 server 读取语义 | Step 21 | `pytest tests/contract/test_step17_agent_instructions.py -q` 5 passed |
 | BUG-21-002 | fixed | P1 | 是 | Python instructions bundle 缺少上游 reconcile/export 行为，可能把 legacy/default 内容落为空文件 | Step 21 | `pytest ...::test_agent_instructions_file_read_reconciles_legacy_prompt_template -q` |
-| BUG-21-003 | open | P2 | 否 | 本地测试环境中 instructions bundle DELETE 文件出现 Windows PermissionError | Step 21 | `pytest tests/contract/test_step17_agent_instructions.py -q` |
+| BUG-21-003 | fixed | P2 | 否 | 本地测试环境中 instructions bundle DELETE 文件出现 Windows PermissionError | Step 21 | `pytest tests/contract/test_step17_agent_instructions.py -q` 5 passed |
 | BUG-21-004 | fixed | P3 | 否 | 文档规范与上游兼容命名存在冲突，需要明确允许保留的外部契约名称 | Step 21 | `CLAUDE.md` 已补充兼容契约例外 |
-| BUG-21-005 | open | P2 | 否 | agents route 和核心 service 文件偏大，需按职责拆分审查 | Step 21/25 | 文件规模与职责扫描 |
-| BUG-21-006 | open | P3 | 否 | 部分 Step TASK 状态与实际开发进度不一致 | Step 21 | Step TASK 状态扫描 |
+| BUG-21-005 | deferred | P2 | 否 | agents route 和核心 service 文件偏大，需按职责拆分审查 | Step 25 | 文件规模已扫描；大规模拆分排入 hardening |
+| BUG-21-006 | fixed | P3 | 否 | 部分 Step TASK 状态与实际开发进度不一致 | Step 21 | Step 14/16/17 TASK 状态已纠偏 |
 | BUG-21-007 | fixed | P1 | 否 | `/api/health` 端点未注册，README 验证步骤无法执行 | Step 21 | `pytest tests/contract/test_step21_health.py -q` |
 | BUG-21-008 | fixed | P1 | 否 | issue 响应缺 `cancelledAt` 字段，与上游 schema 列 `cancelled_at` 与 type 字段 `cancelledAt` 不一致 | Step 21 | `pytest tests/contract/test_step21_issue_cancelled_at.py -q` |
 | BUG-21-009 | fixed | P1 | 是 | issue 状态翻转不自动写 `started_at` / `completed_at` / `cancelled_at`（上游 `applyStatusSideEffects` 行为缺失） | Step 21 | `pytest tests/contract/test_step21_issue_status_timestamps.py -q` |
@@ -42,6 +42,13 @@
 | BUG-21-019 | invalid | P2 | 否 | `GET /api/orgs/{orgId}/messenger/system/{threadKind}` 早前误报 404 | Step 21 | 重测 `failed-runs`/`budget-alerts`/`join-requests` 三个上游真实 kind 全部 200；之前用 `governance/onboarding/...` 等无效 kind 探测才出现 404，属于测试侧错误 |
 | BUG-21-020 | fixed | P3 | 否 | codex runner `clear_inherited_blocking_proxy_env` 的 explicit_keys 只收集 config.env 的键，workspace `context.env` 显式设的代理会被误删 | Step 21 | 多代理审查发现；`pytest tests/contract/test_step14_runtime_adapters.py -q` 回归通过 |
 | BUG-21-021 | fixed | P2 | 否 | chat 多轮 prompt envelope 的 contextLinks 缺 entity hydration 字段（label/identifier/status/description/priority），与上游 `buildPrompt` contextSummary 不一致 | Step 21 | `pytest tests/contract/test_step21_chat_history_prompt.py::test_prompt_context_links_include_hydrated_entity_fields -q` |
+| BUG-21-022 | fixed | P1 | 是 | 缺少上游 issue checkout 和 heartbeat-context 路由，任务执行缺少原子领取与紧凑上下文 | Step 21 | `pytest ...::test_issue_heartbeat_context_route_returns_compact_issue_context ...::test_issue_checkout_route_atomically_claims_issue_for_agent -q` 2 passed |
+| BUG-21-023 | fixed | P1 | 是 | 任务详情页缺少 issue -> runs 查询和稳定 run/issue 关联 | Step 21 | `pytest tests/contract/test_step20_observability.py::test_issue_heartbeat_runs_route_returns_task_execution_summary -q` |
+| BUG-21-024 | fixed | P1 | 是 | run 输出可读性不足，任务详情页缺少稳定过程输出契约 | Step 21 | process run events 已覆盖 queued/started/invoke/spawn/log/final，seq 连续 |
+| BUG-21-025 | fixed | P2 | 否 | 缺少按 issueId 执行任务的服务端专用入口和幂等语义 | Step 21 | `test_issue_execute_route_queues_assigned_issue_idempotently` |
+| BUG-21-026 | fixed | P2 | 否 | 任务详情缺少输出产物和附件的统一聚合契约 | Step 21 | `test_issue_detail_surfaces_work_products_with_asset_content_alongside_attachments` |
+| BUG-21-027 | fixed | P1 | 是 | run 成功后缺少上游式 issue close-out governance | Step 21 | `test_successful_issue_run_without_closeout_queues_passive_followup` |
+| BUG-21-028 | fixed | P1 | 是 | chat `auto_create` issue proposal 没有自动落成任务 | Step 21 | `test_auto_create_chat_issue_proposal_creates_issue` |
 
 ## 记录模板
 
@@ -61,7 +68,7 @@
 
 ### BUG-21-001: 智能体说明文件右侧内容显示为空需确认 server 读取语义
 
-- 状态：open
+- 状态：fixed
 - 严重级别：P1
 - 是否阻塞最小闭环：待确认。若默认 instructions 文件无法读取真实内容，会影响 agent 调试与说明文件编辑闭环。
 - 影响范围：Agent instructions bundle UI、server `instructions-bundle` 文件读取接口、默认 instructions 初始化/materialization 行为。
@@ -80,8 +87,8 @@
   - 如果 `SOUL.md`、`TOOLS.md`、`MEMORY.md` 等默认文件也为空，需要确认 server 默认 instructions 写入/materialization 是否缺失。
   - 代码审查已发现 BUG-21-002：Python 实现缺少上游 `reconcileBundle/exportFiles` 语义，且入口文件缺失时会写空文件。
 - 处理归属：Step 21 先复现并确认 server 响应；若是默认 instructions 初始化缺口，按阻塞程度在 Step 21 修复或排入 Step 17/14 相关 instructions/materialization 后续。
-- 修复记录：待处理。
-- 验证证据：待补充具体请求、响应和涉及文件路径。
+- 修复记录：已由 BUG-21-002 的 reconcile/export 修复覆盖默认 instructions 空内容根因；复测 instructions bundle 读写删除和 legacy prompt materialization 全部通过。
+- 验证证据：`uv run pytest tests/contract/test_step17_agent_instructions.py -q` 5 passed。
 
 ### BUG-21-002: Python instructions bundle 缺少上游 reconcile/export 行为，可能把 legacy/default 内容落为空文件
 
@@ -110,7 +117,7 @@
 
 ### BUG-21-003: 本地测试环境中 instructions bundle DELETE 文件出现 Windows PermissionError
 
-- 状态：open
+- 状态：fixed
 - 严重级别：P2
 - 是否阻塞最小闭环：否。影响自动化验证和 instructions 文件删除路径，但不阻塞组织、agent、说明读取和执行调试闭环。
 - 影响范围：`DELETE /api/agents/{id}/instructions-bundle/file`、`tests/contract/test_step17_agent_instructions.py::test_agent_instructions_bundle_read_write_delete_and_activity`。
@@ -119,11 +126,11 @@
   2. 测试先创建 `notes/PLAYBOOK.md`。
   3. 调用 DELETE instructions file 接口。
 - 预期行为：server 删除 bundle 内非 entry 文件并返回更新后的 bundle。
-- 实际行为：当前 Windows 本地环境抛出 `PermissionError: [WinError 5] 拒绝访问`，位置为 `server/services/agent_instructions.py` 中 `target.unlink()`。
+- 实际行为（修复前）：Windows 本地环境曾抛出 `PermissionError: [WinError 5] 拒绝访问`，位置为 `server/services/agent_instructions.py` 中 `target.unlink()`。
 - 初步根因：待查。当前环境已多次出现 `.pytest_cache`、`pytest-tmp`、运行时生成文件删除权限异常；需要区分是本地权限/杀软/文件句柄问题，还是 server 删除逻辑缺少 Windows 兼容处理。
 - 处理归属：Step 21 继续调查；若确认是 server 行为缺陷则修复，若确认是本地环境权限限制则记录验证替代路径。
-- 修复记录：待处理。
-- 验证证据：`.venv\Scripts\pytest.exe tests\contract\test_step17_agent_instructions.py -q` 中 1 个 DELETE 权限失败；新增 legacy reconcile 测试已单独通过。
+- 修复记录：复测后 DELETE 路径已通过，未再复现 PermissionError；本条按环境瞬时权限问题消失并由 contract 覆盖关闭。
+- 验证证据：`uv run pytest tests/contract/test_step17_agent_instructions.py -q` 5 passed。
 
 ### BUG-21-004: 文档规范与上游兼容命名存在冲突，需要明确允许保留的外部契约名称
 
@@ -399,9 +406,153 @@
 - 修复记录：新增模块级 `_context_link_summary(link)` helper，从 hydrated link 的 `entity` 字段提取 label/identifier/status/description/priority；`_build_assistant_prompt` 改为调用此 helper。`metadata` 字段移除（上游 contextSummary 不含 metadata，改为对齐 entity 字段）。
 - 验证证据：新增 `tests/contract/test_step21_chat_history_prompt.py::test_prompt_context_links_include_hydrated_entity_fields`（seed 一个 issue 作 contextLink，断言 envelope 含全部 hydration 字段）；`pytest tests/contract/ -q` 全套 299 passed；ruff / pyright 全绿。
 
+### BUG-21-022: 缺少上游 issue checkout 和 heartbeat-context 路由，任务执行缺少原子领取与紧凑上下文
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。当前已能通过 assigned issue 自动 queued wakeup/run，但 runtime 只能依赖 payload 中的 `issueId`；缺少 checkout 会导致真实任务执行前没有上游式原子领取/执行锁，缺少 heartbeat-context 会导致 agent 无法稳定读取紧凑任务上下文。
+- 影响范围：`server/routes/issues.py`、`server/services/issues.py`、`server/services/heartbeat.py`、`server/skills/bundled/control-plane` 的 `issue checkout` / `issue context` 工作流、UI 的任务执行对齐。
+- 复现步骤：
+  1. 创建分配给 agent 的 issue，观察 server 可以生成 `assignment` wakeup/run。
+  2. 请求 `POST /api/issues/{issueId}/checkout`。
+  3. 请求 `GET /api/issues/{issueId}/heartbeat-context`。
+- 预期行为：与上游 `D:\coding\rudder\server\src\routes\issues.mutations.ts:613` 和 `D:\coding\rudder\server\src\routes\issues.ts:551` 对齐；`checkout` 应按 `agentId`、`expectedStatuses`、当前 actor/run id 原子领取 issue，并写入 `checkoutRunId/executionRunId`；`heartbeat-context` 应返回 issue、评论、文档、唤醒评论等紧凑上下文，供 heartbeat runtime 执行前读取。
+- 必须补齐：
+  - `POST /api/issues/{issueId}/checkout`。
+  - `GET /api/issues/{issueId}/heartbeat-context`。
+  - checkout 成功后按上游语义可把 issue 切到 `in_progress`，并用 `checkoutRunId/executionRunId` 防止多个 run/agent 同时处理同一任务。
+  - actor 为 agent 时只能 checkout 自己；board/user 代 checkout 时按上游判断是否需要额外 wake assignee。
+- 实际行为（修复前）：Python server 没有这两个路由；onboarding 和 bundled control-plane skill 已要求 checkout/context，但 API 不存在，UI 暂时只能调用已支持的 wakeup。
+- 初步根因：Step 11/13/15 已实现 wakeup/run/workspace 基线，但未迁移上游 issue lifecycle 的 checkout/context 子路由；`checkout_run_id` 字段已存在，说明 schema 留位但 service/route 缺实现。
+- 处理归属：Step 21。优先补齐 server contract，不改 UI/CLI；UI 可在接口存在后对接。
+- 修复记录：已补 `POST /api/issues/{issueId}/checkout` 和 `GET /api/issues/{issueId}/heartbeat-context`。checkout 使用条件 UPDATE 处理 expected status、assignee 和 run lock，冲突返回 409；成功后写 `issue.checked_out` activity，并按 assignment wakeup 语义唤醒 assignee。heartbeat-context 返回 issue 紧凑摘要和当前未实现的 project/goal/comment/document 占位结构。
+- 验证证据：`uv run pytest tests/contract/test_step8_issue_management.py::test_issue_heartbeat_context_route_returns_compact_issue_context tests/contract/test_step8_issue_management.py::test_issue_checkout_route_atomically_claims_issue_for_agent -q` 2 passed；相关回归 `uv run pytest tests/contract/test_step8_issue_management.py tests/contract/test_step20_observability.py tests/contract/test_step11_agent_management.py tests/contract/test_step13_run_management.py -q` 41 passed。
+
+### BUG-21-023: 任务详情页缺少 issue -> runs 查询和稳定 run/issue 关联
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务可以触发 run，但 UI 无法稳定从 issue 找到相关 run，任务详情页无法展示“这个任务的执行过程”。
+- 影响范围：`server/routes/issues.py`、`server/services/heartbeat.py`、`packages/database/schema/heartbeat.py`、`packages/database/queries/heartbeat.py`、UI 任务详情页。
+- 复现步骤：
+  1. 创建 assigned issue 并触发 heartbeat run。
+  2. 尝试按 issueId 查询该 issue 关联过的 heartbeat runs。
+  3. 读取 `GET /api/heartbeat-runs/{runId}`，检查 response 是否直接带 issue 摘要字段。
+- 预期行为：与上游 issue/run 可见性对齐，server 提供 issue -> runs 查询；run 与 issue 有稳定关联，不能只依赖一次性临时 payload。至少支持：
+  - `GET /api/issues/{issueId}/heartbeat-runs` 或上游等价 `GET /api/issues/{id}/runs`。
+  - 返回 `runId/status/agentId/createdAt/startedAt/finishedAt/error/summary`。
+  - `GET /api/heartbeat-runs/{runId}` 返回 `issueId`、`issueIdentifier`、`issueTitle`、`projectId`、`goalId`，供 UI 不再二次猜测。
+  - run 创建时将 issue 关联持久化；可选方案为新增 `heartbeat_runs.issue_id`，或保持上游式 `context_snapshot.issueId` 但必须有 query/helper 封装，避免 UI 直接依赖 JSON 内部结构。
+- 实际行为（修复前）：wakeup payload/contextSnapshot 已可携带 `issueId`，`run_intelligence` 也能按 `context_snapshot.issueId` 过滤；但没有 issue-scoped runs API，也没有在 heartbeat run response 顶层返回 issue 摘要。
+- 初步根因：Step 11/13 建立 run 基线时只提供 org/agent scoped run 查询；Step 20 observability 提供 run 详情、events、log、workspace operations，但未补 issue-scoped run 聚合。
+- 处理归属：Step 21。优先按上游以 `context_snapshot.issueId` 建立 server 查询封装；是否新增物理 `issue_id` 字段需结合 migration 成本和上游证据决定。
+- 修复记录：已补 `GET /api/issues/{issueId}/heartbeat-runs`，由 server 封装 `context_snapshot.issueId` 查询；`GET /api/heartbeat-runs/{runId}` 顶层返回 `issueId`、`issueIdentifier`、`issueTitle`、`projectId`、`goalId`，UI 不需要读取 JSON 内部结构。
+- 验证证据：新增 `tests/contract/test_step20_observability.py::test_issue_heartbeat_runs_route_returns_task_execution_summary`；相关回归 `uv run pytest tests/contract/test_step8_issue_management.py tests/contract/test_step20_observability.py tests/contract/test_step11_agent_management.py tests/contract/test_step13_run_management.py -q` 41 passed。
+
+### BUG-21-024: run 输出可读性不足，任务详情页缺少稳定过程输出契约
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。UI 任务详情页需要展示任务执行过程，但 server 目前只具备基础 run/events/log API，尚未明确执行期间持续可读、关键事件完整性和增量 log 稳定性验收。
+- 影响范围：`server/services/heartbeat.py`、`server/services/logs.py`、`server/routes/agents.py`、`server/routes/workspace_operations.py`、`tests/contract/test_step20_observability.py`、任务详情页输出展示。
+- 复现步骤：
+  1. 创建 assigned issue 并触发 run。
+  2. 在 run 执行期间持续读取 `GET /api/heartbeat-runs/{runId}`、`/events`、`/log`、`/workspace-operations`。
+  3. 检查是否能看到 queued、started、stdout/stderr、workspace/tool 操作、completed/failed/cancelled/timed_out 和 error message。
+  4. 使用 `GET /api/heartbeat-runs/{runId}/log?offset=...&limitBytes=...` 增量读取，检查 `content/nextOffset/eof`。
+- 预期行为：对齐上游三层输出模型：DB 结构化 events、local_file NDJSON run log、实时/轮询可读输出。至少支持：
+  - `GET /api/heartbeat-runs/{runId}` 在执行期间持续可读。
+  - `GET /api/heartbeat-runs/{runId}/events?afterSeq=...&limit=...` 在执行期间持续可读。
+  - `GET /api/heartbeat-runs/{runId}/log?offset=...&limitBytes=...` 返回 `content`、`nextOffset`、`eof`，并可增量读取。
+  - `GET /api/heartbeat-runs/{runId}/workspace-operations` 在执行期间持续可读。
+  - events 至少覆盖 `queued`、`started`、runtime stdout/stderr 摘要、tool/workspace operation、`completed/failed/cancelled/timed_out`、error message。
+- 实际行为（修复前）：已有 run 详情、events、log、workspace-operations 基础接口；`HeartbeatService._execute_run` 会写 `lifecycle` 和 stdout/stderr log event，queued run 创建时也已写入 `lifecycle/run queued` event；但 run started 与 queued event 使用重复 `seq=1`，会破坏 `afterSeq` 增量读取。
+- 初步根因：Step 20 主要补 observability 路径，未按任务详情页场景建立端到端输出契约。
+- 处理归属：Step 21。优先补 contract tests 和最小 server 行为；WebSocket/live event 可后置，当前 UI 可先用轮询 `/events` 和 `/log`。
+- 修复记录：已修复 `_prepare_execution` 固定从 seq=1/2 写 started/invoke 的问题，改为从当前 run events 下一序号继续；process run contract 现在覆盖 queued、started、adapter.invoke、process spawned、stdout log、final succeeded，且 seq 连续。
+- 验证证据：`uv run pytest tests/contract/test_step11_agent_management.py::test_agent_wakeup_executes_process_adapter_and_exposes_run -q` passed；相关目标回归 3 passed。
+
+### BUG-21-025: 缺少按 issueId 执行任务的服务端专用入口和幂等语义
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。assigned issue 自动 wakeup 已能触发 run，但 UI 仍需要自己组合“创建/分配/唤醒”；专用 execute 接口可以降低 UI 耦合。
+- 影响范围：`server/routes/issues.py`、`server/services/issues.py`、`server/services/heartbeat.py`、UI 任务详情页执行按钮。
+- 复现步骤：
+  1. 已有一个分配给 agent 的 issue。
+  2. UI 想触发该 issue 执行，只能自行决定是否 PATCH issue、再调用 agent wakeup。
+  3. 连续点击执行按钮时，server 没有 issue-scoped 幂等响应。
+- 预期行为：提供上游兼容边界之外的 server 组合入口，或确认使用上游 checkout+wakeup 组合。建议接口：
+  - `POST /api/issues/{issueId}/execute`。
+  - 校验 issue 存在、组织访问、assignee 可执行。
+  - 可选执行 checkout/状态切换。
+  - 创建 wakeup/run 并返回 run。
+  - 连续点击执行时返回已有 queued/running run、返回 409，或支持 `idempotencyKey`。
+- 实际行为（修复前）：没有 issue-scoped execute 入口；只有 agent-scoped wakeup。
+- 初步根因：早期 run 能力围绕 agent wakeup 建立，缺少 UI 任务详情页的 issue-centric 操作封装。
+- 处理归属：Step 21 或 Step 25。若严格上游对齐，先实现 checkout/context/issue runs；`execute` 可作为 Octopus server 组合 API 后置。
+- 修复记录：新增 `POST /api/issues/{issueId}/execute`，校验 issue 存在、组织访问和 assignee agent；已有 queued/running run 时直接返回；新建 run 使用 issue-scoped idempotency key `issue:{issueId}:execute`，避免连续点击重复创建。路由会在请求事务关闭后调度 assignee agent。
+- 验证证据：`uv run pytest tests/contract/test_step8_issue_management.py::test_issue_execute_route_queues_assigned_issue_idempotently -q` passed；相关目标回归 3 passed。
+
+### BUG-21-026: 任务详情缺少输出产物和附件的统一聚合契约
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。issue 附件、chat 附件、runtime work products 和 asset 下载链路已经存在，但任务详情页要稳定展示“任务输入附件 + 执行输出产物 + 产物内容下载”还缺少明确的 issue-scoped 聚合验收。
+- 影响范围：`server/routes/issues.py`、`server/services/issues.py`、`server/services/workspaces.py`、issue detail/workProducts、issue attachments、asset content 下载、UI 任务详情页。
+- 复现步骤：
+  1. 给 issue 上传附件。
+  2. 执行该 issue 对应 run，并让 runtime 返回 `workProducts`。
+  3. 打开 issue detail，检查是否能一次性拿到可展示的 `workProducts`，并能通过附件列表拿到输入附件和下载路径。
+- 预期行为：server 有明确 contract 覆盖：
+  - `GET /api/issues/{issueId}` 返回 `workProducts`，包含 `assetId/contentPath`。
+  - `GET /api/issues/{issueId}/attachments` 返回 issue 附件列表。
+  - `GET /api/assets/{assetId}/content` 可下载附件和 work product 内容。
+  - runtime 返回带 `content` 的 work product 时，server 自动归档为 asset。
+- 实际行为（修复前）：基础链路已有实现和部分测试，但缺少围绕“任务详情输出产物/附件展示”的单一验收用例，容易误判为 UI 问题或后续修改时回归。
+- 初步根因：Step 15/19 分别实现 workspace work products 和 storage attachments，Step 20/21 聚焦 run observability，没有把二者整合成 issue task detail contract。
+- 处理归属：Step 21。补 contract test，确认现有实现是否已满足；若缺字段或聚合路径再修 server，不改 UI/CLI。
+- 修复记录：新增 issue task detail 聚合验收：issue 上传附件后可通过 `/attachments` 获取并下载；runtime work product 带 content 时自动归档为 asset，issue detail 返回 `workProducts.assetId/contentPath/summary`，并可下载产物内容。现有 server 实现满足该 contract，无需新增业务代码。
+- 验证证据：`uv run pytest tests/contract/test_step19_storage.py::test_issue_detail_surfaces_work_products_with_asset_content_alongside_attachments -q` passed；相关目标回归 3 passed。
+
+### BUG-21-027: run 成功后缺少上游式 issue close-out governance
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。用户会看到 run 已成功但 issue 一直停留在 `in_progress`，如果没有 close-out governance，就无法区分“任务还在执行”与“执行结束但未关闭任务”。
+- 影响范围：`server/services/heartbeat.py`、`server/routes/issues.py`、`server/services/issues.py`、assignment run、agent close-out 权限、issue 状态可见性。
+- 复现步骤：
+  1. 创建 assigned issue。
+  2. 执行 issue run，让 runtime 成功退出。
+  3. 不调用 `PATCH /api/issues/{issueId}` close-out。
+  4. 查看 issue status 和后续 wakeup。
+- 预期行为：对齐上游：run 成功不应无条件自动把 issue 改为 `done`；agent 必须通过 `PATCH /api/issues/{id}` 明确 close-out。如果成功 run 结束后 issue 仍是 `todo/in_progress` 且没有 close-out signal，server 应 queue 同 agent 的 `issue_passive_followup`，要求 agent 补 progress comment / done / blocked / handoff。
+- 实际行为（修复前）：Python server 只更新 run 状态；不会限制非 checkout owner agent 直接把 issue 标 done，也不会在 run 成功但 issue 未 close-out 时触发 passive follow-up。
+- 初步根因：Step 21 补了 checkout/context/execute，但未迁移上游 close-out governance 和 agent checkout ownership guard。
+- 处理归属：Step 21。先补 server contract：agent close-out 权限和 passive follow-up；不做 run succeeded 自动 done。
+- 修复记录：已补 agent close-out guard：agent actor 只有当前 assignee 才能把 issue 标为 `done`。已补 heartbeat close-out governance：issue run 成功后，如果 issue 仍是 `todo/in_progress` 且不是 passive follow-up 自身，则 queue 同 agent 的 `issue_passive_followup`，不自动把 issue 改为 `done`。
+- 验证证据：`uv run pytest tests/contract/test_step8_issue_management.py::test_agent_cannot_mark_issue_done_without_checkout_ownership tests/contract/test_step11_agent_management.py::test_successful_issue_run_without_closeout_queues_passive_followup -q` 2 passed。
+
+### BUG-21-028: chat `auto_create` issue proposal 没有自动落成任务
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。用户在 chat 中要求“创建一个任务”时，assistant 已返回 `issue_proposal`，但任务列表没有新增 issue，导致“对话创建任务”链路断开。
+- 影响范围：`server/services/chats.py`、chat assistant issue proposal、conversation `issueCreationMode=auto_create`、任务列表可见性。
+- 复现步骤：
+  1. 创建 `issueCreationMode=auto_create` 的 chat conversation。
+  2. selected agent 返回 `kind="issue_proposal"`，或返回 summary 内嵌 JSON envelope。
+  3. 查看 `/api/orgs/{orgId}/issues`。
+- 预期行为：对齐上游 `server/src/routes/chats.ts`：当 conversation 非 plan mode 且 `issueCreationMode === "auto_create"` 时，server 保存 `issue_proposal` assistant message 后立即 `convertToIssue`，创建 issue、绑定 `primaryIssueId`，并追加 `issue_created` system message。`manual_approval` 仍只创建 `chat_issue_creation` approval，等待确认。
+- 实际行为（修复前）：Python server 始终只创建 proposal approval；即使 conversation 是 `auto_create`，也不会自动创建 issue。
+- 初步根因：Step 16/21 迁移了 proposal 持久化和 `POST /api/chats/{id}/convert-to-issue`，但遗漏上游 `auto_create` 分支。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：`ChatService.add_message_and_reply()` 在 `issue_proposal + auto_create + 非 planMode` 时跳过 approval，保存 assistant proposal 后调用既有 `convert_to_issue()`，返回消息中包含 `issue_created` system message。manual approval 路径保持不变。
+- 验证证据：`uv run pytest tests/contract/test_step16_chat_assistant_routes.py tests/contract/test_step16_chat_proposal_routes.py tests/contract/test_step16_chat_stream_routes.py -q` 12 passed；`ruff check` 和 `pyright` 通过。
+
 ### BUG-21-005: agents route 和核心 service 文件偏大，需按职责拆分审查
 
-- 状态：open
+- 状态：deferred
 - 严重级别：P2
 - 是否阻塞最小闭环：否。但继续叠加功能会增加回归风险。
 - 影响范围：`server/routes/agents.py`、`server/services/heartbeat.py`、`server/services/chats.py`、`server/services/agents.py`、`server/services/workspaces.py`、`server/services/agent_instructions.py`。
@@ -412,13 +563,13 @@
 - 预期行为：route 层只做路由、参数、validator、context 和响应；service 层按领域内聚，跨领域能力通过清晰接口协作。
 - 实际行为：部分文件已明显偏大，尤其 `server/routes/agents.py` 和 `server/services/heartbeat.py`；当前尚未确认所有职责都混杂，但需要在 Step 21/25 做拆分审查，避免后续继续堆叠。
 - 初步根因：Step 11-20 连续补齐 agent/runtime/run/workspace/observability，多个相关能力都落在既有文件中。
-- 处理归属：Step 21 先审查并拆分低风险路由；涉及恢复/兼容矩阵的深层 service 拆分可排入 Step 25 hardening。
-- 修复记录：本轮已修复一处明确封装问题：`RunIntelligenceService` 不再调用 `HeartbeatService._to_run/_to_event` 私有方法，改为公共转换函数。
-- 验证证据：文件规模扫描显示 `server/services/heartbeat.py`、`server/services/chats.py`、`server/services/agents.py`、`server/services/workspaces.py`、`server/routes/agents.py` 均为当前最大文件之一。
+- 处理归属：Step 25 hardening。Step 21 不再强行大规模重构，以免在闭环 bugfix 阶段引入架构性回归。
+- 修复记录：已完成文件规模扫描并确认该项属于维护性架构债，不阻塞最小闭环；后续拆分应按 Step 25 设计单独执行。
+- 验证证据：文件规模扫描显示当前最大文件为 `server/services/chats.py`、`server/services/heartbeat.py`、`server/services/agents.py`、`server/services/workspaces.py`、`server/routes/agents.py` 等。
 
 ### BUG-21-006: 部分 Step TASK 状态与实际开发进度不一致
 
-- 状态：open
+- 状态：fixed
 - 严重级别：P3
 - 是否阻塞最小闭环：否。
 - 影响范围：`docs/step-*/TASK.md` 的状态字段、开发进度判断、后续排期。
@@ -426,11 +577,11 @@
   1. 扫描所有 `docs/step-*/TASK.md` 的标题和 `状态`。
   2. 对比 `docs/FEATURE.md` 和当前已实现代码/测试。
 - 预期行为：已完成并合入的步骤应在 `TASK.md` 中标记为已完成或保留准确的阶段性状态；待开发步骤不应已有大量代码实现却仍无说明。
-- 实际行为：Step 20 已完成并合入，但 `docs/step-20-observability/TASK.md` 仍标为“开发中”；Step 16/17 等历史步骤状态也需要结合实现范围复核。
+- 实际行为（修复前）：Step 14 标记为“收尾验证”；Step 16/17 标记为“待开发”，但对应能力已有完成记录和测试覆盖。
 - 初步根因：步骤连续开发和重排后，部分 `TASK.md` 状态未同步更新。
 - 处理归属：Step 21 文档审查。
-- 修复记录：已将 Step 20 状态修正为“已完成”；其余步骤待逐项对照实现范围后再修。
-- 验证证据：Step TASK 状态扫描输出显示 Step 20 为“开发中”，本轮已修正。
+- 修复记录：已将 Step 14、Step 16、Step 17 的 `TASK.md` 顶部状态纠偏为“已完成”。Step 21 保持“开发中”；Step 22 以后仍为待开发。
+- 验证证据：Step TASK 状态扫描显示 Step 1-20 已完成或分阶段完成，Step 21 开发中，Step 22-26 待开发。
 
 ### BUG-21-015: 组织技能列表向 UI 暴露旧品牌 key 和展示文案
 

@@ -189,8 +189,17 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 5. 启动本地 CLI。
 ```
 
-当前 `opencode_local` 已支持把 DB provider/model 配置渲染到 managed home。
-`codex_local`、`claude_local` 的 provider/model 渲染仍属于后续 runtime adapter 深化。
+当前 `opencode_local`、`codex_local`、`claude_local` 已复用 DB
+provider/model 注入逻辑。`opencode_local` 会生成 managed OpenCode 配置；
+`codex_local` 会把 provider `apiKey/baseUrl` 注入为 `OPENAI_API_KEY` /
+`OPENAI_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`；
+`claude_local` 会把 provider `apiKey/baseUrl` 注入为 `ANTHROPIC_API_KEY` /
+`ANTHROPIC_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`。
+`openclaw_gateway` 当前仍是未实现 runtime，占位在 registry 中，没有 runner 可接入。
+
+`opencode_local` 的 managed `.config/opencode` 必须是独立副本，不能 symlink 到
+宿主机 `%USERPROFILE%/.config/opencode`。这样 DB provider/model materialization
+不会污染宿主机全局 OpenCode 配置。
 
 ## 安全要求
 
@@ -198,3 +207,31 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 - API 不返回明文 `api_key`，只返回 `***REDACTED***` 和 `hasApiKey`。
 - 后续正式方案需要迁移到 secret 引用或加密存储。
 - 删除 provider 会同时删除该 provider 下的 runtime models。
+
+## Chat 创建任务
+
+Chat runtime prompt 明确要求：当用户要求创建任务、issue、work item 或 ticket
+时，智能体不得直接创建 issue，而应返回 `issue_proposal` JSON envelope：
+
+```json
+{
+  "summary": "我可以为你创建这个任务。",
+  "kind": "issue_proposal",
+  "structuredPayload": {
+    "issueProposal": {
+      "title": "分析 rudder 源码",
+      "description": "分析 rudder 源码并整理核心架构。",
+      "priority": "medium"
+    }
+  }
+}
+```
+
+server 会把该 envelope 保存为 `issue_proposal` assistant message，并创建
+`chat_issue_creation` approval。真正创建 issue 仍通过：
+
+```text
+POST /api/chats/{id}/convert-to-issue
+```
+
+这样保留用户确认边界，避免普通对话自动落库创建任务。

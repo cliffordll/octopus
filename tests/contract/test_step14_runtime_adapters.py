@@ -1425,12 +1425,95 @@ async def test_opencode_execute_materializes_database_provider_config(
         / "opencode.json"
     )
     managed_config = json.loads(managed_config_path.read_text(encoding="utf-8"))
+    operator_config_after = json.loads(operator_config.read_text(encoding="utf-8"))
+    assert "deepseek" not in operator_config_after["provider"]
+    assert not managed_config_path.parent.is_symlink()
     provider = managed_config["provider"]["deepseek"]
     assert provider["name"] == "DeepSeek"
     assert provider["npm"] == "@ai-sdk/openai-compatible"
     assert provider["options"]["baseURL"] == "https://deepseek.example/v1"
     assert provider["options"]["apiKey"] == "sk-db"
     assert provider["models"]["deepseek-v4-flash"]["name"] == "DeepSeek V4 Flash"
+
+
+async def test_codex_and_claude_execute_use_database_provider_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, dict[str, Any]] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful local process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        captured[command] = {"args": args, "env": dict(kwargs["env"])}
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.claude_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    runtime_provider = {
+        "providerId": "deepseek",
+        "name": "DeepSeek",
+        "protocol": "openai_chat_completions",
+        "baseUrl": "https://deepseek.example/v1",
+        "apiKey": "sk-db",
+        "config": {},
+        "model": {
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+            "metadata": {},
+        },
+    }
+
+    await execute_codex_local(
+        _runtime_context_for_env(
+            command="codex-test",
+            config={
+                "command": "codex-test",
+                "model": "deepseek/deepseek-v4-flash",
+                "_octopus": {"runtimeProvider": runtime_provider},
+            },
+        )
+    )
+    await execute_claude_local(
+        _runtime_context_for_env(
+            command="claude-test",
+            config={
+                "command": "claude-test",
+                "model": "deepseek/deepseek-v4-flash",
+                "_octopus": {"runtimeProvider": runtime_provider},
+            },
+        )
+    )
+
+    codex = captured["codex-test"]
+    assert codex["env"]["OPENAI_API_KEY"] == "sk-db"
+    assert codex["env"]["OPENAI_BASE_URL"] == "https://deepseek.example/v1"
+    assert "--model" in codex["args"]
+    assert codex["args"][codex["args"].index("--model") + 1] == "deepseek-v4-flash"
+
+    claude = captured["claude-test"]
+    assert claude["env"]["ANTHROPIC_API_KEY"] == "sk-db"
+    assert claude["env"]["ANTHROPIC_BASE_URL"] == "https://deepseek.example/v1"
+    assert "--model" in claude["args"]
+    assert claude["args"][claude["args"].index("--model") + 1] == "deepseek-v4-flash"
 
 
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(

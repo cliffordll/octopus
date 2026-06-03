@@ -713,21 +713,29 @@ class ChatService:
             raise RuntimeError("Chat request timed out")
         if result.error_message or (result.exit_code or 0) != 0:
             raise RuntimeError(result.error_message or "Chat adapter execution failed")
-        summary = str((result.result_json or {}).get("summary") or "").strip()
+        result_json = _normalized_assistant_result(result.result_json or {})
+        summary = str(result_json.get("summary") or "").strip()
         if not summary:
             raise RuntimeError("Chat adapter returned no assistant reply")
-        result_json = result.result_json or {}
         assistant_kind = _assistant_kind(result_json.get("kind"))
         structured_payload = _with_persisted_transcript(
             _assistant_structured_payload(result_json), transcript
         )
-        approval_id = await self._create_proposal_approval(
-            conversation,
-            kind=assistant_kind,
-            structured_payload=structured_payload,
-            requested_by_user_id=conversation.created_by_user_id,
-            replying_agent_id=agent.id,
+        should_auto_create_issue = (
+            assistant_kind == "issue_proposal"
+            and _chat_issue_creation_mode(conversation.issue_creation_mode)
+            == "auto_create"
+            and not conversation.plan_mode
         )
+        approval_id = None
+        if not should_auto_create_issue:
+            approval_id = await self._create_proposal_approval(
+                conversation,
+                kind=assistant_kind,
+                structured_payload=structured_payload,
+                requested_by_user_id=conversation.created_by_user_id,
+                replying_agent_id=agent.id,
+            )
         assistant_message_at = max(
             datetime.now(UTC), user_message_at + timedelta(microseconds=1)
         )
@@ -752,14 +760,19 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, assistant_message.created_at
         )
+        messages = [self._to_message(user_message), self._to_message(assistant_message)]
+        if should_auto_create_issue:
+            converted = await self.convert_to_issue(
+                conversation.id,
+                {"messageId": assistant_message.id},
+                actor_type="agent",
+                actor_id=agent.id,
+            )
+            if converted is not None:
+                messages.append(converted["systemMessage"])
         if commit_after_user_message:
             await self._session.commit()
-        return {
-            "messages": [
-                self._to_message(user_message),
-                self._to_message(assistant_message),
-            ]
-        }
+        return {"messages": messages}
 
     async def _create_proposal_approval(
         self,
@@ -875,6 +888,18 @@ class ChatService:
                 (
                     "Always reply in the same language as the latest user "
                     "message unless it explicitly asks for another language."
+                ),
+                (
+                    "If the latest user message asks to create a task, issue, "
+                    "work item, or ticket, do not create it directly. Do not "
+                    "create files. Do not run commands. Return a single JSON "
+                    'object with summary, kind="issue_proposal", '
+                    "and structuredPayload.issueProposal containing title, "
+                    "description, priority, assigneeAgentId, projectId, goalId, "
+                    "or parentId when known. auto_create is a server-side issue "
+                    "conversion mode, not permission for you to execute the "
+                    "requested task. The UI/server will convert the proposal "
+                    "according to the conversation issueCreationMode."
                 ),
                 "Conversation input:",
                 envelope,
@@ -1150,6 +1175,39 @@ def _assistant_structured_payload(
     if isinstance(value, dict):
         return value
     return None
+
+
+def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
+    summary = result_json.get("summary")
+    if not isinstance(summary, str):
+        return result_json
+    parsed = _json_object(summary)
+    if parsed is None:
+        return result_json
+    kind = parsed.get("kind")
+    structured_payload = parsed.get("structuredPayload")
+    parsed_summary = parsed.get("summary")
+    if (
+        kind not in CHAT_MESSAGE_KINDS
+        or not isinstance(structured_payload, dict)
+        or not isinstance(parsed_summary, str)
+        or not parsed_summary.strip()
+    ):
+        return result_json
+    return {
+        **result_json,
+        "summary": parsed_summary.strip(),
+        "kind": kind,
+        "structuredPayload": structured_payload,
+    }
+
+
+def _json_object(value: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(value.strip())
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _chat_transcript_from_payload(

@@ -157,6 +157,7 @@ async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> No
     assert body["id"] == org_id
     assert body["status"] == "active"
     assert body["issuePrefix"] == org_id[:6]
+    assert body["defaultChatIssueCreationMode"] == "manual_approval"
     assert "urlKey" in body
     assert "createdAt" in body
 

@@ -36,6 +36,8 @@ class IssueDetail(IssueListItem):
     startedAt: str | None
     completedAt: str | None
     cancelledAt: str | None
+    checkoutRunId: str | None
+    executionRunId: str | None
     createdAt: str
     workProducts: list[IssueWorkProduct]
 
@@ -93,6 +95,11 @@ IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_fo
 
 class CreateIssueCommentPayload(TypedDict):
     body: str
+
+
+class CheckoutIssuePayload(TypedDict):
+    agentId: str
+    expectedStatuses: list[IssueStatus]
 
 
 class RecordIssueReviewDecisionPayload(TypedDict):
