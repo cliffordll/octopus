@@ -35,6 +35,11 @@ def test_step17_org_skill_contract_exposes_paths_and_validators() -> None:
     assert paths.ORG_SKILL_LIST_PATH == "/api/orgs/{orgId}/skills"
     assert paths.ORG_SKILL_DETAIL_PATH == "/api/orgs/{orgId}/skills/{skillId}"
     assert paths.ORG_SKILL_FILE_PATH == "/api/orgs/{orgId}/skills/{skillId}/files"
+    assert paths.ORG_SKILL_IMPORT_PATH == "/api/orgs/{orgId}/skills/import"
+    assert paths.ORG_SKILL_SCAN_LOCAL_PATH == "/api/orgs/{orgId}/skills/scan-local"
+    assert paths.ORG_SKILL_INSTALL_UPDATE_PATH == (
+        "/api/orgs/{orgId}/skills/{skillId}/install-update"
+    )
     assert validators.validate_create_organization_skill(
         {
             "name": "  Code Review  ",
@@ -51,6 +56,24 @@ def test_step17_org_skill_contract_exposes_paths_and_validators() -> None:
     assert validators.validate_update_organization_skill_file(
         {"path": " SKILL.md ", "content": "# Updated"}
     ) == {"path": "SKILL.md", "content": "# Updated"}
+    assert validators.validate_import_organization_skill(
+        {
+            "sourcePath": " ./skills/review ",
+            "slug": "review",
+            "name": " Review ",
+            "description": None,
+            "overwrite": True,
+        }
+    ) == {
+        "sourcePath": "./skills/review",
+        "slug": "review",
+        "name": "Review",
+        "description": None,
+        "overwrite": True,
+    }
+    assert validators.validate_scan_local_organization_skills(
+        {"rootPath": " ./skills ", "importDiscovered": True}
+    ) == {"rootPath": "./skills", "importDiscovered": True}
 
 
 @pytest.fixture
@@ -336,6 +359,138 @@ async def test_org_skill_list_seeds_bundled_skills(
     )
     assert community_file_code == 200
     assert community_file["content"] == "# Research Methodology\n"
+
+
+async def test_org_skill_import_scan_and_install_update_local_source(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory, "Step 17 External Skills")
+    source_root = tmp_path / "external-skills"
+    review_source = source_root / "review-skill"
+    review_source.mkdir(parents=True)
+    review_source.joinpath("SKILL.md").write_text(
+        "---\nname: review-skill\ndescription: Review code carefully.\n---\n\nUse v1.",
+        encoding="utf-8",
+    )
+    review_source.joinpath("references").mkdir()
+    review_source.joinpath("references", "guide.md").write_text(
+        "# Guide\n",
+        encoding="utf-8",
+    )
+
+    scan_code, scan = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills/scan-local",
+        json_body={"rootPath": str(source_root)},
+    )
+    assert scan_code == 200
+    assert scan["imported"] == []
+    assert scan["candidates"] == [
+        {
+            "sourcePath": str(review_source.resolve()),
+            "slug": "review-skill",
+            "name": "review-skill",
+            "description": "Review code carefully.",
+            "sourceRef": scan["candidates"][0]["sourceRef"],
+            "alreadyImported": False,
+            "skillId": None,
+        }
+    ]
+
+    import_code, imported = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills/import",
+        json_body={"sourcePath": str(review_source)},
+    )
+    assert import_code == 201
+    assert imported["slug"] == "review-skill"
+    assert imported["sourceType"] == "local_path"
+    assert imported["sourceLocator"] == str(review_source.resolve())
+    assert imported["sourceRef"] == scan["candidates"][0]["sourceRef"]
+    assert imported["fileInventory"] == [
+        {"path": "SKILL.md", "kind": "skill"},
+        {"path": "references/guide.md", "kind": "reference"},
+    ]
+
+    installed_code, installed_file = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{imported['id']}/files",
+        params={"path": "SKILL.md"},
+    )
+    assert installed_code == 200
+    assert "Use v1." in installed_file["content"]
+
+    duplicate_code, duplicate = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills/import",
+        json_body={"sourcePath": str(review_source)},
+    )
+    assert duplicate_code == 409
+    assert "already exists" in duplicate["detail"]
+
+    review_source.joinpath("SKILL.md").write_text(
+        "---\nname: review-skill\ndescription: Review code carefully.\n---\n\nUse v2.",
+        encoding="utf-8",
+    )
+    status_code, update_status = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{imported['id']}/update-status",
+    )
+    assert status_code == 200
+    assert update_status["supported"] is True
+    assert update_status["hasUpdate"] is True
+    assert update_status["latestRef"] != update_status["trackingRef"]
+
+    install_code, updated = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills/{imported['id']}/install-update",
+    )
+    assert install_code == 200
+    assert updated["sourceRef"] == update_status["latestRef"]
+
+    updated_file_code, updated_file = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{org_id}/skills/{imported['id']}/files",
+        params={"path": "SKILL.md"},
+    )
+    assert updated_file_code == 200
+    assert "Use v2." in updated_file["content"]
+
+    scan_import_code, scan_import = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills/scan-local",
+        json_body={"rootPath": str(source_root), "importDiscovered": True},
+    )
+    assert scan_import_code == 200
+    assert scan_import["imported"] == []
+    assert scan_import["candidates"][0]["alreadyImported"] is True
+    assert scan_import["candidates"][0]["skillId"] == imported["id"]
+
+    async with factory() as session:
+        actions = [
+            row.action
+            for row in (
+                await session.execute(
+                    select(ActivityLog).where(ActivityLog.org_id == org_id)
+                )
+            )
+            .scalars()
+            .all()
+        ]
+    assert actions == [
+        "organization.skill_imported",
+        "organization.skill_update_installed",
+    ]
 
 
 async def test_org_skill_routes_accept_organization_url_key(
