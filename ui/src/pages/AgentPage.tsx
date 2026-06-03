@@ -4,10 +4,11 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
+import type { AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const RUNTIMES: AgentRuntimeType[] = [
@@ -31,15 +32,27 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function readJsonObjectSafe(value: string): Record<string, unknown> {
+  try {
+    return readJsonObject(value, "Agent runtime config");
+  } catch {
+    return {};
+  }
+}
+
 function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
   const config = readJsonObject(value, "Agent runtime config");
-  if (runtime !== "opencode_local") return config;
+  if (!supportsRuntimeModels(runtime)) return config;
   const model = typeof config.model === "string" ? config.model.trim() : "";
-  const [provider, modelName] = model.split("/", 2);
-  if (!model || !provider?.trim() || !modelName?.trim()) {
-    throw new Error("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。");
-  }
-  return { ...config, model };
+  return { ...config, model: validateModelReference(model) };
+}
+
+function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
+  if (!result) return false;
+  const status = result.status.toLowerCase();
+  const statusPassed = ["ok", "pass", "passed", "success", "succeeded", "warning"].includes(status);
+  const hasFailedCheck = result.checks.some((check) => ["failed", "fail", "error"].includes((check.status ?? "").toLowerCase()));
+  return statusPassed && !hasFailedCheck;
 }
 
 function parseCsv(value: string): string[] {
@@ -550,9 +563,10 @@ export function AgentPage() {
   const [newSkillMarkdown, setNewSkillMarkdown] = useState("");
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [selectedSkillKey, setSelectedSkillKey] = useState("");
-  const [adapterTestChecks, setAdapterTestChecks] = useState<Array<{ label?: string; id?: string; status?: string; message?: string }>>([]);
+  const [runtimeTestResult, setRuntimeTestResult] = useState<AgentRuntimeEnvironmentTestResult | null>(null);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [resetSessionDialogOpen, setResetSessionDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [selectedInstructionKey, setSelectedInstructionKey] = useState("");
@@ -583,20 +597,15 @@ export function AgentPage() {
     queryFn: () => agentsApi.taskSessions(agentId),
     enabled: activeTab === "configuration" || activeTab === "runs",
   });
-  const adapterModels = useQuery({
-    queryKey: ["adapter-models", orgId, runtime],
-    queryFn: () => agentsApi.adapterModels(orgId, runtime),
-    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
-  });
   const adapterMetadata = useQuery({
     queryKey: ["adapter-metadata", orgId, runtime],
     queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
     enabled: activeTab === "configuration" && Boolean(orgId && runtime),
   });
-  const adapterQuotaWindows = useQuery({
-    queryKey: ["adapter-quota-windows", orgId, runtime],
-    queryFn: () => agentsApi.adapterQuotaWindows(orgId, runtime),
-    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+  const runtimeModels = useQuery({
+    queryKey: ["runtime-model-options", orgId, runtime],
+    queryFn: () => listRuntimeModelOptions(orgId, runtime),
+    enabled: activeTab === "configuration" && supportsRuntimeModels(runtime) && Boolean(orgId),
   });
   const skills = useQuery({
     queryKey: ["agent-skills", agentId],
@@ -631,7 +640,7 @@ export function AgentPage() {
     setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
   const action = useMutation({
-    mutationFn: (operation: "pause" | "resume" | "terminate") => agentsApi[operation](agentId),
+    mutationFn: (operation: "pause" | "resume" | "terminate" | "archive") => agentsApi[operation](agentId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
@@ -667,12 +676,16 @@ export function AgentPage() {
   });
   const resetSession = useMutation({
     mutationFn: () => agentsApi.resetSession(agentId, {}),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
+    onSuccess: () => {
+      setResetSessionDialogOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-task-sessions", agentId] });
+    },
   });
-  const testAdapterEnvironment = useMutation({
+  const testRuntime = useMutation({
     mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, validatedAgentRuntimeConfig(runtime, agentRuntimeConfig)),
-    onSuccess: (result) => setAdapterTestChecks(result.checks),
-    onError: () => setAdapterTestChecks([]),
+    onSuccess: (result) => setRuntimeTestResult(result),
+    onError: () => setRuntimeTestResult(null),
   });
   const syncSkills = useMutation({
     mutationFn: (nextDesiredSkills?: string[]) => agentsApi.syncSkills(agentId, nextDesiredSkills ?? parseCsv(desiredSkills)),
@@ -759,6 +772,28 @@ export function AgentPage() {
     event.preventDefault();
     if (taskTitle.trim()) assignTask.mutate();
   }
+  function runRuntimeTest() {
+    setConfigurationError(null);
+    testRuntime.mutate();
+  }
+  function selectRuntimeModel(modelId: string) {
+    try {
+      const config = readJsonObject(agentRuntimeConfig, "Agent runtime config");
+      setAgentRuntimeConfig(JSON.stringify({ ...config, model: modelId }, null, 2));
+      setConfigurationError(null);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
+    }
+  }
+  function setRuntimeModelInput(modelId: string) {
+    try {
+      const config = readJsonObjectSafe(agentRuntimeConfig);
+      setAgentRuntimeConfig(JSON.stringify({ ...config, model: modelId }, null, 2));
+      setConfigurationError(null);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
+    }
+  }
   const canChat = agent.data?.status !== "terminated";
   const runRows = Array.isArray(runs.data) ? runs.data : [];
   const sortedRuns = useMemo(
@@ -786,8 +821,15 @@ export function AgentPage() {
   });
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
-  const adapterModelRows = Array.isArray(adapterModels.data) ? adapterModels.data : [];
   const permissionRows = Object.entries(configuration.data?.permissions ?? {});
+  const runtimeAvailable = runtimeTestPassed(runtimeTestResult);
+  const runtimeModelOptions: RuntimeModel[] = runtimeModels.data ?? [];
+  const selectedRuntimeModel =
+    supportsRuntimeModels(runtime)
+      ? (readJsonObjectSafe(agentRuntimeConfig).model as string | undefined) ?? ""
+      : "";
+  const selectedRuntimeModelKnown =
+    !selectedRuntimeModel || runtimeModelOptions.some((model) => runtimeModelReference(model) === selectedRuntimeModel);
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
@@ -909,6 +951,11 @@ export function AgentPage() {
         {agent.data && (
           <div className="agent-header-actions">
             <button className="secondary" onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
+            {activeTab === "configuration" && (
+              <button className="secondary" disabled={resetSession.isPending} onClick={() => setResetSessionDialogOpen(true)} type="button">
+                重置会话
+              </button>
+            )}
             {canChat ? (
               <Link className="button secondary" to={`/orgs/${orgId}/chats?agentId=${encodeURIComponent(agentId)}`}>聊天</Link>
             ) : (
@@ -917,6 +964,7 @@ export function AgentPage() {
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
             <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("archive")}>归档</button>
             <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
             <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
@@ -1107,7 +1155,56 @@ export function AgentPage() {
                           {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
                         </select>
                       </label>
+                      {supportsRuntimeModels(runtime) && (
+                        <label className="agent-property-row">
+                          <span>模型配置</span>
+                          {runtimeModelOptions.length > 0 ? (
+                            <select value={selectedRuntimeModel} onChange={(event) => selectRuntimeModel(event.target.value)}>
+                              <option value="">选择模型</option>
+                              {runtimeModelOptions.map((model) => (
+                                <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
+                                  {runtimeModelLabel(model)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              placeholder="provider/model"
+                              value={selectedRuntimeModel}
+                              onChange={(event) => setRuntimeModelInput(event.target.value)}
+                            />
+                          )}
+                          {runtimeModelOptions.length > 0 && !selectedRuntimeModelKnown && (
+                            <small className="field-warning">
+                              当前配置的模型不在组织模型列表中：{selectedRuntimeModel}。请从下拉列表重新选择后保存。
+                            </small>
+                          )}
+                        </label>
+                      )}
                       <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+                    </div>
+                    <div className="agent-runtime-test-row">
+                      <button className="secondary" disabled={testRuntime.isPending} onClick={runRuntimeTest} type="button">
+                        测试运行时
+                      </button>
+                      {runtimeTestResult && (
+                        <div className={runtimeAvailable ? "success-notice compact" : "error-notice compact"} role="status">
+                          <strong>{runtimeAvailable ? "智能体运行时可用" : "智能体运行时不可用"}</strong>
+                          {runtimeTestResult.checks.length > 0 && (
+                            <ul>
+                              {runtimeTestResult.checks.map((check) => (
+                                <li key={check.id ?? check.label ?? check.message}>
+                                  <span>{check.label ?? check.id ?? "检查项"}</span>
+                                  <Badge>{check.status ?? "unknown"}</Badge>
+                                  {check.message && <span>{check.message}</span>}
+                                  {check.hint && <small>{check.hint}</small>}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                      {testRuntime.error && <ErrorNotice error={testRuntime.error} />}
                     </div>
                   </section>
                   <section className="agent-config-section">
@@ -1144,7 +1241,6 @@ export function AgentPage() {
                     </div>
                     <div className="agent-summary-grid">
                       <div className="summary-metric"><span>本地 Agent JWT</span><strong>{adapterMetadata.data?.supportsLocalAgentJwt ? "支持" : "未开启"}</strong></div>
-                      <div className="summary-metric"><span>认证检查</span><strong>{adapterTestChecks.find((check) => check.id === "auth")?.status ?? "未测试"}</strong></div>
                     </div>
                   </section>
                 </div>
@@ -1174,55 +1270,9 @@ export function AgentPage() {
               <section className="panel agent-config-revisions-card">
                 <div className="panel-heading">
                   <div>
-                    <p className="eyebrow">Adapter</p>
-                    <h2>Runtime Adapter</h2>
-                  </div>
-                  <button disabled={testAdapterEnvironment.isPending} onClick={() => testAdapterEnvironment.mutate()} type="button">
-                    测试环境
-                  </button>
-                </div>
-                {adapterModels.error && <ErrorNotice error={adapterModels.error} />}
-                {adapterMetadata.error && <ErrorNotice error={adapterMetadata.error} />}
-                {adapterQuotaWindows.error && <ErrorNotice error={adapterQuotaWindows.error} />}
-                {testAdapterEnvironment.error && <ErrorNotice error={testAdapterEnvironment.error} />}
-                <div className="agent-summary-grid">
-                  <div className="summary-metric"><span>Runtime</span><strong>{runtime}</strong></div>
-                  <div className="summary-metric"><span>Models</span><strong>{adapterModelRows.length}</strong></div>
-                  <div className="summary-metric"><span>技能</span><strong>{adapterMetadata.data?.capabilities?.skills ? "支持" : "不支持"}</strong></div>
-                  <div className="summary-metric"><span>Quota</span><strong>{adapterQuotaWindows.data?.ok ? "ok" : (adapterQuotaWindows.data?.error ?? "unknown")}</strong></div>
-                </div>
-                {adapterMetadata.data?.agentConfigurationDoc && (
-                  <pre className="run-excerpt">{adapterMetadata.data.agentConfigurationDoc}</pre>
-                )}
-                <div className="list">
-                  {adapterModelRows.map((model) => (
-                    <article className="row" key={model.id}>
-                      <strong>{model.label}</strong>
-                      <span className="muted">{model.id}</span>
-                    </article>
-                  ))}
-                </div>
-                {adapterTestChecks.length > 0 && (
-                  <div className="list">
-                    {adapterTestChecks.map((check) => (
-                      <article className="row" key={check.id ?? check.label}>
-                        <strong>{check.label ?? check.id}</strong>
-                        <Badge>{check.status ?? "unknown"}</Badge>
-                        {check.message && <span className="muted">{check.message}</span>}
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-              <section className="panel agent-config-revisions-card">
-                <div className="panel-heading">
-                  <div>
                     <p className="eyebrow">Runtime</p>
                     <h2>Runtime State</h2>
                   </div>
-                  <button disabled={resetSession.isPending} onClick={() => resetSession.mutate()} type="button">
-                    重置会话
-                  </button>
                 </div>
                 {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
                 {resetSession.error && <ErrorNotice error={resetSession.error} />}
@@ -1490,6 +1540,32 @@ export function AgentPage() {
                 <button disabled={assignTask.isPending} type="submit">创建任务</button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {resetSessionDialogOpen && agent.data && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setResetSessionDialogOpen(false);
+          }}
+          role="presentation"
+        >
+          <section aria-labelledby="reset-session-title" aria-modal="true" className="panel task-modal" role="dialog">
+            <div className="task-modal-header">
+              <h2 id="reset-session-title">重置会话</h2>
+              <button aria-label="关闭" className="secondary" onClick={() => setResetSessionDialogOpen(false)} type="button">关闭</button>
+            </div>
+            <p className="muted">
+              将清空 {agent.data.name} 的当前运行时会话状态。后续对话或运行会重新建立会话。
+            </p>
+            {resetSession.error && <ErrorNotice error={resetSession.error} />}
+            <div className="task-modal-actions">
+              <button className="secondary" onClick={() => setResetSessionDialogOpen(false)} type="button">取消</button>
+              <button className="danger" disabled={resetSession.isPending} onClick={() => resetSession.mutate()} type="button">
+                确认重置
+              </button>
+            </div>
           </section>
         </div>
       )}

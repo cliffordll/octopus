@@ -26,6 +26,8 @@ _NULLABLE_REF_FIELDS = (
     "assigneeUserId",
     "reviewerAgentId",
     "reviewerUserId",
+    "createdByAgentId",
+    "createdByUserId",
 )
 
 _CREATE_ISSUE_FIELDS = {
@@ -40,6 +42,8 @@ _CREATE_ISSUE_FIELDS = {
     "assigneeUserId",
     "reviewerAgentId",
     "reviewerUserId",
+    "createdByAgentId",
+    "createdByUserId",
     "originKind",
     "originId",
     "requestDepth",

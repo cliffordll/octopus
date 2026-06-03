@@ -55,6 +55,15 @@ export const heartbeatApi = {
     request<WorkspaceOperation[]>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/workspace-operations`, {
       method: "GET",
     }),
+  getWorkspaceOperationLog: (operationId: string, options: LogOptions = {}): Promise<LogReadResult> => {
+    const params = new URLSearchParams();
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    if (options.limitBytes !== undefined) params.set("limitBytes", String(options.limitBytes));
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return request<LogReadResult>(`/api/workspace-operations/${encodeURIComponent(operationId)}/log${query}`, {
+      method: "GET",
+    });
+  },
   cancel: (runId: string): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/cancel`, "POST", {}),
   retry: (runId: string): Promise<HeartbeatRun> =>
