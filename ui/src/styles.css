@@ -4160,15 +4160,25 @@ pre {
   gap: 8px;
 }
 
-.approval-toolbar button {
+.approval-status-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.approval-status-filter button,
+.approval-toolbar > button {
   background: #111827;
   border: 1px solid #223047;
   color: #9aa7bc;
+  min-width: 0;
   padding: 7px 12px;
 }
 
-.approval-toolbar button.active,
-.approval-toolbar button:hover {
+.approval-status-filter button.active,
+.approval-status-filter button:hover,
+.approval-toolbar > button.active,
+.approval-toolbar > button:hover {
   background: #172235;
   border-color: #3d8bfd;
   color: #e8f2ff;
@@ -4202,14 +4212,22 @@ pre {
   margin: 2px 0 0;
 }
 
+.approval-card-subtitle {
+  color: #8b98ad;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
 .approval-card-payload {
   background: #0a1018;
   border: 1px solid #1d293b;
   border-radius: 10px;
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 12px;
+  text-align: left;
 }
 
 .approval-card-payload span,
@@ -4231,6 +4249,11 @@ pre {
 
 .approval-empty-state {
   max-width: 640px;
+}
+
+.org-content-full .approval-empty-state {
+  max-width: none;
+  width: 100%;
 }
 
 .approval-detail-layout {
@@ -4256,6 +4279,27 @@ pre {
 
 .approval-note p {
   margin: 6px 0 0;
+}
+
+.approval-comment-hint {
+  margin-top: -8px;
+}
+
+.approval-comment-form {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approval-comment-form textarea {
+  min-height: 92px;
+  resize: vertical;
+  width: 100%;
+}
+
+.approval-comment-form button {
+  align-self: flex-end;
 }
 
 .approval-decision-panel textarea {
@@ -6393,6 +6437,172 @@ pre {
 .chat-message p {
   margin: 6px 0 0;
   white-space: pre-wrap;
+}
+
+.chat-issue-proposal-card {
+  align-items: center;
+  background: #0f1726;
+  border: 1px solid #27344d;
+  border-radius: 12px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 12px;
+}
+
+.chat-issue-proposal-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-issue-proposal-card span,
+.chat-issue-proposal-card small {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-issue-proposal-card strong {
+  color: #e6edf7;
+  font-size: 14px;
+}
+
+.chat-issue-proposal-card p {
+  color: #b9c7db;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-issue-proposal-card button {
+  flex: 0 0 auto;
+}
+
+.chat-issue-created-card {
+  align-items: center;
+  background: #0f1a27;
+  border: 1px solid #28425f;
+  border-radius: 12px;
+  color: inherit;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.chat-issue-created-card:hover {
+  background: #132236;
+  border-color: #3b82c4;
+}
+
+.chat-issue-created-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-issue-created-card span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-issue-created-card strong {
+  color: #e6edf7;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-approval-prompt {
+  align-items: center;
+  background: #101826;
+  border: 1px solid #2f4360;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+}
+
+.chat-approval-prompt div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-approval-prompt span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-approval-prompt-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.chat-approval-status {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.chat-approval-status.pending {
+  background: #2a200f;
+  color: #f8d37b;
+}
+
+.chat-approval-status.unconfirmed {
+  background: #172033;
+  color: #b9c7db;
+}
+
+.chat-approval-status.revision_requested {
+  background: #251b32;
+  color: #d8b4fe;
+}
+
+.chat-approval-status.approved {
+  background: #102a1a;
+  color: #86efac;
+}
+
+.chat-approval-status.rejected,
+.chat-approval-status.cancelled {
+  background: #33151a;
+  color: #fca5a5;
+}
+
+.chat-approval-prompt strong {
+  color: #e8f0fb;
+  font-size: 14px;
+}
+
+.chat-approval-prompt p {
+  color: #b9c7db;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-approval-actions {
+  align-items: center;
+  display: flex !important;
+  flex: 0 0 auto;
+  gap: 8px !important;
+}
+
+.chat-approval-prompt button,
+.chat-approval-prompt a {
+  flex: 0 0 auto;
 }
 
 .chat-message.thinking {

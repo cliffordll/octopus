@@ -3,14 +3,14 @@ import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { approvalsApi } from "../api/approvals";
-import type { ApprovalListItem, ApprovalStatus } from "../api/types";
+import { messengerApi } from "../api/messenger";
+import type { ApprovalDetail, ApprovalListItem, ApprovalStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { statusLabel } from "../utils/display";
 
-const STATUS_OPTIONS: Array<{ value: ApprovalStatus | ""; label: string }> = [
-  { value: "", label: "全部" },
+const STATUS_OPTIONS: Array<{ value: ApprovalStatus; label: string }> = [
   { value: "pending", label: "待审批" },
   { value: "revision_requested", label: "需修改" },
   { value: "approved", label: "已同意" },
@@ -19,6 +19,20 @@ const STATUS_OPTIONS: Array<{ value: ApprovalStatus | ""; label: string }> = [
 
 function approvalTitle(approval: ApprovalListItem) {
   return approval.type;
+}
+
+function proposedIssueTitle(approval?: ApprovalDetail | null): string | null {
+  const proposedIssue = approval?.payload?.proposedIssue;
+  if (!proposedIssue || typeof proposedIssue !== "object" || Array.isArray(proposedIssue)) return null;
+  const title = (proposedIssue as Record<string, unknown>).title;
+  return typeof title === "string" && title.trim() ? title.trim() : null;
+}
+
+function approvalFromMessengerItem(item: Record<string, unknown>): ApprovalDetail | null {
+  const approval = item.approval;
+  return approval && typeof approval === "object" && !Array.isArray(approval)
+    ? approval as ApprovalDetail
+    : null;
 }
 
 function formatDate(value: string) {
@@ -58,8 +72,8 @@ export function ApprovalsPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approvals = useQuery({
-    queryKey: ["approvals", orgId, status],
-    queryFn: () => approvalsApi.list(orgId, status || undefined),
+    queryKey: ["messenger-approvals", orgId],
+    queryFn: () => messengerApi.approvals(orgId),
   });
   const agents = useQuery({
     queryKey: ["agents", orgId],
@@ -68,7 +82,10 @@ export function ApprovalsPage() {
   const decision = useMutation({
     mutationFn: ({ approvalId, action }: { approvalId: string; action: "approve" | "reject" | "requestRevision" }) =>
       approvalsApi[action](approvalId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
+    },
   });
   const createApproval = useMutation({
     mutationFn: () =>
@@ -86,11 +103,15 @@ export function ApprovalsPage() {
       setRequestedByAgentId("");
       setIssueIds("");
       setCreateError(null);
+      void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
     },
     onError: (error) => setCreateError(createApprovalErrorMessage(error)),
   });
-  const approvalList = approvals.data ?? [];
+  const approvalList = (approvals.data?.detail.items ?? [])
+    .map(approvalFromMessengerItem)
+    .filter((approval): approval is ApprovalDetail => Boolean(approval))
+    .filter((approval) => !status || approval.status === status);
   const agentList = agents.data ?? [];
   function submitApproval(event: FormEvent) {
     event.preventDefault();
@@ -109,62 +130,33 @@ export function ApprovalsPage() {
       </header>
       <section className="approval-management">
         <div className="approval-toolbar">
-          {STATUS_OPTIONS.map((option) => (
-            <button
-              className={status === option.value ? "active" : ""}
-              key={option.value || "all"}
-              onClick={() => setStatus(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
+          <button className={status === "" ? "secondary active" : "secondary"} onClick={() => setStatus("")} type="button">全部</button>
+          <div aria-label="审批状态筛选" className="approval-status-filter" role="group">
+            {STATUS_OPTIONS.map((option) => (
+              <button
+                className={status === option.value ? "active" : ""}
+                key={option.value}
+                onClick={() => setStatus(status === option.value ? "" : option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <button className="secondary" onClick={() => setCreateDialogOpen(true)} type="button">创建审批</button>
         </div>
         {approvals.error && <ErrorNotice error={approvals.error} />}
         {decision.error && <ErrorNotice error={decision.error} />}
         <div className="approval-thread">
-          {approvalList.map((approval) => {
-            const pending = approval.status === "pending";
-            return (
-              <article className="approval-card" key={approval.id}>
-                <div className="approval-card-header">
-                  <div>
-                    <p className="eyebrow">Approvals assistant</p>
-                    <h2>{approvalTitle(approval)}</h2>
-                  </div>
-                  <Badge>{statusLabel(approval.status)}</Badge>
-                </div>
-                <p className="muted">
-                  {approval.requestedByAgentId ? `智能体 ${approval.requestedByAgentId} 发起` : "系统或用户发起"}
-                  {" · "}
-                  {formatDate(approval.createdAt)}
-                </p>
-                <div className="approval-card-payload">
-                  <span>审批类型</span>
-                  <strong>{approval.type}</strong>
-                </div>
-                <div className="approval-actions">
-                  {pending && (
-                    <>
-                      <button disabled={decision.isPending} onClick={() => decision.mutate({ approvalId: approval.id, action: "approve" })} type="button">
-                        同意
-                      </button>
-                      <button className="danger" disabled={decision.isPending} onClick={() => decision.mutate({ approvalId: approval.id, action: "reject" })} type="button">
-                        拒绝
-                      </button>
-                      <button className="secondary" disabled={decision.isPending} onClick={() => decision.mutate({ approvalId: approval.id, action: "requestRevision" })} type="button">
-                        请求修改
-                      </button>
-                    </>
-                  )}
-                  <Link className="button secondary small-button" to={`/orgs/${orgId}/approvals/${approval.id}`}>
-                    打开完整审批
-                  </Link>
-                </div>
-              </article>
-            );
-          })}
+          {approvalList.map((approval) => (
+            <ApprovalCard
+              approval={approval}
+              decisionPending={decision.isPending}
+              key={approval.id}
+              onDecision={(action) => decision.mutate({ approvalId: approval.id, action })}
+              orgId={orgId}
+            />
+          ))}
           {approvals.isSuccess && approvalList.length === 0 && (
             <section className="panel approval-empty-state">
               <p className="eyebrow">Approvals</p>
@@ -221,5 +213,59 @@ export function ApprovalsPage() {
         </div>
       )}
     </ChatsWorkspace>
+  );
+}
+
+function ApprovalCard({
+  approval,
+  decisionPending,
+  onDecision,
+  orgId,
+}: {
+  approval: ApprovalDetail;
+  decisionPending: boolean;
+  onDecision: (action: "approve" | "reject" | "requestRevision") => void;
+  orgId: string;
+}) {
+  const issueTitle = proposedIssueTitle(approval);
+  const pending = approval.status === "pending";
+  return (
+    <article className="approval-card">
+      <div className="approval-card-header">
+        <div>
+          <p className="eyebrow">Approvals assistant</p>
+          <h2>{issueTitle ?? approvalTitle(approval)}</h2>
+          {issueTitle && <p className="approval-card-subtitle">{approval.type}</p>}
+        </div>
+        <Badge>{statusLabel(approval.status)}</Badge>
+      </div>
+      <p className="muted">
+        {approval.requestedByAgentId ? `智能体 ${approval.requestedByAgentId} 发起` : "系统或用户发起"}
+        {" · "}
+        {formatDate(approval.createdAt)}
+      </p>
+      <div className="approval-card-payload">
+        <span>{issueTitle ? "任务标题" : "审批类型"}</span>
+        <strong>{issueTitle ?? approval.type}</strong>
+      </div>
+      <div className="approval-actions">
+        {pending && (
+          <>
+            <button disabled={decisionPending} onClick={() => onDecision("approve")} type="button">
+              同意
+            </button>
+            <button className="danger" disabled={decisionPending} onClick={() => onDecision("reject")} type="button">
+              拒绝
+            </button>
+            <button className="secondary" disabled={decisionPending} onClick={() => onDecision("requestRevision")} type="button">
+              请求修改
+            </button>
+          </>
+        )}
+        <Link className="button secondary small-button" to={`/orgs/${orgId}/approvals/${approval.id}`}>
+          打开完整审批
+        </Link>
+      </div>
+    </article>
   );
 }
