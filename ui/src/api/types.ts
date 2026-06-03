@@ -54,6 +54,8 @@ export interface IssueListItem {
   goalId: string | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
   originKind: IssueOriginKind;
   originId: string | null;
   updatedAt: string;
@@ -69,8 +71,6 @@ export interface IssueDetail extends IssueListItem {
   startedAt: string | null;
   completedAt: string | null;
   cancelledAt?: string | null;
-  createdByAgentId?: string | null;
-  createdByUserId?: string | null;
   workProducts?: IssueWorkProduct[];
   createdAt: string;
 }
@@ -124,6 +124,16 @@ export interface CreateIssuePayload {
   assigneeUserId?: string | null;
   reviewerAgentId?: string | null;
   reviewerUserId?: string | null;
+  createdByAgentId?: string | null;
+  createdByUserId?: string | null;
+  originKind?: IssueOriginKind;
+  originId?: string | null;
+  requestDepth?: number;
+}
+
+export interface CheckoutIssuePayload {
+  agentId: string;
+  expectedStatuses: IssueStatus[];
 }
 
 export interface UpdateIssuePayload {
@@ -220,6 +230,16 @@ export interface ApprovalDetail extends ApprovalListItem {
   decisionNote: string | null;
   decidedByUserId: string | null;
   decidedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ApprovalComment {
+  id: string;
+  approvalId: string;
+  body: string;
+  authorAgentId: string | null;
+  authorUserId: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -835,6 +855,18 @@ export interface UpdateAgentInstructionsBundlePayload {
   rootPath?: string | null;
   entryFile?: string;
   clearLegacyPromptTemplate?: boolean;
+}
+
+export interface AgentInstructionsPathResult {
+  agentId: string;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfigKey: string;
+  path: string | null;
+}
+
+export interface UpdateAgentInstructionsPathPayload {
+  path: string | null;
+  agentRuntimeConfigKey?: string;
 }
 
 export interface UpdateAgentInstructionsFilePayload {

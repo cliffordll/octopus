@@ -9,6 +9,7 @@ import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 import { request } from "../api/client";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
+import { runIntelligenceApi } from "../api/runIntelligence";
 
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
@@ -155,10 +156,14 @@ describe("issue API", () => {
     const fetchMock = vi
       .fn()
       .mockReturnValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(jsonResponse({ id: "issue-1", assigneeAgentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ issueId: "issue-1", wakeReason: "issue_execute" }))
       .mockReturnValueOnce(jsonResponse({ id: "comment-1", body: "Ship it" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await issuesApi.list("org-1", { status: "in_progress" });
+    await issuesApi.checkout("issue-1", { agentId: "agent-1", expectedStatuses: ["todo"] });
+    await issuesApi.heartbeatContext("issue-1");
     await issuesApi.addComment("issue-1", { body: "Ship it" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -168,6 +173,19 @@ describe("issue API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
+      "/api/issues/issue-1/checkout",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agentId: "agent-1", expectedStatuses: ["todo"] }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/issues/issue-1/heartbeat-context",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/issues/issue-1/comments",
       expect.objectContaining({
         method: "POST",
@@ -181,20 +199,41 @@ describe("approval API", () => {
   it("posts approve and resubmit decisions", async () => {
     const fetchMock = vi
       .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "issue-1" }]))
+      .mockReturnValueOnce(jsonResponse([{ id: "comment-1", body: "看过了" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "comment-2", body: "继续" }, 201))
       .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "approved" }))
       .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "pending" }));
     vi.stubGlobal("fetch", fetchMock);
 
+    await approvalsApi.listIssues("approval-1");
+    await approvalsApi.listComments("approval-1");
+    await approvalsApi.addComment("approval-1", { body: "继续" });
     await approvalsApi.approve("approval-1", "Looks correct");
     await approvalsApi.resubmit("approval-1", { payload: { revised: true } });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      "/api/approvals/approval-1/issues",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/approvals/approval-1/comments",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/approvals/approval-1/comments",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "继续" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/approvals/approval-1/approve",
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      5,
       "/api/approvals/approval-1/resubmit",
       expect.objectContaining({
         method: "POST",
@@ -250,6 +289,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }))
       .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]))
+      .mockReturnValueOnce(jsonResponse({ content: "full log", nextOffset: 18, eof: true }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "cancelled" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-2", status: "queued", retryOfRunId: "run-1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -265,6 +305,7 @@ describe("agent and heartbeat APIs", () => {
     await heartbeatApi.list("org-1", "agent-1");
     await heartbeatApi.get("run-1");
     await heartbeatApi.listEvents("run-1", { afterSeq: 3, limit: 20 });
+    await heartbeatApi.getWorkspaceOperationLog("operation-1", { offset: 10, limitBytes: 100 });
     await heartbeatApi.cancel("run-1");
     await heartbeatApi.retry("run-1");
 
@@ -298,11 +339,16 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
+      "/api/workspace-operations/operation-1/log?offset=10&limitBytes=100",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
       "/api/heartbeat-runs/run-1/cancel",
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      8,
+      9,
       "/api/heartbeat-runs/run-1/retry",
       expect.objectContaining({ method: "POST" }),
     );
@@ -358,6 +404,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "revision-1" }))
       .mockReturnValueOnce(jsonResponse({ id: "agent-1" }))
       .mockReturnValueOnce(jsonResponse({ agentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ agentId: "agent-1", path: "soul.md" }))
       .mockReturnValueOnce(jsonResponse({ id: "agent-1", status: "terminated" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "queued" }, 202));
     vi.stubGlobal("fetch", fetchMock);
@@ -369,6 +416,7 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.configRevision("agent-1", "revision-1");
     await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
     await agentsApi.resetSession("agent-1", { taskKey: "task-1" });
+    await agentsApi.updateInstructionsPath("agent-1", { path: "soul.md" });
     await agentsApi.archive("agent-1");
     await heartbeatApi.wakeup("agent-1", {
       source: "on_demand",
@@ -398,11 +446,19 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
+      "/api/agents/agent-1/instructions-path",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ path: "soul.md" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
       "/api/agents/agent-1/archive",
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      9,
+      10,
       "/api/agents/agent-1/wakeup",
       expect.objectContaining({
         method: "POST",
@@ -465,6 +521,34 @@ describe("agent and heartbeat APIs", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       9,
       "/api/agents/agent-1/skills/analytics?windowDays=14",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});
+
+describe("run intelligence API", () => {
+  it("loads run intelligence list, detail, events and log", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "run-1" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1" }))
+      .mockReturnValueOnce(jsonResponse([{ seq: 1 }]))
+      .mockReturnValueOnce(jsonResponse({ content: "raw log", eof: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runIntelligenceApi.list("org-1", { runIdPrefix: "run", limit: 5 });
+    await runIntelligenceApi.get("run-1");
+    await runIntelligenceApi.events("run-1");
+    await runIntelligenceApi.log("run-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/run-intelligence/orgs/org-1/runs?runIdPrefix=run&limit=5",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/run-intelligence/runs/run-1/log",
       expect.objectContaining({ method: "GET" }),
     );
   });
