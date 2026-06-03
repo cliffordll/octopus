@@ -79,6 +79,65 @@ function runSummary(run: HeartbeatRun | null): string {
   return run.status;
 }
 
+function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
+  if (!payload) return "";
+  for (const key of ["text", "content", "message", "delta", "output"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function isLowValueRunEvent(event: HeartbeatRunEvent): boolean {
+  const eventType = event.eventType.toLowerCase();
+  return (
+    eventType.includes("step_start") ||
+    eventType.includes("step_finish") ||
+    eventType.includes("step.start") ||
+    eventType.includes("step.finish") ||
+    eventType.includes("step.started") ||
+    eventType.includes("step.finished")
+  );
+}
+
+function isErrorRunEvent(event: HeartbeatRunEvent): boolean {
+  const eventType = event.eventType.toLowerCase();
+  return (
+    event.level === "error" ||
+    event.stream === "stderr" ||
+    eventType.includes("stderr") ||
+    eventType.includes("error") ||
+    eventType.includes("failed")
+  );
+}
+
+function isTextRunEvent(event: HeartbeatRunEvent): boolean {
+  const eventType = event.eventType.toLowerCase();
+  return (
+    event.stream === "stdout" ||
+    eventType.includes("text") ||
+    eventType.includes("message") ||
+    eventType.includes("output") ||
+    Boolean(eventPayloadText(event.payload))
+  );
+}
+
+function runEventLabel(event: HeartbeatRunEvent): string {
+  const eventType = event.eventType.toLowerCase();
+  if (isErrorRunEvent(event)) return "错误";
+  if (isTextRunEvent(event)) return "Agent 回复";
+  if (eventType.includes("queued")) return "入队";
+  if (eventType.includes("started") || eventType.includes("running")) return "开始";
+  if (eventType.includes("adapter") || eventType.includes("runtime")) return "调用 adapter";
+  if (eventType.includes("succeeded") || eventType.includes("completed")) return "成功";
+  if (eventType.includes("cancel")) return "取消";
+  return event.eventType;
+}
+
+function runEventBody(event: HeartbeatRunEvent): string {
+  return eventPayloadText(event.payload) || event.message || "";
+}
+
 function formatIssueTime(value: string | null | undefined): string {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -272,6 +331,63 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
   );
 }
 
+function IssueRunsPanel({
+  agentsById,
+  currentRun,
+  currentRunId,
+  onSelect,
+  runs,
+}: {
+  agentsById: Map<string, Agent>;
+  currentRun: HeartbeatRun | null;
+  currentRunId: string;
+  onSelect: (runId: string) => void;
+  runs: HeartbeatRun[];
+}) {
+  return (
+    <section aria-label="执行记录" className="issue-section-card">
+      <div className="issue-section-heading">
+        <h2>执行记录</h2>
+        <span className="muted">{runs.length} 次运行</span>
+      </div>
+      {runs.length === 0 ? (
+        <p className="muted">暂无执行记录。</p>
+      ) : (
+        <div className="issue-run-record-list">
+          {runs.map((run) => {
+            const displayRun = currentRun?.id === run.id ? { ...run, ...currentRun } : run;
+            const summary = runSummary(displayRun);
+            return (
+              <button
+                className={`issue-run-record${run.id === currentRunId ? " active" : ""}`}
+                key={run.id}
+                onClick={() => onSelect(run.id)}
+                type="button"
+              >
+                <div className="issue-run-record-header">
+                  <strong>{run.id}</strong>
+                  <Badge>{displayRun.status}</Badge>
+                </div>
+                <dl className="issue-run-record-meta">
+                  <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
+                  <div><dt>创建时间</dt><dd>{formatIssueTime(displayRun.createdAt)}</dd></div>
+                  <div><dt>开始时间</dt><dd>{formatIssueTime(displayRun.startedAt)}</dd></div>
+                </dl>
+                {summary && (
+                  <p className="issue-run-record-summary">
+                    <span>运行输出摘要</span>
+                    {summary}
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 interface IssueRunPanelData {
   events: UseQueryResult<HeartbeatRunEvent[], Error>;
   operations: UseQueryResult<WorkspaceOperation[], Error>;
@@ -290,9 +406,14 @@ function IssueRunOutputPanel({
   runId: string;
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
+  const [showDebugOutput, setShowDebugOutput] = useState(false);
+  const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const run = data.run.data ?? null;
   const events = data.events.data ?? [];
   const operations = data.operations.data ?? [];
+  const visibleEvents = events.filter((event) => !isLowValueRunEvent(event));
+  const lowValueEvents = events.filter(isLowValueRunEvent);
+  const hasRawOutput = Boolean(run?.stdoutExcerpt || run?.stderrExcerpt || operations.some((operation) => operation.command || operation.stdoutExcerpt || operation.stderrExcerpt));
   const operationLog = useQuery({
     queryKey: ["workspace-operation-log", selectedOperationLogId],
     queryFn: () => heartbeatApi.getWorkspaceOperationLog(selectedOperationLogId),
@@ -317,52 +438,91 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
-      <dl className="issue-run-summary">
-        <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
-        <div><dt>状态</dt><dd>{run?.status ?? "加载中"}</dd></div>
-        <div><dt>开始</dt><dd>{run?.startedAt ?? "-"}</dd></div>
-        <div><dt>结束</dt><dd>{run?.finishedAt ?? "-"}</dd></div>
-      </dl>
-      <p className="issue-run-summary-text">{runSummary(run)}</p>
-      {(run?.stdoutExcerpt || run?.stderrExcerpt) && (
-        <div className="issue-run-stream-list">
-          {run.stdoutExcerpt && (
-            <article className="agent-run-event">
-              <div className="agent-run-event-header">
-                <strong>stdout</strong>
-                <Badge>输出</Badge>
-              </div>
-              <pre className="run-excerpt inline">{run.stdoutExcerpt}</pre>
-            </article>
-          )}
-          {run.stderrExcerpt && (
-            <article className="agent-run-event">
-              <div className="agent-run-event-header">
-                <strong>stderr</strong>
-                <Badge>错误</Badge>
-              </div>
-              <pre className="run-excerpt error inline">{run.stderrExcerpt}</pre>
-            </article>
+      <section className="issue-run-output-block">
+        <h3>运行详情</h3>
+        <dl className="issue-run-summary">
+          <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
+          <div><dt>状态</dt><dd>{run?.status ?? "加载中"}</dd></div>
+          <div><dt>开始</dt><dd>{run?.startedAt ?? "-"}</dd></div>
+          <div><dt>结束</dt><dd>{run?.finishedAt ?? "-"}</dd></div>
+        </dl>
+        <div className="issue-run-summary-text">
+          <span>最新执行摘要</span>
+          <p>{runSummary(run)}</p>
+        </div>
+        {run && (
+          <details className="issue-run-inline-details">
+            <summary>查看 result/context/usage</summary>
+            <div className="issue-run-output-grid">
+              {hasJsonObject(run.resultJson) && (
+                <div>
+                  <span className="agent-run-section-label">resultJson</span>
+                  <pre className="agent-run-json">{formattedJson(run.resultJson)}</pre>
+                </div>
+              )}
+              {hasJsonObject(run.contextSnapshot) && (
+                <div>
+                  <span className="agent-run-section-label">contextSnapshot</span>
+                  <pre className="agent-run-json">{formattedJson(run.contextSnapshot)}</pre>
+                </div>
+              )}
+              {hasJsonObject(run.usageJson) && (
+                <div>
+                  <span className="agent-run-section-label">usageJson</span>
+                  <pre className="agent-run-json">{formattedJson(run.usageJson)}</pre>
+                </div>
+              )}
+            </div>
+          </details>
+        )}
+      </section>
+      <section className="issue-run-output-block issue-run-events-flat">
+        <div className="issue-run-output-heading">
+          <h3>事件</h3>
+          {lowValueEvents.length > 0 && (
+            <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
+              {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+            </button>
           )}
         </div>
-      )}
-      <section className="issue-run-output-block issue-run-events-flat">
-        <h3>事件</h3>
         {data.events.isLoading && <p className="muted">加载事件中...</p>}
         {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
-        {events.length > 0 && (
+        {visibleEvents.length > 0 && (
           <div className="agent-run-events">
-            {events.map((event) => (
-              <article className="agent-run-event" key={event.id}>
+            {visibleEvents.map((event) => (
+              <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
                 <div className="agent-run-event-header">
                   <span>#{event.seq}</span>
-                  <strong>{event.eventType}</strong>
+                  <strong>{runEventLabel(event)}</strong>
+                  <Badge>{event.eventType}</Badge>
                   {event.level && <Badge>{event.level}</Badge>}
                   {event.stream && <Badge>{event.stream}</Badge>}
                 </div>
-                {event.message && <pre className="issue-run-event-log">{event.message}</pre>}
-                {hasJsonObject(event.payload) && <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>}
+                {runEventBody(event) && (
+                  isTextRunEvent(event) && !isErrorRunEvent(event)
+                    ? <p className="issue-run-agent-reply">{runEventBody(event)}</p>
+                    : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
+                )}
+                {hasJsonObject(event.payload) && (
+                  <details className="issue-run-inline-details">
+                    <summary>事件详情</summary>
+                    <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
+                  </details>
+                )}
                 <small className="muted">{event.createdAt}</small>
+              </article>
+            ))}
+          </div>
+        )}
+        {showLowValueEvents && lowValueEvents.length > 0 && (
+          <div className="issue-run-low-value-events">
+            {lowValueEvents.map((event) => (
+              <article className="agent-run-event compact" key={event.id}>
+                <div className="agent-run-event-header">
+                  <span>#{event.seq}</span>
+                  <strong>{event.eventType}</strong>
+                </div>
+                {event.message && <p className="muted">{event.message}</p>}
               </article>
             ))}
           </div>
@@ -381,6 +541,48 @@ function IssueRunOutputPanel({
                   <Badge>{operation.status}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
+                {operation.command && <p className="muted">{operation.command}</p>}
+                {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
+                <small className="muted">{operation.cwd ?? operation.id}</small>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="issue-run-output-block issue-run-debug-output">
+        <div className="issue-run-output-heading">
+          <h3>调试 / Raw output</h3>
+          <button className="secondary small-button" disabled={!hasRawOutput} type="button" onClick={() => setShowDebugOutput((value) => !value)}>
+            {showDebugOutput ? "收起" : "展开"}
+          </button>
+        </div>
+        {!hasRawOutput && <p className="muted">暂无原始输出。</p>}
+        {showDebugOutput && hasRawOutput && (
+          <div className="issue-run-stream-list">
+            {run?.stdoutExcerpt && (
+              <article className="agent-run-event">
+                <div className="agent-run-event-header">
+                  <strong>stdout</strong>
+                  <Badge>原始输出</Badge>
+                </div>
+                <pre className="run-excerpt inline">{run.stdoutExcerpt}</pre>
+              </article>
+            )}
+            {run?.stderrExcerpt && (
+              <article className="agent-run-event error">
+                <div className="agent-run-event-header">
+                  <strong>stderr</strong>
+                  <Badge>错误</Badge>
+                </div>
+                <pre className="run-excerpt error inline">{run.stderrExcerpt}</pre>
+              </article>
+            )}
+            {operations.map((operation) => (
+              <article className="agent-run-event" key={operation.id}>
+                <div className="agent-run-event-header">
+                  <strong>{operation.phase}</strong>
+                  <Badge>{operation.status}</Badge>
+                </div>
                 {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 {operation.stdoutExcerpt && <pre className="run-excerpt inline">{operation.stdoutExcerpt}</pre>}
@@ -398,7 +600,6 @@ function IssueRunOutputPanel({
                     {operationLog.data?.content && <pre className="issue-run-event-log">{operationLog.data.content}</pre>}
                   </div>
                 )}
-                <small className="muted">{operation.cwd ?? operation.id}</small>
               </article>
             ))}
           </div>
@@ -792,6 +993,17 @@ export function IssuePage() {
               {updateIssue.error && <ErrorNotice error={updateIssue.error} />}
             </section>
 
+            <IssueRunsPanel
+              agentsById={agentsById}
+              currentRun={runDetail.data ?? null}
+              currentRunId={currentRunId}
+              runs={issueRuns.data ?? []}
+              onSelect={(runId) => {
+                localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+                setCurrentRunId(runId);
+              }}
+            />
+
             {currentRunId && (
               <IssueRunOutputPanel
                 data={{
@@ -864,11 +1076,10 @@ export function IssuePage() {
               <div className="issue-section-heading">
                 <h2>动态</h2>
                 <span className="muted">
-                  {(comments.data?.length ?? 0) + (issueRuns.data?.length ?? 0)} 条记录
+                  {comments.data?.length ?? 0} 条记录
                 </span>
               </div>
               {comments.error && <ErrorNotice error={comments.error} />}
-              {issueRuns.error && <ErrorNotice error={issueRuns.error} />}
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -876,26 +1087,7 @@ export function IssuePage() {
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {issueRuns.data?.map((run) => (
-                  <button
-                    className={`issue-activity-item issue-run-activity${run.id === currentRunId ? " active" : ""}`}
-                    key={run.id}
-                    onClick={() => {
-                      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
-                      setCurrentRunId(run.id);
-                    }}
-                    type="button"
-                  >
-                    <div className="issue-activity-avatar">R</div>
-                    <span>
-                      <strong>执行任务</strong>
-                      <span className="muted">
-                        {run.status} · {agentName(run.agentId, agentsById)} · {formatIssueTime(run.createdAt)}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-                {comments.isSuccess && issueRuns.isSuccess && comments.data.length === 0 && issueRuns.data.length === 0 && (
+                {comments.isSuccess && comments.data.length === 0 && (
                   <p className="muted">暂无动态。</p>
                 )}
               </div>

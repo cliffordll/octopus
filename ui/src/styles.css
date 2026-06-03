@@ -3731,6 +3731,86 @@ button.danger {
   margin: 0;
 }
 
+.issue-run-summary-text span,
+.issue-run-record-summary span {
+  color: #8792a6;
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.issue-run-summary-text p,
+.issue-run-record-summary {
+  margin: 0;
+}
+
+.issue-run-record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issue-run-record {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  color: inherit;
+  cursor: pointer;
+  padding: 10px;
+  text-align: left;
+}
+
+.issue-run-record:hover,
+.issue-run-record.active {
+  background: #111827;
+  border-color: #3a4d6b;
+}
+
+.issue-run-record-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.issue-run-record-header strong {
+  color: #e8edf5;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.issue-run-record-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px 0;
+}
+
+.issue-run-record-meta div {
+  min-width: 0;
+}
+
+.issue-run-record-meta dt {
+  color: #8792a6;
+  font-size: 11px;
+}
+
+.issue-run-record-meta dd {
+  color: #cbd5e1;
+  font-size: 12px;
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.issue-run-record-summary {
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .issue-run-output-grid {
   display: grid;
   gap: 12px;
@@ -3753,6 +3833,13 @@ button.danger {
   color: #e8edf5;
   font-size: 14px;
   margin: 0;
+}
+
+.issue-run-output-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
 }
 
 .issue-run-stream-list {
@@ -4662,6 +4749,27 @@ pre {
 
 .organization-skill-readonly {
   color: #f0b86b !important;
+}
+
+.organization-skill-scan-result {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+}
+
+.organization-skill-scan-result p {
+  color: #dce5f2;
+  font-size: 13px;
+  margin: 0;
+}
+
+.organization-skill-scan-result span {
+  color: #9aa6ba;
+  font-size: 12px;
 }
 
 .organization-skill-info-grid {
@@ -5635,6 +5743,11 @@ pre {
   padding: 12px;
 }
 
+.issue-run-event-log.error {
+  border-color: #5a2c36;
+  color: #fecdd3;
+}
+
 .run-excerpt.error {
   border-color: #5a2c36;
   color: #fecdd3;
@@ -5655,6 +5768,59 @@ pre {
   gap: 7px;
   min-width: 0;
   padding: 10px;
+}
+
+.agent-run-event.error,
+.issue-run-timeline-event.error {
+  background: #170c11;
+  border-color: #5a2c36;
+}
+
+.issue-run-timeline-event.agent-reply {
+  background: #0d1628;
+  border-color: #263f68;
+}
+
+.issue-run-agent-reply {
+  color: #dbeafe;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.issue-run-low-value-events {
+  border-top: 1px dashed #263244;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 10px;
+}
+
+.agent-run-event.compact {
+  gap: 4px;
+  padding: 8px;
+}
+
+.issue-run-debug-output {
+  background: #080d14;
+  border-style: dashed;
+}
+
+.issue-run-inline-details {
+  border-top: 1px solid #1b2433;
+  padding-top: 8px;
+}
+
+.issue-run-inline-details summary {
+  color: #9aa6ba;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.issue-run-inline-details summary:hover {
+  color: #e8edf5;
 }
 
 .agent-run-event-header {

@@ -266,14 +266,20 @@ it("executes an assigned issue through the issue execution route", async () => {
         orgId: "org-1",
         agentId: "agent-1",
         invocationSource: "assignment",
-        triggerDetail: "manual",
-        status: "queued",
-        stdoutExcerpt: "queued output",
-        resultJson: { summary: "等待执行" },
-      });
+          triggerDetail: "manual",
+          status: "queued",
+          createdAt: "2026-06-02T10:00:00Z",
+          stdoutExcerpt: "queued output",
+          resultJson: { summary: "等待执行" },
+          contextSnapshot: { issueId: "issue-1" },
+        });
     }
     if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") {
-      return respond([{ id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.queued", message: "已入队", createdAt: "2026-06-02T10:00:00Z" }]);
+      return respond([
+        { id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.queued", message: "已入队", createdAt: "2026-06-02T10:00:00Z" },
+        { id: 2, runId: "run-1", agentId: "agent-1", seq: 2, eventType: "runtime.text", stream: "stdout", message: "Agent 正在处理任务", createdAt: "2026-06-02T10:00:01Z" },
+        { id: 3, runId: "run-1", agentId: "agent-1", seq: 3, eventType: "step_start", message: "low value", createdAt: "2026-06-02T10:00:02Z" },
+      ]);
     }
     if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
       return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output" }]);
@@ -303,10 +309,24 @@ it("executes an assigned issue through the issue execution route", async () => {
     "/api/issues/issue-1/execute",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
+  expect(await screen.findByRole("region", { name: "执行记录" })).toHaveTextContent("运行输出摘要");
+  expect(screen.getByRole("region", { name: "执行记录" })).toHaveTextContent("等待执行");
+  expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
+  expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
+  expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
   expect(await screen.findByText("已入队")).toBeInTheDocument();
+  expect(screen.getByText("Agent 回复")).toBeInTheDocument();
+  expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
+  expect(screen.queryByText("queued output")).not.toBeInTheDocument();
+  expect(screen.queryByText("workspace output")).not.toBeInTheDocument();
+  expect(screen.queryByText("low value")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开" }));
   expect(screen.getByText("queued output")).toBeInTheDocument();
   expect(screen.getByText("workspace output")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /显示低价值事件/ }));
+  expect(screen.getByText("low value")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-1/log",
     expect.objectContaining({ method: "GET" }),
