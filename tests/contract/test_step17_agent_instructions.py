@@ -18,6 +18,18 @@ from packages.database.schema import ActivityLog, Agent, Base, Organization
 from server.app import create_app
 
 
+DEFAULT_INSTRUCTIONS_FILES = [
+    "HEARTBEAT.md",
+    "HEARTBEAT.zh-CN.md",
+    "MEMORY.md",
+    "MEMORY.zh-CN.md",
+    "SOUL.md",
+    "SOUL.zh-CN.md",
+    "TOOLS.md",
+    "TOOLS.zh-CN.md",
+]
+
+
 def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> None:
     modules = (
         "packages.shared.api_paths.agents",
@@ -147,12 +159,7 @@ async def test_agent_instructions_bundle_read_write_delete_and_activity(
     assert bundle["agentId"] == agent_id
     assert bundle["mode"] == "managed"
     assert bundle["entryFile"] == "SOUL.md"
-    assert [file["path"] for file in bundle["files"]] == [
-        "HEARTBEAT.md",
-        "MEMORY.md",
-        "SOUL.md",
-        "TOOLS.md",
-    ]
+    assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
     file_code, file_detail = await _request(
         application,
@@ -245,12 +252,7 @@ async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     assert file_detail["content"] == "# Legacy Soul\nKeep context durable."
     assert bundle_code == 200
     assert bundle["mode"] == "managed"
-    assert [file["path"] for file in bundle["files"]] == [
-        "HEARTBEAT.md",
-        "MEMORY.md",
-        "SOUL.md",
-        "TOOLS.md",
-    ]
+    assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
 
 async def test_agent_instructions_bundle_reconciles_empty_default_files(
@@ -319,12 +321,7 @@ async def test_agent_instructions_bundle_reconciles_empty_default_files(
     assert memory_code == 200
     assert memory_detail["content"] == "Keep this custom memory."
     assert bundle_code == 200
-    assert [file["path"] for file in bundle["files"]] == [
-        "HEARTBEAT.md",
-        "MEMORY.md",
-        "SOUL.md",
-        "TOOLS.md",
-    ]
+    assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
 
 async def test_agent_instructions_path_update_and_path_guard(
