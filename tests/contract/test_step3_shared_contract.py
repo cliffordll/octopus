@@ -158,8 +158,16 @@ def test_validate_update_organization_invalid_bool_raises() -> None:
 
 
 def test_validate_create_issue_happy() -> None:
-    payload = validate_create_issue({"title": "Demo issue"})
+    payload = validate_create_issue(
+        {
+            "title": "Demo issue",
+            "createdByAgentId": "agent-1",
+            "createdByUserId": None,
+        }
+    )
     assert payload["title"] == "Demo issue"
+    assert payload["createdByAgentId"] == "agent-1"
+    assert payload["createdByUserId"] is None
 
 
 def test_validate_create_issue_missing_title_raises() -> None:
