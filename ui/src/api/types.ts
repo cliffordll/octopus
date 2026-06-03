@@ -357,11 +357,40 @@ export interface OrganizationSkillUpdateStatus {
   hasUpdate: boolean;
 }
 
+export interface OrganizationSkillScanCandidate {
+  sourcePath: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  sourceRef: string;
+  alreadyImported: boolean;
+  skillId: string | null;
+}
+
+export interface OrganizationSkillScanLocalResult {
+  candidates: OrganizationSkillScanCandidate[];
+  imported: OrganizationSkill[];
+}
+
 export interface CreateOrganizationSkillPayload {
   name: string;
   slug?: string | null;
   description?: string | null;
   markdown?: string | null;
+}
+
+export interface ImportOrganizationSkillPayload {
+  sourcePath: string;
+  slug?: string | null;
+  name?: string | null;
+  description?: string | null;
+  overwrite?: boolean;
+}
+
+export interface ScanLocalOrganizationSkillsPayload {
+  rootPath: string;
+  importDiscovered?: boolean;
+  overwrite?: boolean;
 }
 
 export interface UpdateOrganizationSkillFilePayload {

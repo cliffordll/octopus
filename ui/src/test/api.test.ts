@@ -5,6 +5,7 @@ import { chatsApi } from "../api/chats";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
 import { messengerApi } from "../api/messenger";
+import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
 import { request } from "../api/client";
@@ -550,6 +551,44 @@ describe("run intelligence API", () => {
       4,
       "/api/run-intelligence/runs/run-1/log",
       expect.objectContaining({ method: "GET" }),
+    );
+  });
+});
+
+describe("organization skills API", () => {
+  it("covers import, scan-local and install-update routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "skill-1" }, 201))
+      .mockReturnValueOnce(jsonResponse({ candidates: [], imported: [] }))
+      .mockReturnValueOnce(jsonResponse({ id: "skill-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await organizationSkillsApi.import("org-1", {
+      sourcePath: "D:/skills/review",
+      slug: "review",
+      overwrite: true,
+    });
+    await organizationSkillsApi.scanLocal("org-1", {
+      rootPath: "D:/skills",
+      importDiscovered: true,
+    });
+    await organizationSkillsApi.installUpdate("org-1", "skill-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/skills/import",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/skills/scan-local",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/orgs/org-1/skills/skill-1/install-update",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 });
