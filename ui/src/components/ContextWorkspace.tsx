@@ -5,6 +5,7 @@ import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { projectsApi } from "../api/projects";
 import { readRecentIssues, RECENT_ISSUES_EVENT } from "../utils/recentIssues";
+import { roleLabel, statusLabel } from "../utils/display";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
@@ -285,7 +286,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
                   <strong>{issue.title}</strong>
                   <small>{issue.identifier ?? "未编号"}</small>
                 </span>
-                <Badge>{issue.status}</Badge>
+                <Badge>{statusLabel(issue.status)}</Badge>
               </NavLink>
             ))}
             {recentIssues.length > 5 && (
@@ -341,9 +342,9 @@ export function AgentsWorkspace({ contentClassName = "", orgId, children }: Prop
                 <span aria-hidden="true" className="context-entry-icon">A</span>
                 <span className="context-item-copy">
                   <strong>{agent.name}</strong>
-                  <small>{agent.role}</small>
+                  <small>{roleLabel(agent.role)}</small>
                 </span>
-                <Badge>{agent.status}</Badge>
+                <Badge>{statusLabel(agent.status)}</Badge>
               </NavLink>
             ))}
             {agents.isSuccess && agentList.length === 0 && <p className="context-empty">暂无智能体</p>}

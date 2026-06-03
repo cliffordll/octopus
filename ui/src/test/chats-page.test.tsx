@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+﻿import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond, respondStream } from "./render-app";
@@ -52,11 +52,11 @@ it("shows a composer and sends a first message through a selected agent", async 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /新建聊天/ })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "What do you want to work on?" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "你想让智能体处理什么？" })).toBeInTheDocument();
   expect(screen.queryByLabelText("标题（可选）")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toBeInTheDocument();
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
@@ -128,7 +128,7 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "第一行{Shift>}{Enter}{/Shift}第二行");
 
@@ -196,7 +196,7 @@ it("opens a new conversation with an error notice when no assistant reply is ret
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "你好{Enter}");
 
@@ -223,9 +223,9 @@ it("offers non-terminated runtime agents for a new conversation", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "Runner (engineer)" })).toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: "Stopped (qa)" })).not.toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Runner (工程)" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Stopped (测试)" })).not.toBeInTheDocument();
 });
 
 it("preselects the agent provided by an agent detail chat entry", async () => {
@@ -241,7 +241,7 @@ it("preselects the agent provided by an agent detail chat entry", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats?agentId=agent-1");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
 });
 
@@ -272,7 +272,7 @@ it("opens the conversation when the first reply request fails", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "请规划部署");
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
@@ -313,7 +313,7 @@ it("shows the first user message immediately after creating a conversation", asy
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
@@ -353,7 +353,7 @@ it("opens the cached created conversation when the first reply fails and detail 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "请规划部署");
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
@@ -511,7 +511,7 @@ it("shows the selected conversation and agent identity while sending messages", 
   expect(screen.getByRole("link", { name: /支持会话/ })).toHaveClass("active");
   expect(screen.getByLabelText("对话智能体")).toBeDisabled();
   expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
-  expect(screen.getByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
   expect(screen.getByLabelText("对话智能体").closest(".chat-context-controls")).toContainElement(
     screen.getByRole("button", { name: "发送" }),
@@ -576,7 +576,7 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(screen.getByLabelText("项目")).toBeDisabled();
   expect(screen.getByLabelText("项目")).toHaveTextContent("平台项目");
   expect(screen.getByLabelText("对话智能体")).toBeDisabled();
-  expect(screen.queryByRole("option", { name: "Reviewer (reviewer)" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Reviewer (评审)" })).not.toBeInTheDocument();
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
@@ -646,7 +646,7 @@ it("shows the user's message immediately after clicking send", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  await screen.findByText("No messages yet.");
+  await screen.findByText("暂无消息");
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
@@ -688,7 +688,7 @@ it("shows an empty thread prompt for a conversation without messages", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  expect(await screen.findByText("No messages yet.")).toBeInTheDocument();
+  expect(await screen.findByText("暂无消息")).toBeInTheDocument();
   expect(await screen.findByText("向 Builder 发送第一条消息开始对话。")).toBeInTheDocument();
 });
 
@@ -748,7 +748,7 @@ it("renders send errors in the message thread instead of expanding the composer"
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  await screen.findByText("No messages yet.");
+  await screen.findByText("暂无消息");
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 

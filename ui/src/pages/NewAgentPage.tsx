@@ -5,6 +5,7 @@ import { agentsApi } from "../api/agents";
 import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { roleLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
@@ -48,7 +49,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
   const [title, setTitle] = useState("");
   const [capabilities, setCapabilities] = useState("");
-  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
+  const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState("");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeModel, setRuntimeModel] = useState("");
   const [metadata, setMetadata] = useState("{}");
@@ -78,7 +79,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
         agentRuntimeType: runtime,
         agentRuntimeConfig: mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, runtimeModel),
-        ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
+        ...(budgetMonthlyDollars.trim() ? { budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars) * 100) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
         ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
       }),
@@ -125,7 +126,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         <label>
           角色
           <select disabled={isFirstAgent} value={effectiveRole} onChange={(event) => setRole(event.target.value as AgentRole)}>
-            {ROLES.map((item) => <option key={item}>{item}</option>)}
+            {ROLES.map((item) => <option key={item} value={item}>{roleLabel(item)}</option>)}
           </select>
         </label>
         <label>
@@ -160,11 +161,11 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           </label>
         )}
         <label>
-          月度预算（cents）
-          <input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} />
+          月度预算（美元）
+          <input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} />
         </label>
         <label>
-          Desired Skills
+          期望技能
           <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
         </label>
         <label>

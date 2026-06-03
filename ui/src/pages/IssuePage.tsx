@@ -22,6 +22,7 @@ import type {
 import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatBytes, formatDateTime, priorityLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -76,7 +77,7 @@ function runSummary(run: HeartbeatRun | null): string {
     const value = result?.[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return run.status;
+  return statusLabel(run.status);
 }
 
 function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
@@ -139,8 +140,7 @@ function runEventBody(event: HeartbeatRunEvent): string {
 }
 
 function formatIssueTime(value: string | null | undefined): string {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return formatDateTime(value);
 }
 
 function IssuePropertiesPanel({
@@ -176,7 +176,7 @@ function IssuePropertiesPanel({
               value={issue.status}
               onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
             >
-              {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+              {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
             </select>
             <button
               className="secondary small-button"
@@ -191,7 +191,7 @@ function IssuePropertiesPanel({
         <label className="issue-property-row">
           <span>优先级</span>
           <select disabled={isUpdating} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
-            {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+            {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}
           </select>
         </label>
         <label className="issue-property-row">
@@ -282,8 +282,8 @@ function IssuePropertiesPanel({
         <div className="issue-property-row"><span>来源 ID</span><strong>{issue.originId ?? "-"}</strong></div>
         <div className="issue-property-row"><span>已启动</span><strong>{issue.startedAt ?? "-"}</strong></div>
         <div className="issue-property-row"><span>已完成</span><strong>{issue.completedAt ?? "-"}</strong></div>
-        <div className="issue-property-row"><span>已创建</span><strong>{issue.createdAt || "-"}</strong></div>
-        <div className="issue-property-row"><span>已更新</span><strong>{issue.updatedAt || "-"}</strong></div>
+        <div className="issue-property-row"><span>已创建</span><strong>{formatDateTime(issue.createdAt)}</strong></div>
+        <div className="issue-property-row"><span>已更新</span><strong>{formatDateTime(issue.updatedAt)}</strong></div>
       </div>
     </section>
   );
@@ -307,8 +307,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               </div>
               <div className="issue-work-product-meta">
                 <Badge>{product.type}</Badge>
-                <Badge>{product.status}</Badge>
-                <Badge>{product.reviewState}</Badge>
+                <Badge>{statusLabel(product.status)}</Badge>
+                <Badge>{statusLabel(product.reviewState)}</Badge>
                 {product.isPrimary && <Badge>primary</Badge>}
               </div>
               <dl className="issue-work-product-details">
@@ -317,7 +317,7 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                 {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
                 {product.contentType && <div><dt>类型</dt><dd>{product.contentType}</dd></div>}
-                {product.byteSize !== undefined && product.byteSize !== null && <div><dt>大小</dt><dd>{product.byteSize} bytes</dd></div>}
+                {product.byteSize !== undefined && product.byteSize !== null && <div><dt>大小</dt><dd>{formatBytes(product.byteSize)}</dd></div>}
               </dl>
               <div className="issue-work-product-actions">
                 {product.contentPath && <a className="button secondary small-button" href={product.contentPath}>下载产物</a>}
@@ -366,7 +366,7 @@ function IssueRunsPanel({
               >
                 <div className="issue-run-record-header">
                   <strong>{run.id}</strong>
-                  <Badge>{displayRun.status}</Badge>
+                  <Badge>{statusLabel(displayRun.status)}</Badge>
                 </div>
                 <dl className="issue-run-record-meta">
                   <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
@@ -429,7 +429,7 @@ function IssueRunOutputPanel({
           <p className="muted">本面板展示当前任务最近一次由本页面触发的运行。</p>
         </div>
         <div className="issue-run-actions">
-          {run && <Badge>{run.status}</Badge>}
+          {run && <Badge>{statusLabel(run.status)}</Badge>}
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
           <button className="secondary small-button" disabled={!canCancel} onClick={onCancel} type="button">取消运行</button>
           <button className="secondary small-button" disabled={!canRetry} onClick={onRetry} type="button">重试运行</button>
@@ -442,7 +442,7 @@ function IssueRunOutputPanel({
         <h3>运行详情</h3>
         <dl className="issue-run-summary">
           <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
-          <div><dt>状态</dt><dd>{run?.status ?? "加载中"}</dd></div>
+          <div><dt>状态</dt><dd>{run ? statusLabel(run.status) : "加载中"}</dd></div>
           <div><dt>开始</dt><dd>{run?.startedAt ?? "-"}</dd></div>
           <div><dt>结束</dt><dd>{run?.finishedAt ?? "-"}</dd></div>
         </dl>
@@ -495,7 +495,7 @@ function IssueRunOutputPanel({
                   <span>#{event.seq}</span>
                   <strong>{runEventLabel(event)}</strong>
                   <Badge>{event.eventType}</Badge>
-                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
                   {event.stream && <Badge>{event.stream}</Badge>}
                 </div>
                 {runEventBody(event) && (
@@ -509,7 +509,7 @@ function IssueRunOutputPanel({
                     <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
                   </details>
                 )}
-                <small className="muted">{event.createdAt}</small>
+                <small className="muted">{formatDateTime(event.createdAt)}</small>
               </article>
             ))}
           </div>
@@ -538,7 +538,7 @@ function IssueRunOutputPanel({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{operation.status}</Badge>
+                  <Badge>{statusLabel(operation.status)}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p className="muted">{operation.command}</p>}
@@ -581,7 +581,7 @@ function IssueRunOutputPanel({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{operation.status}</Badge>
+                  <Badge>{statusLabel(operation.status)}</Badge>
                 </div>
                 {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
@@ -881,8 +881,8 @@ export function IssuePage() {
             <div className="issue-detail-title-block">
               <div className="issue-detail-kicker">
                 <Badge>{issueDisplayId(issue.data)}</Badge>
-                <Badge>{issue.data.status}</Badge>
-                <Badge>{issue.data.priority}</Badge>
+                <Badge>{statusLabel(issue.data.status)}</Badge>
+                <Badge>{priorityLabel(issue.data.priority)}</Badge>
               </div>
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
@@ -954,7 +954,7 @@ export function IssuePage() {
             <section aria-label="评审" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>评审</h2>
-                <span className="muted">当前状态：{issue.data.status}</span>
+                <span className="muted">当前状态：{statusLabel(issue.data.status)}</span>
               </div>
               <div className="actions">
                 <button
@@ -1042,7 +1042,7 @@ export function IssuePage() {
                     <article className="issue-attachment-item" key={attachment.id}>
                       <div>
                         <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">{attachment.usage} · {attachment.contentType} · {attachment.byteSize} bytes</p>
+                        <p className="muted">{attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
                       </div>
                       <div className="issue-attachment-actions">
                         <a className="button secondary small-button" href={attachment.contentPath}>下载</a>

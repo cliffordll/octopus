@@ -5,6 +5,7 @@ import { approvalsApi } from "../api/approvals";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatDateTime, statusLabel } from "../utils/display";
 
 function formatPayload(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
@@ -89,7 +90,7 @@ export function ApprovalPage() {
                 <p className="eyebrow">审批对象</p>
                 <h2>{approval.data.type}</h2>
               </div>
-              <Badge>{approval.data.status}</Badge>
+              <Badge>{statusLabel(approval.data.status)}</Badge>
             </div>
             <dl className="detail-grid">
               <div>
@@ -98,7 +99,7 @@ export function ApprovalPage() {
               </div>
               <div>
                 <dt>发起时间</dt>
-                <dd>{approval.data.createdAt || "未知"}</dd>
+                <dd>{formatDateTime(approval.data.createdAt)}</dd>
               </div>
               <div>
                 <dt>发起智能体</dt>
@@ -125,7 +126,7 @@ export function ApprovalPage() {
               <Link className="approval-linked-issue" key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
                 <span>{issue.identifier ?? issue.id.slice(0, 8)}</span>
                 <strong>{issue.title}</strong>
-                <Badge>{issue.status}</Badge>
+                <Badge>{statusLabel(issue.status)}</Badge>
               </Link>
             ))}
             <h3>评论</h3>
@@ -135,7 +136,7 @@ export function ApprovalPage() {
             {comments.data?.map((comment) => (
               <article className="approval-comment" key={comment.id}>
                 <p>{comment.body}</p>
-                <small className="muted">{comment.authorAgentId ?? comment.authorUserId ?? "unknown"} · {comment.createdAt}</small>
+                <small className="muted">{comment.authorAgentId ?? comment.authorUserId ?? "未知"} · {formatDateTime(comment.createdAt)}</small>
               </article>
             ))}
             <form
@@ -184,7 +185,7 @@ export function ApprovalPage() {
                 </div>
               </>
             ) : (
-              <p className="muted">该审批已处理，当前状态为 {approval.data.status}。</p>
+              <p className="muted">该审批已处理，当前状态为 {statusLabel(approval.data.status)}。</p>
             )}
             {approval.data.status === "revision_requested" && (
               <div className="approval-resubmit-form">
