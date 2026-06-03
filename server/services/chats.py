@@ -1212,11 +1212,38 @@ def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
 
 
 def _json_object(value: str) -> dict[str, Any] | None:
-    try:
-        parsed = json.loads(value.strip())
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    candidates = [value.strip(), *_fenced_json_candidates(value)]
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _fenced_json_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    marker = "```"
+    start = 0
+    while True:
+        fence_start = value.find(marker, start)
+        if fence_start == -1:
+            return candidates
+        content_start = fence_start + len(marker)
+        line_end = value.find("\n", content_start)
+        if line_end == -1:
+            return candidates
+        language = value[content_start:line_end].strip().lower()
+        fence_end = value.find(marker, line_end + 1)
+        if fence_end == -1:
+            return candidates
+        if language in {"", "json"}:
+            candidate = value[line_end + 1 : fence_end].strip()
+            if candidate:
+                candidates.append(candidate)
+        start = fence_end + len(marker)
 
 
 def _chat_transcript_from_payload(
