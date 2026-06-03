@@ -127,6 +127,80 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
       return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
     }
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") {
+      return respond([{
+        id: "doc-1",
+        orgId: "org-1",
+        issueId: "issue-1",
+        key: "plan",
+        title: "执行计划",
+        format: "markdown",
+        latestRevisionId: "rev-1",
+        latestRevisionNumber: 1,
+        createdByAgentId: null,
+        createdByUserId: "board",
+        updatedByAgentId: null,
+        updatedByUserId: "board",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      }]);
+    }
+    if (path === "/api/issues/issue-1/documents/plan" && init?.method === "GET") {
+      return respond({
+        id: "doc-1",
+        orgId: "org-1",
+        issueId: "issue-1",
+        key: "plan",
+        title: "执行计划",
+        format: "markdown",
+        latestRevisionId: "rev-1",
+        latestRevisionNumber: 1,
+        body: "## 执行步骤",
+        createdByAgentId: null,
+        createdByUserId: "board",
+        updatedByAgentId: null,
+        updatedByUserId: "board",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      });
+    }
+    if (path === "/api/issues/issue-1/documents/plan/revisions" && init?.method === "GET") {
+      return respond([{
+        id: "rev-1",
+        orgId: "org-1",
+        documentId: "doc-1",
+        issueId: "issue-1",
+        key: "plan",
+        revisionNumber: 1,
+        body: "## 执行步骤",
+        changeSummary: "初始版本",
+        createdByAgentId: null,
+        createdByUserId: "board",
+        createdAt: "2026-05-28T10:00:00Z",
+      }]);
+    }
+    if (path === "/api/issues/issue-1/documents/plan" && init?.method === "PUT") {
+      return respond({
+        id: "doc-1",
+        orgId: "org-1",
+        issueId: "issue-1",
+        key: "plan",
+        title: "执行计划更新",
+        format: "markdown",
+        latestRevisionId: "rev-2",
+        latestRevisionNumber: 2,
+        body: "## 执行步骤\n\n补充内容",
+        createdByAgentId: null,
+        createdByUserId: "board",
+        updatedByAgentId: null,
+        updatedByUserId: "board",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:30:00Z",
+      });
+    }
+    if (path === "/api/issues/issue-1/documents/plan" && init?.method === "DELETE") {
+      return respond({ ok: true });
+    }
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") {
       return respond([
         {
@@ -157,6 +231,9 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/attachments/attachment-1" && init?.method === "DELETE") {
       return respond({}, 204);
     }
+    if (path === "/api/work-products/wp-2" && init?.method === "DELETE") {
+      return respond(issue.workProducts[1]);
+    }
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -182,9 +259,43 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("运行摘要");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
-  expect(screen.getByRole("link", { name: "下载产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("UI 只展示下载入口");
+  expect(screen.getByRole("link", { name: "下载产物文件" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("link", { name: "预览内容" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("不可下载");
+  expect(await screen.findByRole("region", { name: "任务文档" })).toHaveTextContent("执行计划");
+  expect(await screen.findByDisplayValue("## 执行步骤")).toBeInTheDocument();
+  await userEvent.clear(screen.getByLabelText("标题"));
+  await userEvent.type(screen.getByLabelText("标题"), "执行计划更新");
+  await userEvent.type(screen.getByLabelText("正文"), "\n\n补充内容");
+  await userEvent.type(screen.getByLabelText("变更说明"), "补充步骤");
+  await userEvent.click(screen.getByRole("button", { name: "保存文档" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/documents/plan",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({
+        title: "执行计划更新",
+        format: "markdown",
+        body: "## 执行步骤\n\n补充内容",
+        changeSummary: "补充步骤",
+        baseRevisionId: "rev-1",
+      }),
+    }),
+  );
+  await userEvent.click(screen.getByText("历史版本"));
+  expect(await screen.findByText(/初始版本/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "删除文档" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/documents/plan",
+    expect.objectContaining({ method: "DELETE" }),
+  );
+  await userEvent.click(screen.getAllByRole("button", { name: "删除产物" })[1]);
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/work-products/wp-2",
+    expect.objectContaining({ method: "DELETE" }),
+  );
   expect(await screen.findByRole("region", { name: "附件" })).toHaveTextContent("note.txt");
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
@@ -305,6 +416,7 @@ it("executes an assigned issue through the issue execution route", async () => {
     }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1" && init?.method === "PATCH") {
       return respond({ ...issue, status: "in_progress", startedAt: "2026-06-02T10:00:00Z" });
     }
@@ -421,6 +533,7 @@ it("explains why an unassigned issue cannot be executed", async () => {
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     return respond(issue);

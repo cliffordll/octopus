@@ -292,12 +292,20 @@ function IssuePropertiesPanel({
 
 function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
   const workProducts = issue.workProducts ?? [];
+  const queryClient = useQueryClient();
+  const deleteWorkProduct = useMutation({
+    mutationFn: (workProductId: string) => issuesApi.deleteWorkProduct(workProductId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] }),
+  });
   return (
     <section aria-label="工作产物" className="issue-section-card">
       <div className="issue-section-heading">
         <h2>工作产物</h2>
         <span className="muted">{workProducts.length}</span>
       </div>
+      <p className="muted issue-work-product-hint">
+        工作产物由智能体运行生成并由 server 记录。UI 只展示下载入口，只有点击下载时才会通过 contentPath 获取文件，不会自动写入本地仓库。
+      </p>
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
           {workProducts.map((product) => (
@@ -329,16 +337,186 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               </details>
               <div className="issue-work-product-actions">
                 {product.contentPath ? (
-                  <a className="button secondary small-button" href={product.contentPath}>下载产物</a>
+                  <>
+                    <a className="button secondary small-button" href={product.contentPath}>下载产物文件</a>
+                    <a className="button secondary small-button" href={product.contentPath} target="_blank" rel="noreferrer">预览内容</a>
+                  </>
                 ) : (
                   <span className="download-unavailable">不可下载</span>
                 )}
                 {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+                <button
+                  className="danger small-button"
+                  disabled={deleteWorkProduct.isPending}
+                  onClick={() => deleteWorkProduct.mutate(product.id)}
+                  type="button"
+                >
+                  删除产物
+                </button>
               </div>
             </article>
           ))}
         </div>
       )}
+      {deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
+    </section>
+  );
+}
+
+function IssueDocumentsPanel({ issueId }: { issueId: string }) {
+  const queryClient = useQueryClient();
+  const [selectedKey, setSelectedKey] = useState<string>("");
+  const [draftKey, setDraftKey] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [changeSummary, setChangeSummary] = useState("");
+  const documents = useQuery({
+    queryKey: ["issue-documents", issueId],
+    queryFn: () => issuesApi.listDocuments(issueId),
+  });
+  useEffect(() => {
+    if (selectedKey || !documents.data?.[0]) return;
+    setSelectedKey(documents.data[0].key);
+  }, [documents.data, selectedKey]);
+  const document = useQuery({
+    queryKey: ["issue-document", issueId, selectedKey],
+    queryFn: () => issuesApi.getDocument(issueId, selectedKey),
+    enabled: Boolean(selectedKey),
+  });
+  const revisions = useQuery({
+    queryKey: ["issue-document-revisions", issueId, selectedKey],
+    queryFn: () => issuesApi.listDocumentRevisions(issueId, selectedKey),
+    enabled: Boolean(selectedKey),
+  });
+  useEffect(() => {
+    if (!document.data) return;
+    setDraftKey(document.data.key);
+    setDraftTitle(document.data.title ?? "");
+    setDraftBody(document.data.body);
+    setChangeSummary("");
+  }, [document.data]);
+  const saveDocument = useMutation({
+    mutationFn: () => issuesApi.upsertDocument(issueId, draftKey.trim(), {
+      title: draftTitle.trim() || null,
+      format: "markdown",
+      body: draftBody,
+      changeSummary: changeSummary.trim() || null,
+      baseRevisionId: document.data?.latestRevisionId ?? null,
+    }),
+    onSuccess: (saved) => {
+      setSelectedKey(saved.key);
+      void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-document", issueId, saved.key] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-document-revisions", issueId, saved.key] });
+    },
+  });
+  const deleteDocument = useMutation({
+    mutationFn: () => issuesApi.deleteDocument(issueId, selectedKey),
+    onSuccess: () => {
+      setSelectedKey("");
+      setDraftKey("");
+      setDraftTitle("");
+      setDraftBody("");
+      setChangeSummary("");
+      void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+    },
+  });
+  function startNewDocument() {
+    setSelectedKey("");
+    setDraftKey("");
+    setDraftTitle("");
+    setDraftBody("");
+    setChangeSummary("");
+  }
+  const canSave = Boolean(draftKey.trim() && draftBody.trim());
+  return (
+    <section aria-label="任务文档" className="issue-section-card">
+      <div className="issue-section-heading">
+        <h2>任务文档</h2>
+        <span className="muted">{documents.data?.length ?? 0}</span>
+      </div>
+      <p className="muted issue-work-product-hint">
+        文档由 server 按任务保存，支持查看正文、编辑保存、查看历史版本和删除。
+      </p>
+      {documents.error && <ErrorNotice error={documents.error} />}
+      <div className="issue-documents-layout">
+        <aside className="issue-document-list" aria-label="文档列表">
+          <button className="secondary small-button" onClick={startNewDocument} type="button">新建文档</button>
+          {documents.isLoading && <p className="muted">加载文档中...</p>}
+          {documents.isSuccess && documents.data.length === 0 && <p className="muted">暂无文档。</p>}
+          {documents.data?.map((item) => (
+            <button
+              className={selectedKey === item.key ? "active" : ""}
+              key={item.id}
+              onClick={() => setSelectedKey(item.key)}
+              type="button"
+            >
+              <strong>{item.title || item.key}</strong>
+              <span>{item.key} · v{item.latestRevisionNumber}</span>
+            </button>
+          ))}
+        </aside>
+        <div className="issue-document-editor">
+          {document.error && <ErrorNotice error={document.error} />}
+          <div className="issue-document-fields">
+            <label>
+              文档 key
+              <input
+                disabled={Boolean(document.data)}
+                placeholder="plan"
+                value={draftKey}
+                onChange={(event) => setDraftKey(event.target.value)}
+              />
+            </label>
+            <label>
+              标题
+              <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+            </label>
+          </div>
+          <label>
+            正文
+            <textarea
+              className="issue-document-body"
+              placeholder="输入 Markdown 文档内容"
+              value={draftBody}
+              onChange={(event) => setDraftBody(event.target.value)}
+            />
+          </label>
+          <label>
+            变更说明
+            <input value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} />
+          </label>
+          <div className="issue-work-product-actions">
+            <button disabled={!canSave || saveDocument.isPending} onClick={() => saveDocument.mutate()} type="button">
+              保存文档
+            </button>
+            <button
+              className="danger small-button"
+              disabled={!selectedKey || deleteDocument.isPending}
+              onClick={() => deleteDocument.mutate()}
+              type="button"
+            >
+              删除文档
+            </button>
+          </div>
+          {saveDocument.error && <ErrorNotice error={saveDocument.error} />}
+          {deleteDocument.error && <ErrorNotice error={deleteDocument.error} />}
+          <details className="storage-object-details">
+            <summary>历史版本</summary>
+            {revisions.error && <ErrorNotice error={revisions.error} />}
+            {revisions.isLoading && selectedKey && <p className="muted">加载历史版本中...</p>}
+            {revisions.data?.map((revision) => (
+              <article className="issue-document-revision" key={revision.id}>
+                <strong>v{revision.revisionNumber}</strong>
+                <span>{revision.changeSummary || "无变更说明"} · {formatDateTime(revision.createdAt)}</span>
+              </article>
+            ))}
+            {revisions.isSuccess && revisions.data.length === 0 && <p className="muted">暂无历史版本。</p>}
+          </details>
+        </div>
+      </div>
     </section>
   );
 }
@@ -1056,6 +1234,8 @@ export function IssuePage() {
             )}
             {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
             {retryRun.error && <ErrorNotice error={retryRun.error} />}
+
+            <IssueDocumentsPanel issueId={issueId} />
 
             <IssueWorkProductsPanel issue={issue.data} />
 

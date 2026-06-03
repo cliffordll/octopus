@@ -1582,6 +1582,75 @@ small {
   padding: 0 10px;
 }
 
+.issue-work-product-hint {
+  margin: -4px 0 10px;
+}
+
+.issue-documents-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
+}
+
+.issue-document-list {
+  background: #0f1622;
+  border: 1px solid #232d3d;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.issue-document-list button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #d7deea;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 8px;
+  text-align: left;
+}
+
+.issue-document-list button:hover,
+.issue-document-list button.active {
+  background: #172235;
+  border-color: #34445d;
+}
+
+.issue-document-list span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.issue-document-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.issue-document-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(140px, 0.35fr) minmax(0, 1fr);
+}
+
+.issue-document-body {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.issue-document-revision {
+  border-top: 1px solid #202938;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
 .workspace-shell-layout {
   display: grid;
   gap: 16px;
