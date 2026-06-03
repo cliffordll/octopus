@@ -12,6 +12,7 @@ from ..constants.agent import (
     DEFAULT_AGENT_RUNTIME_TYPE,
 )
 from ..types.agent import (
+    HireAgentPayload,
     CreateAgentPayload,
     ResetAgentSessionPayload,
     UpdateAgentPayload,
@@ -32,6 +33,7 @@ _CREATE_FIELDS = {
     "permissions",
     "metadata",
 }
+_HIRE_FIELDS = _CREATE_FIELDS | {"sourceIssueId", "sourceIssueIds"}
 _UPDATE_FIELDS = (_CREATE_FIELDS - {"permissions"}) | {
     "replaceAgentRuntimeConfig",
     "status",
@@ -110,6 +112,27 @@ def validate_create_agent(payload: Mapping[str, Any]) -> CreateAgentPayload:
     result.setdefault("runtimeConfig", {})
     result.setdefault("budgetMonthlyCents", 0)
     return cast(CreateAgentPayload, result)
+
+
+def validate_hire_agent(payload: Mapping[str, Any]) -> HireAgentPayload:
+    _reject_unknown_fields(payload, _HIRE_FIELDS)
+    _validate_common(payload)
+    if "sourceIssueId" in payload:
+        _nullable_string(payload, "sourceIssueId")
+    if "sourceIssueIds" in payload:
+        issue_ids = payload["sourceIssueIds"]
+        if not isinstance(issue_ids, list) or any(
+            not isinstance(issue_id, str) or not issue_id.strip()
+            for issue_id in issue_ids
+        ):
+            raise ValueError("'sourceIssueIds' must be an array of non-empty strings")
+    result = dict(payload)
+    result.setdefault("role", DEFAULT_AGENT_ROLE)
+    result.setdefault("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
+    result.setdefault("agentRuntimeConfig", {})
+    result.setdefault("runtimeConfig", {})
+    result.setdefault("budgetMonthlyCents", 0)
+    return cast(HireAgentPayload, result)
 
 
 def validate_update_agent(payload: Mapping[str, Any]) -> UpdateAgentPayload:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 import uuid
 
@@ -142,6 +144,85 @@ async def test_local_storage_service_put_get_head_delete(tmp_path: Path) -> None
     await storage.delete_object("org-1", stored["objectKey"])
     missing = await storage.head_object("org-1", stored["objectKey"])
     assert missing["exists"] is False
+
+
+class _FakeObjectStorageClient:
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], tuple[bytes, str]] = {}
+
+    def put_object(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+        Body: bytes,
+        ContentType: str,
+        ContentLength: int,
+    ) -> None:
+        assert ContentLength == len(Body)
+        self.objects[(Bucket, Key)] = (Body, ContentType)
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+        body, _ = self.objects[(Bucket, Key)]
+        return {
+            "Body": BytesIO(body),
+            "ContentLength": len(body),
+            "LastModified": datetime(2026, 6, 3, tzinfo=UTC),
+        }
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+        body, _ = self.objects[(Bucket, Key)]
+        return {"ContentLength": len(body)}
+
+    def delete_object(self, *, Bucket: str, Key: str) -> None:
+        self.objects.pop((Bucket, Key), None)
+
+
+async def test_minio_storage_provider_put_get_head_delete() -> None:
+    from server.storage import create_storage_service
+    from server.storage.s3_compatible import S3CompatibleStorageProvider
+
+    client = _FakeObjectStorageClient()
+    storage = create_storage_service(
+        S3CompatibleStorageProvider(
+            bucket="octopus",
+            client=client,
+            provider_id="minio",
+        )
+    )
+
+    stored = await storage.put_file(
+        org_id="org-1",
+        namespace="work-products",
+        original_filename="report.txt",
+        content_type="text/plain",
+        body=b"minio object",
+    )
+
+    assert stored["provider"] == "minio"
+    assert stored["objectKey"].startswith("org-1/work-products/")
+    assert client.objects[("octopus", stored["objectKey"])][0] == b"minio object"
+
+    head = await storage.head_object("org-1", stored["objectKey"])
+    assert head == {"exists": True, "contentLength": len(b"minio object")}
+    assert (
+        await storage.get_object_bytes("org-1", stored["objectKey"]) == b"minio object"
+    )
+
+    await storage.delete_object("org-1", stored["objectKey"])
+    assert ("octopus", stored["objectKey"]) not in client.objects
+
+
+def test_storage_factory_rejects_incomplete_minio_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.storage import get_storage_service
+
+    monkeypatch.setenv("OCTOPUS_STORAGE_PROVIDER", "minio")
+    monkeypatch.delenv("OCTOPUS_STORAGE_BUCKET", raising=False)
+
+    with pytest.raises(ValueError, match="OCTOPUS_STORAGE_BUCKET"):
+        get_storage_service()
 
 
 async def test_asset_content_route_streams_stored_object(

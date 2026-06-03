@@ -547,6 +547,100 @@ async def test_org_issue_list_supports_step8_filters(
     assert body[0]["originId"] == "origin-1"
 
 
+async def test_issue_parent_filter_and_depth_are_applied(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+
+    parent_code, parent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Parent issue", "status": "todo", "originKind": "manual"},
+    )
+    child_code, child = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Child issue",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent["id"],
+        },
+    )
+
+    assert parent_code == 200
+    assert child_code == 200
+    assert child["parentId"] == parent["id"]
+    assert child["requestDepth"] == 1
+
+    code, body = await _request(
+        app, "GET", f"/api/orgs/{org_id}/issues?parentId={parent['id']}"
+    )
+
+    assert code == 200
+    assert [row["id"] for row in body] == [child["id"]]
+
+
+async def test_issue_create_rejects_parent_from_another_org(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    parent_org_id = await _seed_org(session)
+    child_org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, parent_org_id, title="External parent")
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{child_org_id}/issues",
+        json={
+            "title": "Invalid child",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent_id,
+        },
+    )
+
+    assert code == 422
+    assert "Parent issue not found" in body["detail"]
+
+
+async def test_issue_update_rejects_parent_cycle(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    parent_code, parent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Parent", "status": "todo", "originKind": "manual"},
+    )
+    child_code, child = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Child",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent["id"],
+        },
+    )
+    assert parent_code == 200
+    assert child_code == 200
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{parent['id']}",
+        json={"parentId": child["id"]},
+    )
+
+    assert code == 422
+    assert "cycle" in body["detail"].lower()
+
+
 async def test_issue_detail_returns_association_fields_and_nulls(
     app: FastAPI, session: AsyncSession
 ) -> None:

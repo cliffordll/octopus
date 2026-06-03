@@ -24,7 +24,16 @@ MANAGED_INSTRUCTIONS_RUNTIME_TYPES = {
 
 _ENTRY_FILE = "SOUL.md"
 _MEMORY_FILE = "MEMORY.md"
-_DEFAULT_BUNDLE_FILES = ("MEMORY.md", "HEARTBEAT.md", _ENTRY_FILE, "TOOLS.md")
+_DEFAULT_BUNDLE_FILES = (
+    "MEMORY.md",
+    "MEMORY.zh-CN.md",
+    "HEARTBEAT.md",
+    "HEARTBEAT.zh-CN.md",
+    _ENTRY_FILE,
+    "SOUL.zh-CN.md",
+    "TOOLS.md",
+    "TOOLS.zh-CN.md",
+)
 _ONBOARDING_ROOT = Path(__file__).resolve().parents[1] / "onboarding"
 _PROMPT_TEMPLATE_FILE = "promptTemplate.legacy.md"
 _EXPLICIT_INSTRUCTIONS_KEYS = (
