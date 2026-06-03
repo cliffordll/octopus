@@ -20,7 +20,11 @@ from sqlalchemy.pool import StaticPool
 from packages.database.clients import async_transaction
 from packages.database.schema import (
     ActivityLog,
+    Agent,
+    AgentWakeupRequest,
     Base,
+    HeartbeatRun,
+    HeartbeatRunEvent,
     Issue,
     IssueComment,
     Organization,
@@ -121,10 +125,11 @@ async def _request(
     path: str,
     *,
     json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.request(method, path, json=json)
+        response = await client.request(method, path, json=json, headers=headers)
     try:
         body: Any = response.json()
     except ValueError:
@@ -157,6 +162,90 @@ async def test_create_issue_route_returns_200_and_persists(
     assert len(rows) == 1
 
 
+async def test_create_assigned_issue_queues_assignment_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Issue Owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Assigned task",
+            "status": "todo",
+            "priority": "high",
+            "assigneeAgentId": agent_id,
+        },
+    )
+
+    assert code == 200
+    assert body["assigneeAgentId"] == agent_id
+
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent_id
+                )
+            )
+        ).scalar_one()
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+            )
+        ).scalar_one()
+        events = (
+            (
+                await verify.execute(
+                    select(HeartbeatRunEvent).where(HeartbeatRunEvent.run_id == run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert wakeup.source == "assignment"
+    assert wakeup.trigger_detail == "system"
+    assert wakeup.reason == "issue_assigned"
+    assert wakeup.payload == {"issueId": body["id"], "mutation": "create"}
+    assert run.status == "queued"
+    assert run.invocation_source == "assignment"
+    assert run.trigger_detail == "system"
+    assert run.context_snapshot == {
+        "triggeredBy": "user",
+        "actorId": "local-board",
+        "forceFreshSession": False,
+        "issueId": body["id"],
+        "source": "issue.create",
+        "wakeSource": "assignment",
+        "wakeReason": "issue_assigned",
+        "issue": {
+            "id": body["id"],
+            "title": "Assigned task",
+            "description": None,
+            "status": "todo",
+            "priority": "high",
+        },
+    }
+    assert [(event.seq, event.event_type, event.message) for event in events] == [
+        (1, "lifecycle", "run queued")
+    ]
+
+
 async def test_update_issue_route_returns_200_and_updates(
     app: FastAPI, session: AsyncSession
 ) -> None:
@@ -174,6 +263,194 @@ async def test_update_issue_route_returns_200_and_updates(
     assert body["id"] == issue_id
     assert body["title"] == "After"
     assert body["status"] == "in_progress"
+
+
+async def test_issue_heartbeat_context_route_returns_compact_issue_context(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Context task",
+        status="todo",
+        assignee_agent_id="agent-context",
+    )
+
+    code, body = await _request(
+        app,
+        "GET",
+        f"/api/issues/{issue_id}/heartbeat-context",
+    )
+
+    assert code == 200
+    assert body["issue"] == {
+        "id": issue_id,
+        "identifier": None,
+        "title": "Context task",
+        "description": None,
+        "status": "todo",
+        "priority": "medium",
+        "projectId": None,
+        "goalId": None,
+        "parentId": None,
+        "assigneeAgentId": "agent-context",
+        "assigneeUserId": None,
+        "updatedAt": body["issue"]["updatedAt"],
+    }
+    assert body["ancestors"] == []
+    assert body["project"] is None
+    assert body["goal"] is None
+    assert body["commentCursor"] is None
+    assert body["wakeComment"] is None
+
+
+async def test_issue_checkout_route_atomically_claims_issue_for_agent(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, title="Checkout task", status="todo")
+    agent_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Checkout Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                status="running",
+                invocation_source="assignment",
+                trigger_detail="system",
+                context_snapshot={"issueId": issue_id},
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/checkout",
+        json={"agentId": agent_id, "expectedStatuses": ["todo"]},
+    )
+
+    assert code == 200
+    assert body["id"] == issue_id
+    assert body["status"] == "in_progress"
+    assert body["assigneeAgentId"] == agent_id
+    assert body["checkoutRunId"] is None
+    assert body["executionRunId"] is None
+    async with session_factory() as verify:
+        row = await verify.get(Issue, issue_id)
+        assert row is not None
+        assert row.status == "in_progress"
+        assert row.assignee_agent_id == agent_id
+
+    conflict_code, conflict = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/checkout",
+        json={"agentId": agent_id, "expectedStatuses": ["todo"]},
+    )
+
+    assert conflict_code == 409
+    assert "checkout conflict" in conflict["detail"].lower()
+
+
+async def test_issue_execute_route_queues_assigned_issue_idempotently(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Issue Executor",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Executable task",
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+
+    code, run = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+    repeat_code, repeat = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+
+    assert code == 202
+    assert run["status"] == "queued"
+    assert run["agentId"] == agent_id
+    assert run["issueId"] == issue_id
+    assert run["invocationSource"] == "assignment"
+    assert repeat_code == 200
+    assert repeat["id"] == run["id"]
+    async with session_factory() as verify:
+        rows = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == agent_id,
+                        HeartbeatRun.context_snapshot["issueId"].as_string()
+                        == issue_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+
+
+async def test_agent_cannot_mark_issue_done_without_checkout_ownership(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    owner_id = str(uuid.uuid4())
+    other_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Owned task",
+        status="in_progress",
+        assignee_agent_id=owner_id,
+    )
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(id=owner_id, org_id=org_id, name="Owner", role="engineer"),
+                Agent(id=other_id, org_id=org_id, name="Other", role="engineer"),
+            ]
+        )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "done"},
+        headers={"x-test-agent-id": other_id, "x-test-org-id": org_id},
+    )
+
+    assert code == 403
+    assert "checkout owner" in body["detail"].lower()
 
 
 async def test_issue_comment_routes_create_and_list(
@@ -268,6 +545,100 @@ async def test_org_issue_list_supports_step8_filters(
     assert body[0]["goalId"] == "goal-1"
     assert body[0]["originKind"] == "manual"
     assert body[0]["originId"] == "origin-1"
+
+
+async def test_issue_parent_filter_and_depth_are_applied(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+
+    parent_code, parent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Parent issue", "status": "todo", "originKind": "manual"},
+    )
+    child_code, child = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Child issue",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent["id"],
+        },
+    )
+
+    assert parent_code == 200
+    assert child_code == 200
+    assert child["parentId"] == parent["id"]
+    assert child["requestDepth"] == 1
+
+    code, body = await _request(
+        app, "GET", f"/api/orgs/{org_id}/issues?parentId={parent['id']}"
+    )
+
+    assert code == 200
+    assert [row["id"] for row in body] == [child["id"]]
+
+
+async def test_issue_create_rejects_parent_from_another_org(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    parent_org_id = await _seed_org(session)
+    child_org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, parent_org_id, title="External parent")
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{child_org_id}/issues",
+        json={
+            "title": "Invalid child",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent_id,
+        },
+    )
+
+    assert code == 422
+    assert "Parent issue not found" in body["detail"]
+
+
+async def test_issue_update_rejects_parent_cycle(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    parent_code, parent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Parent", "status": "todo", "originKind": "manual"},
+    )
+    child_code, child = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Child",
+            "status": "todo",
+            "originKind": "manual",
+            "parentId": parent["id"],
+        },
+    )
+    assert parent_code == 200
+    assert child_code == 200
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{parent['id']}",
+        json={"parentId": child["id"]},
+    )
+
+    assert code == 422
+    assert "cycle" in body["detail"].lower()
 
 
 async def test_issue_detail_returns_association_fields_and_nulls(

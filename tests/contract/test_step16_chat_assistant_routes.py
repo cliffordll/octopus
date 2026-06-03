@@ -21,8 +21,12 @@ class FakeChatAdapter:
 
     def __init__(self, replies: list[dict[str, Any]]) -> None:
         self._replies = replies
+        self.captured_prompts: list[str] = []
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+        prompt = context.config.get("promptTemplate")
+        if isinstance(prompt, str):
+            self.captured_prompts.append(prompt)
         reply = self._replies.pop(0)
         return RuntimeExecutionResult(exit_code=0, result_json=reply)
 
@@ -93,13 +97,20 @@ async def _seed_org_agent(factory: async_sessionmaker) -> tuple[str, str]:
 
 
 async def _create_chat(
-    application: FastAPI, org_id: str, agent_id: str
+    application: FastAPI,
+    org_id: str,
+    agent_id: str,
+    *,
+    issue_creation_mode: str | None = None,
 ) -> dict[str, Any]:
+    payload: dict[str, Any] = {"title": "Assistant chat", "preferredAgentId": agent_id}
+    if issue_creation_mode is not None:
+        payload["issueCreationMode"] = issue_creation_mode
     code, created = await _request(
         application,
         "POST",
         f"/api/orgs/{org_id}/chats",
-        json={"title": "Assistant chat", "preferredAgentId": agent_id},
+        json=payload,
     )
     assert code == 201
     return created
@@ -153,6 +164,162 @@ async def test_assistant_reply_persists_kind_structured_payload_and_approval(
     assert approval is not None
     assert approval.type == "chat_issue_creation"
     assert approval.payload["chatConversationId"] == chat["id"]
+    prompt = adapter.captured_prompts[0]
+    assert "issue_proposal" in prompt
+    assert "issueProposal" in prompt
+    assert "server-side issue conversion mode" in prompt
+    assert "conversation issueCreationMode" in prompt
+
+
+async def test_assistant_json_text_issue_proposal_is_persisted(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": (
+                    '{"summary":"我可以为你创建这个任务。",'
+                    '"kind":"issue_proposal",'
+                    '"structuredPayload":{"issueProposal":{'
+                    '"title":"分析 rudder 源码",'
+                    '"description":"分析 rudder 源码并整理核心架构。",'
+                    '"priority":"medium"}}}'
+                )
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "我想分析一下rudder源码，你能帮我创建一个任务吗？"},
+    )
+
+    assert code == 201
+    assistant_message = result["messages"][1]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["body"] == "我可以为你创建这个任务。"
+    assert assistant_message["structuredPayload"]["issueProposal"] == {
+        "title": "分析 rudder 源码",
+        "description": "分析 rudder 源码并整理核心架构。",
+        "priority": "medium",
+    }
+    assert assistant_message["approvalId"] is not None
+
+
+async def test_assistant_fenced_json_issue_proposal_is_persisted(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": (
+                    "根据 `issueCreationMode` 为 `manual_approval`，我不能直接执行。"
+                    "以下是一个 issue 提案：\n\n"
+                    "```json\n"
+                    '{"summary":"读取 README.md 并总结出标题文档",'
+                    '"kind":"issue_proposal",'
+                    '"structuredPayload":{"issueProposal":{'
+                    '"title":"读取 README.md 并生成标题文档",'
+                    '"description":"读取 D:\\\\opendemo\\\\codexdemo\\\\octopus\\\\README.md 的内容，总结并生成一个标题文档。",'
+                    '"priority":"medium"}}}'
+                    "\n```"
+                )
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "读取 README.md 帮我总结出一个标题文档"},
+    )
+
+    assert code == 201
+    assistant_message = result["messages"][1]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["body"] == "读取 README.md 并总结出标题文档"
+    assert assistant_message["structuredPayload"]["issueProposal"]["title"] == (
+        "读取 README.md 并生成标题文档"
+    )
+    assert assistant_message["approvalId"] is not None
+    async with factory() as session:
+        approval = await session.scalar(
+            select(Approval).where(Approval.id == assistant_message["approvalId"])
+        )
+    assert approval is not None
+    assert approval.type == "chat_issue_creation"
+
+
+async def test_auto_create_chat_issue_proposal_creates_issue(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": "我会创建任务。",
+                "kind": "issue_proposal",
+                "structuredPayload": {
+                    "issueProposal": {
+                        "title": "输出 hello world",
+                        "description": "创建一个简单的任务，输出 hello world",
+                        "priority": "low",
+                    }
+                },
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(
+        application, org_id, agent_id, issue_creation_mode="auto_create"
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "请帮我创建一个任务输出hello world"},
+    )
+
+    assert code == 201
+    assert len(result["messages"]) == 3
+    assistant_message = result["messages"][1]
+    system_message = result["messages"][2]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["approvalId"] is None
+    assert system_message["kind"] == "system_event"
+    assert system_message["structuredPayload"]["eventType"] == "issue_created"
+
+    issue_id = system_message["structuredPayload"]["issueId"]
+    issues_code, issues = await _request(
+        application, "GET", f"/api/orgs/{org_id}/issues"
+    )
+    assert issues_code == 200
+    assert [row["id"] for row in issues] == [issue_id]
+    assert issues[0]["title"] == "输出 hello world"
+    assert issues[0]["createdByAgentId"] == agent_id
+    assert issues[0]["assigneeAgentId"] == agent_id
 
 
 async def test_edit_user_message_supersedes_previous_turn_variant(

@@ -15,7 +15,12 @@ from packages.database.queries.approvals import (
     list_org_approvals,
     update_approval,
 )
+from packages.database.queries.chats import get_message_by_approval_id
 from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.agents import (
+    get_agent_by_id,
+    update_agent as update_agent_row,
+)
 from packages.database.queries.issues import (
     get_issue_by_id,
     recover_blocked_linked_issues_for_approval,
@@ -43,7 +48,9 @@ from packages.shared.types.approval import (
     ResolveApprovalPayload,
     ResubmitApprovalPayload,
 )
+from packages.shared.types.chat import ConvertChatToIssuePayload
 from packages.shared.types.issue import IssueListItem
+from .chats import ChatService
 
 APPROVAL_CREATE_TO_COLUMN: dict[str, str] = {
     "type": "type",
@@ -351,7 +358,94 @@ class ApprovalService:
             entity_id=row.id,
             details=dict(payload),
         )
+        await self._apply_hire_agent_decision(
+            row,
+            status=status,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        await self._apply_chat_issue_creation_decision(
+            row,
+            status=status,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
         return _to_detail(row)
+
+    async def _apply_chat_issue_creation_decision(
+        self,
+        approval: Approval,
+        *,
+        status: ApprovalStatus,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        if approval.type != "chat_issue_creation" or status != "approved":
+            return
+        conversation_id = approval.payload.get("chatConversationId")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            return
+        payload: ConvertChatToIssuePayload = {}
+        message_id = approval.payload.get("chatMessageId")
+        if not isinstance(message_id, str) or not message_id:
+            message = await get_message_by_approval_id(self._session, approval.id)
+            if message is not None and message.conversation_id == conversation_id:
+                message_id = message.id
+        if isinstance(message_id, str) and message_id:
+            payload["messageId"] = message_id
+        proposed_issue = approval.payload.get("proposedIssue")
+        if isinstance(proposed_issue, dict):
+            payload["proposal"] = proposed_issue
+        await ChatService(self._session).convert_to_issue(
+            conversation_id,
+            payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+
+    async def _apply_hire_agent_decision(
+        self,
+        approval: Approval,
+        *,
+        status: ApprovalStatus,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        if approval.type != "hire_agent":
+            return
+        agent_id = approval.payload.get("agentId")
+        if not isinstance(agent_id, str) or not agent_id:
+            return
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None or agent.org_id != approval.org_id:
+            return
+        next_status: str | None = None
+        action: str | None = None
+        if status == "approved" and agent.status == "pending_approval":
+            next_status = "idle"
+            action = "agent.hire_approved"
+        elif status == "rejected" and agent.status != "terminated":
+            next_status = "terminated"
+            action = "agent.hire_rejected"
+        if next_status is None or action is None:
+            return
+        updated = await update_agent_row(
+            self._session,
+            agent_id,
+            {"status": next_status, "pause_reason": None, "paused_at": None},
+        )
+        if updated is None:
+            return
+        await insert_activity_log(
+            self._session,
+            org_id=approval.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action=action,
+            entity_type="agent",
+            entity_id=agent_id,
+            details={"approvalId": approval.id},
+        )
 
 
 def _to_list_item(row: Approval) -> ApprovalListItem:
@@ -408,6 +502,8 @@ def _to_issue_list_item(row: IssueRow) -> IssueListItem:
         goalId=row.goal_id,
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        createdByAgentId=row.created_by_agent_id,
+        createdByUserId=row.created_by_user_id,
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
         updatedAt=row.updated_at.isoformat(),

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -45,6 +46,7 @@ from packages.shared.types.issue_attachment import (
     IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
+from .documents import DocumentService
 from .goals import GoalService
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
@@ -54,6 +56,10 @@ _REVIEW_DECISION_STATUS_MAP = {
     "request_changes": "in_progress",
     "blocked": "blocked",
 }
+
+
+class IssueCheckoutConflictError(RuntimeError):
+    pass
 
 
 def _apply_status_side_effects(values: dict[str, Any]) -> None:
@@ -88,6 +94,8 @@ ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
     "assigneeUserId": "assignee_user_id",
     "reviewerAgentId": "reviewer_agent_id",
     "reviewerUserId": "reviewer_user_id",
+    "createdByAgentId": "created_by_agent_id",
+    "createdByUserId": "created_by_user_id",
     "originKind": "origin_kind",
     "originId": "origin_id",
     "requestDepth": "request_depth",
@@ -121,6 +129,7 @@ class IssueService:
         assignee_agent_id: str | None = None,
         project_id: str | None = None,
         goal_id: str | None = None,
+        parent_id: str | None = None,
         origin_kind: str | None = None,
         origin_id: str | None = None,
     ) -> list[IssueListItem]:
@@ -131,6 +140,7 @@ class IssueService:
             assignee_agent_id=assignee_agent_id,
             project_id=project_id,
             goal_id=goal_id,
+            parent_id=parent_id,
             origin_kind=origin_kind,
             origin_id=origin_id,
         )
@@ -179,6 +189,19 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        await self._apply_parent_values(
+            org_id,
+            values,
+            issue_id=None,
+            explicit_parent="parent_id" in values,
+        )
+        if (
+            actor_type == "agent"
+            and values.get("created_by_agent_id") == actor_id
+            and "assignee_agent_id" not in values
+            and "assignee_user_id" not in values
+        ):
+            values["assignee_agent_id"] = actor_id
         if not values.get("project_id") and not values.get("goal_id"):
             default_goal = await GoalService(
                 self._session
@@ -231,6 +254,12 @@ class IssueService:
             next_goal_id = default_goal["id"] if default_goal is not None else None
         if next_goal_id != current.goal_id:
             values["goal_id"] = next_goal_id
+        await self._apply_parent_values(
+            current.org_id,
+            values,
+            issue_id=current.id,
+            explicit_parent="parentId" in payload,
+        )
 
         workflow_actions: list[tuple[str, Mapping[str, Any] | None]] = []
         review_decision = payload.get("reviewDecision")
@@ -260,6 +289,8 @@ class IssueService:
         row = await update_issue(self._session, issue_id, values)
         if row is None:
             return None
+        if "parent_id" in values:
+            await self._refresh_descendant_depths(row)
 
         if values and review_decision is None:
             await insert_activity_log(
@@ -284,6 +315,180 @@ class IssueService:
                 details=dict(details) if details is not None else None,
             )
         return await self._to_detail(row)
+
+    async def _apply_parent_values(
+        self,
+        org_id: str,
+        values: dict[str, Any],
+        *,
+        issue_id: str | None,
+        explicit_parent: bool,
+    ) -> None:
+        if not explicit_parent:
+            return
+        parent_id = values.get("parent_id")
+        if parent_id is None:
+            values["request_depth"] = 0
+            return
+        if issue_id is not None and parent_id == issue_id:
+            raise ValueError("Issue cannot be its own parent")
+        parent = await get_issue_by_id(self._session, parent_id)
+        if parent is None or parent.org_id != org_id:
+            raise ValueError("Parent issue not found")
+        if issue_id is not None:
+            await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
+        values["request_depth"] = parent.request_depth + 1
+
+    async def _assert_parent_does_not_cycle(
+        self, issue_id: str, parent_id: str, org_id: str
+    ) -> None:
+        rows = (
+            (await self._session.execute(select(Issue).where(Issue.org_id == org_id)))
+            .scalars()
+            .all()
+        )
+        by_id = {row.id: row for row in rows}
+        cursor: str | None = parent_id
+        while cursor is not None:
+            if cursor == issue_id:
+                raise ValueError("Issue parent cycle is not allowed")
+            parent = by_id.get(cursor)
+            cursor = parent.parent_id if parent is not None else None
+
+    async def _refresh_descendant_depths(self, root: Issue) -> None:
+        rows = (
+            (
+                await self._session.execute(
+                    select(Issue).where(Issue.org_id == root.org_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        children_by_parent: dict[str, list[Issue]] = {}
+        for row in rows:
+            if row.parent_id is not None:
+                children_by_parent.setdefault(row.parent_id, []).append(row)
+
+        stack = [
+            (child, root.request_depth + 1)
+            for child in children_by_parent.get(root.id, [])
+        ]
+        now = datetime.now(UTC)
+        while stack:
+            row, depth = stack.pop()
+            row.request_depth = depth
+            row.updated_at = now
+            stack.extend(
+                (child, depth + 1) for child in children_by_parent.get(row.id, [])
+            )
+        await self._session.flush()
+
+    async def checkout_issue(
+        self,
+        issue_id: str,
+        payload: Mapping[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+        checkout_run_id: str | None = None,
+    ) -> IssueDetail | None:
+        current = await get_issue_by_id(self._session, issue_id)
+        if current is None:
+            return None
+
+        agent_id = cast(str, payload["agentId"])
+        expected_statuses = cast(list[str], payload["expectedStatuses"])
+        now = datetime.now(UTC)
+        assignee_matches = or_(
+            Issue.assignee_agent_id.is_(None),
+            Issue.assignee_agent_id == agent_id,
+        )
+        if checkout_run_id is None:
+            run_lock_matches = and_(
+                Issue.checkout_run_id.is_(None),
+                Issue.execution_run_id.is_(None),
+            )
+        else:
+            run_lock_matches = and_(
+                or_(
+                    Issue.checkout_run_id.is_(None),
+                    Issue.checkout_run_id == checkout_run_id,
+                ),
+                or_(
+                    Issue.execution_run_id.is_(None),
+                    Issue.execution_run_id == checkout_run_id,
+                ),
+            )
+        result = await self._session.execute(
+            update(Issue)
+            .where(
+                Issue.id == issue_id,
+                Issue.status.in_(expected_statuses),
+                assignee_matches,
+                run_lock_matches,
+            )
+            .values(
+                assignee_agent_id=agent_id,
+                assignee_user_id=None,
+                checkout_run_id=checkout_run_id,
+                execution_run_id=checkout_run_id,
+                status="in_progress",
+                started_at=now,
+                updated_at=now,
+            )
+            .returning(Issue)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise IssueCheckoutConflictError("Issue checkout conflict")
+
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.checked_out",
+            entity_type="issue",
+            entity_id=row.id,
+            details={
+                "agentId": agent_id,
+                "expectedStatuses": expected_statuses,
+                "checkoutRunId": checkout_run_id,
+            },
+        )
+        return await self._to_detail(row)
+
+    async def get_heartbeat_context(self, issue_id: str) -> dict[str, Any] | None:
+        detail = await self.get_by_id(issue_id)
+        if detail is None:
+            return None
+        issue = {
+            "id": detail["id"],
+            "identifier": detail["identifier"],
+            "title": detail["title"],
+            "description": detail["description"],
+            "status": detail["status"],
+            "priority": detail["priority"],
+            "projectId": detail["projectId"],
+            "goalId": detail["goalId"],
+            "parentId": detail["parentId"],
+            "assigneeAgentId": detail["assigneeAgentId"],
+            "assigneeUserId": detail["assigneeUserId"],
+            "updatedAt": detail["updatedAt"],
+        }
+        return {
+            "issue": issue,
+            "ancestors": [],
+            "project": None,
+            "goal": None,
+            "commentCursor": None,
+            "documentSummaries": [],
+            "planDocument": None,
+            "legacyPlanDocument": None,
+            "issueDocumentsPrompt": "",
+            "wakeComment": None,
+        }
 
     async def add_comment(
         self,
@@ -401,6 +606,9 @@ class IssueService:
         detail["workProducts"] = await WorkspaceService(
             self._session
         ).list_work_products_for_issue(row.id)
+        detail["documentSummaries"] = await DocumentService(
+            self._session
+        ).list_issue_documents(row.id)
         return detail
 
 
@@ -416,6 +624,8 @@ def _to_list_item(row: Issue) -> IssueListItem:
         goalId=row.goal_id,
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        createdByAgentId=row.created_by_agent_id,
+        createdByUserId=row.created_by_user_id,
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
         updatedAt=row.updated_at.isoformat(),
@@ -432,6 +642,8 @@ def _to_detail(row: Issue) -> IssueDetail:
         priority=cast(IssuePriority, row.priority),
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        createdByAgentId=row.created_by_agent_id,
+        createdByUserId=row.created_by_user_id,
         updatedAt=row.updated_at.isoformat(),
         description=row.description,
         reviewerAgentId=row.reviewer_agent_id,
@@ -446,8 +658,11 @@ def _to_detail(row: Issue) -> IssueDetail:
         startedAt=row.started_at.isoformat() if row.started_at else None,
         completedAt=row.completed_at.isoformat() if row.completed_at else None,
         cancelledAt=row.cancelled_at.isoformat() if row.cancelled_at else None,
+        checkoutRunId=row.checkout_run_id,
+        executionRunId=row.execution_run_id,
         createdAt=row.created_at.isoformat(),
         workProducts=[],
+        documentSummaries=[],
     )
 
 

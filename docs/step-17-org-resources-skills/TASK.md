@@ -1,6 +1,6 @@
 # Step 17: Organization Resources、Organization Skills 与 Agent Instructions
 
-状态：待开发
+状态：已完成
 
 ## 范围边界
 
@@ -138,24 +138,33 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
   - `GET /api/orgs/{orgId}/skills/{skillId}/files?path=SKILL.md`
   - `PATCH /api/orgs/{orgId}/skills/{skillId}/files`
   - `GET /api/orgs/{orgId}/skills/{skillId}/update-status`
+  - `POST /api/orgs/{orgId}/skills/import`
+  - `POST /api/orgs/{orgId}/skills/scan-local`
+  - `POST /api/orgs/{orgId}/skills/{skillId}/install-update`
   - `DELETE /api/orgs/{orgId}/skills/{skillId}`
 - 本地 organization skill 文件落盘到 `.octopus/workspaces/org_<orgId>/skills/<slug>/SKILL.md`。
+- 已支持本地外部 skill source 闭环：
+  - `import` 从一个包含 `SKILL.md` 的本地目录导入，复制为组织内副本，持久化 `sourceType=local_path`、`sourceLocator=<源目录>`、`sourceRef=<源内容 hash>` 和 `metadata.sourceKind=local_import`。
+  - `scan-local` 扫描本地 root 下包含 `SKILL.md` 的 skill package，返回候选；可用 `importDiscovered=true` 导入未导入候选。
+  - `update-status` 对 local import 比较源目录 hash 与已安装 `sourceRef`，返回 `hasUpdate/latestRef/currentRef`。
+  - `install-update` 从源目录重新复制到组织 skill 目录，刷新 markdown、description、fileInventory 和 sourceRef。
+  - runtime 始终消费组织内副本，不直接读取外部源目录，避免外部路径变化影响执行稳定性。
 - Agent runtime config 默认把 `skillsRootPath` 指向组织 skills 根目录，使 Step 14 已实现的 runtime skills snapshot/sync/enable 能发现 organization skill。
 - `GET /api/orgs/{orgId}/skills` 会按上游方式自动 seed bundled organization skills，避免新组织技能页返回空列表；当前本地 bundled source 来自 `server/skills/bundled`，以内置 `skills/<slug>` key 返回，并标记为只读。
 - `GET /api/orgs/{orgId}/skills` 会同时自动 seed community preset skills；当前本地 community source 来自 `server/skills/community`，按上游组织作用域 key `organization/{orgId}/{slug}` 返回，metadata 标记 `sourceKind=community_preset`，source badge/label 为 `community` / `Community preset`，并标记为只读。
 - Organization skills 路由支持用 organization UUID 或 `urlKey` 访问，内部统一解析为真实 organization UUID，避免 `/api/orgs/OCT/skills` 这类路径把 urlKey 当成数据库 `org_id` 写入。
 - 记录 activity：
   - `organization.skill_created`
+  - `organization.skill_imported`
   - `organization.skill_file_updated`
+  - `organization.skill_update_installed`
   - `organization.skill_deleted`
-- 增加 contract tests 覆盖 path/validator、CRUD/file、activity、scope guard、path guard、bundled seed、urlKey 解析、agent skills snapshot 消费。
+- 增加 contract tests 覆盖 path/validator、CRUD/file、activity、scope guard、path guard、bundled seed、urlKey 解析、agent skills snapshot 消费、本地 import/scan-local/update-status/install-update。
 
 本步骤后续子项：
 
-- `POST /api/orgs/{orgId}/skills/import`：导入 skills.sh/GitHub/url/local source。
-- `POST /api/orgs/{orgId}/skills/scan-local`：扫描本地 roots 并导入。
 - `POST /api/orgs/{orgId}/skills/scan-projects`：扫描组织 workspace/project workspace 中的 skill packages。
-- `POST /api/orgs/{orgId}/skills/{skillId}/install-update`：对可更新来源执行 update install。
+- `POST /api/orgs/{orgId}/skills/import` 的远程来源扩展：skills.sh/GitHub/url source。
 - organization skill reference 解析：支持 id、key、slug、public ref 等多种 selection reference。
 
 不做：

@@ -156,6 +156,7 @@ async def test_org_create_board_returns_200(
     assert body["description"] == "seeded"
     assert body["budgetMonthlyCents"] == 1234
     assert body["status"] == "active"
+    assert body["defaultChatIssueCreationMode"] == "manual_approval"
     assert body["issueCounter"] == 0
     assert body["spentMonthlyCents"] == 0
     assert body["issuePrefix"]
@@ -165,6 +166,26 @@ async def test_org_create_board_returns_200(
         row = await verify.get(Organization, body["id"])
     assert row is not None
     assert row.name == "New Org"
+
+
+async def test_org_create_normalizes_chat_issue_creation_mode(
+    app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    code, body = await _http(
+        app,
+        "POST",
+        "/api/orgs",
+        actor_type="board",
+        json={"name": "Auto Chat Org", "defaultChatIssueCreationMode": "automatic"},
+    )
+
+    assert code == 200
+    assert body["defaultChatIssueCreationMode"] == "auto_create"
+    async with session_factory() as verify:
+        row = await verify.get(Organization, body["id"])
+    assert row is not None
+    assert row.default_chat_issue_creation_mode == "auto_create"
 
 
 async def test_org_create_missing_actor_returns_503(app: FastAPI) -> None:
@@ -281,6 +302,22 @@ async def test_org_update_changes_config_fields(
     assert code == 200
     assert body["brandColor"] == "#ff0000"
     assert body["budgetMonthlyCents"] == 50000
+
+
+async def test_org_update_normalizes_chat_issue_creation_mode(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    code, body = await _http(
+        app,
+        "PATCH",
+        f"/api/orgs/{org_id}",
+        actor_type="board",
+        json={"defaultChatIssueCreationMode": "auto_create"},
+    )
+
+    assert code == 200
+    assert body["defaultChatIssueCreationMode"] == "auto_create"
 
 
 async def test_org_update_partial_does_not_touch_other_fields(

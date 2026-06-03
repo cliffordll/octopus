@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type PropsWithChildren, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState, type FormEvent, type PropsWithChildren, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import { projectsApi } from "../api/projects";
@@ -40,11 +40,64 @@ function ContextWorkspace({
 }
 
 export function ChatsWorkspace({ contentClassName = "", orgId, children }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const chats = useQuery({ queryKey: ["chats", orgId], queryFn: () => chatsApi.list(orgId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState("");
+  const [chatActionNotice, setChatActionNotice] = useState<string | null>(null);
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
   const conversations = Array.isArray(chats.data) ? chats.data : [];
+  const updateChat = useMutation({
+    mutationFn: ({ chatId, title, status }: { chatId: string; title?: string; status?: "archived" }) =>
+      chatsApi.update(chatId, { ...(title !== undefined ? { title } : {}), ...(status ? { status } : {}) }),
+    onSuccess: (updated, variables) => {
+      queryClient.setQueryData(["chat", updated.id], updated);
+      queryClient.setQueryData<typeof conversations>(["chats", orgId], (current) => {
+        if (!Array.isArray(current)) return current;
+        if (variables.status === "archived") return current.filter((chat) => chat.id !== updated.id);
+        return current.map((chat) => (chat.id === updated.id ? { ...chat, ...updated } : chat));
+      });
+      if (variables.status === "archived" && location.pathname.endsWith(`/chats/${updated.id}`)) {
+        navigate(`/orgs/${orgId}/chats`);
+      }
+      setOpenMenuId(null);
+      setRenamingChatId(null);
+      setRenameTitle("");
+      setChatActionNotice(null);
+    },
+    onError: (error) => {
+      setChatActionNotice(error instanceof Error ? error.message : "操作失败");
+    },
+  });
+  function submitRename(event: FormEvent, chatId: string) {
+    event.preventDefault();
+    const title = renameTitle.trim();
+    if (!title) return;
+    updateChat.mutate({ chatId, title });
+  }
+  function copyChatId(chatId: string) {
+    void navigator.clipboard?.writeText(chatId);
+    setChatActionNotice("聊天 ID 已复制");
+    setOpenMenuId(null);
+  }
+  useEffect(() => {
+    if (!openMenuId) return;
+    function closeMenuOnOutsidePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const row = target.closest("[data-chat-conversation-row]");
+      if (row?.getAttribute("data-chat-id") === openMenuId) return;
+      setOpenMenuId(null);
+      setRenamingChatId(null);
+    }
+    document.addEventListener("pointerdown", closeMenuOnOutsidePointerDown);
+    return () => document.removeEventListener("pointerdown", closeMenuOnOutsidePointerDown);
+  }, [openMenuId]);
   return (
     <ContextWorkspace
       contentClassName={contentClassName}
@@ -68,22 +121,90 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
               <span>消息中心</span>
             </NavLink>
           </section>
-          <section className="context-nav-section">
+          <section className="context-nav-section chat-conversation-section">
             <h3>对话</h3>
             {chats.error && <ErrorNotice error={chats.error} />}
-            {conversations.map((chat) => (
-              <NavLink key={chat.id} to={`/orgs/${orgId}/chats/${chat.id}`}>
-                <span aria-hidden="true" className="context-entry-icon">C</span>
-                <span className="context-item-copy">
-                  <strong>{chat.title}</strong>
-                  <small>
-                    {chat.latestReplyPreview
-                      ?? (chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体")}
-                  </small>
-                </span>
-                <Badge>{chat.unreadCount ? `${chat.unreadCount} 未读` : chat.status}</Badge>
-              </NavLink>
-            ))}
+            {chatActionNotice && <p className="context-action-notice">{chatActionNotice}</p>}
+            <div className="chat-conversation-list">
+              {conversations.map((chat) => {
+                const menuOpen = openMenuId === chat.id;
+                const renaming = renamingChatId === chat.id;
+                return (
+                  <div className="chat-conversation-row" data-chat-conversation-row data-chat-id={chat.id} key={chat.id}>
+                    <NavLink to={`/orgs/${orgId}/chats/${chat.id}`}>
+                      <span aria-hidden="true" className="context-entry-icon">C</span>
+                      <span className="context-item-copy">
+                        <strong title={chat.title}>{chat.title}</strong>
+                        <small title={chat.latestReplyPreview ?? undefined}>
+                          {chat.latestReplyPreview
+                            ?? (chat.preferredAgentId ? agentNameById.get(chat.preferredAgentId) ?? "未知智能体" : "未选择智能体")}
+                        </small>
+                      </span>
+                    </NavLink>
+                    <button
+                      aria-expanded={menuOpen}
+                      aria-label={`${chat.title} 操作`}
+                      className="chat-conversation-menu-trigger"
+                      onClick={() => {
+                        setOpenMenuId(menuOpen ? null : chat.id);
+                        setRenamingChatId(null);
+                        setRenameTitle(chat.title);
+                        setChatActionNotice(null);
+                      }}
+                      type="button"
+                    >
+                      ...
+                    </button>
+                    {menuOpen && (
+                      <div className="chat-conversation-menu">
+                        {renaming ? (
+                          <form onSubmit={(event) => submitRename(event, chat.id)}>
+                            <input
+                              aria-label="新会话名称"
+                              autoFocus
+                              onChange={(event) => setRenameTitle(event.target.value)}
+                              value={renameTitle}
+                            />
+                            <div className="chat-conversation-menu-actions">
+                              <button disabled={updateChat.isPending} type="submit">确认</button>
+                              <button
+                                onClick={() => {
+                                  setRenamingChatId(null);
+                                  setRenameTitle(chat.title);
+                                }}
+                                type="button"
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                setRenamingChatId(chat.id);
+                                setRenameTitle(chat.title);
+                              }}
+                              type="button"
+                            >
+                              重命名
+                            </button>
+                            <button onClick={() => copyChatId(chat.id)} type="button">复制聊天 ID</button>
+                            <button
+                              disabled={updateChat.isPending}
+                              onClick={() => updateChat.mutate({ chatId: chat.id, status: "archived" })}
+                              type="button"
+                            >
+                              归档
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
             {chats.isSuccess && conversations.length === 0 && <p className="context-empty">暂无对话</p>}
           </section>
         </>

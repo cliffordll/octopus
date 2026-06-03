@@ -143,6 +143,14 @@ _OVERWRITE_MANAGED_HOME_ENTRIES = frozenset(
     }
 )
 
+_COPY_MANAGED_HOME_ENTRIES = frozenset(
+    {
+        # Runtime config is mutable per agent. Copy it so DB materialization in the
+        # managed home cannot write through a symlink into the operator home.
+        ".config/opencode",
+    }
+)
+
 
 def _sync_local_cli_credential_home_entries(
     source_home: Path, target_home: Path
@@ -159,13 +167,14 @@ def _sync_local_cli_credential_home_entries(
             source,
             target,
             overwrite=relative_entry in _OVERWRITE_MANAGED_HOME_ENTRIES,
+            force_copy=relative_entry in _COPY_MANAGED_HOME_ENTRIES,
         ):
             linked.append(relative_entry)
     return linked
 
 
 def _ensure_link_or_copy(
-    source: Path, target: Path, *, overwrite: bool = False
+    source: Path, target: Path, *, overwrite: bool = False, force_copy: bool = False
 ) -> bool:
     if target.is_symlink():
         try:
@@ -184,6 +193,15 @@ def _ensure_link_or_copy(
         else:
             target.unlink(missing_ok=True)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if force_copy:
+        try:
+            if source.is_dir():
+                shutil.copytree(source, target)
+            else:
+                shutil.copy2(source, target)
+            return True
+        except OSError:
+            return False
     try:
         target.symlink_to(source, target_is_directory=source.is_dir())
         return True

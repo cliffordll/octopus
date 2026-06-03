@@ -17,9 +17,46 @@ class IssueListItem(TypedDict):
     goalId: str | None
     assigneeAgentId: str | None
     assigneeUserId: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
     originKind: IssueOriginKind
     originId: str | None
     updatedAt: str
+
+
+class IssueDocumentSummary(TypedDict):
+    id: str
+    orgId: str
+    issueId: str
+    key: str
+    title: str | None
+    format: str
+    latestRevisionId: str | None
+    latestRevisionNumber: int
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    updatedByAgentId: str | None
+    updatedByUserId: str | None
+    createdAt: str
+    updatedAt: str
+
+
+class IssueDocument(IssueDocumentSummary):
+    body: str
+
+
+class DocumentRevision(TypedDict):
+    id: str
+    orgId: str
+    documentId: str
+    issueId: str
+    key: str
+    revisionNumber: int
+    body: str
+    changeSummary: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    createdAt: str
 
 
 class IssueDetail(IssueListItem):
@@ -36,8 +73,11 @@ class IssueDetail(IssueListItem):
     startedAt: str | None
     completedAt: str | None
     cancelledAt: str | None
+    checkoutRunId: str | None
+    executionRunId: str | None
     createdAt: str
     workProducts: list[IssueWorkProduct]
+    documentSummaries: list[IssueDocumentSummary]
 
 
 class ListOrgIssuesQuery(TypedDict, total=False):
@@ -65,6 +105,8 @@ class CreateIssuePayload(TypedDict):
     assigneeUserId: NotRequired[str | None]
     reviewerAgentId: NotRequired[str | None]
     reviewerUserId: NotRequired[str | None]
+    createdByAgentId: NotRequired[str | None]
+    createdByUserId: NotRequired[str | None]
     originKind: NotRequired[IssueOriginKind]
     originId: NotRequired[str | None]
     requestDepth: NotRequired[int]
@@ -95,6 +137,19 @@ class CreateIssueCommentPayload(TypedDict):
     body: str
 
 
+class CheckoutIssuePayload(TypedDict):
+    agentId: str
+    expectedStatuses: list[IssueStatus]
+
+
 class RecordIssueReviewDecisionPayload(TypedDict):
     decision: IssueReviewDecision
     note: NotRequired[str | None]
+
+
+class UpsertIssueDocumentPayload(TypedDict):
+    title: NotRequired[str | None]
+    format: str
+    body: str
+    changeSummary: NotRequired[str | None]
+    baseRevisionId: NotRequired[str | None]

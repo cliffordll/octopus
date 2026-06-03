@@ -15,6 +15,7 @@ from .commands import (
     organization,
     project,
     run_intelligence,
+    runtime_provider,
 )
 
 
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     asset.configure(resources)
     heartbeat.configure(resources)
     run_intelligence.configure(resources)
+    runtime_provider.configure(resources)
     chat.configure(resources)
     messenger.configure(resources)
     return parser
