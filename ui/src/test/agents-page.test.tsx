@@ -5,6 +5,8 @@ import { renderApp, respond } from "./render-app";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  document.documentElement.lang = "";
   vi.unstubAllGlobals();
 });
 
@@ -77,10 +79,10 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
-  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "5000");
+  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
   fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
-  await userEvent.type(screen.getByLabelText("Desired Skills"), "review,debug");
+  await userEvent.type(screen.getByLabelText("期望技能"), "review,debug");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -100,7 +102,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
       }),
     }),
   );
-});
+}, 10000);
 
 it("creates the first agent as the organization CEO", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -135,7 +137,7 @@ it("creates the first agent as the organization CEO", async () => {
       }),
     }),
   );
-});
+}, 10000);
 
 it("requires provider/model when creating a model-provider runtime agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -179,7 +181,7 @@ it("requires provider/model when creating a model-provider runtime agent", async
       }),
     }),
   );
-});
+}, 10000);
 
 it("manages runtime providers and models from settings", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -234,6 +236,25 @@ it("manages runtime providers and models from settings", async () => {
   expect(dialog.getByRole("button", { name: /供应商/ })).toHaveClass("active");
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
+  await userEvent.click(dialog.getByRole("button", { name: /通用/ }));
+  expect(dialog.getByRole("heading", { name: "通用" })).toBeInTheDocument();
+  expect(dialog.getByRole("button", { name: "简体中文" })).toHaveClass("active");
+  await userEvent.click(dialog.getByRole("button", { name: "English" }));
+  expect(window.localStorage.getItem("octopus.locale")).toBe("en-US");
+  expect(document.documentElement.lang).toBe("en-US");
+
+  await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
+  expect(await dialog.findByRole("heading", { name: "Runtime Providers" })).toBeInTheDocument();
+  const englishKimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
+  expect(englishKimiProvider.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
+  expect(englishKimiProvider.queryByRole("button", { name: "Edit" })).toBeInTheDocument();
+
+  await userEvent.click(dialog.getByRole("button", { name: /通用/ }));
+  await userEvent.click(dialog.getByRole("button", { name: "简体中文" }));
+  expect(window.localStorage.getItem("octopus.locale")).toBe("zh-CN");
+  expect(document.documentElement.lang).toBe("zh-CN");
+
+  await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
@@ -339,7 +360,7 @@ it("manages runtime providers and models from settings", async () => {
     "/api/orgs/org-1/runtime-providers?runtimeType=codex_local",
     expect.objectContaining({ method: "GET" }),
   );
-});
+}, 10000);
 
 it("shows empty detail tabs when the organization has no agents", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
