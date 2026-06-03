@@ -329,10 +329,17 @@ export function ChatPage() {
                   {message.attachments && message.attachments.length > 0 && (
                     <div className="chat-attachment-list">
                       {message.attachments.map((attachment) => (
-                        <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
-                          {attachment.originalFilename ?? attachment.id}
-                          <span>{formatBytes(attachment.byteSize)}</span>
-                        </a>
+                        attachment.contentPath ? (
+                          <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
+                            {attachment.originalFilename ?? attachment.id}
+                            <span>{formatBytes(attachment.byteSize)}</span>
+                          </a>
+                        ) : (
+                          <span className="chat-attachment-chip disabled" key={attachment.id}>
+                            {attachment.originalFilename ?? attachment.id}
+                            <span>不可下载 · {formatBytes(attachment.byteSize)}</span>
+                          </span>
+                        )
                       ))}
                     </div>
                   )}
