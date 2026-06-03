@@ -30,6 +30,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+
+RUN uv add asyncpg
 # 第二层：一方源码（server/、packages/、alembic.ini、migrations）
 # 不安装为 wheel，用 PYTHONPATH 直接跑源码，保证 runner.py 的 _project_root()
 # 与 alembic.ini 路径解析正确。
