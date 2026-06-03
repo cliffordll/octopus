@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from sqlalchemy import and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -54,6 +55,10 @@ _REVIEW_DECISION_STATUS_MAP = {
     "request_changes": "in_progress",
     "blocked": "blocked",
 }
+
+
+class IssueCheckoutConflictError(RuntimeError):
+    pass
 
 
 def _apply_status_side_effects(values: dict[str, Any]) -> None:
@@ -285,6 +290,112 @@ class IssueService:
             )
         return await self._to_detail(row)
 
+    async def checkout_issue(
+        self,
+        issue_id: str,
+        payload: Mapping[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+        checkout_run_id: str | None = None,
+    ) -> IssueDetail | None:
+        current = await get_issue_by_id(self._session, issue_id)
+        if current is None:
+            return None
+
+        agent_id = cast(str, payload["agentId"])
+        expected_statuses = cast(list[str], payload["expectedStatuses"])
+        now = datetime.now(UTC)
+        assignee_matches = or_(
+            Issue.assignee_agent_id.is_(None),
+            Issue.assignee_agent_id == agent_id,
+        )
+        if checkout_run_id is None:
+            run_lock_matches = and_(
+                Issue.checkout_run_id.is_(None),
+                Issue.execution_run_id.is_(None),
+            )
+        else:
+            run_lock_matches = and_(
+                or_(
+                    Issue.checkout_run_id.is_(None),
+                    Issue.checkout_run_id == checkout_run_id,
+                ),
+                or_(
+                    Issue.execution_run_id.is_(None),
+                    Issue.execution_run_id == checkout_run_id,
+                ),
+            )
+        result = await self._session.execute(
+            update(Issue)
+            .where(
+                Issue.id == issue_id,
+                Issue.status.in_(expected_statuses),
+                assignee_matches,
+                run_lock_matches,
+            )
+            .values(
+                assignee_agent_id=agent_id,
+                assignee_user_id=None,
+                checkout_run_id=checkout_run_id,
+                execution_run_id=checkout_run_id,
+                status="in_progress",
+                started_at=now,
+                updated_at=now,
+            )
+            .returning(Issue)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise IssueCheckoutConflictError("Issue checkout conflict")
+
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.checked_out",
+            entity_type="issue",
+            entity_id=row.id,
+            details={
+                "agentId": agent_id,
+                "expectedStatuses": expected_statuses,
+                "checkoutRunId": checkout_run_id,
+            },
+        )
+        return await self._to_detail(row)
+
+    async def get_heartbeat_context(self, issue_id: str) -> dict[str, Any] | None:
+        detail = await self.get_by_id(issue_id)
+        if detail is None:
+            return None
+        issue = {
+            "id": detail["id"],
+            "identifier": detail["identifier"],
+            "title": detail["title"],
+            "description": detail["description"],
+            "status": detail["status"],
+            "priority": detail["priority"],
+            "projectId": detail["projectId"],
+            "goalId": detail["goalId"],
+            "parentId": detail["parentId"],
+            "assigneeAgentId": detail["assigneeAgentId"],
+            "assigneeUserId": detail["assigneeUserId"],
+            "updatedAt": detail["updatedAt"],
+        }
+        return {
+            "issue": issue,
+            "ancestors": [],
+            "project": None,
+            "goal": None,
+            "commentCursor": None,
+            "documentSummaries": [],
+            "planDocument": None,
+            "legacyPlanDocument": None,
+            "issueDocumentsPrompt": "",
+            "wakeComment": None,
+        }
+
     async def add_comment(
         self,
         issue_id: str,
@@ -446,6 +557,8 @@ def _to_detail(row: Issue) -> IssueDetail:
         startedAt=row.started_at.isoformat() if row.started_at else None,
         completedAt=row.completed_at.isoformat() if row.completed_at else None,
         cancelledAt=row.cancelled_at.isoformat() if row.cancelled_at else None,
+        checkoutRunId=row.checkout_run_id,
+        executionRunId=row.execution_run_id,
         createdAt=row.created_at.isoformat(),
         workProducts=[],
     )

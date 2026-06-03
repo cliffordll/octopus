@@ -240,9 +240,13 @@ async def test_model_crud_is_database_only(
     assert deleted["modelId"] == "kimik/kimi-k2.5"
 
 
+@pytest.mark.parametrize(
+    "runtime_type", ["opencode_local", "codex_local", "claude_local"]
+)
 async def test_chat_runtime_config_includes_database_provider_model(
     app: tuple[FastAPI, async_sessionmaker],
     monkeypatch: pytest.MonkeyPatch,
+    runtime_type: str,
 ) -> None:
     from server.services import chats as chat_service_module
 
@@ -252,7 +256,7 @@ async def test_chat_runtime_config_includes_database_provider_model(
     captured: dict[str, Any] = {}
 
     class CapturingAdapter:
-        type = "opencode_local"
+        type = runtime_type
 
         async def execute(
             self, context: RuntimeExecutionContext
@@ -269,7 +273,7 @@ async def test_chat_runtime_config_includes_database_provider_model(
                     name="OpenCode Agent",
                     role="engineer",
                     status="idle",
-                    agent_runtime_type="opencode_local",
+                    agent_runtime_type=runtime_type,
                     agent_runtime_config={"model": "deepseek/deepseek-v4-flash"},
                     runtime_config={},
                 )
@@ -278,7 +282,7 @@ async def test_chat_runtime_config_includes_database_provider_model(
                 RuntimeProvider(
                     id=str(uuid.uuid4()),
                     org_id=org_id,
-                    runtime_type="opencode_local",
+                    runtime_type=runtime_type,
                     provider_id="deepseek",
                     name="DeepSeek",
                     protocol="openai_chat_completions",
@@ -293,7 +297,7 @@ async def test_chat_runtime_config_includes_database_provider_model(
                 RuntimeModel(
                     id=str(uuid.uuid4()),
                     org_id=org_id,
-                    runtime_type="opencode_local",
+                    runtime_type=runtime_type,
                     provider_id="deepseek",
                     model_id="deepseek-v4-flash",
                     display_name="DeepSeek V4 Flash",

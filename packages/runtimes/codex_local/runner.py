@@ -15,6 +15,7 @@ from typing import Any
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..provider_config import apply_provider_env, model_for_cli
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
 
@@ -49,6 +50,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     if context.env:
         explicit_env_keys.update(context.env)
         env.update(context.env)
+    apply_provider_env(
+        env,
+        context.config,
+        api_key_env="OPENAI_API_KEY",
+        base_url_env="OPENAI_BASE_URL",
+    )
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
     if not _string(env.get("CODEX_HOME")):
         env["CODEX_HOME"] = str(_default_codex_home(context))
@@ -431,7 +438,7 @@ def _build_args(
         args.insert(0, "--search")
     if config.get("dangerouslyBypassApprovalsAndSandbox") is True:
         args.append("--dangerously-bypass-approvals-and-sandbox")
-    model = _string(config.get("model"))
+    model = model_for_cli(config)
     if model:
         args.extend(["--model", model])
     reasoning = _string(

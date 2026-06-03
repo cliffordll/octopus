@@ -1,6 +1,6 @@
 # Step 17: Organization Resources、Organization Skills 与 Agent Instructions
 
-状态：待开发
+状态：已完成
 
 ## 范围边界
 
