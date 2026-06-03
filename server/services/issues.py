@@ -93,6 +93,8 @@ ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
     "assigneeUserId": "assignee_user_id",
     "reviewerAgentId": "reviewer_agent_id",
     "reviewerUserId": "reviewer_user_id",
+    "createdByAgentId": "created_by_agent_id",
+    "createdByUserId": "created_by_user_id",
     "originKind": "origin_kind",
     "originId": "origin_id",
     "requestDepth": "request_depth",
@@ -184,6 +186,13 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        if (
+            actor_type == "agent"
+            and values.get("created_by_agent_id") == actor_id
+            and "assignee_agent_id" not in values
+            and "assignee_user_id" not in values
+        ):
+            values["assignee_agent_id"] = actor_id
         if not values.get("project_id") and not values.get("goal_id"):
             default_goal = await GoalService(
                 self._session
@@ -527,6 +536,8 @@ def _to_list_item(row: Issue) -> IssueListItem:
         goalId=row.goal_id,
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        createdByAgentId=row.created_by_agent_id,
+        createdByUserId=row.created_by_user_id,
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
         updatedAt=row.updated_at.isoformat(),
@@ -543,6 +554,8 @@ def _to_detail(row: Issue) -> IssueDetail:
         priority=cast(IssuePriority, row.priority),
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
+        createdByAgentId=row.created_by_agent_id,
+        createdByUserId=row.created_by_user_id,
         updatedAt=row.updated_at.isoformat(),
         description=row.description,
         reviewerAgentId=row.reviewer_agent_id,

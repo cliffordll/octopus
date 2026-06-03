@@ -73,6 +73,7 @@ from packages.shared.types.chat import (
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
+from packages.shared.types.issue import CreateIssuePayload
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
 
@@ -407,22 +408,30 @@ class ChatService:
         if conversation is None:
             return None
         proposal = await self._issue_proposal_for_conversion(conversation, payload)
+        issue_payload: CreateIssuePayload = {
+            "title": proposal["title"],
+            "description": proposal.get("description"),
+            "priority": proposal.get("priority", "medium"),
+            "createdByAgentId": actor_id if actor_type == "agent" else None,
+            "createdByUserId": actor_id if actor_type == "board" else None,
+            "originKind": "manual",
+            "originId": conversation.id,
+        }
+        for optional_key in (
+            "projectId",
+            "goalId",
+            "parentId",
+            "assigneeAgentId",
+            "assigneeUserId",
+            "reviewerAgentId",
+            "reviewerUserId",
+        ):
+            if optional_key in proposal:
+                issue_payload[optional_key] = proposal[optional_key]
+
         issue = await IssueService(self._session).create_issue(
             conversation.org_id,
-            {
-                "title": proposal["title"],
-                "description": proposal.get("description"),
-                "priority": proposal.get("priority", "medium"),
-                "projectId": proposal.get("projectId"),
-                "goalId": proposal.get("goalId"),
-                "parentId": proposal.get("parentId"),
-                "assigneeAgentId": proposal.get("assigneeAgentId"),
-                "assigneeUserId": proposal.get("assigneeUserId"),
-                "reviewerAgentId": proposal.get("reviewerAgentId"),
-                "reviewerUserId": proposal.get("reviewerUserId"),
-                "originKind": "manual",
-                "originId": conversation.id,
-            },
+            issue_payload,
             actor_type=actor_type,
             actor_id=actor_id,
         )
