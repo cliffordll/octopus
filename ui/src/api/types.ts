@@ -61,6 +61,23 @@ export interface IssueListItem {
   updatedAt: string;
 }
 
+export interface StorageHealthConfig {
+  provider?: "local_disk" | "minio" | "s3" | string | null;
+  bucket?: string | null;
+  endpoint?: string | null;
+  pathStyle?: boolean | null;
+  forcePathStyle?: boolean | null;
+}
+
+export interface ServerHealth {
+  status: string;
+  storage?: StorageHealthConfig | null;
+  storageProvider?: string | null;
+  storageBucket?: string | null;
+  storageEndpoint?: string | null;
+  storagePathStyle?: boolean | null;
+}
+
 export interface IssueDetail extends IssueListItem {
   description: string | null;
   reviewerAgentId: string | null;
@@ -100,7 +117,7 @@ export interface IssueAttachment {
   originalFilename: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface IssueFilters {
@@ -1070,7 +1087,7 @@ export interface ChatAttachment {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface ChatContextLink {

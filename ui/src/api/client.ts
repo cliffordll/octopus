@@ -21,14 +21,32 @@ export function rootCauseMessage(message: string): string {
 
 async function parseError(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { detail?: unknown };
+    const body = (await response.json()) as { detail?: unknown; error?: unknown; message?: unknown };
     if (typeof body.detail === "string") {
-      return rootCauseMessage(body.detail);
+      return friendlyBackendError(rootCauseMessage(body.detail));
     }
+    if (body.detail && typeof body.detail === "object") {
+      const detail = body.detail as { error?: unknown; message?: unknown; reason?: unknown };
+      const message = detail.message ?? detail.error ?? detail.reason;
+      if (typeof message === "string") return friendlyBackendError(rootCauseMessage(message));
+    }
+    if (typeof body.message === "string") return friendlyBackendError(rootCauseMessage(body.message));
+    if (typeof body.error === "string") return friendlyBackendError(rootCauseMessage(body.error));
   } catch {
     // Fall through to the HTTP status when a non-JSON error is returned.
   }
   return `Request failed (${response.status})`;
+}
+
+function friendlyBackendError(message: string): string {
+  const normalized = message.trim();
+  if (!normalized) return normalized;
+  const lower = normalized.toLowerCase();
+  if (lower.includes("object not found")) return "存储对象不存在";
+  if (lower.includes("asset not found")) return "资产不存在";
+  if (lower.includes("storage unavailable")) return "存储服务不可用";
+  if (lower.includes("provider mismatch")) return "存储 Provider 不匹配";
+  return normalized;
 }
 
 export async function request<T>(

@@ -266,6 +266,17 @@ it("manages runtime providers and models from settings", async () => {
     if (path === "/api/orgs" && init?.method === "GET") {
       return respond([{ id: "org-1", urlKey: "core", name: "核心团队", status: "active" }]);
     }
+    if (path === "/api/health" && init?.method === "GET") {
+      return respond({
+        status: "ok",
+        storage: {
+          provider: "minio",
+          bucket: "octopus",
+          endpoint: "http://127.0.0.1:9000",
+          pathStyle: true,
+        },
+      });
+    }
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([]);
     }
@@ -312,8 +323,14 @@ it("manages runtime providers and models from settings", async () => {
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   expect(dialog.getByRole("button", { name: /供应商/ })).toHaveClass("active");
+  expect(dialog.getByRole("button", { name: /存储/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
+  await userEvent.click(dialog.getByRole("button", { name: /存储/ }));
+  expect(dialog.getByRole("heading", { name: "存储" })).toBeInTheDocument();
+  expect(dialog.getByText("minio")).toBeInTheDocument();
+  expect(dialog.getByText("octopus")).toBeInTheDocument();
+  expect(dialog.getByText("http://127.0.0.1:9000")).toBeInTheDocument();
   await userEvent.click(dialog.getByRole("button", { name: /通用/ }));
   expect(dialog.getByRole("heading", { name: "通用" })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: "简体中文" })).toHaveClass("active");

@@ -414,6 +414,15 @@ small {
   margin: 0;
 }
 
+.storage-settings-card {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
 .settings-section-content > .runtime-settings {
   height: 100%;
   overflow: hidden;
@@ -1544,6 +1553,33 @@ small {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.storage-object-details {
+  color: #9aa8bc;
+  font-size: 12px;
+}
+
+.storage-object-details summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.storage-object-details[open] {
+  display: grid;
+  gap: 8px;
+}
+
+.download-unavailable {
+  align-items: center;
+  background: #151b24;
+  border: 1px solid #2c3648;
+  border-radius: 999px;
+  color: #8f9bad;
+  display: inline-flex;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 10px;
 }
 
 .workspace-shell-layout {
@@ -6383,6 +6419,11 @@ pre {
 .chat-attachment-chip span {
   color: #8f9bad;
   font-size: 11px;
+}
+
+.chat-attachment-chip.disabled {
+  color: #8f9bad;
+  cursor: default;
 }
 
 .chat-empty-thread {

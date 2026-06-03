@@ -46,6 +46,7 @@ it("shows an issue and records comments and review decisions", async () => {
         contentPath: "/api/assets/asset-product-1/content",
         contentType: "text/markdown",
         byteSize: 128,
+        sha256: "def",
         title: "登录流程 PR",
         url: "https://example.com/pr/42",
         status: "open",
@@ -55,6 +56,33 @@ it("shows an issue and records comments and review decisions", async () => {
         summary: "实现登录流程并等待 review",
         metadata: null,
         createdByRunId: "run-1",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      },
+      {
+        id: "wp-2",
+        orgId: "org-1",
+        projectId: "project-1",
+        issueId: "issue-1",
+        executionWorkspaceId: null,
+        runtimeServiceId: null,
+        type: "artifact",
+        provider: "minio",
+        externalId: null,
+        assetId: null,
+        contentPath: null,
+        contentType: null,
+        byteSize: null,
+        sha256: null,
+        title: "运行摘要",
+        url: null,
+        status: "open",
+        reviewState: "pending",
+        isPrimary: false,
+        healthStatus: "unknown",
+        summary: "只有摘要，没有下载对象",
+        metadata: null,
+        createdByRunId: null,
         createdAt: "2026-05-28T09:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
       },
@@ -140,9 +168,11 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "PATCH", body: JSON.stringify({ priority: "critical" }) }),
   );
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
+  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("运行摘要");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
   expect(screen.getByRole("link", { name: "下载产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
+  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("不可下载");
   expect(await screen.findByRole("region", { name: "附件" })).toHaveTextContent("note.txt");
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();

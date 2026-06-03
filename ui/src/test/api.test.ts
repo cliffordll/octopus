@@ -668,6 +668,13 @@ describe("chat API", () => {
     await expect(request("/api/fails", { method: "GET" })).rejects.toThrow("database is locked");
   });
 
+  it("shows readable storage errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse({ detail: { message: "Object not found" } }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/assets/missing/content", { method: "GET" })).rejects.toThrow("存储对象不存在");
+  });
+
   it("covers Step 16 chat and messenger routes", async () => {
     const fetchMock = vi
       .fn()

@@ -316,11 +316,22 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                 {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
-                {product.contentType && <div><dt>类型</dt><dd>{product.contentType}</dd></div>}
-                {product.byteSize !== undefined && product.byteSize !== null && <div><dt>大小</dt><dd>{formatBytes(product.byteSize)}</dd></div>}
               </dl>
+              <details className="storage-object-details">
+                <summary>存储对象</summary>
+                <dl className="issue-work-product-details">
+                  <div><dt>provider</dt><dd>{product.provider}</dd></div>
+                  <div><dt>大小</dt><dd>{product.byteSize !== undefined && product.byteSize !== null ? formatBytes(product.byteSize) : "-"}</dd></div>
+                  <div><dt>contentType</dt><dd>{product.contentType ?? "-"}</dd></div>
+                  <div><dt>sha256</dt><dd>{product.sha256 ?? "-"}</dd></div>
+                </dl>
+              </details>
               <div className="issue-work-product-actions">
-                {product.contentPath && <a className="button secondary small-button" href={product.contentPath}>下载产物</a>}
+                {product.contentPath ? (
+                  <a className="button secondary small-button" href={product.contentPath}>下载产物</a>
+                ) : (
+                  <span className="download-unavailable">不可下载</span>
+                )}
                 {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
               </div>
             </article>
@@ -1042,10 +1053,23 @@ export function IssuePage() {
                     <article className="issue-attachment-item" key={attachment.id}>
                       <div>
                         <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">{attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                        <p className="muted">附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                        <details className="storage-object-details">
+                          <summary>存储对象</summary>
+                          <dl className="issue-work-product-details">
+                            <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
+                            <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
+                            <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
+                            <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
+                          </dl>
+                        </details>
                       </div>
                       <div className="issue-attachment-actions">
-                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                        {attachment.contentPath ? (
+                          <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                        ) : (
+                          <span className="download-unavailable">不可下载</span>
+                        )}
                         <button
                           className="danger small-button"
                           disabled={deleteAttachment.isPending}
