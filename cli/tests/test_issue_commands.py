@@ -70,6 +70,8 @@ def test_issue_commands_support_full_server_fields() -> None:
                 "agent-1",
                 "--reviewer-agent-id",
                 "agent-2",
+                "--created-by-agent-id",
+                "agent-1",
                 "--parent-id",
                 "parent-1",
                 "--request-depth",
@@ -101,7 +103,8 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[1].read() == (
         b'{"title":"Review","projectId":"project-1","goalId":"goal-1",'
         b'"parentId":"parent-1","assigneeAgentId":"agent-1",'
-        b'"reviewerAgentId":"agent-2","requestDepth":2}'
+        b'"reviewerAgentId":"agent-2","createdByAgentId":"agent-1",'
+        b'"requestDepth":2}'
     )
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
@@ -130,6 +133,42 @@ def test_issue_list_only_sends_route_supported_filters() -> None:
         )
         == 0
     )
+
+
+def test_issue_checkout_and_heartbeat_context_commands() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/heartbeat-context"):
+            return httpx.Response(200, json={"issueId": "issue-1"})
+        return httpx.Response(200, json={"id": "issue-1", "assigneeAgentId": "agent-1"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "issue",
+                "checkout",
+                "issue-1",
+                "--agent-id",
+                "agent-1",
+                "--expected-status",
+                "todo",
+                "--expected-status",
+                "in_progress",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert main(["issue", "heartbeat-context", "issue-1"], client=client) == 0
+
+    assert requests[0].url.path == "/api/issues/issue-1/checkout"
+    assert requests[0].read() == (
+        b'{"agentId":"agent-1","expectedStatuses":["todo","in_progress"]}'
+    )
+    assert requests[1].url.path == "/api/issues/issue-1/heartbeat-context"
 
 
 def test_issue_get_json_outputs_work_products() -> None:

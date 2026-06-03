@@ -106,6 +106,12 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     instructions_parser = actions.add_parser("instructions")
     instructions_parser.add_argument("agent_id")
     instructions_parser.set_defaults(handler=get_instructions_bundle)
+    instructions_path_parser = actions.add_parser("instructions-path")
+    instructions_path_parser.add_argument("agent_id")
+    instructions_path_parser.add_argument("--path")
+    instructions_path_parser.add_argument("--clear-path", action="store_true")
+    instructions_path_parser.add_argument("--agent-runtime-config-key")
+    instructions_path_parser.set_defaults(handler=update_instructions_path)
     instruction_file_parser = actions.add_parser("instruction-file")
     instruction_file_parser.add_argument("agent_id")
     instruction_file_parser.add_argument("--path", required=True)
@@ -329,6 +335,23 @@ def get_skills_analytics(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def get_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}/instructions-bundle")
+
+
+def update_instructions_path(args: argparse.Namespace, client: ApiClient) -> Any:
+    if args.path and args.clear_path:
+        raise ValueError("--path and --clear-path cannot both be set.")
+    payload: dict[str, str | None] = {}
+    if args.path:
+        payload["path"] = args.path
+    if args.clear_path:
+        payload["path"] = None
+    if args.agent_runtime_config_key:
+        payload["agentRuntimeConfigKey"] = args.agent_runtime_config_key
+    if not payload:
+        raise ValueError("At least one instructions path field is required.")
+    return client.request(
+        "PATCH", f"/api/agents/{args.agent_id}/instructions-path", json=payload
+    )
 
 
 def read_instruction_file(args: argparse.Namespace, client: ApiClient) -> Any:
