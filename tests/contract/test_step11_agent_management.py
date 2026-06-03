@@ -49,6 +49,7 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     validators = importlib.import_module("packages.shared.validators.agent")
 
     assert paths.ORG_AGENT_LIST_PATH == "/api/orgs/{orgId}/agents"
+    assert paths.ORG_AGENT_HIRES_PATH == "/api/orgs/{orgId}/agent-hires"
     assert (
         paths.ORG_AGENT_NAME_SUGGESTION_PATH
         == "/api/orgs/{orgId}/agents/name-suggestion"
@@ -90,6 +91,11 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     assert payload["agentRuntimeConfig"] == {}
     with pytest.raises(ValueError, match="role"):
         validators.validate_create_agent({"role": "invalid"})
+    hire_payload = validators.validate_hire_agent(
+        {"name": "Reviewer", "sourceIssueId": "issue-1"}
+    )
+    assert hire_payload["name"] == "Reviewer"
+    assert hire_payload["sourceIssueId"] == "issue-1"
     assert validators.validate_reset_agent_session({"taskKey": "issue-1"}) == {
         "taskKey": "issue-1"
     }
@@ -289,10 +295,19 @@ async def _wait_for_dispatch(app: FastAPI) -> None:
         await asyncio.gather(*tasks)
 
 
-async def _seed_org(session_factory: async_sessionmaker, *, key: str) -> str:
+async def _seed_org(
+    session_factory: async_sessionmaker,
+    *,
+    key: str,
+    require_agent_approval: bool = True,
+) -> str:
     async with session_factory() as session:
         org = Organization(
-            id=str(uuid.uuid4()), url_key=key, name=key, issue_prefix=key[:3].upper()
+            id=str(uuid.uuid4()),
+            url_key=key,
+            name=key,
+            issue_prefix=key[:3].upper(),
+            require_board_approval_for_new_agents=require_agent_approval,
         )
         session.add(org)
         await session.commit()
@@ -378,6 +393,176 @@ async def test_agent_archive_route_terminates_and_hides_agent(
     list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/agents")
     assert list_code == 200
     assert listed == []
+
+
+async def test_agent_hire_directly_creates_agent_when_org_does_not_require_approval(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="direct-hire", require_agent_approval=False
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Reviewer", "role": "engineer", "budgetMonthlyCents": 1200},
+    )
+
+    assert code == 201
+    assert body["approval"] is None
+    assert body["agent"]["name"] == "Reviewer"
+    assert body["agent"]["status"] == "idle"
+    assert body["agent"]["budgetMonthlyCents"] == 1200
+
+
+async def test_agent_hire_creates_pending_agent_and_approval_when_required(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="approval-hire", require_agent_approval=True
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Analyst", "role": "researcher"},
+    )
+
+    assert code == 201
+    assert body["agent"]["status"] == "pending_approval"
+    approval = body["approval"]
+    assert approval["type"] == "hire_agent"
+    assert approval["status"] == "pending"
+    assert approval["payload"]["agentId"] == body["agent"]["id"]
+    assert approval["payload"]["hire"]["name"] == "Analyst"
+
+    wake_code, wake_body = await _request(
+        app,
+        "POST",
+        f"/api/agents/{body['agent']['id']}/wakeup",
+        json={"reason": "not yet"},
+    )
+    assert wake_code == 409
+    assert "not invokable" in wake_body["detail"].lower()
+
+
+async def test_ceo_agent_can_request_hire_with_board_approval(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="ceo-hire", require_agent_approval=True
+    )
+    _, ceo = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "CEO", "role": "ceo"},
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Builder", "role": "engineer"},
+        headers={"x-test-agent-id": ceo["id"], "x-test-org-id": org_id},
+    )
+
+    assert code == 201
+    assert body["agent"]["status"] == "pending_approval"
+    assert body["approval"]["type"] == "hire_agent"
+    assert body["approval"]["requestedByAgentId"] == ceo["id"]
+    assert body["approval"]["requestedByUserId"] is None
+
+
+async def test_non_ceo_agent_cannot_request_hire_without_create_permission(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="worker-hire", require_agent_approval=True
+    )
+    _, worker = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "Worker", "role": "engineer"},
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Another", "role": "engineer"},
+        headers={"x-test-agent-id": worker["id"], "x-test-org-id": org_id},
+    )
+
+    assert code == 403
+    assert "permission" in body["detail"].lower()
+
+
+async def test_approving_hire_agent_approval_activates_pending_agent(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="approve-hire", require_agent_approval=True
+    )
+    _, hire = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Operator", "role": "engineer"},
+    )
+    agent_id = hire["agent"]["id"]
+    approval_id = hire["approval"]["id"]
+
+    approve_code, approved = await _request(
+        app,
+        "POST",
+        f"/api/approvals/{approval_id}/approve",
+        json={"decisionNote": "approved"},
+    )
+    assert approve_code == 200
+    assert approved["status"] == "approved"
+
+    detail_code, detail = await _request(app, "GET", f"/api/agents/{agent_id}")
+    assert detail_code == 200
+    assert detail["status"] == "idle"
+
+
+async def test_rejecting_hire_agent_approval_terminates_pending_agent(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(
+        session_factory, key="reject-hire", require_agent_approval=True
+    )
+    _, hire = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Temporary", "role": "engineer"},
+    )
+    agent_id = hire["agent"]["id"]
+    approval_id = hire["approval"]["id"]
+
+    reject_code, rejected = await _request(
+        app,
+        "POST",
+        f"/api/approvals/{approval_id}/reject",
+        json={"decisionNote": "not needed"},
+    )
+    assert reject_code == 200
+    assert rejected["status"] == "rejected"
+
+    detail_code, detail = await _request(app, "GET", f"/api/agents/{agent_id}")
+    assert detail_code == 200
+    assert detail["status"] == "terminated"
 
 
 async def test_agent_creation_without_name_uses_personal_name_suggestion(
