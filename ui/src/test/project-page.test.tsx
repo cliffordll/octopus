@@ -275,18 +275,18 @@ it("updates a project and manages its resource attachments", async () => {
   const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
   expect(projectIssueCard).not.toBeNull();
   expect(projectIssueCard).toHaveTextContent("创建时间");
-  expect(projectIssueCard).toHaveTextContent("2026-05-28T10:00:00Z");
+  expect(projectIssueCard).toHaveTextContent("2026年5月28日 18:00");
   expect(projectIssueCard).toHaveTextContent("归属");
   expect(projectIssueCard).toHaveTextContent("Builder");
   const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
   expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("3");
   expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("2");
-  expect(within(issueSummary as HTMLElement).getByText("blocked").closest(".summary-metric")).toHaveTextContent("1");
-  expect(within(issueSummary as HTMLElement).getByText("done").closest(".summary-metric")).toHaveTextContent("1");
-  expect(screen.getByRole("heading", { name: "in_progress" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "blocked" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "done" })).toBeInTheDocument();
+  expect(within(issueSummary as HTMLElement).getByText("阻塞").closest(".summary-metric")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("已完成").closest(".summary-metric")).toHaveTextContent("1");
+  expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "等待接口确认" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-2",

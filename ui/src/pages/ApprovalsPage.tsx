@@ -7,13 +7,14 @@ import type { ApprovalListItem, ApprovalStatus } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { statusLabel } from "../utils/display";
 
 const STATUS_OPTIONS: Array<{ value: ApprovalStatus | ""; label: string }> = [
-  { value: "", label: "all" },
-  { value: "pending", label: "pending" },
-  { value: "revision_requested", label: "revision_requested" },
-  { value: "approved", label: "approved" },
-  { value: "rejected", label: "rejected" },
+  { value: "", label: "全部" },
+  { value: "pending", label: "待审批" },
+  { value: "revision_requested", label: "需修改" },
+  { value: "approved", label: "已同意" },
+  { value: "rejected", label: "已拒绝" },
 ];
 
 function approvalTitle(approval: ApprovalListItem) {
@@ -132,7 +133,7 @@ export function ApprovalsPage() {
                     <p className="eyebrow">Approvals assistant</p>
                     <h2>{approvalTitle(approval)}</h2>
                   </div>
-                  <Badge>{approval.status}</Badge>
+                  <Badge>{statusLabel(approval.status)}</Badge>
                 </div>
                 <p className="muted">
                   {approval.requestedByAgentId ? `智能体 ${approval.requestedByAgentId} 发起` : "系统或用户发起"}

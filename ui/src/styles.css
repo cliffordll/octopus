@@ -470,6 +470,54 @@ small {
   margin: 0;
 }
 
+.settings-preference-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.settings-preference-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.settings-preference-row span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-preference-row small {
+  color: var(--muted);
+}
+
+.settings-locale-tabs {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+}
+
+.settings-locale-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 0.4rem 0.8rem;
+}
+
+.settings-locale-tabs button.active {
+  background: rgba(59, 130, 246, 0.22);
+  color: var(--text);
+}
+
 .runtime-provider-title-line h3,
 .runtime-provider-title-line p {
   margin: 0;
@@ -1952,6 +2000,11 @@ small {
   overflow: clip;
 }
 
+.project-issue-status-group:has(> .muted) {
+  background: #0a1018;
+  min-height: 132px;
+}
+
 .project-issue-status-heading {
   align-items: center;
   background: #101722;
@@ -2010,6 +2063,8 @@ small {
 }
 
 .project-issue-status-group > .muted {
+  color: #68758a;
+  font-size: 12px;
   margin: 0;
   padding: 14px;
 }
@@ -2091,6 +2146,17 @@ small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-issue-card-action {
+  align-self: flex-start;
+  background: rgba(59, 130, 196, 0.16);
+  border: 1px solid rgba(77, 148, 216, 0.38);
+  border-radius: 999px;
+  color: #b9dcff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
 }
 
 .heartbeat-filter {
@@ -4780,6 +4846,28 @@ pre {
   padding: 12px 18px;
 }
 
+.organization-skill-readable-summary {
+  background: #0f1622;
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 6px;
+  padding: 12px 18px;
+}
+
+.organization-skill-readable-summary span {
+  color: #7f8ea5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.organization-skill-readable-summary p {
+  color: #d9e5f5;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+}
+
 .organization-skill-info-grid div {
   background: #101722;
   border: 1px solid #202a3b;
@@ -6174,6 +6262,13 @@ pre {
   min-width: 0;
 }
 
+.chat-message-source {
+  color: #738195;
+  display: inline-block;
+  font-size: 11px;
+  margin-top: 5px;
+}
+
 .chat-agent-avatar {
   align-items: center;
   background: #1d2a3d;
@@ -6197,6 +6292,36 @@ pre {
 
 .chat-message.thinking {
   color: #c8d4e5;
+}
+
+.chat-linked-issue-card {
+  align-items: center;
+  background: #101722;
+  border: 1px solid #263346;
+  border-radius: 14px;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.chat-linked-issue-card:hover {
+  background: #142033;
+  border-color: #3b82c4;
+}
+
+.chat-linked-issue-card span {
+  color: #7f8ea5;
+  display: block;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.chat-linked-issue-card strong {
+  color: #edf4ff;
+  font-size: 13px;
 }
 
 .chat-thinking-text {

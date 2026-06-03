@@ -57,13 +57,13 @@ it("creates a project from the upstream-style empty state dialog", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects");
-  expect(await screen.findByText("No projects yet.")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "暂无项目" })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "Add Project" }));
-  const dialog = within(screen.getByRole("dialog", { name: "Add Project" }));
-  await userEvent.type(dialog.getByLabelText("Project Name"), "发布流程");
-  await userEvent.selectOptions(dialog.getByLabelText("Project Status"), "planned");
-  await userEvent.click(screen.getByRole("button", { name: "Create Project" }));
+  await userEvent.click(screen.getAllByRole("button", { name: "创建项目" })[0]!);
+  const dialog = within(screen.getByRole("dialog", { name: "创建项目" }));
+  await userEvent.type(dialog.getByLabelText("项目名称"), "发布流程");
+  await userEvent.selectOptions(dialog.getByLabelText("项目状态"), "planned");
+  await userEvent.click(dialog.getByRole("button", { name: "创建项目" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/projects",

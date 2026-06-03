@@ -9,6 +9,7 @@ import type { OrganizationResource, ProjectCodebase, ProjectResourceRole, Projec
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
+import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
@@ -21,17 +22,17 @@ const ROLES: ProjectResourceRole[] = [
 ];
 const RESOURCE_KINDS: OrganizationResource["kind"][] = ["file", "directory", "url", "connector_object"];
 const RESOURCE_KIND_LABELS: Record<OrganizationResource["kind"], string> = {
-  connector_object: "connector_object",
-  directory: "directory",
-  file: "file",
-  url: "url",
+  connector_object: "连接器对象",
+  directory: "目录",
+  file: "文件",
+  url: "URL",
 };
 const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
-  background: "background",
-  deliverable: "deliverable",
-  reference: "reference",
-  tracking: "tracking",
-  working_set: "working_set",
+  background: "背景资料",
+  deliverable: "交付物",
+  reference: "参考",
+  tracking: "跟踪",
+  working_set: "工作集",
 };
 
 function formatJson(value: Record<string, unknown> | null | undefined): string {
@@ -336,7 +337,7 @@ export function ProjectPage() {
               <label className="project-property-row">
                 <span>状态</span>
                 <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
-                  {STATUSES.map((item) => <option key={item}>{item}</option>)}
+                  {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
                 </select>
               </label>
               <label className="project-property-row">
@@ -376,11 +377,11 @@ export function ProjectPage() {
               </div>
               <div className="project-property-row">
                 <span>创建时间</span>
-                <strong>{project.data.createdAt || "-"}</strong>
+                <strong>{formatDateTime(project.data.createdAt)}</strong>
               </div>
               <div className="project-property-row">
                 <span>更新时间</span>
-                <strong>{project.data.updatedAt || "-"}</strong>
+                <strong>{formatDateTime(project.data.updatedAt)}</strong>
               </div>
               <label className="project-property-row project-property-row-start">
                 <span>执行工作区策略 JSON</span>

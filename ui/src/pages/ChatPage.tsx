@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
 import type { ChatConversation, ChatMessage } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatBytes, roleLabel, statusLabel } from "../utils/display";
 
 interface ChatRouteState {
   sendError?: string;
@@ -43,7 +44,7 @@ function skillLabel(entry: Record<string, unknown>) {
 
 function agentOptionLabel(agent: { name?: string | null; role?: string | null } | null | undefined, fallback: string) {
   if (!agent?.name) return fallback;
-  return agent.role ? `${agent.name} (${agent.role})` : agent.name;
+  return agent.role ? `${agent.name} (${roleLabel(agent.role)})` : agent.name;
 }
 
 function focusLeftElement(event: ReactFocusEvent<HTMLElement>) {
@@ -272,11 +273,20 @@ export function ChatPage() {
               <p>{boundChatAgentName ? `使用 ${boundChatAgentName}` : "选择智能体后发送消息"}</p>
             </div>
             <div className="meta-line">
-              <Badge>{chat.data.status}</Badge>
+              <Badge>{statusLabel(chat.data.status)}</Badge>
               {chat.data.isPinned && <Badge>已置顶</Badge>}
               {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
             </div>
           </header>
+          {chat.data.primaryIssue && (
+            <Link className="chat-linked-issue-card" to={`/orgs/${orgId}/issues/${chat.data.primaryIssue.id}`}>
+              <div>
+                <span>关联任务</span>
+                <strong>{chat.data.primaryIssue.identifier ?? chat.data.primaryIssue.id.slice(0, 8)} · {chat.data.primaryIssue.title}</strong>
+              </div>
+              <Badge>{statusLabel(chat.data.primaryIssue.status)}</Badge>
+            </Link>
+          )}
           {chat.error && (
             <div className="error-notice">
               已打开本地缓存的对话，详情刷新失败：{chat.error instanceof Error ? chat.error.message : "请求失败"}
@@ -285,7 +295,7 @@ export function ChatPage() {
           <div className="chat-messages" data-testid="chat-message-thread" ref={messageThreadRef}>
             {messages.isSuccess && visibleMessages.length === 0 && (
               <div className="chat-empty-thread">
-                <h2>No messages yet.</h2>
+                <h2>暂无消息</h2>
                 <p className="muted">
                   {boundChatAgentName ? `向 ${boundChatAgentName} 发送第一条消息开始对话。` : "发送第一条消息开始对话。"}
                 </p>
@@ -306,6 +316,9 @@ export function ChatPage() {
                         : "系统"}
                     </strong>
                   )}
+                  {message.role === "assistant" && (
+                    <span className="chat-message-source">智能体回复，不代表任务产物</span>
+                  )}
                   {(message.approvalId || (typeof message.turnVariant === "number" && message.turnVariant > 0)) && (
                     <div className="meta-line">
                       {message.approvalId && <Badge>审批 {message.approvalId}</Badge>}
@@ -318,7 +331,7 @@ export function ChatPage() {
                       {message.attachments.map((attachment) => (
                         <a className="chat-attachment-chip" href={attachment.contentPath} key={attachment.id}>
                           {attachment.originalFilename ?? attachment.id}
-                          <span>{attachment.byteSize} bytes</span>
+                          <span>{formatBytes(attachment.byteSize)}</span>
                         </a>
                       ))}
                     </div>
