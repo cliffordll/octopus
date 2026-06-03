@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
 import { heartbeatApi } from "../api/heartbeat";
@@ -12,6 +12,7 @@ import type {
   HeartbeatRun,
   HeartbeatRunEvent,
   IssueDetail,
+  IssueListItem,
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
@@ -622,7 +623,6 @@ function IssueRunOutputPanel({
 
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
-  const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentUploadNotice, setAttachmentUploadNotice] = useState("");
@@ -657,6 +657,11 @@ export function IssuePage() {
     queryFn: () => issuesApi.listRuns(issueId),
     enabled: Boolean(issueId),
     refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? 3000 : false,
+  });
+  const subIssues = useQuery({
+    queryKey: ["issues", orgId, "children", issueId],
+    queryFn: () => issuesApi.list(orgId, { parentId: issueId }),
+    enabled: Boolean(orgId && issueId),
   });
   useEffect(() => {
     if (!orgId || !issueId) return;
@@ -711,8 +716,12 @@ export function IssuePage() {
     },
     onSuccess: (created) => {
       setSubIssueTitle("");
+      queryClient.setQueryData<IssueListItem[]>(["issues", orgId, "children", issueId], (current = []) => [
+        ...current.filter((item) => item.id !== created.id),
+        created,
+      ]);
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId, "children", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
-      navigate(`/orgs/${orgId}/issues/${created.id}`);
     },
   });
   const executeIssue = useMutation({
@@ -875,6 +884,7 @@ export function IssuePage() {
   const agentsById = new Map(agentList.map((agent) => [agent.id, agent]));
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
+  const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
   return (
     <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {agents.error && <ErrorNotice error={agents.error} />}
@@ -948,7 +958,7 @@ export function IssuePage() {
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>子任务</h2>
-                <span className="muted">0</span>
+                <span className="muted">{subIssueList.length}</span>
               </div>
               <form className="issue-subtask-form" onSubmit={submitSubIssue}>
                 <input
@@ -960,6 +970,23 @@ export function IssuePage() {
                 <button disabled={createSubIssue.isPending || !subIssueTitle.trim()} type="submit">添加子任务</button>
               </form>
               {createSubIssue.error && <ErrorNotice error={createSubIssue.error} />}
+              {subIssues.isLoading && <p className="muted">加载子任务中...</p>}
+              {subIssues.error && <ErrorNotice error={subIssues.error} />}
+              {!subIssues.isLoading && !subIssues.error && subIssueList.length === 0 && <p className="muted">暂无子任务。</p>}
+              {subIssueList.length > 0 && (
+                <div className="issue-subtask-list">
+                  {subIssueList.map((child) => (
+                    <Link className="issue-subtask-row" key={child.id} to={`/orgs/${orgId}/issues/${child.id}`}>
+                      <span className="issue-subtask-id">{child.identifier ?? child.id.slice(0, 8)}</span>
+                      <strong>{child.title}</strong>
+                      <span className="issue-subtask-meta">
+                        <Badge>{child.status}</Badge>
+                        <Badge>{child.priority}</Badge>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section aria-label="评审" className="issue-section-card">
