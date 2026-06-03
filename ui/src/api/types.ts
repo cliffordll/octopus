@@ -108,6 +108,7 @@ export interface IssueFilters {
   assigneeAgentId?: string;
   projectId?: string;
   goalId?: string;
+  parentId?: string;
   originKind?: IssueOriginKind;
   originId?: string;
 }
