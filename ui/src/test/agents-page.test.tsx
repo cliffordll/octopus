@@ -192,6 +192,75 @@ it("requires provider/model when creating a model-provider runtime agent", async
   );
 }, 10000);
 
+it("hires agents as the CEO actor and opens the pending approval agent", async () => {
+  const ceo = { id: "agent-ceo", orgId: "org-1", name: "CEO", role: "ceo", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
+  const pendingAgent = { id: "agent-pending", orgId: "org-1", name: "Reviewer", role: "qa", status: "pending_approval", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1" && init?.method === "GET") {
+      return respond({ id: "org-1", urlKey: "core", name: "核心团队", status: "active", requireBoardApprovalForNewAgents: true });
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([ceo]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Suggested Agent" });
+    }
+    if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
+      return respond({
+        agent: pendingAgent,
+        approval: { id: "approval-1", orgId: "org-1", type: "hire_agent", status: "pending" },
+      }, 201);
+    }
+    if (path === "/api/agents/agent-pending" && init?.method === "GET") return respond(pendingAgent);
+    if (path === "/api/agents/agent-pending/runtime-state" && init?.method === "GET") {
+      return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
+    }
+    if (path === "/api/orgs/org-1/heartbeat-runs?agentId=agent-pending" && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  expect(await screen.findByText("当前组织要求审批。创建后智能体将显示为待审批，审批通过后才可用。")).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("智能体名称"), "Reviewer");
+  await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+
+  const hireCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/orgs/org-1/agent-hires" && init?.method === "POST");
+  expect(hireCall).toBeTruthy();
+  const headers = hireCall?.[1]?.headers as Headers;
+  expect(headers.get("x-test-agent-id")).toBe("agent-ceo");
+  expect(headers.get("x-test-org-id")).toBe("org-1");
+  expect(await screen.findByRole("heading", { name: "Reviewer" })).toBeInTheDocument();
+  expect(screen.getByText("待审批")).toBeInTheDocument();
+}, 10000);
+
+it("shows a permission error when the actor cannot hire agents", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1" && init?.method === "GET") {
+      return respond({ id: "org-1", urlKey: "core", name: "核心团队", status: "active", requireBoardApprovalForNewAgents: false });
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "Suggested Agent" });
+    }
+    if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
+      return respond({ detail: "Agent does not have permission to create agents" }, 403);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  expect(await screen.findByText("当前组织不要求审批。创建成功后智能体可直接使用。")).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("智能体名称"), "Reviewer");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+
+  expect(await screen.findByText("无创建智能体权限")).toBeInTheDocument();
+}, 10000);
+
 it("manages runtime providers and models from settings", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs" && init?.method === "GET") {

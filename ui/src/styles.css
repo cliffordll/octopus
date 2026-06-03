@@ -4036,8 +4036,18 @@ button.danger {
   padding: 10px 12px;
 }
 
+.info-notice {
+  background: #151b2b;
+  border: 1px solid #2d3a5f;
+  border-radius: 6px;
+  color: #b9c7ff;
+  margin: 12px 0;
+  padding: 10px 12px;
+}
+
 .error-notice.compact,
-.success-notice.compact {
+.success-notice.compact,
+.info-notice.compact {
   margin: 0;
 }
 

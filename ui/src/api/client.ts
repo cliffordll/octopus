@@ -57,6 +57,7 @@ export function jsonRequest<T>(
   path: string,
   method: "POST" | "PATCH",
   body: unknown,
+  options: Omit<RequestInit, "body" | "method"> = {},
 ): Promise<T> {
-  return request<T>(path, { method, body: JSON.stringify(body) });
+  return request<T>(path, { ...options, method, body: JSON.stringify(body) });
 }
