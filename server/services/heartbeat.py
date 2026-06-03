@@ -696,6 +696,9 @@ class HeartbeatService:
                 runtime_context = {}
             runtime_config["_octopus"] = {
                 **runtime_context,
+                "agentId": agent.id,
+                "agentName": agent.name,
+                "context": running.context_snapshot or {},
                 "sessionIdBefore": running.session_id_before,
                 "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
             }
