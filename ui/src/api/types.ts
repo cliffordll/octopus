@@ -89,7 +89,51 @@ export interface IssueDetail extends IssueListItem {
   completedAt: string | null;
   cancelledAt?: string | null;
   workProducts?: IssueWorkProduct[];
+  documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
+}
+
+export interface IssueDocumentSummary {
+  id: string;
+  orgId: string;
+  issueId: string;
+  key: string;
+  title: string | null;
+  format: string;
+  latestRevisionId: string | null;
+  latestRevisionNumber: number;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  updatedByAgentId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDocument extends IssueDocumentSummary {
+  body: string;
+}
+
+export interface IssueDocumentRevision {
+  id: string;
+  orgId: string;
+  documentId: string;
+  issueId: string;
+  key: string;
+  revisionNumber: number;
+  body: string;
+  changeSummary: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+}
+
+export interface UpsertIssueDocumentPayload {
+  title?: string | null;
+  format: "markdown";
+  body: string;
+  changeSummary?: string | null;
+  baseRevisionId?: string | null;
 }
 
 export interface IssueComment {
