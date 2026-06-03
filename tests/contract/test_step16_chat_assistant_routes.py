@@ -167,7 +167,8 @@ async def test_assistant_reply_persists_kind_structured_payload_and_approval(
     prompt = adapter.captured_prompts[0]
     assert "issue_proposal" in prompt
     assert "issueProposal" in prompt
-    assert "convert-to-issue" in prompt
+    assert "server-side issue conversion mode" in prompt
+    assert "conversation issueCreationMode" in prompt
 
 
 async def test_assistant_json_text_issue_proposal_is_persisted(
