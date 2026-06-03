@@ -7,7 +7,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, sta
 from packages.shared.api_paths.organization_skills import (
     ORG_SKILL_DETAIL_PATH,
     ORG_SKILL_FILE_PATH,
+    ORG_SKILL_IMPORT_PATH,
+    ORG_SKILL_INSTALL_UPDATE_PATH,
     ORG_SKILL_LIST_PATH,
+    ORG_SKILL_SCAN_LOCAL_PATH,
     ORG_SKILL_UPDATE_STATUS_PATH,
 )
 from packages.shared.types.organization_skill import (
@@ -15,10 +18,13 @@ from packages.shared.types.organization_skill import (
     OrganizationSkillDetail,
     OrganizationSkillFileDetail,
     OrganizationSkillListItem,
+    OrganizationSkillScanLocalResult,
     OrganizationSkillUpdateStatus,
 )
 from packages.shared.validators.organization_skills import (
     validate_create_organization_skill,
+    validate_import_organization_skill,
+    validate_scan_local_organization_skills,
     validate_update_organization_skill_file,
 )
 
@@ -77,6 +83,58 @@ async def create_organization_skill(
         ) from exc
 
 
+@router.post(ORG_SKILL_IMPORT_PATH, status_code=status.HTTP_201_CREATED)
+async def import_organization_skill(
+    request: Request,
+    orgId: str,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_organization_access),
+    service: OrganizationSkillService = Depends(get_organization_skill_service),
+) -> OrganizationSkill:
+    try:
+        payload = validate_import_organization_skill(body)
+        actor = require_actor_identity(request)
+        return await service.import_local_skill(
+            orgId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except OrganizationSkillConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(ORG_SKILL_SCAN_LOCAL_PATH)
+async def scan_local_organization_skills(
+    request: Request,
+    orgId: str,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_organization_access),
+    service: OrganizationSkillService = Depends(get_organization_skill_service),
+) -> OrganizationSkillScanLocalResult:
+    try:
+        payload = validate_scan_local_organization_skills(body)
+        actor = require_actor_identity(request)
+        return await service.scan_local_skills(
+            orgId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
 @router.get(ORG_SKILL_DETAIL_PATH)
 async def get_organization_skill(
     orgId: str,
@@ -85,6 +143,35 @@ async def get_organization_skill(
     service: OrganizationSkillService = Depends(get_organization_skill_service),
 ) -> OrganizationSkillDetail:
     detail = await service.detail(orgId, skillId)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Skill not found",
+        )
+    return detail
+
+
+@router.post(ORG_SKILL_INSTALL_UPDATE_PATH)
+async def install_organization_skill_update(
+    request: Request,
+    orgId: str,
+    skillId: str,
+    _: None = Depends(require_organization_access),
+    service: OrganizationSkillService = Depends(get_organization_skill_service),
+) -> OrganizationSkill:
+    try:
+        actor = require_actor_identity(request)
+        detail = await service.install_update(
+            orgId,
+            skillId,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if detail is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
