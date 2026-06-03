@@ -398,8 +398,10 @@ async def test_approve_chat_issue_creation_creates_issue_and_system_message(
         )
     )
     assert system_message is not None
-    assert system_message.structured_payload["eventType"] == "issue_created"
-    assert system_message.structured_payload["sourceMessageId"] == message_id
+    payload = system_message.structured_payload
+    assert isinstance(payload, dict)
+    assert payload["eventType"] == "issue_created"
+    assert payload["sourceMessageId"] == message_id
 
 
 async def test_approve_chat_issue_creation_finds_message_by_approval_id(
@@ -425,7 +427,9 @@ async def test_approve_chat_issue_creation_finds_message_by_approval_id(
         select(ChatMessage).where(ChatMessage.kind == "system_event")
     )
     assert system_message is not None
-    assert system_message.structured_payload["sourceMessageId"] == message_id
+    payload = system_message.structured_payload
+    assert isinstance(payload, dict)
+    assert payload["sourceMessageId"] == message_id
 
 
 async def test_reject_approval_route_returns_200(
