@@ -19,6 +19,7 @@ from packages.database.clients import create_database_engine, create_session_fac
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
+from packages.runtimes.opencode_local.protocol import build_args as build_opencode_args
 from packages.runtimes.opencode_local.runner import execute as execute_opencode_local
 from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
@@ -51,6 +52,27 @@ def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
     assert registry.get_runtime_adapter("claude_local").type == "claude_local"
     assert registry.get_runtime_adapter("opencode_local").type == "opencode_local"
     assert registry.get_runtime_adapter("gemini_local").type == "gemini_local"
+
+
+def test_opencode_extra_args_are_run_subcommand_options() -> None:
+    args = build_opencode_args(
+        {
+            "model": "local/deepseek-v4-flash",
+            "variant": "high",
+            "extraArgs": ["--dangerously-skip-permissions"],
+        }
+    )
+
+    assert args == [
+        "run",
+        "--format",
+        "json",
+        "--model",
+        "local/deepseek-v4-flash",
+        "--variant",
+        "high",
+        "--dangerously-skip-permissions",
+    ]
 
 
 @pytest.fixture
