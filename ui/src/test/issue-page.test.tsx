@@ -62,9 +62,21 @@ it("shows an issue and records comments and review decisions", async () => {
     createdAt: "",
     updatedAt: "",
   };
+  const childIssue = {
+    ...issue,
+    id: "issue-child",
+    identifier: "OCT-2",
+    title: "新增子任务",
+    status: "todo",
+    parentId: "issue-1",
+    requestDepth: 1,
+  };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/issues" && init?.method === "GET") {
       return respond([issue]);
+    }
+    if (path === "/api/orgs/org-1/issues?parentId=issue-1" && init?.method === "GET") {
+      return respond([childIssue]);
     }
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
       return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
@@ -112,7 +124,7 @@ it("shows an issue and records comments and review decisions", async () => {
       return respond({ id: "attachment-2", originalFilename: "upload.txt" }, 201);
     }
     if (path === "/api/orgs/org-1/issues" && init?.method === "POST") {
-      return respond({ ...issue, id: "issue-child", identifier: "OCT-2", title: "新增子任务", parentId: "issue-1" }, 201);
+      return respond(childIssue, 201);
     }
     if (path === "/api/attachments/attachment-1" && init?.method === "DELETE") {
       return respond({}, 204);
@@ -194,6 +206,15 @@ it("shows an issue and records comments and review decisions", async () => {
         status: "todo",
       }),
     }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/issues?parentId=issue-1",
+    expect.objectContaining({ method: "GET" }),
+  );
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("新增子任务");
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/issues/issue-child",
+    expect.objectContaining({ method: "GET" }),
   );
 });
 

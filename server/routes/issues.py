@@ -82,6 +82,7 @@ async def list_org_issues_route(
     assigneeAgentId: str | None = Query(default=None),
     projectId: str | None = Query(default=None),
     goalId: str | None = Query(default=None),
+    parentId: str | None = Query(default=None),
     originKind: str | None = Query(default=None),
     originId: str | None = Query(default=None),
 ) -> list[IssueListItem]:
@@ -94,6 +95,8 @@ async def list_org_issues_route(
         raw_query["projectId"] = projectId
     if goalId is not None:
         raw_query["goalId"] = goalId
+    if parentId is not None:
+        raw_query["parentId"] = parentId
     if originKind is not None:
         raw_query["originKind"] = originKind
     if originId is not None:
@@ -111,6 +114,7 @@ async def list_org_issues_route(
         assignee_agent_id=validated.get("assigneeAgentId"),
         project_id=validated.get("projectId"),
         goal_id=validated.get("goalId"),
+        parent_id=validated.get("parentId"),
         origin_kind=validated.get("originKind"),
         origin_id=validated.get("originId"),
     )
@@ -133,12 +137,18 @@ async def create_issue_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    issue = await service.create_issue(
-        orgId,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-    )
+    try:
+        issue = await service.create_issue(
+            orgId,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     await queue_issue_assignment_wakeup(
         heartbeat,
         issue,

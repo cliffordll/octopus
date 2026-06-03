@@ -3682,6 +3682,49 @@ button.danger {
   min-height: 34px;
 }
 
+.issue-subtask-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issue-subtask-row {
+  align-items: center;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  color: #d7deea;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(58px, auto) minmax(0, 1fr) auto;
+  padding: 10px;
+  text-decoration: none;
+}
+
+.issue-subtask-row:hover {
+  background: #111a29;
+  border-color: #314057;
+}
+
+.issue-subtask-row strong {
+  color: #f2f5fb;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-subtask-id {
+  color: #8d9aaf;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.issue-subtask-meta {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
 .issue-run-actions {
   align-items: center;
   display: flex;
