@@ -464,6 +464,7 @@ class ChatService:
                     "eventType": "issue_created",
                     "issueId": issue["id"],
                     "issueIdentifier": issue["identifier"],
+                    "sourceMessageId": payload.get("messageId"),
                 },
             },
         )
