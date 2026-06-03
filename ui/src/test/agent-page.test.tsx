@@ -441,6 +441,65 @@ it("warns when the configured opencode model is not in organization runtime mode
   expect(await screen.findByText(/当前配置的模型不在组织模型列表中：local\/deepseek-v4-flash/)).toBeInTheDocument();
 });
 
+it("toggles opencode local skip permissions without replacing other extra args", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "opencode_local",
+    agentRuntimeConfig: {
+      model: "deepseek/deepseek-v4-flash",
+      extraArgs: ["--verbose", "--dangerously-skip-permissions"],
+    },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash", enabled: true }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ ...agent, agentRuntimeConfig: JSON.parse(String(init.body)).agentRuntimeConfig });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  const checkbox = await screen.findByLabelText("跳过 OpenCode 权限确认");
+  expect(checkbox).toBeChecked();
+  expect(screen.getByText(/仅适用于本地可信开发环境/)).toBeInTheDocument();
+
+  await userEvent.click(checkbox);
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"extraArgs":["--verbose"]'),
+    }),
+  );
+
+  await userEvent.click(checkbox);
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"extraArgs":["--verbose","--dangerously-skip-permissions"]'),
+    }),
+  );
+});
+
 it("tests agent runtime availability from configuration", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

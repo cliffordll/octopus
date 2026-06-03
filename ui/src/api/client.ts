@@ -46,6 +46,9 @@ function friendlyBackendError(message: string): string {
   if (lower.includes("asset not found")) return "资产不存在";
   if (lower.includes("storage unavailable")) return "存储服务不可用";
   if (lower.includes("provider mismatch")) return "存储 Provider 不匹配";
+  if (lower.includes("the user rejected permission to use this specific tool call")) {
+    return "OpenCode 请求了本地工具权限，但当前是 server 非交互运行，无法弹出确认。请开启“跳过 OpenCode 权限确认”，或调整任务避免本地工具调用。";
+  }
   return normalized;
 }
 

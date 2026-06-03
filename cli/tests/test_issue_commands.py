@@ -44,6 +44,8 @@ def test_issue_commands_support_full_server_fields() -> None:
                 "project-1",
                 "--goal-id",
                 "goal-1",
+                "--parent-id",
+                "parent-1",
                 "--origin-kind",
                 "manual",
                 "--origin-id",
@@ -99,6 +101,7 @@ def test_issue_commands_support_full_server_fields() -> None:
 
     assert "projectId=project-1" in str(requests[0].url)
     assert "goalId=goal-1" in str(requests[0].url)
+    assert "parentId=parent-1" in str(requests[0].url)
     assert "originKind=manual" in str(requests[0].url)
     assert requests[1].read() == (
         b'{"title":"Review","projectId":"project-1","goalId":"goal-1",'
@@ -109,14 +112,14 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
-def test_issue_list_only_sends_route_supported_filters() -> None:
+def test_issue_list_sends_route_supported_filters() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/orgs/org-1/issues"
         assert "projectId=project-1" in str(request.url)
+        assert "parentId=parent-1" in str(request.url)
         assert "assigneeUserId" not in str(request.url)
         assert "reviewerAgentId" not in str(request.url)
         assert "reviewerUserId" not in str(request.url)
-        assert "parentId" not in str(request.url)
         return httpx.Response(200, json=[])
 
     assert (
@@ -128,6 +131,8 @@ def test_issue_list_only_sends_route_supported_filters() -> None:
                 "org-1",
                 "--project-id",
                 "project-1",
+                "--parent-id",
+                "parent-1",
             ],
             client=ApiClient(transport=httpx.MockTransport(handler)),
         )

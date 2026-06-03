@@ -675,6 +675,18 @@ describe("chat API", () => {
     await expect(request("/api/assets/missing/content", { method: "GET" })).rejects.toThrow("存储对象不存在");
   });
 
+  it("shows readable opencode permission errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse(
+      { detail: "The user rejected permission to use this specific tool call." },
+      500,
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/agents/agent-1/wakeup", { method: "POST" })).rejects.toThrow(
+      "OpenCode 请求了本地工具权限，但当前是 server 非交互运行，无法弹出确认。请开启“跳过 OpenCode 权限确认”，或调整任务避免本地工具调用。",
+    );
+  });
+
   it("covers Step 16 chat and messenger routes", async () => {
     const fetchMock = vi
       .fn()
