@@ -24,6 +24,41 @@ class IssueListItem(TypedDict):
     updatedAt: str
 
 
+class IssueDocumentSummary(TypedDict):
+    id: str
+    orgId: str
+    issueId: str
+    key: str
+    title: str | None
+    format: str
+    latestRevisionId: str | None
+    latestRevisionNumber: int
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    updatedByAgentId: str | None
+    updatedByUserId: str | None
+    createdAt: str
+    updatedAt: str
+
+
+class IssueDocument(IssueDocumentSummary):
+    body: str
+
+
+class DocumentRevision(TypedDict):
+    id: str
+    orgId: str
+    documentId: str
+    issueId: str
+    key: str
+    revisionNumber: int
+    body: str
+    changeSummary: str | None
+    createdByAgentId: str | None
+    createdByUserId: str | None
+    createdAt: str
+
+
 class IssueDetail(IssueListItem):
     description: str | None
     reviewerAgentId: str | None
@@ -42,6 +77,7 @@ class IssueDetail(IssueListItem):
     executionRunId: str | None
     createdAt: str
     workProducts: list[IssueWorkProduct]
+    documentSummaries: list[IssueDocumentSummary]
 
 
 class ListOrgIssuesQuery(TypedDict, total=False):
@@ -109,3 +145,11 @@ class CheckoutIssuePayload(TypedDict):
 class RecordIssueReviewDecisionPayload(TypedDict):
     decision: IssueReviewDecision
     note: NotRequired[str | None]
+
+
+class UpsertIssueDocumentPayload(TypedDict):
+    title: NotRequired[str | None]
+    format: str
+    body: str
+    changeSummary: NotRequired[str | None]
+    baseRevisionId: NotRequired[str | None]

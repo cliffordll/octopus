@@ -17,35 +17,58 @@ from packages.shared.api_paths.heartbeat import ISSUE_HEARTBEAT_RUNS_PATH
 from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
     ISSUE_COMMENT_LIST_PATH,
+    ISSUE_DOCUMENT_DETAIL_PATH,
+    ISSUE_DOCUMENT_REVISIONS_PATH,
+    ISSUE_DOCUMENTS_PATH,
     ISSUE_DETAIL_PATH,
     ISSUE_EXECUTE_PATH,
     ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_REVIEW_DECISION_PATH,
+    ISSUE_WORK_PRODUCTS_PATH,
     ORG_ISSUE_LIST_PATH,
+    WORK_PRODUCT_DETAIL_PATH,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
-from packages.shared.types.issue import IssueDetail, IssueListItem
+from packages.shared.types.issue import (
+    DocumentRevision,
+    IssueDetail,
+    IssueDocument,
+    IssueDocumentSummary,
+    IssueListItem,
+)
 from packages.shared.types.issue_attachment import IssueAttachment
+from packages.shared.types.workspace import IssueWorkProduct
 from packages.shared.validators.issue import (
     validate_create_issue,
     validate_create_issue_comment,
     validate_checkout_issue,
+    validate_issue_document_key,
     validate_list_org_issues_query,
     validate_record_issue_review_decision,
+    validate_upsert_issue_document,
     validate_update_issue,
+)
+from packages.shared.validators.work_product import (
+    validate_create_issue_work_product,
+    validate_update_issue_work_product,
 )
 
 from ..dependencies.access import (
     assert_organization_access,
     require_actor_identity,
+    require_board_access,
     require_organization_access,
 )
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
+from ..dependencies.documents import get_document_service
+from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.issues import IssueCheckoutConflictError, IssueService
+from ..services.documents import DocumentService
+from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
@@ -493,6 +516,251 @@ async def record_issue_review_decision_route(
             detail="Issue not found",
         )
     return updated
+
+
+@router.get(ISSUE_WORK_PRODUCTS_PATH)
+async def list_issue_work_products_route(
+    id: str,
+    request: Request,
+    issue_service: IssueService = Depends(get_issue_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> list[IssueWorkProduct]:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    return await workspace_service.list_work_products_for_issue(id)
+
+
+@router.post(ISSUE_WORK_PRODUCTS_PATH, status_code=http_status.HTTP_201_CREATED)
+async def create_issue_work_product_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    issue_service: IssueService = Depends(get_issue_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> IssueWorkProduct:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        payload = validate_create_issue_work_product(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return await workspace_service.create_work_product_for_issue(
+        org_id=detail["orgId"],
+        issue_id=id,
+        project_id=detail.get("projectId"),
+        payload=payload,
+    )
+
+
+@router.patch(WORK_PRODUCT_DETAIL_PATH)
+async def update_work_product_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> IssueWorkProduct:
+    existing = await workspace_service.get_work_product(id)
+    if existing is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Work product not found",
+        )
+    assert_organization_access(request, existing["orgId"])
+    try:
+        payload = validate_update_issue_work_product(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    updated = await workspace_service.update_work_product(id, payload)
+    if updated is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Work product not found",
+        )
+    return updated
+
+
+@router.delete(WORK_PRODUCT_DETAIL_PATH)
+async def delete_work_product_route(
+    id: str,
+    request: Request,
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> IssueWorkProduct:
+    existing = await workspace_service.get_work_product(id)
+    if existing is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Work product not found",
+        )
+    assert_organization_access(request, existing["orgId"])
+    removed = await workspace_service.delete_work_product(id)
+    if removed is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Work product not found",
+        )
+    return removed
+
+
+@router.get(ISSUE_DOCUMENTS_PATH)
+async def list_issue_documents_route(
+    id: str,
+    request: Request,
+    issue_service: IssueService = Depends(get_issue_service),
+    document_service: DocumentService = Depends(get_document_service),
+) -> list[IssueDocumentSummary]:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    return await document_service.list_issue_documents(id)
+
+
+@router.get(ISSUE_DOCUMENT_DETAIL_PATH)
+async def get_issue_document_route(
+    id: str,
+    key: str,
+    request: Request,
+    issue_service: IssueService = Depends(get_issue_service),
+    document_service: DocumentService = Depends(get_document_service),
+) -> IssueDocument:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        document_key = validate_issue_document_key(key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    document = await document_service.get_issue_document_by_key(id, document_key)
+    if document is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+    return document
+
+
+@router.put(ISSUE_DOCUMENT_DETAIL_PATH)
+async def upsert_issue_document_route(
+    id: str,
+    key: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    issue_service: IssueService = Depends(get_issue_service),
+    document_service: DocumentService = Depends(get_document_service),
+) -> JSONResponse:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        document_key = validate_issue_document_key(key)
+        payload = validate_upsert_issue_document(body)
+        actor = require_actor_identity(request)
+        document, created, _ = await document_service.upsert_issue_document(
+            org_id=detail["orgId"],
+            issue_id=id,
+            key=document_key,
+            payload=payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    return JSONResponse(
+        status_code=http_status.HTTP_201_CREATED
+        if created
+        else http_status.HTTP_200_OK,
+        content=document,
+    )
+
+
+@router.get(ISSUE_DOCUMENT_REVISIONS_PATH)
+async def list_issue_document_revisions_route(
+    id: str,
+    key: str,
+    request: Request,
+    issue_service: IssueService = Depends(get_issue_service),
+    document_service: DocumentService = Depends(get_document_service),
+) -> list[DocumentRevision]:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        document_key = validate_issue_document_key(key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return await document_service.list_issue_document_revisions(id, document_key)
+
+
+@router.delete(ISSUE_DOCUMENT_DETAIL_PATH)
+async def delete_issue_document_route(
+    id: str,
+    key: str,
+    request: Request,
+    _: None = Depends(require_board_access),
+    issue_service: IssueService = Depends(get_issue_service),
+    document_service: DocumentService = Depends(get_document_service),
+) -> dict[str, bool]:
+    detail = await issue_service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        document_key = validate_issue_document_key(key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    removed = await document_service.delete_issue_document(id, document_key)
+    if removed is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+    return {"ok": True}
 
 
 @router.get(ISSUE_ATTACHMENTS_PATH)
