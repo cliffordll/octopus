@@ -395,7 +395,21 @@ class ApprovalService:
             payload["messageId"] = message_id
         proposed_issue = approval.payload.get("proposedIssue")
         if isinstance(proposed_issue, dict):
-            payload["proposal"] = proposed_issue
+            proposal = dict(proposed_issue)
+            proposed_by_agent_id = approval.payload.get("proposedByAgentId")
+            chat_service = ChatService(self._session)
+            if (
+                isinstance(proposed_by_agent_id, str)
+                and proposed_by_agent_id
+                and not proposal.get("assigneeAgentId")
+                and not proposal.get("assigneeUserId")
+            ):
+                proposal[
+                    "assigneeAgentId"
+                ] = await chat_service.default_issue_assignee_for_agent(
+                    approval.org_id, proposed_by_agent_id
+                )
+            payload["proposal"] = proposal
         await ChatService(self._session).convert_to_issue(
             conversation_id,
             payload,

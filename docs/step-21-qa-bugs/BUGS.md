@@ -702,3 +702,20 @@
 - 处理归属：Step 21 closed-loop QA 补强。
 - 修复记录：已在正常终态和异常终态后调用 `_release_issue_execution()`，清理 `executionRunId`、`checkoutRunId`、`executionAgentNameKey`、`executionLockedAt`。
 - 验证证据：`test_failed_issue_backed_run_releases_issue_execution_lock` 覆盖失败 run 后锁释放；相关 pytest、ruff 通过。
+
+### BUG-21-033: chat 提案创建任务后未默认分配给提案智能体
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务创建成功但没有 `assigneeAgentId`，后续 `POST /api/issues/{issueId}/execute` 会因为未分配智能体而无法执行。
+- 影响范围：`manual_approval` 确认创建任务、`POST /api/chats/{conversationId}/convert-to-issue`、任务列表默认执行者展示。
+- 复现步骤：
+  1. 智能体在 chat 中返回 `issue_proposal`。
+  2. 通过审批确认创建任务，或调用 `convert-to-issue`。
+  3. 查看创建出来的 issue。
+- 预期行为：如果 proposal 没有显式 `assigneeAgentId` / `assigneeUserId`，server 应默认把任务分配给提出该任务的智能体（`proposedByAgentId` 或 assistant message `replyingAgentId`）。
+- 实际行为（修复前）：审批由 board/user 确认后，`IssueService.create_issue()` 不会自动使用提案智能体，导致 `assigneeAgentId` 为空。
+- 初步根因：`ChatService.convert_to_issue()` 只取 issueProposal 内容，没有把 assistant message 的 `replyingAgentId` 带入默认 assignee；`ApprovalService` 也没有把 approval payload 的 `proposedByAgentId` 注入 proposed issue。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：direct convert 路径默认使用 `replyingAgentId`；approval approve 路径默认使用 `proposedByAgentId`。如果提案智能体是 CEO，且存在可运行的直属非 CEO 下属，则默认委派给该下属；没有可用下属时回退 CEO。显式 assignee 仍优先生效，不被覆盖。
+- 验证证据：`test_convert_chat_issue_proposal_defaults_assignee_to_replying_agent`、`test_convert_chat_issue_proposal_delegates_ceo_issue_to_direct_report`、`test_convert_chat_issue_proposal_keeps_explicit_assignee` 和 `test_approve_chat_issue_creation_creates_issue_and_system_message` 覆盖 direct/approval、CEO 委派和显式 assignee 场景。
