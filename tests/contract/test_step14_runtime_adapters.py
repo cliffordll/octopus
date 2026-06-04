@@ -154,6 +154,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
             agent_name="OpenCode",
             config={"command": "opencode-test", "promptTemplate": "Do the task."},
             on_log=_noop_on_log,
+            workspace={
+                "rudderWorkspace": {
+                    "cwd": "D:/octopus/worktree",
+                    "worktreePath": "D:/octopus/worktree",
+                    "orgArtifactsDir": "D:/octopus/artifacts",
+                }
+            },
         )
     )
 
@@ -162,6 +169,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "description" in captured_prompt
     assert "command" in captured_prompt
     assert "Do not guess tool input schemas" in captured_prompt
+    assert "## Workspace Output Contract" in captured_prompt
+    assert "D:/octopus/worktree" in captured_prompt
+    assert "D:/octopus/artifacts" in captured_prompt
+    assert (
+        "Do not write generated deliverables into external source paths"
+        in captured_prompt
+    )
 
 
 async def test_opencode_tool_error_with_later_text_is_diagnostic_not_failure(

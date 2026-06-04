@@ -17,7 +17,10 @@ from ..local_skills import (
     prepare_managed_home,
 )
 from ..provider_config import apply_provider_env
-from ..tool_capabilities import append_runtime_tool_guidance
+from ..tool_capabilities import (
+    append_runtime_tool_guidance,
+    append_runtime_workspace_guidance,
+)
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     build_args,
@@ -37,8 +40,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Claude adapter cwd must be a string")
-    prompt = append_runtime_tool_guidance(
-        runtime_prompt_from_config(context.config), "claude_local"
+    prompt = append_runtime_workspace_guidance(
+        append_runtime_tool_guidance(
+            runtime_prompt_from_config(context.config), "claude_local"
+        ),
+        context.workspace,
     )
     args = build_args(context.config)
     env = dict(os.environ)
