@@ -771,55 +771,58 @@ class HeartbeatService:
         stdout = ""
         stderr = ""
         adapter_operation: object | None = None
+        runtime_callback_lock = asyncio.Lock()
 
         async def on_log(stream: str, chunk: str) -> None:
             nonlocal sequence, stdout, stderr
-            if stream == "stdout":
-                stdout += chunk
-            else:
-                stderr += chunk
-            if isinstance(adapter_operation, dict) and isinstance(
-                adapter_operation.get("id"), str
-            ):
-                await WorkspaceService(self._session).append_operation_log(
-                    adapter_operation["id"],
+            async with runtime_callback_lock:
+                if stream == "stdout":
+                    stdout += chunk
+                else:
+                    stderr += chunk
+                if isinstance(adapter_operation, dict) and isinstance(
+                    adapter_operation.get("id"), str
+                ):
+                    await WorkspaceService(self._session).append_operation_log(
+                        adapter_operation["id"],
+                        stream=stream,
+                        chunk=chunk,
+                    )
+                await self._append_run_log(running, stream=stream, chunk=chunk)
+                await self._append_event(
+                    running,
+                    sequence,
+                    "log",
+                    message=chunk,
                     stream=stream,
-                    chunk=chunk,
+                    level="info" if stream == "stdout" else "error",
                 )
-            await self._append_run_log(running, stream=stream, chunk=chunk)
-            await self._append_event(
-                running,
-                sequence,
-                "log",
-                message=chunk,
-                stream=stream,
-                level="info" if stream == "stdout" else "error",
-            )
-            sequence += 1
+                sequence += 1
 
         async def on_process_started(pid: int, started_at: datetime) -> None:
             nonlocal sequence, running
-            updated = await update_run(
-                self._session,
-                running.id,
-                {"process_pid": pid, "process_started_at": started_at},
-            )
-            if updated is not None:
-                running = updated
-                await self._append_event(
-                    updated,
-                    sequence,
-                    "lifecycle",
-                    message=f"child process spawned with pid {pid}",
-                    level="info",
-                    payload={
-                        "processPid": pid,
-                        "processStartedAt": started_at.isoformat(),
-                    },
+            async with runtime_callback_lock:
+                updated = await update_run(
+                    self._session,
+                    running.id,
+                    {"process_pid": pid, "process_started_at": started_at},
                 )
-                sequence += 1
-            if self._commit_process_metadata:
-                await self._session.commit()
+                if updated is not None:
+                    running = updated
+                    await self._append_event(
+                        updated,
+                        sequence,
+                        "lifecycle",
+                        message=f"child process spawned with pid {pid}",
+                        level="info",
+                        payload={
+                            "processPid": pid,
+                            "processStartedAt": started_at.isoformat(),
+                        },
+                    )
+                    sequence += 1
+                if self._commit_process_metadata:
+                    await self._session.commit()
 
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
