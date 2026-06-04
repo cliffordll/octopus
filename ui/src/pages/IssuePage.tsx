@@ -74,6 +74,10 @@ function isRerunnableRun(status?: string | null): boolean {
   return status === "failed" || status === "timed_out" || status === "cancelled";
 }
 
+function isTerminalRun(status?: string | null): boolean {
+  return status === "succeeded" || isRerunnableRun(status);
+}
+
 function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
   return run?.id || run?.runId || "";
 }
@@ -358,11 +362,19 @@ function IssuePropertiesPanel({
 }
 
 function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
-  const workProducts = issue.workProducts ?? [];
   const queryClient = useQueryClient();
+  const workProductsQuery = useQuery({
+    queryKey: ["issue-work-products", issue.id],
+    queryFn: () => issuesApi.listWorkProducts(issue.id),
+    initialData: issue.workProducts ?? [],
+  });
+  const workProducts = workProductsQuery.data ?? [];
   const deleteWorkProduct = useMutation({
     mutationFn: (workProductId: string) => issuesApi.deleteWorkProduct(workProductId),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issue.id] });
+      void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] });
+    },
   });
   return (
     <section aria-label="工作产物" className="issue-section-card">
@@ -373,6 +385,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
       <p className="muted issue-work-product-hint">
         工作产物由智能体运行生成并由 server 记录。UI 只展示下载入口，只有点击下载时才会通过 contentPath 获取文件，不会自动写入本地仓库。
       </p>
+      {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
+      {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
           {workProducts.map((product) => (
@@ -916,6 +930,7 @@ export function IssuePage() {
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
   const streamCursorRef = useRef<Record<string, RunStreamCursor>>({});
+  const refreshedTerminalRunRef = useRef("");
   const [streamActiveRunId, setStreamActiveRunId] = useState("");
   const [streamErrorsByRun, setStreamErrorsByRun] = useState<Record<string, string | null>>({});
   const [streamLogsByRun, setStreamLogsByRun] = useState<Record<string, string>>({});
@@ -1120,6 +1135,7 @@ export function IssuePage() {
         void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
         void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
         void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
       },
       onError: (error) => {
         setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: error }));
@@ -1140,6 +1156,17 @@ export function IssuePage() {
       setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
     };
   }, [currentRunId, issueId, orgId, queryClient, runDetail.data?.status]);
+  useEffect(() => {
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+    const latestRunId = heartbeatRunId(latestRun);
+    if (!latestRunId || !isTerminalRun(latestRun?.status)) return;
+    const refreshKey = `${latestRunId}:${latestRun?.status}`;
+    if (refreshedTerminalRunRef.current === refreshKey) return;
+    refreshedTerminalRunRef.current = refreshKey;
+    void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+    void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+    void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
+  }, [issueId, issueRuns.data, queryClient, runDetail.data]);
   const cancelRun = useMutation({
     mutationFn: () => heartbeatApi.cancel(currentRunId),
     onSuccess: (run) => {
