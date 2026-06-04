@@ -50,6 +50,7 @@
 | BUG-21-027 | fixed | P1 | 是 | run 成功后缺少上游式 issue close-out governance | Step 21 | `test_successful_issue_run_without_closeout_queues_passive_followup` |
 | BUG-21-028 | fixed | P1 | 是 | chat `auto_create` issue proposal 没有自动落成任务 | Step 21 | `test_auto_create_chat_issue_proposal_creates_issue` |
 | BUG-21-029 | fixed | P2 | 否 | issue documents 与 work-products 只有聚合/预留，缺上游独立 API | Step 21 | `pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed |
+| BUG-21-030 | fixed | P2 | 否 | 任务执行过程只能轮询 events/log，缺 run 级动态输出流接口 | Step 21 | `pytest tests/contract/test_step20_observability.py::test_heartbeat_run_stream_returns_incremental_ndjson -q` passed |
 
 ## 记录模板
 
@@ -96,6 +97,27 @@
   - 新增 work-product create/update/delete/list route，并复用现有 `IssueWorkProduct` model 与 `WorkspaceService` 转换逻辑。
   - `GET /api/issues/{id}` 增加 `documentSummaries`，继续保留 `workProducts` 聚合。
 - 验证证据：`pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed；`pyright server packages tests/contract/test_step21_issue_documents_work_products.py` 0 errors；目标 `ruff check` passed。
+
+### BUG-21-030: 任务执行过程缺 run 级动态输出流接口
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。已有 `events?afterSeq=` 与 `log?offset=` 轮询接口可用，但 UI 若要动态展示执行过程，需要自行组合多个轮询请求。
+- 影响范围：任务详情页执行过程展示、run timeline/log 实时刷新、UI 对任务执行进度的用户反馈。
+- 复现步骤：
+  1. 执行一个 issue，拿到 `runId`。
+  2. 期望打开单个实时输出接口，例如 `GET /api/heartbeat-runs/{runId}/stream`。
+  3. 当前只能分别轮询 `GET /api/heartbeat-runs/{runId}`、`/events?afterSeq=` 和 `/log?offset=`。
+- 预期行为：server 提供 run 级 NDJSON stream，连接后返回初始 run 状态，并持续输出新增 events/log，run 结束时输出 final。
+- 实际行为（修复前）：缺少 `GET /api/heartbeat-runs/{runId}/stream`。
+- 初步根因：Step 20 已补 observability 轮询 API，Step 16 只补 chat stream，尚未将同样的动态输出能力扩展到 heartbeat run。
+- 处理归属：Step 21。属于最小闭环可视化补强，不引入 WebSocket 或复杂实时基础设施。
+- 修复记录：
+  - 新增 shared path `HEARTBEAT_RUN_STREAM_PATH`。
+  - 新增 `GET /api/heartbeat-runs/{runId}/stream`，返回 `application/x-ndjson`。
+  - stream 事件类型：`run`、`event`、`log`、`final`、`error`。
+  - stream 每轮用短事务读取 run/events/log，避免长连接持有 SQLite 事务。
+- 验证证据：`pytest tests/contract/test_step20_observability.py::test_heartbeat_run_stream_returns_incremental_ndjson -q` passed。
 
 ### BUG-21-001: 智能体说明文件右侧内容显示为空需确认 server 读取语义
 
