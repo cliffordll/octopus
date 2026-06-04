@@ -183,7 +183,7 @@ export function ApprovalPage() {
                     onChange={(event) => setDecisionPayload(event.target.value)}
                   />
                 </label>
-                <div className="actions">
+                <div className="approval-actions">
                   <button disabled={act.isPending} onClick={() => runAction("approve")} type="button">同意</button>
                   <button className="danger" disabled={act.isPending} onClick={() => runAction("reject")} type="button">拒绝</button>
                   <button className="secondary" disabled={act.isPending} onClick={() => runAction("requestRevision")} type="button">

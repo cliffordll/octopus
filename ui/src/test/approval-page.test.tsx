@@ -63,6 +63,9 @@ it("shows an approval and submits a board decision", async () => {
   expect(screen.getByLabelText("审批评论")).toHaveValue("");
 
   await userEvent.type(screen.getByLabelText("决策备注"), "额度合理");
+  const decisionActions = screen.getByRole("button", { name: "同意" }).closest(".approval-actions");
+  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "拒绝" }));
+  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "请求修改" }));
   await userEvent.clear(screen.getByLabelText("决策 Payload JSON"));
   fireEvent.change(screen.getByLabelText("决策 Payload JSON"), { target: { value: '{"approvedLimit":1000}' } });
   await userEvent.click(screen.getByRole("button", { name: "同意" }));
