@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -199,10 +199,8 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
-  await userEvent.clear(screen.getByLabelText("执行工作区策略 JSON"));
-  fireEvent.change(screen.getByLabelText("执行工作区策略 JSON"), {
-    target: { value: '{"enabled":true,"defaultMode":"isolated_workspace"}' },
-  });
+  await userEvent.click(screen.getByLabelText(/独立工作区/));
+  expect(screen.getByText("isolated_workspace")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -215,7 +213,11 @@ it("updates a project and manages its resource attachments", async () => {
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
         goalIds: ["goal-1", "goal-2"],
-        executionWorkspacePolicy: { enabled: true, defaultMode: "isolated_workspace" },
+        executionWorkspacePolicy: {
+          enabled: true,
+          defaultMode: "isolated_workspace",
+          workspaceStrategy: { mode: "isolated_workspace" },
+        },
       }),
     }),
   );

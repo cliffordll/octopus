@@ -202,6 +202,9 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/issues/issue-1/documents/plan" && init?.method === "DELETE") {
       return respond({ ok: true });
     }
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") {
+      return respond(issue.workProducts);
+    }
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") {
       return respond([
         {
@@ -426,6 +429,7 @@ it("executes an assigned issue through the issue execution route", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1" && init?.method === "PATCH") {
       return respond({ ...issue, status: "in_progress", startedAt: "2026-06-02T10:00:00Z" });
     }
@@ -562,6 +566,110 @@ it("executes an assigned issue through the issue execution route", async () => {
   );
 });
 
+it("refreshes server registered work products when an issue run succeeds", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-9",
+    title: "生成标题文档",
+    description: "读取 README 并生成标题文档",
+    status: "todo",
+    priority: "medium",
+    projectId: "project-1",
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 9,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const generatedWorkProduct = {
+    id: "wp-generated",
+    orgId: "org-1",
+    projectId: "project-1",
+    issueId: "issue-1",
+    executionWorkspaceId: "exec-1",
+    runtimeServiceId: "svc-1",
+    type: "artifact",
+    provider: "local_disk",
+    externalId: null,
+    assetId: "asset-generated",
+    contentPath: "/api/assets/asset-generated/content",
+    contentType: "text/markdown",
+    byteSize: 64,
+    sha256: "abc",
+    title: "README 标题文档",
+    url: null,
+    status: "ready",
+    reviewState: "none",
+    isPrimary: false,
+    healthStatus: "healthy",
+    summary: "server 登记的生成文件",
+    metadata: null,
+    createdByRunId: "run-1",
+    createdAt: "2026-06-04T10:00:00Z",
+    updatedAt: "2026-06-04T10:00:00Z",
+  };
+  let hasFinished = false;
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
+      return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
+    }
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+      return respond(hasFinished ? [{ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "succeeded", createdAt: "2026-06-04T10:00:00Z" }] : []);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") {
+      return respond(hasFinished ? [generatedWorkProduct] : []);
+    }
+    if (path === "/api/issues/issue-1" && init?.method === "PATCH") {
+      return respond({ ...issue, status: "in_progress" });
+    }
+    if (path === "/api/issues/issue-1/execute" && init?.method === "POST") {
+      return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "queued" }, 202);
+    }
+    if (path.startsWith("/api/heartbeat-runs/run-1/stream") && init?.method === "GET") {
+      hasFinished = true;
+      return respondStream([{ type: "final", run: { id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "succeeded" } }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") {
+      return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: hasFinished ? "succeeded" : "queued" });
+    }
+    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
+
+  expect(await screen.findByText("README 标题文档")).toBeInTheDocument();
+  expect(screen.getByText("server 登记的生成文件")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "下载产物文件" })).toHaveAttribute("href", "/api/assets/asset-generated/content");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/work-products",
+    expect.objectContaining({ method: "GET" }),
+  );
+});
+
 it("allows re-executing an issue after the latest run failed", async () => {
   const issue = {
     id: "issue-1",
@@ -611,6 +719,7 @@ it("allows re-executing an issue after the latest run failed", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-failed" && init?.method === "GET") return respond(failedRun);
     if (path === "/api/heartbeat-runs/run-failed/events" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-failed/workspace-operations" && init?.method === "GET") return respond([]);
@@ -689,6 +798,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-succeeded" && init?.method === "GET") {
       return respond({ id: "run-succeeded", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "succeeded" });
     }
@@ -737,6 +847,7 @@ it("explains why an unassigned issue cannot be executed", async () => {
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     return respond(issue);

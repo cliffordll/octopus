@@ -34,6 +34,35 @@ const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
   tracking: "跟踪",
   working_set: "工作集",
 };
+const WORKSPACE_POLICY_MODES = ["shared_workspace", "isolated_workspace", "operator_branch"] as const;
+
+type WorkspacePolicyMode = (typeof WORKSPACE_POLICY_MODES)[number];
+
+const WORKSPACE_POLICY_OPTIONS: Array<{
+  description: string;
+  label: string;
+  mode: WorkspacePolicyMode;
+}> = [
+  {
+    mode: "shared_workspace",
+    label: "共享工作区",
+    description: "多个任务复用项目主工作区，适合常规项目协作。",
+  },
+  {
+    mode: "isolated_workspace",
+    label: "独立工作区",
+    description: "每个任务准备独立执行目录，适合需要隔离改动的任务。",
+  },
+  {
+    mode: "operator_branch",
+    label: "操作分支",
+    description: "按任务派生分支或工作区，适合需要保留任务分支痕迹的场景。",
+  },
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function formatJson(value: Record<string, unknown> | null | undefined): string {
   return value ? JSON.stringify(value, null, 2) : "";
@@ -46,6 +75,39 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
     throw new Error("执行工作区策略必须是 JSON 对象。");
   }
   return parsed as Record<string, unknown>;
+}
+
+function normalizeWorkspacePolicyMode(value: unknown): WorkspacePolicyMode {
+  if (value === "project_primary") return "shared_workspace";
+  if (value === "isolated") return "isolated_workspace";
+  return WORKSPACE_POLICY_MODES.includes(value as WorkspacePolicyMode)
+    ? value as WorkspacePolicyMode
+    : "shared_workspace";
+}
+
+function workspacePolicyModeFromPolicy(value: Record<string, unknown> | null | undefined): WorkspacePolicyMode {
+  if (!value) return "shared_workspace";
+  const strategy = isRecord(value.workspaceStrategy) ? value.workspaceStrategy : null;
+  return normalizeWorkspacePolicyMode(value.defaultMode ?? strategy?.mode);
+}
+
+function workspacePolicyForMode(currentJson: string, mode: WorkspacePolicyMode): string {
+  let current: Record<string, unknown> = {};
+  try {
+    current = parseJsonObject(currentJson) ?? {};
+  } catch {
+    current = {};
+  }
+  const currentStrategy = isRecord(current.workspaceStrategy) ? current.workspaceStrategy : {};
+  return formatJson({
+    ...current,
+    enabled: true,
+    defaultMode: mode,
+    workspaceStrategy: {
+      ...currentStrategy,
+      mode,
+    },
+  });
 }
 
 function nullableText(value: string | null | undefined): string {
@@ -123,6 +185,7 @@ export function ProjectPage() {
   const [targetDate, setTargetDate] = useState("");
   const [goalIds, setGoalIds] = useState("");
   const [workspacePolicy, setWorkspacePolicy] = useState("");
+  const [workspacePolicyMode, setWorkspacePolicyMode] = useState<WorkspacePolicyMode>("shared_workspace");
   const [workspacePolicyError, setWorkspacePolicyError] = useState("");
   const [attachCatalogOpen, setAttachCatalogOpen] = useState(false);
   const [createResourceOpen, setCreateResourceOpen] = useState(false);
@@ -167,6 +230,7 @@ export function ProjectPage() {
       setTargetDate(project.data.targetDate ?? "");
       setGoalIds((project.data.goalIds ?? (project.data.goalId ? [project.data.goalId] : [])).join(","));
       setWorkspacePolicy(formatJson(project.data.executionWorkspacePolicy));
+      setWorkspacePolicyMode(workspacePolicyModeFromPolicy(project.data.executionWorkspacePolicy));
       setWorkspacePolicyError("");
     }
   }, [project.data]);
@@ -263,6 +327,20 @@ export function ProjectPage() {
     event.preventDefault();
     setWorkspacePolicyError("");
     update.mutate();
+  }
+  function selectWorkspacePolicyMode(mode: WorkspacePolicyMode) {
+    setWorkspacePolicyMode(mode);
+    setWorkspacePolicy(workspacePolicyForMode(workspacePolicy, mode));
+    setWorkspacePolicyError("");
+  }
+  function editWorkspacePolicy(value: string) {
+    setWorkspacePolicy(value);
+    try {
+      setWorkspacePolicyMode(workspacePolicyModeFromPolicy(parseJsonObject(value)));
+      setWorkspacePolicyError("");
+    } catch {
+      setWorkspacePolicyError("执行工作区策略必须是 JSON 对象。");
+    }
   }
   function submitInlineResource(event: FormEvent) {
     event.preventDefault();
@@ -383,15 +461,49 @@ export function ProjectPage() {
                 <span>更新时间</span>
                 <strong>{formatDateTime(project.data.updatedAt)}</strong>
               </div>
-              <label className="project-property-row project-property-row-start">
-                <span>执行工作区策略 JSON</span>
-                <textarea
-                  className="config-editor"
-                  value={workspacePolicy}
-                  onChange={(event) => setWorkspacePolicy(event.target.value)}
-                  placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
-                />
-              </label>
+              <div className="project-property-row project-property-row-start">
+                <span>执行工作区策略</span>
+                <div className="workspace-policy-config">
+                  <fieldset className="workspace-policy-options">
+                    <legend>选择任务执行时使用的工作区方式</legend>
+                    {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                      <label
+                        className={`workspace-policy-option ${workspacePolicyMode === option.mode ? "selected" : ""}`}
+                        key={option.mode}
+                      >
+                        <input
+                          checked={workspacePolicyMode === option.mode}
+                          name="workspace-policy-mode"
+                          onChange={() => selectWorkspacePolicyMode(option.mode)}
+                          type="radio"
+                          value={option.mode}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <div className="workspace-policy-preview">
+                    <div className="workspace-policy-preview-heading">
+                      <strong>提交参数</strong>
+                      <Badge>{workspacePolicyMode}</Badge>
+                    </div>
+                    <pre>{workspacePolicy || workspacePolicyForMode("", workspacePolicyMode)}</pre>
+                  </div>
+                  <details className="workspace-policy-advanced">
+                    <summary>高级配置 JSON</summary>
+                    <textarea
+                      aria-label="高级执行工作区策略 JSON"
+                      className="config-editor"
+                      value={workspacePolicy}
+                      onChange={(event) => editWorkspacePolicy(event.target.value)}
+                      placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
+                    />
+                  </details>
+                </div>
+              </div>
             </div>
             <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
             {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
