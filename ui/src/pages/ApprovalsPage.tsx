@@ -82,9 +82,13 @@ export function ApprovalsPage() {
   const decision = useMutation({
     mutationFn: ({ approvalId, action }: { approvalId: string; action: "approve" | "reject" | "requestRevision" }) =>
       approvalsApi[action](approvalId),
-    onSuccess: () => {
+    onSuccess: (approval) => {
       void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["approval", approval.id] });
+      void queryClient.invalidateQueries({ queryKey: ["approval-issues", approval.id] });
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue"] });
     },
   });
   const createApproval = useMutation({

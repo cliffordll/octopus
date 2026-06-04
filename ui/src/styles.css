@@ -6126,6 +6126,21 @@ pre {
   white-space: pre-wrap;
 }
 
+.issue-run-agent-reply-block {
+  display: grid;
+  gap: 6px;
+}
+
+.issue-run-agent-reply.collapsed {
+  max-height: 160px;
+  overflow: hidden;
+  position: relative;
+}
+
+.issue-run-agent-reply-toggle {
+  justify-self: flex-start;
+}
+
 .issue-run-low-value-events {
   border-top: 1px dashed #263244;
   display: flex;
