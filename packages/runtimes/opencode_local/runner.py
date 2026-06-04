@@ -15,7 +15,10 @@ from ..local_skills import (
     materialize_runtime_skills,
     prepare_managed_home,
 )
-from ..tool_capabilities import append_runtime_tool_guidance
+from ..tool_capabilities import (
+    append_runtime_tool_guidance,
+    append_runtime_workspace_guidance,
+)
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     auth_required,
@@ -35,8 +38,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("OpenCode adapter cwd must be a string")
-    prompt = append_runtime_tool_guidance(
-        runtime_prompt_from_config(context.config), "opencode_local"
+    prompt = append_runtime_workspace_guidance(
+        append_runtime_tool_guidance(
+            runtime_prompt_from_config(context.config), "opencode_local"
+        ),
+        context.workspace,
     )
     args = build_args(context.config)
     env = dict(os.environ)
