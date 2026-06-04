@@ -15,6 +15,7 @@ from ..local_skills import (
     materialize_runtime_skills,
     prepare_managed_home,
 )
+from ..tool_capabilities import append_runtime_tool_guidance
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     auth_required,
@@ -34,7 +35,9 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("OpenCode adapter cwd must be a string")
-    prompt = runtime_prompt_from_config(context.config)
+    prompt = append_runtime_tool_guidance(
+        runtime_prompt_from_config(context.config), "opencode_local"
+    )
     args = build_args(context.config)
     env = dict(os.environ)
     configured_env = context.config.get("env")
@@ -85,7 +88,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             loaded_skills=loaded_skills,
         )
     stdout_task = asyncio.create_task(_read_stdout(process, context))
-    stderr_task = asyncio.create_task(_read_stderr(process))
+    stderr_task = asyncio.create_task(_read_stderr(process, context))
     stdin_task = asyncio.create_task(_write_stdin(process, prompt))
     wait_task = asyncio.create_task(process.wait())
     try:
@@ -151,21 +154,21 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
 
     stdout_text = await stdout_task
     stderr_text = await stderr_task
-    if stdout_text:
-        await context.on_log("stdout", stdout_text)
-    if stderr_text:
-        await context.on_log("stderr", stderr_text)
     parsed = parse_jsonl(stdout_text)
     error = parsed["errorMessage"]
     exit_code = process.returncode
-    if error and (exit_code or 0) == 0:
+    final_error = error
+    if error and (exit_code or 0) == 0 and not parsed["summary"]:
         exit_code = 1
+    elif error and (exit_code or 0) == 0 and parsed["summary"]:
+        final_error = None
     if (exit_code or 0) != 0 and not error:
         error = first_line(stderr_text) or f"OpenCode exited with code {exit_code}"
+        final_error = error
     model = string(context.config.get("model"))
     return RuntimeExecutionResult(
         exit_code=exit_code,
-        error_message=error,
+        error_message=final_error,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
         result_json=_result_json(
@@ -238,22 +241,26 @@ async def _execute_with_communicate(
         )
     stdout_text = stdout.decode(errors="replace")
     stderr_text = stderr.decode(errors="replace")
-    await _emit_opencode_stream_events_from_text(context, stdout_text)
     if stdout_text:
+        await _emit_opencode_stream_events_from_text(context, stdout_text)
         await context.on_log("stdout", stdout_text)
     if stderr_text:
         await context.on_log("stderr", stderr_text)
     parsed = parse_jsonl(stdout_text)
     error = parsed["errorMessage"]
     exit_code = getattr(process, "returncode", None)
-    if error and (exit_code or 0) == 0:
+    final_error = error
+    if error and (exit_code or 0) == 0 and not parsed["summary"]:
         exit_code = 1
+    elif error and (exit_code or 0) == 0 and parsed["summary"]:
+        final_error = None
     if (exit_code or 0) != 0 and not error:
         error = first_line(stderr_text) or f"OpenCode exited with code {exit_code}"
+        final_error = error
     model = string(context.config.get("model"))
     return RuntimeExecutionResult(
         exit_code=exit_code,
-        error_message=error,
+        error_message=final_error,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],
         result_json=_result_json(
@@ -274,6 +281,7 @@ async def _read_stdout(
         if not chunk:
             break
         chunks.append(chunk)
+        await context.on_log("stdout", chunk.decode(errors="replace"))
         line_buffer.extend(chunk)
         while True:
             newline = line_buffer.find(b"\n")
@@ -289,7 +297,9 @@ async def _read_stdout(
     return b"".join(chunks).decode(errors="replace")
 
 
-async def _read_stderr(process: asyncio.subprocess.Process) -> str:
+async def _read_stderr(
+    process: asyncio.subprocess.Process, context: RuntimeExecutionContext
+) -> str:
     if process.stderr is None:
         return ""
     chunks: list[bytes] = []
@@ -298,6 +308,7 @@ async def _read_stderr(process: asyncio.subprocess.Process) -> str:
         if not chunk:
             break
         chunks.append(chunk)
+        await context.on_log("stderr", chunk.decode(errors="replace"))
     return b"".join(chunks).decode(errors="replace")
 
 
@@ -426,6 +437,7 @@ def _result_json(
         "provider": provider(model),
         "model": model,
         "loadedSkills": loaded_skills,
+        "toolErrors": parsed.get("toolErrors", []),
         "modelUnavailable": model_unavailable(stdout_text, stderr_text, error),
         "authRequired": auth_required(stdout_text, stderr_text, error),
     }

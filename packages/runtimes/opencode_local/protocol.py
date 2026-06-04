@@ -23,6 +23,7 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
     session_id: str | None = None
     messages: list[str] = []
     errors: list[str] = []
+    tool_errors: list[str] = []
     usage = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0}
     cost_usd = 0.0
     for raw_line in stdout.splitlines():
@@ -63,6 +64,7 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
                     text = string(state.get("error"))
                     if text:
                         errors.append(text)
+                        tool_errors.append(text)
         elif event_type == "error":
             text = error_text(event.get("error") or event.get("message"))
             if text:
@@ -73,6 +75,7 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
         "usage": usage,
         "costUsd": cost_usd,
         "errorMessage": "\n".join(errors) if errors else None,
+        "toolErrors": tool_errors,
     }
 
 
