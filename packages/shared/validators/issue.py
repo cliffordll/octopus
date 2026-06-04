@@ -9,11 +9,13 @@ from ..constants.issue import (
     ISSUE_STATUSES,
 )
 from ..types.issue import (
+    CheckoutIssuePayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
     ListOrgIssuesQuery,
     RecordIssueReviewDecisionPayload,
     UpdateIssuePayload,
+    UpsertIssueDocumentPayload,
 )
 
 
@@ -25,6 +27,8 @@ _NULLABLE_REF_FIELDS = (
     "assigneeUserId",
     "reviewerAgentId",
     "reviewerUserId",
+    "createdByAgentId",
+    "createdByUserId",
 )
 
 _CREATE_ISSUE_FIELDS = {
@@ -39,6 +43,8 @@ _CREATE_ISSUE_FIELDS = {
     "assigneeUserId",
     "reviewerAgentId",
     "reviewerUserId",
+    "createdByAgentId",
+    "createdByUserId",
     "originKind",
     "originId",
     "requestDepth",
@@ -63,6 +69,14 @@ _UPDATE_ISSUE_FIELDS = {
 }
 
 _REVIEW_DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
+_ISSUE_DOCUMENT_FORMATS = ("markdown",)
+_UPSERT_ISSUE_DOCUMENT_FIELDS = {
+    "title",
+    "format",
+    "body",
+    "changeSummary",
+    "baseRevisionId",
+}
 
 
 def _reject_unknown_fields(
@@ -136,6 +150,22 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
     return cast(CreateIssuePayload, payload)
 
 
+def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:
+    _reject_unknown_fields(payload, allowed_fields={"agentId", "expectedStatuses"})
+    agent_id = payload.get("agentId")
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        raise ValueError("'agentId' is required and must be a non-empty string")
+    expected_statuses = payload.get("expectedStatuses")
+    if not isinstance(expected_statuses, list) or not expected_statuses:
+        raise ValueError("'expectedStatuses' is required and must be a non-empty list")
+    for status in expected_statuses:
+        if status not in ISSUE_STATUSES:
+            raise ValueError(
+                f"'expectedStatuses' must contain only {list(ISSUE_STATUSES)}"
+            )
+    return cast(CheckoutIssuePayload, payload)
+
+
 def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
     _reject_unknown_fields(payload, allowed_fields=_UPDATE_ISSUE_FIELDS)
     if "title" in payload:
@@ -195,3 +225,45 @@ def validate_record_issue_review_decision(
         if note is not None and not isinstance(note, str):
             raise ValueError("'note' must be a string or null")
     return cast(RecordIssueReviewDecisionPayload, payload)
+
+
+def validate_issue_document_key(value: str) -> str:
+    key = value.strip().lower()
+    if not key or len(key) > 64:
+        raise ValueError("Invalid document key")
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
+    if key[0] not in set("abcdefghijklmnopqrstuvwxyz0123456789"):
+        raise ValueError("Invalid document key")
+    if any(char not in allowed for char in key):
+        raise ValueError("Invalid document key")
+    return key
+
+
+def validate_upsert_issue_document(
+    payload: Mapping[str, Any],
+) -> UpsertIssueDocumentPayload:
+    _reject_unknown_fields(payload, allowed_fields=_UPSERT_ISSUE_DOCUMENT_FIELDS)
+    title = payload.get("title")
+    if title is not None:
+        if not isinstance(title, str):
+            raise ValueError("'title' must be a string or null")
+        if len(title.strip()) > 200:
+            raise ValueError("'title' must be at most 200 characters")
+    fmt = payload.get("format")
+    if fmt not in _ISSUE_DOCUMENT_FORMATS:
+        raise ValueError(f"'format' must be one of {list(_ISSUE_DOCUMENT_FORMATS)}")
+    body = payload.get("body")
+    if not isinstance(body, str):
+        raise ValueError("'body' is required and must be a string")
+    if len(body) > 524288:
+        raise ValueError("'body' must be at most 524288 characters")
+    change_summary = payload.get("changeSummary")
+    if change_summary is not None:
+        if not isinstance(change_summary, str):
+            raise ValueError("'changeSummary' must be a string or null")
+        if len(change_summary.strip()) > 500:
+            raise ValueError("'changeSummary' must be at most 500 characters")
+    base_revision_id = payload.get("baseRevisionId")
+    if base_revision_id is not None and not isinstance(base_revision_id, str):
+        raise ValueError("'baseRevisionId' must be a string or null")
+    return cast(UpsertIssueDocumentPayload, payload)

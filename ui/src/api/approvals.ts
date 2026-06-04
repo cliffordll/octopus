@@ -1,9 +1,11 @@
 import { jsonRequest, request } from "./client";
 import type {
+  ApprovalComment,
   ApprovalDetail,
   ApprovalListItem,
   ApprovalStatus,
   CreateApprovalPayload,
+  IssueListItem,
   ResolveApprovalPayload,
   ResubmitApprovalPayload,
 } from "./types";
@@ -22,6 +24,12 @@ export const approvalsApi = {
   },
   get: (approvalId: string): Promise<ApprovalDetail> =>
     request<ApprovalDetail>(approvalRoot(approvalId), { method: "GET" }),
+  listIssues: (approvalId: string): Promise<IssueListItem[]> =>
+    request<IssueListItem[]>(`${approvalRoot(approvalId)}/issues`, { method: "GET" }),
+  listComments: (approvalId: string): Promise<ApprovalComment[]> =>
+    request<ApprovalComment[]>(`${approvalRoot(approvalId)}/comments`, { method: "GET" }),
+  addComment: (approvalId: string, payload: { body: string }): Promise<ApprovalComment> =>
+    jsonRequest<ApprovalComment>(`${approvalRoot(approvalId)}/comments`, "POST", payload),
   create: (orgId: string, payload: CreateApprovalPayload): Promise<ApprovalDetail> =>
     jsonRequest<ApprovalDetail>(
       `/api/orgs/${encodeURIComponent(orgId)}/approvals`,

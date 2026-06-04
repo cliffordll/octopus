@@ -5,7 +5,9 @@ from typing import Any
 
 
 def build_args(config: dict[str, Any]) -> list[str]:
-    args = _string_list(config.get("extraArgs", config.get("args", [])))
+    # Preserve legacy test/custom-command behavior where `args` prefixes the
+    # command, while `extraArgs` mirrors upstream OpenCode run-subcommand flags.
+    args = _string_list(config.get("args"))
     args.extend(["run", "--format", "json"])
     model = string(config.get("model"))
     if model:
@@ -13,6 +15,7 @@ def build_args(config: dict[str, Any]) -> list[str]:
     variant = string(config.get("variant"))
     if variant:
         args.extend(["--variant", variant])
+    args.extend(_string_list(config.get("extraArgs")))
     return args
 
 
@@ -77,13 +80,15 @@ def error_text(value: Any) -> str | None:
     if isinstance(value, str):
         return value.strip() or None
     if isinstance(value, dict):
+        data = value.get("data")
+        if isinstance(data, dict):
+            text = string(data.get("message"))
+            if text:
+                return text
         for key in ("message", "error", "name", "code"):
             text = string(value.get(key))
             if text:
                 return text
-        data = value.get("data")
-        if isinstance(data, dict):
-            return string(data.get("message"))
     return None
 
 

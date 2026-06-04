@@ -61,6 +61,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     adapter_test_parser.add_argument("--org-id", required=True)
     adapter_test_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     adapter_test_parser.add_argument("--runtime-config", default="{}")
+    adapter_test_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    adapter_test_parser.add_argument("--skip-opencode-permissions", action="store_true")
     adapter_test_parser.set_defaults(handler=test_adapter_environment)
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
@@ -106,6 +108,12 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     instructions_parser = actions.add_parser("instructions")
     instructions_parser.add_argument("agent_id")
     instructions_parser.set_defaults(handler=get_instructions_bundle)
+    instructions_path_parser = actions.add_parser("instructions-path")
+    instructions_path_parser.add_argument("agent_id")
+    instructions_path_parser.add_argument("--path")
+    instructions_path_parser.add_argument("--clear-path", action="store_true")
+    instructions_path_parser.add_argument("--agent-runtime-config-key")
+    instructions_path_parser.set_defaults(handler=update_instructions_path)
     instruction_file_parser = actions.add_parser("instruction-file")
     instruction_file_parser.add_argument("agent_id")
     instruction_file_parser.add_argument("--path", required=True)
@@ -134,10 +142,27 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     create_parser.add_argument("--runtime-config", default="{}")
     create_parser.add_argument("--model")
+    create_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    create_parser.add_argument("--skip-opencode-permissions", action="store_true")
     create_parser.add_argument("--icon")
     create_parser.add_argument("--desired-skill", action="append", default=[])
     create_parser.add_argument("--metadata")
     create_parser.set_defaults(handler=create_agent)
+    hire_parser = actions.add_parser("hire")
+    hire_parser.add_argument("--org-id", required=True)
+    hire_parser.add_argument("--name", required=True)
+    hire_parser.add_argument("--role", required=True, choices=ROLES)
+    hire_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
+    hire_parser.add_argument("--runtime-config", default="{}")
+    hire_parser.add_argument("--model")
+    hire_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    hire_parser.add_argument("--skip-opencode-permissions", action="store_true")
+    hire_parser.add_argument("--icon")
+    hire_parser.add_argument("--desired-skill", action="append", default=[])
+    hire_parser.add_argument("--metadata")
+    hire_parser.add_argument("--source-issue-id")
+    hire_parser.add_argument("--source-issue", action="append", default=[])
+    hire_parser.set_defaults(handler=hire_agent)
     update_parser = actions.add_parser("update")
     update_parser.add_argument("agent_id")
     update_parser.add_argument("--name")
@@ -150,6 +175,8 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     update_parser.add_argument("--runtime", choices=RUNTIMES)
     update_parser.add_argument("--runtime-config")
     update_parser.add_argument("--model")
+    update_parser.add_argument("--runtime-extra-arg", action="append")
+    update_parser.add_argument("--skip-opencode-permissions", action="store_true")
     update_parser.add_argument("--budget-monthly-cents", type=int)
     update_parser.add_argument("--replace-agent-runtime-config", action="store_true")
     update_parser.add_argument("--status")
@@ -179,11 +206,14 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     bootstrap_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     bootstrap_parser.add_argument("--runtime-config", default="{}")
     bootstrap_parser.add_argument("--model")
+    bootstrap_parser.add_argument("--runtime-extra-arg", action="append", default=[])
+    bootstrap_parser.add_argument("--skip-opencode-permissions", action="store_true")
     bootstrap_parser.set_defaults(handler=bootstrap_ceo)
     for name, handler in (
         ("pause", pause_agent),
         ("resume", resume_agent),
         ("terminate", terminate_agent),
+        ("archive", archive_agent),
         ("invoke", invoke_agent),
     ):
         action = actions.add_parser(name)
@@ -199,11 +229,19 @@ def _json_object(value: str) -> dict[str, Any]:
 
 
 def _runtime_config(
-    runtime: str | None, value: str, model: str | None = None
+    runtime: str | None,
+    value: str,
+    model: str | None = None,
+    extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
     config = _json_object(value)
     if model is not None:
         config["model"] = model
+    if extra_args:
+        existing = config.get("extraArgs")
+        merged = list(existing) if isinstance(existing, list) else []
+        merged.extend(extra_args)
+        config["extraArgs"] = merged
     if runtime == "opencode_local":
         configured_model = config.get("model")
         if not isinstance(configured_model, str) or "/" not in configured_model:
@@ -217,6 +255,13 @@ def _runtime_config(
             )
         config["model"] = configured_model.strip()
     return config
+
+
+def _runtime_extra_args(args: argparse.Namespace) -> list[str]:
+    extra_args = list(args.runtime_extra_arg or [])
+    if getattr(args, "skip_opencode_permissions", False):
+        extra_args.append("--dangerously-skip-permissions")
+    return extra_args
 
 
 def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
@@ -251,7 +296,11 @@ def test_adapter_environment(args: argparse.Namespace, client: ApiClient) -> Any
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/adapters/{args.runtime}/test-environment",
-        json={"agentRuntimeConfig": _json_object(args.runtime_config)},
+        json={
+            "agentRuntimeConfig": _runtime_config(
+                args.runtime, args.runtime_config, extra_args=_runtime_extra_args(args)
+            )
+        },
     )
 
 
@@ -330,6 +379,23 @@ def get_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}/instructions-bundle")
 
 
+def update_instructions_path(args: argparse.Namespace, client: ApiClient) -> Any:
+    if args.path and args.clear_path:
+        raise ValueError("--path and --clear-path cannot both be set.")
+    payload: dict[str, str | None] = {}
+    if args.path:
+        payload["path"] = args.path
+    if args.clear_path:
+        payload["path"] = None
+    if args.agent_runtime_config_key:
+        payload["agentRuntimeConfigKey"] = args.agent_runtime_config_key
+    if not payload:
+        raise ValueError("At least one instructions path field is required.")
+    return client.request(
+        "PATCH", f"/api/agents/{args.agent_id}/instructions-path", json=payload
+    )
+
+
 def read_instruction_file(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request(
         "GET",
@@ -370,13 +436,13 @@ def update_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> A
     )
 
 
-def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+def _agent_create_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "name": args.name,
         "role": args.role,
         "agentRuntimeType": args.runtime,
         "agentRuntimeConfig": _runtime_config(
-            args.runtime, args.runtime_config, args.model
+            args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
         ),
     }
     if args.icon:
@@ -385,9 +451,27 @@ def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["desiredSkills"] = args.desired_skill
     if args.metadata:
         payload["metadata"] = _json_object(args.metadata)
+    return payload
+
+
+def create_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _agent_create_payload(args)
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/agents",
+        json=payload,
+    )
+
+
+def hire_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _agent_create_payload(args)
+    if args.source_issue_id:
+        payload["sourceIssueId"] = args.source_issue_id
+    if args.source_issue:
+        payload["sourceIssueIds"] = args.source_issue
+    return client.request(
+        "POST",
+        f"/api/orgs/{args.org_id}/agent-hires",
         json=payload,
     )
 
@@ -413,10 +497,16 @@ def update_agent(args: argparse.Namespace, client: ApiClient) -> Any:
         payload["desiredSkills"] = args.desired_skill
     if args.runtime_config is not None:
         payload["agentRuntimeConfig"] = _runtime_config(
-            args.runtime, args.runtime_config, args.model
+            args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
         )
-    elif args.model is not None:
-        payload["agentRuntimeConfig"] = _runtime_config(args.runtime, "{}", args.model)
+    elif (
+        args.model is not None
+        or args.runtime_extra_arg
+        or args.skip_opencode_permissions
+    ):
+        payload["agentRuntimeConfig"] = _runtime_config(
+            args.runtime, "{}", args.model, _runtime_extra_args(args)
+        )
     if args.metadata is not None:
         payload["metadata"] = _json_object(args.metadata)
     if args.replace_agent_runtime_config:
@@ -487,7 +577,7 @@ def bootstrap_ceo(args: argparse.Namespace, client: ApiClient) -> Any:
             "role": "ceo",
             "agentRuntimeType": args.runtime,
             "agentRuntimeConfig": _runtime_config(
-                args.runtime, args.runtime_config, args.model
+                args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
             ),
         },
     )
@@ -503,6 +593,10 @@ def resume_agent(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def terminate_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("POST", f"/api/agents/{args.agent_id}/terminate", json={})
+
+
+def archive_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("POST", f"/api/agents/{args.agent_id}/archive", json={})
 
 
 def invoke_agent(args: argparse.Namespace, client: ApiClient) -> Any:

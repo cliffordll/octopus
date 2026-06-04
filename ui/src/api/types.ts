@@ -54,9 +54,28 @@ export interface IssueListItem {
   goalId: string | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
   originKind: IssueOriginKind;
   originId: string | null;
   updatedAt: string;
+}
+
+export interface StorageHealthConfig {
+  provider?: "local_disk" | "minio" | "s3" | string | null;
+  bucket?: string | null;
+  endpoint?: string | null;
+  pathStyle?: boolean | null;
+  forcePathStyle?: boolean | null;
+}
+
+export interface ServerHealth {
+  status: string;
+  storage?: StorageHealthConfig | null;
+  storageProvider?: string | null;
+  storageBucket?: string | null;
+  storageEndpoint?: string | null;
+  storagePathStyle?: boolean | null;
 }
 
 export interface IssueDetail extends IssueListItem {
@@ -68,8 +87,53 @@ export interface IssueDetail extends IssueListItem {
   requestDepth: number;
   startedAt: string | null;
   completedAt: string | null;
+  cancelledAt?: string | null;
   workProducts?: IssueWorkProduct[];
+  documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
+}
+
+export interface IssueDocumentSummary {
+  id: string;
+  orgId: string;
+  issueId: string;
+  key: string;
+  title: string | null;
+  format: string;
+  latestRevisionId: string | null;
+  latestRevisionNumber: number;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  updatedByAgentId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDocument extends IssueDocumentSummary {
+  body: string;
+}
+
+export interface IssueDocumentRevision {
+  id: string;
+  orgId: string;
+  documentId: string;
+  issueId: string;
+  key: string;
+  revisionNumber: number;
+  body: string;
+  changeSummary: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+}
+
+export interface UpsertIssueDocumentPayload {
+  title?: string | null;
+  format: "markdown";
+  body: string;
+  changeSummary?: string | null;
+  baseRevisionId?: string | null;
 }
 
 export interface IssueComment {
@@ -97,7 +161,7 @@ export interface IssueAttachment {
   originalFilename: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface IssueFilters {
@@ -105,6 +169,7 @@ export interface IssueFilters {
   assigneeAgentId?: string;
   projectId?: string;
   goalId?: string;
+  parentId?: string;
   originKind?: IssueOriginKind;
   originId?: string;
 }
@@ -116,10 +181,21 @@ export interface CreateIssuePayload {
   priority?: IssuePriority;
   projectId?: string | null;
   goalId?: string | null;
+  parentId?: string | null;
   assigneeAgentId?: string | null;
   assigneeUserId?: string | null;
   reviewerAgentId?: string | null;
   reviewerUserId?: string | null;
+  createdByAgentId?: string | null;
+  createdByUserId?: string | null;
+  originKind?: IssueOriginKind;
+  originId?: string | null;
+  requestDepth?: number;
+}
+
+export interface CheckoutIssuePayload {
+  agentId: string;
+  expectedStatuses: IssueStatus[];
 }
 
 export interface UpdateIssuePayload {
@@ -127,6 +203,13 @@ export interface UpdateIssuePayload {
   description?: string | null;
   status?: IssueStatus;
   priority?: IssuePriority;
+  projectId?: string | null;
+  goalId?: string | null;
+  parentId?: string | null;
+  assigneeAgentId?: string | null;
+  assigneeUserId?: string | null;
+  reviewerAgentId?: string | null;
+  reviewerUserId?: string | null;
 }
 
 export type GoalLevel = "organization" | "team" | "agent" | "task";
@@ -209,6 +292,16 @@ export interface ApprovalDetail extends ApprovalListItem {
   decisionNote: string | null;
   decidedByUserId: string | null;
   decidedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ApprovalComment {
+  id: string;
+  approvalId: string;
+  body: string;
+  authorAgentId: string | null;
+  authorUserId: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -326,11 +419,40 @@ export interface OrganizationSkillUpdateStatus {
   hasUpdate: boolean;
 }
 
+export interface OrganizationSkillScanCandidate {
+  sourcePath: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  sourceRef: string;
+  alreadyImported: boolean;
+  skillId: string | null;
+}
+
+export interface OrganizationSkillScanLocalResult {
+  candidates: OrganizationSkillScanCandidate[];
+  imported: OrganizationSkill[];
+}
+
 export interface CreateOrganizationSkillPayload {
   name: string;
   slug?: string | null;
   description?: string | null;
   markdown?: string | null;
+}
+
+export interface ImportOrganizationSkillPayload {
+  sourcePath: string;
+  slug?: string | null;
+  name?: string | null;
+  description?: string | null;
+  overwrite?: boolean;
+}
+
+export interface ScanLocalOrganizationSkillsPayload {
+  rootPath: string;
+  importDiscovered?: boolean;
+  overwrite?: boolean;
 }
 
 export interface UpdateOrganizationSkillFilePayload {
@@ -428,6 +550,11 @@ export interface IssueWorkProduct {
   type: string;
   provider: string;
   externalId: string | null;
+  assetId?: string | null;
+  contentPath?: string | null;
+  contentType?: string | null;
+  byteSize?: number | null;
+  sha256?: string | null;
   title: string;
   url: string | null;
   status: string;
@@ -605,6 +732,16 @@ export interface CreateAgentPayload {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface HireAgentPayload extends CreateAgentPayload {
+  sourceIssueId?: string | null;
+  sourceIssueIds?: string[];
+}
+
+export interface AgentHireResult {
+  agent: Agent;
+  approval: ApprovalDetail | null;
+}
+
 export interface UpdateAgentPayload {
   name?: string;
   title?: string | null;
@@ -622,6 +759,57 @@ export interface UpdateAgentPayload {
   spentMonthlyCents?: number;
   metadata?: Record<string, unknown> | null;
 }
+
+export interface RuntimeProvider {
+  orgId?: string;
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  name?: string | null;
+  protocol?: string | null;
+  npmPackage?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  hasApiKey?: boolean;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RuntimeModel {
+  orgId?: string;
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  modelId: string;
+  displayName?: string | null;
+  metadata?: Record<string, unknown>;
+  enabled?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateRuntimeProviderPayload {
+  runtimeType: AgentRuntimeType;
+  providerId: string;
+  name?: string | null;
+  protocol?: string | null;
+  npmPackage?: string | null;
+  baseUrl?: string | null;
+  apiKey?: string | null;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "runtimeType" | "providerId">>;
+
+export interface CreateRuntimeModelPayload {
+  modelId: string;
+  displayName?: string | null;
+  metadata?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export type UpdateRuntimeModelPayload = Partial<Omit<CreateRuntimeModelPayload, "modelId">>;
 
 export interface AgentRuntimeState {
   agentId: string;
@@ -770,6 +958,18 @@ export interface UpdateAgentInstructionsBundlePayload {
   clearLegacyPromptTemplate?: boolean;
 }
 
+export interface AgentInstructionsPathResult {
+  agentId: string;
+  agentRuntimeType: AgentRuntimeType;
+  agentRuntimeConfigKey: string;
+  path: string | null;
+}
+
+export interface UpdateAgentInstructionsPathPayload {
+  path: string | null;
+  agentRuntimeConfigKey?: string;
+}
+
 export interface UpdateAgentInstructionsFilePayload {
   path: string;
   content: string;
@@ -778,8 +978,14 @@ export interface UpdateAgentInstructionsFilePayload {
 
 export interface HeartbeatRun {
   id: string;
+  runId?: string;
   orgId: string;
   agentId: string;
+  issueId?: string | null;
+  issueIdentifier?: string | null;
+  issueTitle?: string | null;
+  projectId?: string | null;
+  goalId?: string | null;
   invocationSource: string;
   triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
@@ -927,7 +1133,7 @@ export interface ChatAttachment {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface ChatContextLink {

@@ -92,15 +92,30 @@ async def _seed_org_agent(factory: async_sessionmaker) -> tuple[str, str]:
     return org_id, agent_id
 
 
-async def _create_chat(app: FastAPI, org_id: str, agent_id: str) -> dict:
+async def _create_chat(
+    app: FastAPI,
+    org_id: str,
+    agent_id: str,
+    *,
+    issue_creation_mode: str | None = None,
+) -> dict:
+    payload: dict[str, Any] = {"title": "History chat", "preferredAgentId": agent_id}
+    if issue_creation_mode is not None:
+        payload["issueCreationMode"] = issue_creation_mode
     code, body = await _request(
         app,
         "POST",
         f"/api/orgs/{org_id}/chats",
-        json={"title": "History chat", "preferredAgentId": agent_id},
+        json=payload,
     )
     assert code == 201
     return body
+
+
+def _prompt_envelope(prompt: str) -> dict[str, Any]:
+    marker = "Conversation input:"
+    assert marker in prompt
+    return json.loads(prompt.split(marker, 1)[1].strip())
 
 
 async def test_first_message_prompt_contains_only_user_turn(
@@ -123,10 +138,15 @@ async def test_first_message_prompt_contains_only_user_turn(
     )
     assert code == 201
     assert len(adapter.captured_prompts) == 1
-    envelope = json.loads(adapter.captured_prompts[0])
+    prompt = adapter.captured_prompts[0]
+    assert "replying inside Octopus's chat scene" in prompt
+    assert "Reply to the latest user message" in prompt
+    assert "Do not summarize or analyze the JSON envelope" in prompt
+    envelope = _prompt_envelope(prompt)
     assert envelope["conversation"]["id"] == chat["id"]
     assert envelope["recentMessages"][-1]["role"] == "user"
     assert envelope["recentMessages"][-1]["body"] == "first user turn"
+    assert envelope["latestUserMessage"]["body"] == "first user turn"
     assert len(envelope["recentMessages"]) == 1
 
 
@@ -158,13 +178,44 @@ async def test_second_message_prompt_includes_prior_turn(
     )
     assert code == 201
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     bodies = [(entry["role"], entry["body"]) for entry in envelope["recentMessages"]]
     assert ("user", "first user turn") in bodies
     assert ("assistant", "assistant reply 1") in bodies
     assert ("user", "second user turn") in bodies
     # latest turn must be last so the LLM treats it as the new prompt
     assert bodies[-1] == ("user", "second user turn")
+
+
+async def test_auto_create_prompt_forbids_runtime_task_execution(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = CapturingChatAdapter([{"summary": "ack"}])
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(
+        application, org_id, agent_id, issue_creation_mode="auto_create"
+    )
+
+    code, _ = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "请帮我创建一个任务输出 hello world"},
+    )
+
+    assert code == 201
+    prompt = adapter.captured_prompts[-1]
+    envelope = _prompt_envelope(prompt)
+    assert envelope["conversation"]["issueCreationMode"] == "auto_create"
+    assert "auto_create is a server-side issue conversion mode" in prompt
+    assert "not permission for you to execute the requested task" in prompt
+    assert "Do not create files" in prompt
+    assert "Do not run commands" in prompt
 
 
 async def test_prompt_envelope_caps_recent_messages_at_twelve(
@@ -188,7 +239,7 @@ async def test_prompt_envelope_caps_recent_messages_at_twelve(
             json={"body": f"msg {index}"},
         )
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     assert len(envelope["recentMessages"]) == 12
     # last entry must still be the freshest user message
     assert envelope["recentMessages"][-1]["body"] == "msg 14"
@@ -240,7 +291,7 @@ async def test_prompt_context_links_include_hydrated_entity_fields(
         json={"body": "use the linked issue"},
     )
 
-    envelope = json.loads(adapter.captured_prompts[-1])
+    envelope = _prompt_envelope(adapter.captured_prompts[-1])
     links = envelope["contextLinks"]
     assert len(links) == 1
     link = links[0]

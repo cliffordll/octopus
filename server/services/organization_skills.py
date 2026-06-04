@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -31,9 +32,14 @@ from packages.shared.types.organization_skill import (
     OrganizationSkillDetail,
     OrganizationSkillFileDetail,
     OrganizationSkillFileInventoryEntry,
+    OrganizationSkillImportPayload,
     OrganizationSkillListItem,
+    OrganizationSkillScanCandidate,
+    OrganizationSkillScanLocalPayload,
+    OrganizationSkillScanLocalResult,
     OrganizationSkillUpdateStatus,
 )
+from .workspace_paths import organization_workspace_root
 
 _DEFAULT_MARKDOWN = "Use this skill when it is relevant to the current task."
 _SKILL_FILE = "SKILL.md"
@@ -193,6 +199,26 @@ class OrganizationSkillService:
         row = await self._get_row(org_id, skill_id)
         if row is None:
             return None
+        if _skill_source_kind(row) == "local_import":
+            source_dir = _local_import_source_dir(row)
+            if source_dir is None:
+                return {
+                    "supported": False,
+                    "reason": "Local import source directory is not available.",
+                    "trackingRef": row.source_ref,
+                    "currentRef": _skill_tree_hash(_skill_root(row)),
+                    "latestRef": None,
+                    "hasUpdate": False,
+                }
+            latest_ref = _skill_tree_hash(source_dir)
+            return {
+                "supported": True,
+                "reason": None,
+                "trackingRef": row.source_ref,
+                "currentRef": _skill_tree_hash(_skill_root(row)),
+                "latestRef": latest_ref,
+                "hasUpdate": latest_ref != row.source_ref,
+            }
         return {
             "supported": False,
             "reason": "Local organization skills do not support upstream update checks.",
@@ -254,6 +280,166 @@ class OrganizationSkillService:
             details={"slug": row.slug, "name": row.name},
         )
         return self._to_skill(row)
+
+    async def import_local_skill(
+        self,
+        org_id: str,
+        payload: OrganizationSkillImportPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> OrganizationSkillData:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            raise ValueError("Organization not found")
+        org_id = resolved_org_id
+        source_dir = _resolve_local_skill_source(payload["sourcePath"])
+        markdown = _read_skill_markdown(source_dir)
+        if markdown is None:
+            raise ValueError("Local skill source must contain SKILL.md")
+        slug = str(payload.get("slug") or _slugify(source_dir.name))
+        existing = await get_organization_skill_by_key(self._session, org_id, slug)
+        overwrite = bool(payload.get("overwrite", False))
+        if existing is not None and not overwrite:
+            raise OrganizationSkillConflictError("Organization skill already exists")
+        name = payload.get("name") or _skill_name_from_markdown(markdown, slug)
+        description = payload.get("description")
+        if description is None:
+            description = _skill_description_from_markdown(markdown)
+        installed_dir = _org_skill_dir(org_id, slug)
+        _replace_skill_tree(source_dir, installed_dir)
+        source_ref = _skill_tree_hash(source_dir)
+        fields = {
+            "key": slug,
+            "slug": slug,
+            "name": name,
+            "description": description,
+            "markdown": markdown,
+            "source_type": "local_path",
+            "source_locator": str(source_dir),
+            "source_ref": source_ref,
+            "trust_level": "markdown_only",
+            "compatibility": "compatible",
+            "file_inventory": _scan_skill_inventory(installed_dir),
+            "metadata_json": {"sourceKind": "local_import"},
+        }
+        if existing is None:
+            row = await create_organization_skill(
+                self._session,
+                {"id": str(uuid.uuid4()), "org_id": org_id, **fields},
+            )
+        else:
+            row = await update_organization_skill(
+                self._session, org_id, existing.id, fields
+            )
+            assert row is not None
+        await insert_activity_log(
+            self._session,
+            org_id=org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="organization.skill_imported",
+            entity_type="organization_skill",
+            entity_id=row.id,
+            details={"slug": row.slug, "sourcePath": str(source_dir)},
+        )
+        return self._to_skill(row)
+
+    async def scan_local_skills(
+        self,
+        org_id: str,
+        payload: OrganizationSkillScanLocalPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> OrganizationSkillScanLocalResult:
+        resolved_org_id = await self._resolve_org_id(org_id)
+        if resolved_org_id is None:
+            raise ValueError("Organization not found")
+        org_id = resolved_org_id
+        root = Path(payload["rootPath"]).expanduser().resolve()
+        if not root.is_dir():
+            raise ValueError("Local skill scan root must be a directory")
+        import_discovered = bool(payload.get("importDiscovered", False))
+        overwrite = bool(payload.get("overwrite", False))
+        candidates: list[OrganizationSkillScanCandidate] = []
+        imported: list[OrganizationSkillData] = []
+        for source_dir in _scan_local_skill_dirs(root):
+            markdown = _read_skill_markdown(source_dir)
+            if markdown is None:
+                continue
+            slug = _slugify(source_dir.name)
+            existing = await get_organization_skill_by_key(self._session, org_id, slug)
+            candidate: OrganizationSkillScanCandidate = {
+                "sourcePath": str(source_dir),
+                "slug": slug,
+                "name": _skill_name_from_markdown(markdown, slug),
+                "description": _skill_description_from_markdown(markdown),
+                "sourceRef": _skill_tree_hash(source_dir),
+                "alreadyImported": existing is not None,
+                "skillId": existing.id if existing is not None else None,
+            }
+            candidates.append(candidate)
+            if import_discovered and (existing is None or overwrite):
+                imported.append(
+                    await self.import_local_skill(
+                        org_id,
+                        {
+                            "sourcePath": str(source_dir),
+                            "overwrite": overwrite,
+                        },
+                        actor_type=actor_type,
+                        actor_id=actor_id,
+                    )
+                )
+        return {"candidates": candidates, "imported": imported}
+
+    async def install_update(
+        self,
+        org_id: str,
+        skill_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> OrganizationSkillData | None:
+        row = await self._get_row(org_id, skill_id)
+        if row is None:
+            return None
+        if _skill_source_kind(row) != "local_import":
+            raise ValueError("Only local imported organization skills support updates")
+        source_dir = _local_import_source_dir(row)
+        if source_dir is None:
+            raise ValueError("Local import source directory is not available")
+        markdown = _read_skill_markdown(source_dir)
+        if markdown is None:
+            raise ValueError("Local skill source must contain SKILL.md")
+        installed_dir = _org_skill_dir(row.org_id, row.slug)
+        _replace_skill_tree(source_dir, installed_dir)
+        source_ref = _skill_tree_hash(source_dir)
+        updated = await update_organization_skill(
+            self._session,
+            row.org_id,
+            row.id,
+            {
+                "name": _skill_name_from_markdown(markdown, row.slug),
+                "description": _skill_description_from_markdown(markdown),
+                "markdown": markdown,
+                "source_ref": source_ref,
+                "file_inventory": _scan_skill_inventory(installed_dir),
+            },
+        )
+        assert updated is not None
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="organization.skill_update_installed",
+            entity_type="organization_skill",
+            entity_id=row.id,
+            details={"slug": row.slug, "sourcePath": str(source_dir)},
+        )
+        return self._to_skill(updated)
 
     async def read_file(
         self, org_id: str, skill_id: str, relative_path: str
@@ -405,9 +591,7 @@ class OrganizationSkillConflictError(ValueError):
 
 
 def organization_skills_root(org_id: str) -> Path:
-    return (
-        Path.cwd() / ".octopus" / "workspaces" / f"org_{org_id}" / "skills"
-    ).resolve()
+    return (organization_workspace_root(org_id) / "skills").resolve()
 
 
 def _org_skill_dir(org_id: str, slug: str) -> Path:
@@ -583,11 +767,76 @@ def _resolve_skill_file(row: OrganizationSkill, relative_path: str) -> Path:
 
 
 def _skill_root(row: OrganizationSkill) -> Path:
+    if _skill_source_kind(row) == "local_import":
+        return _org_skill_dir(row.org_id, row.slug)
     if row.source_locator:
         path = Path(row.source_locator)
         if path.exists():
             return path.resolve()
     return _org_skill_dir(row.org_id, row.slug)
+
+
+def _local_import_source_dir(row: OrganizationSkill) -> Path | None:
+    if not row.source_locator:
+        return None
+    source_dir = Path(row.source_locator).expanduser().resolve()
+    if not source_dir.is_dir() or not source_dir.joinpath(_SKILL_FILE).is_file():
+        return None
+    return source_dir
+
+
+def _resolve_local_skill_source(source_path: str) -> Path:
+    source_dir = Path(source_path).expanduser().resolve()
+    if not source_dir.is_dir():
+        raise ValueError("Local skill source must be a directory")
+    if not source_dir.joinpath(_SKILL_FILE).is_file():
+        raise ValueError("Local skill source must contain SKILL.md")
+    return source_dir
+
+
+def _scan_local_skill_dirs(root: Path) -> list[Path]:
+    candidates: dict[str, Path] = {}
+    if root.joinpath(_SKILL_FILE).is_file():
+        candidates[str(root.resolve())] = root.resolve()
+    for skill_file in root.rglob(_SKILL_FILE):
+        source_dir = skill_file.parent.resolve()
+        if _skip_inventory_path(source_dir.relative_to(root.resolve())):
+            continue
+        candidates[str(source_dir)] = source_dir
+    return sorted(candidates.values(), key=lambda path: path.as_posix())
+
+
+def _replace_skill_tree(source_dir: Path, target_dir: Path) -> None:
+    root = target_dir.parent.resolve()
+    target = target_dir.resolve()
+    if not _is_relative_to(target, root):
+        raise OrganizationSkillPathError("Invalid organization skill target path")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    for source_path in source_dir.rglob("*"):
+        if not source_path.is_file():
+            continue
+        relative = source_path.relative_to(source_dir)
+        if _skip_inventory_path(relative):
+            continue
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination)
+
+
+def _skill_tree_hash(skill_dir: Path) -> str:
+    digest = hashlib.sha256()
+    for entry in _scan_skill_inventory(skill_dir):
+        path = skill_dir / entry["path"]
+        digest.update(entry["path"].encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _skill_source_kind(row: OrganizationSkill) -> str | None:

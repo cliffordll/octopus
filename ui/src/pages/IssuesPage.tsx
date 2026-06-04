@@ -8,6 +8,7 @@ import type { IssuePriority, IssueStatus } from "../api/types";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
+import { priorityLabel, statusLabel } from "../utils/display";
 
 const STATUSES: Array<IssueStatus | ""> = [
   "",
@@ -196,19 +197,19 @@ export function IssuesPage() {
                 <label>
                   代办
                   <select value={newIssueStatus} onChange={(event) => setNewIssueStatus(event.target.value as IssueStatus)}>
-                    <option value="todo">todo</option>
-                    <option value="in_progress">in_progress</option>
-                    <option value="in_review">in_review</option>
-                    <option value="blocked">blocked</option>
+                    <option value="todo">{statusLabel("todo")}</option>
+                    <option value="in_progress">{statusLabel("in_progress")}</option>
+                    <option value="in_review">{statusLabel("in_review")}</option>
+                    <option value="blocked">{statusLabel("blocked")}</option>
                   </select>
                 </label>
                 <label>
                   优先级
                   <select value={priority} onChange={(event) => setPriority(event.target.value as IssuePriority)}>
-                    <option value="critical">critical</option>
-                    <option value="high">high</option>
-                    <option value="medium">medium</option>
-                    <option value="low">low</option>
+                    <option value="critical">{priorityLabel("critical")}</option>
+                    <option value="high">{priorityLabel("high")}</option>
+                    <option value="medium">{priorityLabel("medium")}</option>
+                    <option value="low">{priorityLabel("low")}</option>
                   </select>
                 </label>
               </div>

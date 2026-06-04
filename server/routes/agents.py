@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from fastapi import (
@@ -11,9 +12,10 @@ from fastapi import (
     Request,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from packages.shared.api_paths.agents import (
+    AGENT_ARCHIVE_PATH,
     AGENT_CONFIGURATION_PATH,
     AGENT_CONFIG_REVISIONS_PATH,
     AGENT_CONFIG_REVISION_PATH,
@@ -34,6 +36,7 @@ from packages.shared.api_paths.agents import (
     AGENT_TASK_SESSIONS_PATH,
     AGENT_TERMINATE_PATH,
     ORG_AGENT_CONFIGURATIONS_PATH,
+    ORG_AGENT_HIRES_PATH,
     ORG_AGENT_LIST_PATH,
     ORG_AGENT_NAME_SUGGESTION_PATH,
     ORG_ADAPTER_METADATA_PATH,
@@ -55,6 +58,7 @@ from packages.shared.api_paths.heartbeat import (
     HEARTBEAT_RUN_LOG_PATH,
     HEARTBEAT_RUN_PATH,
     HEARTBEAT_RUN_RETRY_PATH,
+    HEARTBEAT_RUN_STREAM_PATH,
     HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH,
     ORG_HEARTBEAT_RUNS_PATH,
 )
@@ -63,6 +67,7 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentConfigRevision,
     AgentDetail,
+    AgentHireResult,
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
     AgentInstructionsPathResult,
@@ -79,6 +84,7 @@ from packages.shared.validators.agent import (
     validate_agent_skills_enable,
     validate_agent_skills_sync,
     validate_create_agent,
+    validate_hire_agent,
     validate_reset_agent_session,
     validate_test_agent_runtime_environment,
     validate_update_agent,
@@ -159,6 +165,30 @@ async def create_agent_route(
         ) from exc
 
 
+@router.post(ORG_AGENT_HIRES_PATH, status_code=status.HTTP_201_CREATED)
+async def hire_agent_route(
+    request: Request,
+    orgId: str,
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_organization_access),
+    service: AgentService = Depends(get_agent_service),
+) -> AgentHireResult:
+    try:
+        payload = validate_hire_agent(body)
+        actor = require_actor_identity(request)
+        return await service.hire_agent(
+            orgId, payload, actor_type=actor.actor_type, actor_id=actor.actor_id
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+
 @router.get(ORG_AGENT_NAME_SUGGESTION_PATH)
 async def suggest_agent_name_route(
     orgId: str,
@@ -223,6 +253,7 @@ async def _lifecycle_action(
     await _get_agent_or_404(agent_id, request=request, service=service)
     actor = require_actor_identity(request)
     method = {
+        "archive": service.terminate_agent,
         "pause": service.pause_agent,
         "resume": service.resume_agent,
         "terminate": service.terminate_agent,
@@ -240,6 +271,18 @@ async def _lifecycle_action(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return agent
+
+
+@router.post(AGENT_ARCHIVE_PATH)
+async def archive_agent_route(
+    id: str,
+    request: Request,
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> Agent:
+    return await _lifecycle_action(
+        id, action="archive", request=request, service=service
+    )
 
 
 @router.post(AGENT_PAUSE_PATH)
@@ -923,6 +966,78 @@ async def get_heartbeat_run_log_route(
     )
 
 
+@router.get(HEARTBEAT_RUN_STREAM_PATH)
+async def stream_heartbeat_run_route(
+    runId: str,
+    request: Request,
+    afterSeq: int = 0,
+    offset: int = 0,
+    limitBytes: int = 65_536,
+    pollMs: int = 1000,
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> StreamingResponse:
+    run = await heartbeat.get(runId)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
+        )
+    assert_organization_access(request, run["orgId"])
+
+    session_factory = request.app.state.session_factory
+    initial_after_seq = max(0, afterSeq)
+    initial_offset = max(0, offset)
+    limit_bytes = max(1024, min(limitBytes, 1_048_576))
+    poll_seconds = max(0.1, min(pollMs, 10_000) / 1000)
+
+    async def event_stream():
+        next_seq = initial_after_seq
+        next_offset = initial_offset
+        while True:
+            if await request.is_disconnected():
+                break
+            async with session_factory() as session:
+                service = HeartbeatService(session)
+                current = await service.get(runId)
+                if current is None:
+                    yield _stream_line(
+                        {"type": "error", "error": "Heartbeat run not found"}
+                    )
+                    break
+                yield _stream_line({"type": "run", "run": current})
+                events = await service.list_events(runId, after_seq=next_seq, limit=200)
+                for event in events:
+                    next_seq = max(next_seq, event["seq"])
+                    yield _stream_line({"type": "event", "event": event})
+                log = await service.read_log(
+                    runId, offset=next_offset, limit_bytes=limit_bytes
+                )
+                if log is not None and log["content"]:
+                    next_offset = log.get("nextOffset", log["endOffset"])
+                    yield _stream_line(
+                        {
+                            "type": "log",
+                            "content": log["content"],
+                            "nextOffset": next_offset,
+                            "eof": log["eof"],
+                        }
+                    )
+                if current["status"] in {
+                    "succeeded",
+                    "failed",
+                    "cancelled",
+                    "timed_out",
+                }:
+                    yield _stream_line({"type": "final", "run": current})
+                    break
+            await asyncio.sleep(poll_seconds)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @router.get(HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH)
 async def list_heartbeat_run_workspace_operations_route(
     runId: str,
@@ -1001,3 +1116,7 @@ async def retry_heartbeat_run_route(
     )
     _schedule_dispatch(request, run["agentId"])
     return run
+
+
+def _stream_line(event: dict[str, Any]) -> str:
+    return json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"

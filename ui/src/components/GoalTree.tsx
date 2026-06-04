@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Goal } from "../api/types";
+import { statusLabel } from "../utils/display";
 import { Badge } from "./Badge";
 
 interface GoalTreeProps {
@@ -41,7 +42,7 @@ function GoalNode({
         )}
         <span className="goal-tree-level">{goal.level}</span>
         <strong>{goal.title}</strong>
-        <Badge>{goal.status}</Badge>
+        <Badge>{statusLabel(goal.status)}</Badge>
       </Link>
       {hasChildren && expanded && children.map((child) => (
         <GoalNode depth={depth + 1} goal={child} goalLink={goalLink} goals={goals} key={child.id} />

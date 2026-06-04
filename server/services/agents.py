@@ -17,6 +17,7 @@ from packages.database.queries.agents import (
     list_org_agents,
     update_agent,
 )
+from packages.database.queries.organizations import get_organization_by_id
 from packages.database.queries.agent_skills import (
     add_enabled_skill_keys,
     list_enabled_skill_keys,
@@ -56,15 +57,18 @@ from packages.shared.types.agent import (
     AgentConfigRevision,
     AgentConfiguration,
     AgentDetail,
+    AgentHireResult,
     AgentRuntimeState,
     AgentSkillAnalytics,
     AgentSkillSnapshot,
     AgentTaskSession,
     CreateAgentPayload,
+    HireAgentPayload,
     ResetAgentSessionPayload,
     ResetAgentSessionResult,
     UpdateAgentPayload,
 )
+from packages.shared.types.approval import CreateApprovalPayload
 from packages.runtimes import get_runtime_adapter
 
 from .agent_instructions import (
@@ -73,6 +77,7 @@ from .agent_instructions import (
 )
 from .organization_skills import OrganizationSkillService, organization_skills_root
 from .agent_names import pick_unique_agent_name
+from .workspace_paths import agent_workspace_root
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_KEY_PATTERN = re.compile(
@@ -109,6 +114,17 @@ def _derive_url_key(name: str | None, fallback: str | None = None) -> str:
     return _normalize_url_key(name) or _normalize_url_key(fallback) or "agent"
 
 
+def _source_issue_ids(payload: HireAgentPayload) -> list[str]:
+    issue_ids: list[str] = []
+    source_issue_id = payload.get("sourceIssueId")
+    if isinstance(source_issue_id, str) and source_issue_id.strip():
+        issue_ids.append(source_issue_id.strip())
+    for issue_id in payload.get("sourceIssueIds", []):
+        if issue_id.strip():
+            issue_ids.append(issue_id.strip())
+    return list(dict.fromkeys(issue_ids))
+
+
 def _workspace_key(agent_id: str, name: str) -> str:
     normalized = re.sub(r"[^a-f0-9]", "", agent_id.lower())
     short_id = (
@@ -121,28 +137,14 @@ def _workspace_key(agent_id: str, name: str) -> str:
 
 def _agent_home_root(row: AgentRow) -> Path:
     workspace_key = _derive_url_key(row.workspace_key, row.id)
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{row.org_id}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
     workspace_key = _derive_url_key(
         cast(str | None, values.get("workspace_key")), cast(str, values["id"])
     )
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{values['org_id']}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(cast(str, values["org_id"]), workspace_key)
 
 
 def _agent_skills_root(row: AgentRow) -> Path:
@@ -324,6 +326,97 @@ class AgentService:
         actor_type: str,
         actor_id: str,
     ) -> Agent:
+        return await self._create_agent(
+            org_id,
+            payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            status=DEFAULT_AGENT_STATUS,
+            activity_action="agent.created",
+        )
+
+    async def hire_agent(
+        self,
+        org_id: str,
+        payload: HireAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> AgentHireResult:
+        organization = await get_organization_by_id(self._session, org_id)
+        if organization is None:
+            raise ValueError("Organization not found")
+        await self._validate_hire_actor(
+            org_id, actor_type=actor_type, actor_id=actor_id
+        )
+        requires_approval = organization.require_board_approval_for_new_agents
+        agent_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"sourceIssueId", "sourceIssueIds"}
+        }
+        agent = await self._create_agent(
+            org_id,
+            cast(CreateAgentPayload, agent_payload),
+            actor_type=actor_type,
+            actor_id=actor_id,
+            status="pending_approval" if requires_approval else DEFAULT_AGENT_STATUS,
+            activity_action="agent.hire_requested"
+            if requires_approval
+            else "agent.hired",
+        )
+        if not requires_approval:
+            return {"agent": agent, "approval": None}
+
+        issue_ids = _source_issue_ids(payload)
+        from .approvals import ApprovalService
+
+        approval_payload: CreateApprovalPayload = {
+            "type": "hire_agent",
+            "payload": {
+                "agentId": agent["id"],
+                "hire": dict(payload),
+                "sourceIssueIds": issue_ids,
+            },
+        }
+        if issue_ids:
+            approval_payload["issueIds"] = issue_ids
+        approval = await ApprovalService(self._session).create_approval(
+            org_id,
+            approval_payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        return {"agent": agent, "approval": approval}
+
+    async def _validate_hire_actor(
+        self,
+        org_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        if actor_type == "board":
+            return
+        if actor_type != "agent":
+            raise PermissionError("Only board or agent actors can hire agents")
+        actor_agent = await get_agent_by_id(self._session, actor_id)
+        if actor_agent is None or actor_agent.org_id != org_id:
+            raise PermissionError("Agent cannot hire agents for another organization")
+        permissions = _normalized_permissions(actor_agent.permissions, actor_agent.role)
+        if not permissions["canCreateAgents"]:
+            raise PermissionError("Agent does not have permission to create agents")
+
+    async def _create_agent(
+        self,
+        org_id: str,
+        payload: CreateAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        status: AgentStatus,
+        activity_action: str,
+    ) -> Agent:
         manager_id = payload.get("reportsTo")
         if manager_id is not None:
             await self._validate_manager(org_id, manager_id)
@@ -349,7 +442,7 @@ class AgentService:
             "title": payload.get("title"),
             "icon": payload.get("icon")
             or f"{AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX}{uuid.uuid4()}",
-            "status": DEFAULT_AGENT_STATUS,
+            "status": status,
             "reports_to": payload.get("reportsTo"),
             "capabilities": payload.get("capabilities"),
             "agent_runtime_type": agent_runtime_type,
@@ -385,7 +478,7 @@ class AgentService:
             org_id=org_id,
             actor_type=actor_type,
             actor_id=actor_id,
-            action="agent.created",
+            action=activity_action,
             entity_type="agent",
             entity_id=row.id,
             details={"name": row.name, "role": row.role},

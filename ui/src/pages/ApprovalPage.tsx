@@ -5,6 +5,7 @@ import { approvalsApi } from "../api/approvals";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatDateTime, statusLabel } from "../utils/display";
 
 function formatPayload(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
@@ -23,11 +24,23 @@ export function ApprovalPage() {
   const [decisionNote, setDecisionNote] = useState("");
   const [decisionPayload, setDecisionPayload] = useState("{}");
   const [resubmitPayload, setResubmitPayload] = useState("{}");
+  const [commentBody, setCommentBody] = useState("");
+  const [commentNotice, setCommentNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const approval = useQuery({
     queryKey: ["approval", approvalId],
     queryFn: () => approvalsApi.get(approvalId),
+  });
+  const linkedIssues = useQuery({
+    queryKey: ["approval-issues", approvalId],
+    queryFn: () => approvalsApi.listIssues(approvalId),
+    enabled: Boolean(approvalId),
+  });
+  const comments = useQuery({
+    queryKey: ["approval-comments", approvalId],
+    queryFn: () => approvalsApi.listComments(approvalId),
+    enabled: Boolean(approvalId),
   });
   const act = useMutation({
     mutationFn: (action: "approve" | "reject" | "requestRevision" | "resubmit") => {
@@ -43,8 +56,24 @@ export function ApprovalPage() {
       });
     },
     onMutate: () => setFormError(null),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] });
+      void queryClient.invalidateQueries({ queryKey: ["approval-issues", approvalId] });
+      void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue"] });
+    },
     onError: (error) => setFormError(error instanceof Error ? error.message : "审批操作失败"),
+  });
+  const addComment = useMutation({
+    mutationFn: () => approvalsApi.addComment(approvalId, { body: commentBody.trim() }),
+    onSuccess: () => {
+      setCommentBody("");
+      setCommentNotice("评论已添加。评论只记录沟通内容，不会改变审批状态。");
+      void queryClient.invalidateQueries({ queryKey: ["approval-comments", approvalId] });
+    },
+    onMutate: () => setCommentNotice(null),
   });
   function runAction(action: "approve" | "reject" | "requestRevision" | "resubmit") {
     setFormError(null);
@@ -71,7 +100,7 @@ export function ApprovalPage() {
                 <p className="eyebrow">审批对象</p>
                 <h2>{approval.data.type}</h2>
               </div>
-              <Badge>{approval.data.status}</Badge>
+              <Badge>{statusLabel(approval.data.status)}</Badge>
             </div>
             <dl className="detail-grid">
               <div>
@@ -80,7 +109,7 @@ export function ApprovalPage() {
               </div>
               <div>
                 <dt>发起时间</dt>
-                <dd>{approval.data.createdAt || "未知"}</dd>
+                <dd>{formatDateTime(approval.data.createdAt)}</dd>
               </div>
               <div>
                 <dt>发起智能体</dt>
@@ -99,6 +128,47 @@ export function ApprovalPage() {
             )}
             <h3>完整请求</h3>
             <pre>{JSON.stringify(approval.data.payload, null, 2)}</pre>
+            <h3>关联任务</h3>
+            {linkedIssues.error && <ErrorNotice error={linkedIssues.error} />}
+            {linkedIssues.isLoading && <p className="muted">加载关联任务中...</p>}
+            {!linkedIssues.isLoading && (linkedIssues.data?.length ?? 0) === 0 && <p className="muted">暂无关联任务。</p>}
+            {linkedIssues.data?.map((issue) => (
+              <Link className="approval-linked-issue" key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
+                <span>{issue.identifier ?? issue.id.slice(0, 8)}</span>
+                <strong>{issue.title}</strong>
+                <Badge>{statusLabel(issue.status)}</Badge>
+              </Link>
+            ))}
+            <h3>评论</h3>
+            <p className="muted approval-comment-hint">
+              评论不会改变审批状态；如需处理审批，请使用右侧同意、拒绝或请求修改。
+            </p>
+            {comments.error && <ErrorNotice error={comments.error} />}
+            {comments.isLoading && <p className="muted">加载评论中...</p>}
+            {!comments.isLoading && (comments.data?.length ?? 0) === 0 && <p className="muted">暂无评论。</p>}
+            {comments.data?.map((comment) => (
+              <article className="approval-comment" key={comment.id}>
+                <p>{comment.body}</p>
+                <small className="muted">{comment.authorAgentId ?? comment.authorUserId ?? "未知"} · {formatDateTime(comment.createdAt)}</small>
+              </article>
+            ))}
+            <form
+              className="approval-comment-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (commentBody.trim()) addComment.mutate();
+              }}
+            >
+              <textarea
+                aria-label="审批评论"
+                placeholder="添加审批评论"
+                value={commentBody}
+                onChange={(event) => setCommentBody(event.target.value)}
+              />
+              <button disabled={addComment.isPending || !commentBody.trim()} type="submit">添加评论</button>
+            </form>
+            {commentNotice && <p className="success-notice">{commentNotice}</p>}
+            {addComment.error && <ErrorNotice error={addComment.error} />}
           </article>
           <aside className="panel approval-decision-panel">
             <h2>审批决策</h2>
@@ -120,7 +190,7 @@ export function ApprovalPage() {
                     onChange={(event) => setDecisionPayload(event.target.value)}
                   />
                 </label>
-                <div className="actions">
+                <div className="approval-actions">
                   <button disabled={act.isPending} onClick={() => runAction("approve")} type="button">同意</button>
                   <button className="danger" disabled={act.isPending} onClick={() => runAction("reject")} type="button">拒绝</button>
                   <button className="secondary" disabled={act.isPending} onClick={() => runAction("requestRevision")} type="button">
@@ -129,7 +199,7 @@ export function ApprovalPage() {
                 </div>
               </>
             ) : (
-              <p className="muted">该审批已处理，当前状态为 {approval.data.status}。</p>
+              <p className="muted">该审批已处理，当前状态为 {statusLabel(approval.data.status)}。</p>
             )}
             {approval.data.status === "revision_requested" && (
               <div className="approval-resubmit-form">

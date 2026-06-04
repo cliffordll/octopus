@@ -4,13 +4,20 @@ import { Link, useNavigate } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatMoneyCents, statusLabel } from "../utils/display";
+
+function organizationBudgetCents(organization: unknown): number | undefined {
+  if (!organization || typeof organization !== "object" || !("budgetMonthlyCents" in organization)) return undefined;
+  const value = organization.budgetMonthlyCents;
+  return typeof value === "number" ? value : undefined;
+}
 
 export function OrganizationsPage() {
   const [name, setName] = useState("");
-  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
+  const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState("");
   const [brandColor, setBrandColor] = useState("");
   const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
-  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("disabled");
+  const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("manual_approval");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const organizations = useQuery({
@@ -21,10 +28,10 @@ export function OrganizationsPage() {
     mutationFn: organizationsApi.create,
     onSuccess: (organization) => {
       setName("");
-      setBudgetMonthlyCents("");
+      setBudgetMonthlyDollars("");
       setBrandColor("");
       setRequireBoardApprovalForNewAgents(false);
-      setDefaultChatIssueCreationMode("disabled");
+      setDefaultChatIssueCreationMode("manual_approval");
       void queryClient.invalidateQueries({ queryKey: ["organizations"] });
       navigate(`/orgs/${organization.id}/agents/new`);
     },
@@ -35,7 +42,7 @@ export function OrganizationsPage() {
     if (value) {
       create.mutate({
         name: value,
-        ...(budgetMonthlyCents.trim() ? { budgetMonthlyCents: Number(budgetMonthlyCents) } : {}),
+        ...(budgetMonthlyDollars.trim() ? { budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars) * 100) } : {}),
         ...(brandColor.trim() ? { brandColor: brandColor.trim() } : {}),
         requireBoardApprovalForNewAgents,
         defaultChatIssueCreationMode,
@@ -58,8 +65,13 @@ export function OrganizationsPage() {
           <div className="list">
             {organizations.data?.map((organization) => (
               <article className="row" key={organization.id}>
-                <Link to={`/orgs/${organization.id}/issues`}>{organization.name}</Link>
-                <Badge>{organization.status}</Badge>
+                <div>
+                  <Link to={`/orgs/${organization.id}/issues`}>{organization.name}</Link>
+                  <p className="muted">
+                    {organization.urlKey} · 预算 {formatMoneyCents(organizationBudgetCents(organization))}
+                  </p>
+                </div>
+                <Badge>{statusLabel(organization.status)}</Badge>
               </article>
             ))}
           </div>
@@ -71,12 +83,13 @@ export function OrganizationsPage() {
             <input value={name} onChange={(event) => setName(event.target.value)} required />
           </label>
           <label>
-            月度预算（cents）
+            月度预算（美元）
             <input
               min="0"
+              step="0.01"
               type="number"
-              value={budgetMonthlyCents}
-              onChange={(event) => setBudgetMonthlyCents(event.target.value)}
+              value={budgetMonthlyDollars}
+              onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
             />
           </label>
           <label>
@@ -85,11 +98,12 @@ export function OrganizationsPage() {
           </label>
           <label className="checkbox-row">
             <input
+              aria-label="新建智能体需要审批"
               checked={requireBoardApprovalForNewAgents}
               onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
               type="checkbox"
             />
-            新建智能体需要审批
+            <span>新建智能体需要审批</span>
           </label>
           <label>
             默认聊天任务创建模式
@@ -97,9 +111,8 @@ export function OrganizationsPage() {
               value={defaultChatIssueCreationMode}
               onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
             >
-              <option value="disabled">disabled</option>
-              <option value="manual">manual</option>
-              <option value="automatic">automatic</option>
+              <option value="manual_approval">手动确认</option>
+              <option value="auto_create">自动创建</option>
             </select>
           </label>
           {create.error && <ErrorNotice error={create.error} />}

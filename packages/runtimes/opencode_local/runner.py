@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
 from ..environment import resolve_runtime_executable
@@ -52,6 +53,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         context=context,
         env=env,
     )
+    _materialize_runtime_provider_config(home, context.config)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="opencode_local",
@@ -265,15 +267,26 @@ async def _read_stdout(
 ) -> str:
     if process.stdout is None:
         return ""
-    chunks: list[str] = []
+    chunks: list[bytes] = []
+    line_buffer = bytearray()
     while True:
-        line = await process.stdout.readline()
-        if not line:
+        chunk = await process.stdout.read(65_536)
+        if not chunk:
             break
-        text = line.decode(errors="replace")
-        chunks.append(text)
-        await _emit_opencode_stream_event(context, text)
-    return "".join(chunks)
+        chunks.append(chunk)
+        line_buffer.extend(chunk)
+        while True:
+            newline = line_buffer.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(line_buffer[: newline + 1])
+            del line_buffer[: newline + 1]
+            await _emit_opencode_stream_event(context, line.decode(errors="replace"))
+    if line_buffer:
+        await _emit_opencode_stream_event(
+            context, bytes(line_buffer).decode(errors="replace")
+        )
+    return b"".join(chunks).decode(errors="replace")
 
 
 async def _read_stderr(process: asyncio.subprocess.Process) -> str:
@@ -323,6 +336,78 @@ def _supports_streaming_process(process: object) -> bool:
         and getattr(process, "stderr", None) is not None
         and callable(getattr(process, "wait", None))
     )
+
+
+def _materialize_runtime_provider_config(
+    home: os.PathLike[str] | str, config: dict
+) -> None:
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        return
+    provider = runtime_context.get("runtimeProvider")
+    if not isinstance(provider, dict):
+        return
+    provider_id = string(provider.get("providerId"))
+    if provider_id is None:
+        return
+    model = provider.get("model")
+    if not isinstance(model, dict):
+        return
+    model_id = string(model.get("modelId"))
+    if model_id is None:
+        return
+
+    config_path = Path(home) / ".config" / "opencode" / "opencode.json"
+    document = _read_opencode_config(config_path)
+    providers = document.get("provider")
+    if not isinstance(providers, dict):
+        providers = {}
+        document["provider"] = providers
+
+    provider_entry: dict[str, object] = {
+        "name": string(provider.get("name")) or provider_id,
+    }
+    npm_package = string(provider.get("npmPackage"))
+    if npm_package is not None:
+        provider_entry["npm"] = npm_package
+    options: dict[str, object] = {}
+    base_url = string(provider.get("baseUrl"))
+    if base_url is not None:
+        options["baseURL"] = base_url
+    api_key = string(provider.get("apiKey"))
+    if api_key is not None:
+        options["apiKey"] = api_key
+    provider_config = provider.get("config")
+    if isinstance(provider_config, dict):
+        extra_options = provider_config.get("options")
+        if isinstance(extra_options, dict):
+            options.update(
+                {
+                    key: value
+                    for key, value in extra_options.items()
+                    if isinstance(key, str)
+                }
+            )
+    if options:
+        provider_entry["options"] = options
+
+    model_name = string(model.get("displayName")) or model_id
+    provider_entry["models"] = {model_id: {"name": model_name}}
+    providers[provider_id] = provider_entry
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _read_opencode_config(config_path: Path) -> dict:
+    try:
+        value = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _result_json(

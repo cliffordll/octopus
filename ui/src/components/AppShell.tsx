@@ -2,12 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
+import { initializeLocalePreference, LOCALE_CHANGE_EVENT } from "../utils/locale";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
 import { ProjectCreateDialog } from "../pages/ProjectsPage";
+import { OrganizationSettingsPanel } from "./OrganizationSettingsPanel";
 
 function organizationTarget(pathname: string, orgId: string) {
   const section = pathname.match(
-    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|heartbeat-runs|settings)/,
+    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|heartbeat-runs|run-intelligence|settings)/,
   )?.[1];
   return `/orgs/${orgId}/${section ?? "issues"}`;
 }
@@ -19,11 +21,12 @@ export function AppShell() {
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [locale, setLocale] = useState(() => initializeLocalePreference());
   const productMenuRef = useRef<HTMLDivElement>(null);
   const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
   const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
-  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|resources|workspaces|goals|skills|settings)/.test(location.pathname);
+  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|run-intelligence|resources|workspaces|goals|skills|settings)/.test(location.pathname);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],
@@ -33,6 +36,16 @@ export function AppShell() {
   const selectedOrganization =
     organizationList.find((organization) => organization.id === activeOrganizationId) ?? organizationList[0];
   const selectedOrganizationId = activeOrganizationId ?? selectedOrganization?.id;
+
+  useEffect(() => {
+    function rerenderOnLocaleChange() {
+      setLocale(initializeLocalePreference());
+    }
+    window.addEventListener(LOCALE_CHANGE_EVENT, rerenderOnLocaleChange);
+    return () => {
+      window.removeEventListener(LOCALE_CHANGE_EVENT, rerenderOnLocaleChange);
+    };
+  }, []);
 
   useEffect(() => {
     function closeMenusOnOutsideInteraction(event: MouseEvent | FocusEvent) {
@@ -203,7 +216,7 @@ export function AppShell() {
           </button>
         </div>
       </aside>
-      <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`}>
+      <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`} key={locale}>
         <Outlet />
       </main>
       {agentCreateOpen && selectedOrganizationId && (
@@ -214,16 +227,21 @@ export function AppShell() {
       )}
       {settingsOpen && (
         <div className="modal-backdrop" role="presentation">
-          <div aria-modal="true" className="panel settings-dialog" role="dialog">
+          <div aria-label="设置" aria-modal="true" className="panel settings-dialog" role="dialog">
             <div className="modal-header">
               <div>
+                <p className="eyebrow">Settings</p>
                 <h2>设置</h2>
-                <p className="muted">设置功能暂未接入。</p>
               </div>
               <button aria-label="关闭设置" className="ghost" onClick={() => setSettingsOpen(false)} type="button">
                 关闭
               </button>
             </div>
+            {selectedOrganizationId ? (
+              <OrganizationSettingsPanel orgId={selectedOrganizationId} />
+            ) : (
+              <p className="muted">请选择组织后再配置模型供应商。</p>
+            )}
           </div>
         </div>
       )}
