@@ -124,6 +124,13 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): 
   return sorted[0] ?? null;
 }
 
+function metadataText(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata?.[key];
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
   const next = new Map<number, HeartbeatRunEvent>();
   for (const event of left) next.set(event.id, event);
@@ -429,6 +436,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               </div>
               <dl className="issue-work-product-details">
                 <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
+                <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
+                <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
                 <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                 {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
@@ -736,6 +745,13 @@ function IssueRunOutputPanel({
     queryKey: ["workspace-operation-log", selectedOperationLogId],
     queryFn: () => heartbeatApi.getWorkspaceOperationLog(selectedOperationLogId),
     enabled: Boolean(selectedOperationLogId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", runId],
+    queryFn: () => heartbeatApi.getLog(runId),
+    enabled: Boolean(runId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
@@ -761,6 +777,7 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
+      {runLog.error && <ErrorNotice error={runLog.error} />}
       {streamError && <p className="error-notice">{streamError}</p>}
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
@@ -809,6 +826,15 @@ function IssueRunOutputPanel({
           <pre className="run-excerpt inline">{streamLog}</pre>
         </section>
       )}
+      <section className="issue-run-output-block">
+        <div className="issue-run-output-heading">
+          <h3>运行日志</h3>
+          {runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+        </div>
+        {runLog.isLoading && <p className="muted">加载运行日志中...</p>}
+        {!runLog.isLoading && !runLog.data?.content && <p className="muted">暂无运行日志。</p>}
+        {runLog.data?.content && <pre className="run-excerpt inline">{runLog.data.content}</pre>}
+      </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
@@ -877,6 +903,26 @@ function IssueRunOutputPanel({
                 {operation.command && <p className="muted">{operation.command}</p>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
+                <div className="issue-run-operation-actions">
+                  <button
+                    className="secondary small-button"
+                    type="button"
+                    onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
+                  >
+                    {selectedOperationLogId === operation.id ? "收起操作日志" : "查看操作日志"}
+                  </button>
+                  {operation.logBytes !== undefined && operation.logBytes !== null && (
+                    <span className="muted">{formatBytes(operation.logBytes)}</span>
+                  )}
+                </div>
+                {selectedOperationLogId === operation.id && (
+                  <div className="issue-run-operation-log">
+                    {operationLog.isLoading && <p className="muted">加载操作日志中...</p>}
+                    {operationLog.error && <ErrorNotice error={operationLog.error} />}
+                    {!operationLog.isLoading && !operationLog.data?.content && <p className="muted">暂无操作日志。</p>}
+                    {operationLog.data?.content && <pre className="issue-run-event-log">{operationLog.data.content}</pre>}
+                  </div>
+                )}
               </article>
             ))}
           </div>

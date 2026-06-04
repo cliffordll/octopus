@@ -512,6 +512,9 @@ it("executes an assigned issue through the issue execution route", async () => {
         { id: 9, runId: "run-1", agentId: "agent-1", seq: 9, eventType: "issue_execution_promoted", message: "promoted", createdAt: "2026-06-02T10:00:08Z" },
       ]);
     }
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
+      return respond({ content: "persisted run log", endOffset: 17, eof: true });
+    }
     if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
       return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output" }]);
     }
@@ -549,6 +552,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("persisted run log");
   expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
@@ -571,7 +575,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByText("workspace output")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /显示低价值事件/ }));
   expect(screen.getByText("low value")).toBeInTheDocument();
-  expect(fetchMock).not.toHaveBeenCalledWith(
+  expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-1/log",
     expect.objectContaining({ method: "GET" }),
   );
