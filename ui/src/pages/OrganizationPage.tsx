@@ -1216,6 +1216,38 @@ function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder
   return `workspace-tree-icon-${fallback}`;
 }
 
+function workspaceEntryLabel(entry: OrganizationWorkspaceFileEntry): string {
+  if (entry.displayLabel) return entry.displayLabel;
+  const name = entry.name || entry.path.split("/").at(-1) || entry.path;
+  const normalizedPath = entry.path.replace(/\\/g, "/");
+  if (normalizedPath === "agents") return "智能体 agents";
+  if (normalizedPath === "artifacts") return "产物 artifacts";
+  if (normalizedPath === "skills") return "技能 skills";
+  if (normalizedPath === "plans") return "计划 plans";
+  if (normalizedPath === "artifacts/issues") return "任务产物 issues";
+  if (normalizedPath.endsWith("/runs")) return "运行产物 runs";
+  return name;
+}
+
+function workspaceHeaderPath(path: string | null): string {
+  if (!path) return "未选择文件";
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return path;
+  return `${parts.at(-1)} · ${parts.slice(0, -1).join(" / ")}`;
+}
+
+function sortWorkspaceEntries(entries: OrganizationWorkspaceFileEntry[]): OrganizationWorkspaceFileEntry[] {
+  return [...entries].sort((left, right) => {
+    if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+    const leftKey = left.name || left.path;
+    const rightKey = right.name || right.path;
+    return leftKey.localeCompare(rightKey, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+
 function WorkspaceTreeNode({
   entry,
   expandedParents,
@@ -1241,9 +1273,9 @@ function WorkspaceTreeNode({
     if (expandedParents.has(entry.path)) setExpanded(true);
   }, [entry.path, expandedParents]);
   const icon = entry.isDirectory ? "F" : undefined;
-  const label = "displayLabel" in entry && entry.displayLabel ? entry.displayLabel : (("name" in entry && entry.name) || entry.path.split("/").at(-1) || entry.path);
+  const label = workspaceEntryLabel(entry);
   if (entry.isDirectory) {
-    const childEntries = children.data?.entries;
+    const childEntries = children.data?.entries ? sortWorkspaceEntries(children.data.entries) : undefined;
     return (
       <li>
         <button
@@ -1253,11 +1285,11 @@ function WorkspaceTreeNode({
           style={{ paddingLeft: `${depth * 14 + 8}px` }}
           type="button"
         >
-          <span aria-hidden="true" className="workspace-tree-chevron">{expanded ? "⌄" : "›"}</span>
           <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(icon, "folder")}`}>
             {icon ?? "F"}
           </span>
           <span className="workspace-tree-label">{label}</span>
+          <span aria-hidden="true" className="workspace-tree-chevron">{expanded ? "⌄" : "›"}</span>
         </button>
         {expanded && children.isLoading && <p className="muted workspace-tree-hint">加载中...</p>}
         {expanded && children.error && <ErrorNotice error={children.error} />}
@@ -1287,7 +1319,7 @@ function WorkspaceTreeNode({
       <button
         className={`workspace-tree-row workspace-tree-file ${selectedPath === entry.path ? "selected" : ""}`}
         onClick={() => onSelect(entry.path)}
-        style={{ paddingLeft: `${depth * 14 + 28}px` }}
+        style={{ paddingLeft: `${depth * 14 + 8}px` }}
         type="button"
       >
         <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(icon, "file")}`}>
@@ -1319,6 +1351,7 @@ export function OrganizationWorkspacesPage() {
     enabled: Boolean(selectedPath),
   });
   const workspaceTree = rootFiles.data?.entries ?? [];
+  const sortedWorkspaceTree = useMemo(() => sortWorkspaceEntries(workspaceTree), [workspaceTree]);
   const expandedParents = useMemo(() => parentDirectories(selectedPath), [selectedPath]);
 
   useEffect(() => {
@@ -1327,14 +1360,14 @@ export function OrganizationWorkspacesPage() {
 
   useEffect(() => {
     if (selectedPath) return;
-    const firstFile = workspaceTree.find((entry) => !entry.isDirectory);
+    const firstFile = sortedWorkspaceTree.find((entry) => !entry.isDirectory);
     if (firstFile && !firstFile.isDirectory) {
       setSelectedPath(firstFile.path);
       const next = new URLSearchParams(searchParams);
       next.set("path", firstFile.path);
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, selectedPath, setSearchParams, workspaceTree]);
+  }, [searchParams, selectedPath, setSearchParams, sortedWorkspaceTree]);
 
   function selectFile(path: string) {
     setSelectedPath(path);
@@ -1354,11 +1387,10 @@ export function OrganizationWorkspacesPage() {
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
-          <p className="eyebrow">Organization</p>
           <h1>工作区</h1>
-          <p className="muted">浏览真实组织工作区。运行产物会出现在 artifacts 目录。</p>
+          <p className="muted">查看组织文件、运行产物和智能体配置。</p>
         </div>
-        <button onClick={refreshWorkspace} type="button">Refresh</button>
+        <button onClick={refreshWorkspace} type="button">刷新</button>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}
       {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
@@ -1367,16 +1399,16 @@ export function OrganizationWorkspacesPage() {
         <section className="workspace-files-card" data-testid="org-workspaces-files-card">
           <div className="workspace-card-header">
             <div>
-              <h2>工作区文件</h2>
-              <p>{rootFiles.data?.rootPath ?? "/"}</p>
+              <h2>文件</h2>
+              <p>{rootFiles.data?.rootExists === false ? "工作区不存在" : "组织工作区根目录"}</p>
             </div>
-            <Badge>{workspaceTree.length}</Badge>
+            <Badge>{sortedWorkspaceTree.length}</Badge>
           </div>
           <div className="workspace-files-scroll">
             {rootFiles.isLoading && <p className="muted">加载工作区中...</p>}
             {rootFiles.data?.message && <p className="muted">{rootFiles.data.message}</p>}
             <ul className="workspace-tree-list">
-              {workspaceTree.map((entry) => (
+              {sortedWorkspaceTree.map((entry) => (
                 <WorkspaceTreeNode
                   entry={entry}
                   expandedParents={expandedParents}
@@ -1392,17 +1424,17 @@ export function OrganizationWorkspacesPage() {
         <section className="workspace-editor-card" data-testid="org-workspaces-editor-card">
           <div className="workspace-card-header workspace-editor-header">
             <div>
-              <h2>Editor</h2>
-              <p>{selectedPath ?? "Select a file to edit"}</p>
+              <h2>内容</h2>
+              <p>{workspaceHeaderPath(selectedPath)}</p>
             </div>
             <div className="workspace-editor-actions">
               {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
-              <button disabled title="当前暂只支持工作区预览" type="button">Save</button>
+              <button disabled title="当前暂只支持工作区预览" type="button">保存</button>
             </div>
           </div>
           <div className="workspace-editor-body">
             {!selectedPath ? (
-              <p className="muted">Choose a file from the workspace tree to edit it.</p>
+              <p className="muted">从左侧选择文件查看内容。</p>
             ) : selectedFile.isLoading ? (
               <p className="muted">加载文件中...</p>
             ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
@@ -1410,7 +1442,7 @@ export function OrganizationWorkspacesPage() {
                 <img alt={selectedPath} src={selectedDetail.contentPath} />
               </div>
             ) : selectedDetail?.previewKind === "binary" ? (
-              <p className="muted">{selectedDetail.message ?? "Binary files are not previewed."}</p>
+              <p className="muted">{selectedDetail.message ?? "二进制文件暂不预览。"}</p>
             ) : (
               <textarea
                 aria-label="工作区文件内容"

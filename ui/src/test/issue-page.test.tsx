@@ -269,8 +269,9 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("登录流程 PR");
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("运行摘要");
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("pull_request");
-  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("execution_workspace_scan");
-  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("docs/login-flow.md");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("运行产物");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("技术详情");
+  expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("下载只读取 contentPath");
   expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
@@ -442,6 +443,18 @@ it("executes an assigned issue through the issue execution route", async () => {
           status: "queued",
           createdAt: "2026-06-02T10:00:00Z",
         },
+        {
+          id: "run-0",
+          orgId: "org-1",
+          agentId: "agent-1",
+          issueId: "issue-1",
+          issueIdentifier: "OCT-1",
+          issueTitle: "实现登录流程",
+          invocationSource: "assignment",
+          status: "succeeded",
+          createdAt: "2026-06-02T09:00:00Z",
+          resultJson: { summary: "早期运行" },
+        },
       ] : []);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
@@ -568,6 +581,8 @@ it("executes an assigned issue through the issue execution route", async () => {
   );
   expect(await screen.findByRole("region", { name: "运行记录" })).toHaveTextContent("运行输出摘要");
   expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("等待执行");
+  const runRecords = screen.getByRole("region", { name: "运行记录" }).textContent ?? "";
+  expect(runRecords.indexOf("run-0")).toBeLessThan(runRecords.indexOf("run-1"));
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
@@ -731,7 +746,7 @@ it("refreshes server registered work products when an issue run succeeds", async
   renderApp("/orgs/org-1/issues/issue-1");
   await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
 
-  expect(await screen.findByText("README 标题文档")).toBeInTheDocument();
+  expect((await screen.findAllByText("README 标题文档"))[0]).toBeInTheDocument();
   expect(screen.getByText("server 登记的生成文件")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("organization_artifacts_scan");
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("artifacts/readme-title.md");
@@ -819,6 +834,65 @@ it("allows re-executing an issue after the latest run failed", async () => {
     "/api/issues/issue-1/execute",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
+});
+
+it("hides the live stream log when it duplicates the persisted run log", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-10",
+    title: "同步日志展示",
+    description: "避免重复日志",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 10,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+      return respond([{ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "running", createdAt: "2026-06-02T10:00:00Z" }]);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path.startsWith("/api/heartbeat-runs/run-1/stream") && init?.method === "GET") {
+      return respondStream([{ type: "log", content: "same log", nextOffset: 8, eof: false }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "running" });
+    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") return respond({ content: "same log", endOffset: 8, eof: true });
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByRole("heading", { name: "运行日志" })).toBeInTheDocument();
+  expect(await screen.findByText("same log")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "实时日志增量" })).not.toBeInTheDocument();
 });
 
 it("shows repeat execution after the latest run succeeded", async () => {
