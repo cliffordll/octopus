@@ -16,6 +16,7 @@ import type {
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
+  IssueWorkProduct,
   LogReadResult,
   ProjectDetail,
   UpdateIssuePayload,
@@ -158,9 +159,56 @@ function AutoScrollPre({
   return <pre className={className} ref={ref}>{content}</pre>;
 }
 
+function streamLogDelta(streamLog: string, persistedLog: string | undefined): string {
+  if (!streamLog) return "";
+  const persisted = persistedLog ?? "";
+  if (!persisted) return streamLog;
+  if (persisted.includes(streamLog)) return "";
+  if (streamLog.startsWith(persisted)) return streamLog.slice(persisted.length);
+  return streamLog;
+}
+
 function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function pathBasename(value: string | null | undefined): string {
+  if (!value?.trim()) return "";
+  const normalized = value.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) ?? value;
+}
+
+function workProductDisplayName(product: IssueWorkProduct): string {
+  return (
+    pathBasename(product.title) ||
+    pathBasename(metadataString(product.metadata, "workspacePath")) ||
+    pathBasename(product.externalId) ||
+    product.id
+  );
+}
+
+function workProductSourceLabel(product: IssueWorkProduct): string {
+  const source = metadataString(product.metadata, "source") ?? "";
+  const workspacePath = metadataString(product.metadata, "workspacePath") ?? "";
+  const browserPath = metadataString(product.metadata, "workspaceBrowserPath") ?? "";
+  const combinedPath = `${workspacePath}/${browserPath}`;
+  if (source.includes("run") || combinedPath.includes("/runs/") || combinedPath.includes("\\runs\\")) return "运行产物";
+  if (source.includes("execution_workspace")) return "工作区产物";
+  if (source.includes("organization_artifacts")) return "任务产物";
+  if (product.createdByRunId) return "运行产物";
+  return "任务产物";
+}
+
+function workProductSize(product: IssueWorkProduct): string {
+  const metadataByteSize = product.metadata?.byteSize;
+  const byteSize = typeof metadataByteSize === "number" ? metadataByteSize : product.byteSize;
+  return byteSize !== undefined && byteSize !== null ? formatBytes(byteSize) : "-";
+}
+
+function workProductSummary(product: IssueWorkProduct): string {
+  return product.summary ?? "server 已登记该产物。";
 }
 
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
@@ -461,11 +509,17 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
       )}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
-          {workProducts.map((product) => (
+          {workProducts.map((product) => {
+            const workspaceBrowserPath = metadataString(product.metadata, "workspaceBrowserPath");
+            const displayName = workProductDisplayName(product);
+            return (
             <article className="issue-work-product-card" key={product.id}>
-              <div>
-                <strong>{product.title}</strong>
-                <p>{product.summary ?? product.externalId ?? product.id}</p>
+              <div className="issue-work-product-title-row">
+                <div>
+                  <strong>{displayName}</strong>
+                  <p>{workProductSummary(product)}</p>
+                </div>
+                <Badge>{workProductSourceLabel(product)}</Badge>
               </div>
               <div className="issue-work-product-meta">
                 <Badge>{product.type}</Badge>
@@ -474,18 +528,22 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
                 {product.isPrimary && <Badge>primary</Badge>}
               </div>
               <dl className="issue-work-product-details">
-                <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
-                <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
-                <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
-                <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
-                <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
-                {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
+                <div><dt>大小</dt><dd>{workProductSize(product)}</dd></div>
+                <div><dt>运行</dt><dd>{product.createdByRunId ? product.createdByRunId.slice(0, 8) : "-"}</dd></div>
+                <div><dt>健康</dt><dd>{statusLabel(product.healthStatus)}</dd></div>
               </dl>
               <details className="storage-object-details">
-                <summary>存储对象</summary>
+                <summary>技术详情</summary>
                 <dl className="issue-work-product-details">
+                  {product.title !== displayName && <div><dt>原始标题</dt><dd>{product.title}</dd></div>}
+                  <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
+                  <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
+                  <div><dt>浏览路径</dt><dd>{metadataText(product.metadata, "workspaceBrowserPath")}</dd></div>
+                  <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
+                  <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
+                  {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
                   <div><dt>provider</dt><dd>{product.provider}</dd></div>
-                  <div><dt>大小</dt><dd>{product.byteSize !== undefined && product.byteSize !== null ? formatBytes(product.byteSize) : "-"}</dd></div>
+                  <div><dt>大小</dt><dd>{workProductSize(product)}</dd></div>
                   <div><dt>contentType</dt><dd>{product.contentType ?? "-"}</dd></div>
                   <div><dt>sha256</dt><dd>{product.sha256 ?? "-"}</dd></div>
                 </dl>
@@ -499,10 +557,10 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
                 ) : (
                   <span className="download-unavailable">不可下载</span>
                 )}
-                {metadataString(product.metadata, "workspaceBrowserPath") && (
+                {workspaceBrowserPath && (
                   <Link
                     className="button secondary small-button"
-                    to={`/orgs/${issue.orgId}/workspaces?path=${encodeURIComponent(metadataString(product.metadata, "workspaceBrowserPath") ?? "")}`}
+                    to={`/orgs/${issue.orgId}/workspaces?path=${encodeURIComponent(workspaceBrowserPath)}`}
                   >
                     在工作区打开
                   </Link>
@@ -518,7 +576,8 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
                 </button>
               </div>
             </article>
-          ))}
+          );
+          })}
         </div>
       )}
       {deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
@@ -711,6 +770,7 @@ function IssueRunsPanel({
   onSelect: (runId: string) => void;
   runs: HeartbeatRun[];
 }) {
+  const displayRuns = [...runs].sort((left, right) => runSortTime(left) - runSortTime(right));
   return (
     <section aria-label="运行记录" className="issue-section-card">
       <div className="issue-section-heading">
@@ -721,7 +781,7 @@ function IssueRunsPanel({
         <p className="muted">暂无运行记录。</p>
       ) : (
         <div className="issue-run-record-list">
-          {runs.map((run) => {
+          {displayRuns.map((run) => {
             const runId = heartbeatRunId(run);
             const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
             const summary = runSummary(displayRun);
@@ -878,6 +938,7 @@ function IssueRunOutputPanel({
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
   const liveRun = isLiveRun(run?.status);
+  const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
   return (
     <section aria-label="执行输出" className="issue-section-card issue-run-output">
       <div className="issue-section-heading">
@@ -939,13 +1000,13 @@ function IssueRunOutputPanel({
           </details>
         )}
       </section>
-      {streamLog && (
+      {liveLogDelta && (
         <section className="issue-run-output-block">
           <div className="issue-run-output-heading">
-            <h3>实时日志</h3>
-            <Badge>stream log</Badge>
+            <h3>实时日志增量</h3>
+            <Badge>stream</Badge>
           </div>
-          <AutoScrollPre className="run-excerpt inline" content={streamLog} />
+          <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
         </section>
       )}
       <section className="issue-run-output-block">

@@ -1885,6 +1885,7 @@ small {
   flex-basis: 14px;
   font-size: 14px;
   height: auto;
+  margin-left: auto;
   width: 14px;
 }
 
@@ -4006,6 +4007,7 @@ button.danger {
 .issue-work-product-card strong {
   color: #e8edf5;
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .issue-work-product-card p {
@@ -4013,6 +4015,22 @@ button.danger {
   font-size: 13px;
   line-height: 1.5;
   margin: 4px 0 0;
+}
+
+.issue-work-product-title-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.issue-work-product-title-row > div {
+  min-width: 0;
+}
+
+.issue-work-product-title-row .badge {
+  flex-shrink: 0;
 }
 
 .issue-comment-actions {
