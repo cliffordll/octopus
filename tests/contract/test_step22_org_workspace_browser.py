@@ -18,6 +18,7 @@ from starlette.responses import Response
 
 from packages.database.schema import Base, Organization
 from server.app import app as fastapi_app
+from server.services.workspace_paths import organization_workspace_root
 
 
 @fastapi_app.middleware("http")
@@ -63,6 +64,8 @@ def app(
     root = Path("pytest-tmp") / "org-workspace-browser"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.chdir(root)
+    monkeypatch.setenv("OCTOPUS_HOME", str(root / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
     fastapi_app.state.session_factory = session_factory
     return fastapi_app
 
@@ -107,14 +110,7 @@ async def test_org_workspace_browser_lists_and_reads_artifacts(
 ) -> None:
     org_id = await _seed_org(session_factory)
     artifact = (
-        Path.cwd()
-        / ".octopus"
-        / "organizations"
-        / org_id
-        / "workspaces"
-        / "artifacts"
-        / "reports"
-        / "summary.md"
+        organization_workspace_root(org_id) / "artifacts" / "reports" / "summary.md"
     )
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"# Summary\n\nhello")
@@ -147,15 +143,7 @@ async def test_org_workspace_browser_supports_image_content(
     app: FastAPI, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     org_id = await _seed_org(session_factory)
-    image = (
-        Path.cwd()
-        / ".octopus"
-        / "organizations"
-        / org_id
-        / "workspaces"
-        / "artifacts"
-        / "shot.png"
-    )
+    image = organization_workspace_root(org_id) / "artifacts" / "shot.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"\x89PNG\r\n\x1a\n")
 

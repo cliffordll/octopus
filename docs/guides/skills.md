@@ -280,15 +280,14 @@ uv run server
 
 如果当前目录是 `D:\coding\octopus`，那 server 里用 `Path.cwd()` 解析出来的就是这个 repo 根目录。
 
-当前项目里很多本地路径都和 `cwd` 有关，例如：
+当前项目里部分开发期资源仍和 `cwd` 有关，例如：
 
 ```text
 .agents/skills
 server/skills/bundled
-.octopus/organizations
 ```
 
-如果 `cwd` 不对，服务端可能找不到预期的本地资源。
+如果 `cwd` 不对，服务端可能找不到预期的开发期本地资源。组织工作区不再依赖 `cwd`，而是按 `OCTOPUS_HOME/instances/<instance-id>` 解析。
 
 ## 工作区
 
@@ -303,7 +302,7 @@ Octopus 运行中的组织、项目、agent 把共享文件、计划、产物、
 当前 server 里组织技能工作区类似：
 
 ```text
-.octopus/organizations/<org-id>/workspaces/skills/<slug>
+~/.octopus/instances/default/organizations/<org-id>/workspaces/skills/<slug>
 ```
 
 这属于 Octopus 产品内部管理的 workspace 数据，不等同于 repo 根目录，也不等同于 `CODEX_HOME`。
@@ -385,7 +384,11 @@ cwd
   ├─ server/skills/bundled
   │  └─ Octopus 产品内置技能来源
   │
-  └─ .octopus/organizations/<org-id>/workspaces/skills
+OCTOPUS_HOME/instances/OCTOPUS_INSTANCE_ID
+= Octopus instance home
+= 默认 ~/.octopus/instances/default
+
+  └─ organizations/<org-id>/workspaces/skills
      └─ Octopus 组织本地技能工作区
 
 CODEX_HOME
