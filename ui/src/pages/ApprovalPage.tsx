@@ -56,7 +56,14 @@ export function ApprovalPage() {
       });
     },
     onMutate: () => setFormError(null),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["approval", approvalId] });
+      void queryClient.invalidateQueries({ queryKey: ["approval-issues", approvalId] });
+      void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue"] });
+    },
     onError: (error) => setFormError(error instanceof Error ? error.message : "审批操作失败"),
   });
   const addComment = useMutation({

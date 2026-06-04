@@ -978,6 +978,7 @@ export interface UpdateAgentInstructionsFilePayload {
 
 export interface HeartbeatRun {
   id: string;
+  runId?: string;
   orgId: string;
   agentId: string;
   issueId?: string | null;

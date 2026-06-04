@@ -367,6 +367,8 @@ it("shows an issue and records comments and review decisions", async () => {
 });
 
 it("executes an assigned issue through the issue execution route", async () => {
+  let hasExecuted = false;
+  const longAgentReply = `${"长回复内容。".repeat(130)}最终结论`;
   const issue = {
     id: "issue-1",
     orgId: "org-1",
@@ -404,7 +406,7 @@ it("executes an assigned issue through the issue execution route", async () => {
     }
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
-      return respond([
+      return respond(hasExecuted ? [
         {
           id: "run-1",
           orgId: "org-1",
@@ -416,7 +418,7 @@ it("executes an assigned issue through the issue execution route", async () => {
           status: "queued",
           createdAt: "2026-06-02T10:00:00Z",
         },
-      ]);
+      ] : []);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
       return respond({ issueId: "issue-1" });
@@ -428,9 +430,10 @@ it("executes an assigned issue through the issue execution route", async () => {
       return respond({ ...issue, status: "in_progress", startedAt: "2026-06-02T10:00:00Z" });
     }
     if (path === "/api/issues/issue-1/execute" && init?.method === "POST") {
+      hasExecuted = true;
       return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "queued" }, 202);
     }
-    if (path === "/api/heartbeat-runs/run-1/stream?afterSeq=0&offset=0&pollMs=1000" && init?.method === "GET") {
+    if (path.startsWith("/api/heartbeat-runs/run-1/stream") && init?.method === "GET") {
       return respondStream([
         {
           type: "run",
@@ -454,6 +457,19 @@ it("executes an assigned issue through the issue execution route", async () => {
             stream: "stdout",
             message: "Stream 正在输出",
             createdAt: "2026-06-02T10:00:03Z",
+          },
+        },
+        {
+          type: "event",
+          event: {
+            id: 5,
+            runId: "run-1",
+            agentId: "agent-1",
+            seq: 5,
+            eventType: "runtime.text",
+            stream: "stdout",
+            message: longAgentReply,
+            createdAt: "2026-06-02T10:00:04Z",
           },
         },
         { type: "log", content: "stream log chunk", nextOffset: 16, eof: false },
@@ -498,7 +514,8 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("button", { name: "请求修改" })).toHaveAttribute("aria-disabled", "true");
   expect(screen.getByRole("button", { name: "标记待评审" })).toHaveAttribute("aria-disabled", "true");
   await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
-  expect(screen.getByRole("status")).toHaveTextContent("请先设置 Reviewer，当前任务不能评审。");
+  expect(screen.getByText("请先设置 Reviewer，当前任务不能评审。")).toBeInTheDocument();
+  expect(screen.getByText("已创建运行 run-1")).toBeInTheDocument();
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
@@ -520,8 +537,12 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
   expect(await screen.findByText("已入队")).toBeInTheDocument();
-  expect(screen.getAllByText("Agent 回复")).toHaveLength(2);
+  expect(screen.getAllByText("Agent 回复")).toHaveLength(3);
   expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
+  expect(screen.getByText(/长回复内容/)).toBeInTheDocument();
+  expect(screen.queryByText(/最终结论/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开完整回复" }));
+  expect(screen.getByText(new RegExp(`最终结论`))).toBeInTheDocument();
   expect(screen.queryByText("queued output")).not.toBeInTheDocument();
   expect(screen.queryByText("workspace output")).not.toBeInTheDocument();
   expect(screen.queryByText("low value")).not.toBeInTheDocument();
@@ -539,6 +560,148 @@ it("executes an assigned issue through the issue execution route", async () => {
     "/api/heartbeat-runs/run-1/cancel",
     expect.objectContaining({ method: "POST" }),
   );
+});
+
+it("allows re-executing an issue after the latest run failed", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "修复运行错误",
+    description: "重新执行失败任务",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const failedRun = {
+    id: "run-failed",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    triggerDetail: "manual",
+    status: "failed",
+    error: "Separator is found in model output",
+    createdAt: "2026-06-02T10:00:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([failedRun]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-failed" && init?.method === "GET") return respond(failedRun);
+    if (path === "/api/heartbeat-runs/run-failed/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-failed/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/execute" && init?.method === "POST") {
+      return respond({ id: "run-2", orgId: "org-1", agentId: "agent-1", status: "queued" }, 202);
+    }
+    if (path === "/api/heartbeat-runs/run-2" && init?.method === "GET") {
+      return respond({ id: "run-2", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "queued" });
+    }
+    if (path === "/api/heartbeat-runs/run-2/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-2/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path.startsWith("/api/heartbeat-runs/run-2/stream") && init?.method === "GET") {
+      return respondStream([{ type: "final", run: { id: "run-2", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "succeeded" } }]);
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  expect(await screen.findByRole("heading", { name: "修复运行错误" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "重新执行" })).toBeInTheDocument();
+  expect(screen.getAllByText(/Separator is found in model output/).length).toBeGreaterThan(0);
+  await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/execute",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
+});
+
+it("shows repeat execution after the latest run succeeded", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-3",
+    title: "分析源码",
+    description: "继续分析",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 3,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+      return respond([{
+        runId: "run-succeeded",
+        orgId: "org-1",
+        agentId: "agent-1",
+        issueId: "issue-1",
+        invocationSource: "assignment",
+        status: "succeeded",
+        createdAt: "2026-06-04T01:46:42Z",
+        finishedAt: "2026-06-04T01:49:46Z",
+      }]);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-succeeded" && init?.method === "GET") {
+      return respond({ id: "run-succeeded", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "succeeded" });
+    }
+    if (path === "/api/heartbeat-runs/run-succeeded/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-succeeded/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("run-succeeded");
+  expect(screen.getByText("运行：成功")).toBeInTheDocument();
 });
 
 it("explains why an unassigned issue cannot be executed", async () => {

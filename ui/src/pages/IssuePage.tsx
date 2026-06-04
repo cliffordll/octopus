@@ -29,6 +29,8 @@ import { writeRecentIssue } from "../utils/recentIssues";
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
 const LIVE_RUN_REFETCH_MS = 1000;
+const AGENT_REPLY_COLLAPSE_CHARS = 600;
+const AGENT_REPLY_COLLAPSE_LINES = 8;
 
 interface RunStreamCursor {
   lastSeq: number;
@@ -66,6 +68,41 @@ function markReviewBlockReason(issue: IssueDetail): string {
 
 function isLiveRun(status?: string | null): boolean {
   return status === "queued" || status === "running";
+}
+
+function isRerunnableRun(status?: string | null): boolean {
+  return status === "failed" || status === "timed_out" || status === "cancelled";
+}
+
+function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
+  return run?.id || run?.runId || "";
+}
+
+function runSortTime(run: HeartbeatRun): number {
+  const value = run.createdAt ?? run.startedAt ?? run.updatedAt ?? "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): HeartbeatRun | null {
+  const merged = new Map<string, HeartbeatRun>();
+  for (const run of runs) {
+    const id = heartbeatRunId(run);
+    if (id) merged.set(id, run);
+  }
+  if (currentRun) {
+    const id = heartbeatRunId(currentRun);
+    if (id) merged.set(id, { ...merged.get(id), ...currentRun });
+  }
+  const sorted = Array.from(merged.values()).sort((left, right) => runSortTime(right) - runSortTime(left));
+  return sorted[0] ?? null;
+}
+
+function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
+  const next = new Map<number, HeartbeatRunEvent>();
+  for (const event of left) next.set(event.id, event);
+  for (const event of right) next.set(event.id, event);
+  return Array.from(next.values()).sort((leftEvent, rightEvent) => leftEvent.seq - rightEvent.seq);
 }
 
 function hasJsonObject(value: unknown): value is Record<string, unknown> {
@@ -144,6 +181,40 @@ function runEventLabel(event: HeartbeatRunEvent): string {
 
 function runEventBody(event: HeartbeatRunEvent): string {
   return eventPayloadText(event.payload) || event.message || "";
+}
+
+function shouldCollapseAgentReply(body: string): boolean {
+  return body.length > AGENT_REPLY_COLLAPSE_CHARS || body.split(/\r?\n/).length > AGENT_REPLY_COLLAPSE_LINES;
+}
+
+function agentReplyPreview(body: string): string {
+  const lines = body.split(/\r?\n/);
+  const linePreview = lines.slice(0, AGENT_REPLY_COLLAPSE_LINES).join("\n");
+  const preview = linePreview.length > AGENT_REPLY_COLLAPSE_CHARS
+    ? `${linePreview.slice(0, AGENT_REPLY_COLLAPSE_CHARS).trimEnd()}...`
+    : linePreview;
+  return lines.length > AGENT_REPLY_COLLAPSE_LINES && !preview.endsWith("...") ? `${preview}\n...` : preview;
+}
+
+function AgentReplyBody({ body }: { body: string }) {
+  const shouldCollapse = shouldCollapseAgentReply(body);
+  const [expanded, setExpanded] = useState(!shouldCollapse);
+  return (
+    <div className="issue-run-agent-reply-block">
+      <p className={`issue-run-agent-reply${shouldCollapse && !expanded ? " collapsed" : ""}`}>
+        {expanded ? body : agentReplyPreview(body)}
+      </p>
+      {shouldCollapse && (
+        <button
+          className="secondary small-button issue-run-agent-reply-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {expanded ? "收起回复" : "展开完整回复"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 function formatIssueTime(value: string | null | undefined): string {
@@ -555,17 +626,18 @@ function IssueRunsPanel({
       ) : (
         <div className="issue-run-record-list">
           {runs.map((run) => {
-            const displayRun = currentRun?.id === run.id ? { ...run, ...currentRun } : run;
+            const runId = heartbeatRunId(run);
+            const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
             const summary = runSummary(displayRun);
             return (
               <button
-                className={`issue-run-record${run.id === currentRunId ? " active" : ""}`}
-                key={run.id}
-                onClick={() => onSelect(run.id)}
+                className={`issue-run-record${runId === currentRunId ? " active" : ""}`}
+                key={runId}
+                onClick={() => onSelect(runId)}
                 type="button"
               >
                 <div className="issue-run-record-header">
-                  <strong>{run.id}</strong>
+                  <strong>{runId}</strong>
                   <Badge>{statusLabel(displayRun.status)}</Badge>
                 </div>
                 <dl className="issue-run-record-meta">
@@ -653,7 +725,7 @@ function IssueRunOutputPanel({
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
         <dl className="issue-run-summary">
-          <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
+          <div><dt>Run ID</dt><dd>{heartbeatRunId(run) || runId}</dd></div>
           <div><dt>状态</dt><dd>{run ? statusLabel(run.status) : "加载中"}</dd></div>
           <div><dt>开始</dt><dd>{run?.startedAt ?? "-"}</dd></div>
           <div><dt>结束</dt><dd>{run?.finishedAt ?? "-"}</dd></div>
@@ -721,7 +793,7 @@ function IssueRunOutputPanel({
                 </div>
                 {runEventBody(event) && (
                   isTextRunEvent(event) && !isErrorRunEvent(event)
-                    ? <p className="issue-run-agent-reply">{runEventBody(event)}</p>
+                    ? <AgentReplyBody body={runEventBody(event)} />
                     : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
                 )}
                 {hasJsonObject(event.payload) && (
@@ -883,8 +955,10 @@ export function IssuePage() {
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
     const latestRun = issueRuns.data[0];
-    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRun.id);
-    setCurrentRunId(latestRun.id);
+    const latestRunId = heartbeatRunId(latestRun);
+    if (!latestRunId) return;
+    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
+    setCurrentRunId(latestRunId);
   }, [currentRunId, issueRuns.data, issueId, orgId]);
   useEffect(() => {
     if (!reviewNotice) return;
@@ -951,11 +1025,12 @@ export function IssuePage() {
       return issuesApi.execute(issue.data.id);
     },
     onSuccess: async (run) => {
-      setExecuteNotice("");
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
-      resetRunStreamState(run.id);
-      setCurrentRunId(run.id);
-      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", run.id], (current) => ({
+      const runId = heartbeatRunId(run);
+      setExecuteNotice(`已创建运行 ${runId}`);
+      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+      resetRunStreamState(runId);
+      setCurrentRunId(runId);
+      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
         ...current,
         ...run,
       }));
@@ -988,7 +1063,11 @@ export function IssuePage() {
   });
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", currentRunId],
-    queryFn: () => heartbeatApi.listEvents(currentRunId),
+    queryFn: async () => {
+      const fetched = await heartbeatApi.listEvents(currentRunId);
+      const cached = queryClient.getQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId]) ?? [];
+      return mergeRunEvents(cached, fetched);
+    },
     enabled: Boolean(currentRunId),
     refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
@@ -1019,9 +1098,7 @@ export function IssuePage() {
       onEvent: (event) => {
         cursor.lastSeq = Math.max(cursor.lastSeq, event.seq);
         queryClient.setQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId], (current = []) => {
-          const next = new Map(current.map((item) => [item.id, item]));
-          next.set(event.id, event);
-          return Array.from(next.values()).sort((left, right) => left.seq - right.seq);
+          return mergeRunEvents(current, [event]);
         });
       },
       onLog: (payload) => {
@@ -1074,10 +1151,11 @@ export function IssuePage() {
   const retryRun = useMutation({
     mutationFn: () => heartbeatApi.retry(currentRunId),
     onSuccess: (run) => {
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
-      resetRunStreamState(run.id);
-      setCurrentRunId(run.id);
-      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", run.id], (current) => ({
+      const runId = heartbeatRunId(run);
+      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+      resetRunStreamState(runId);
+      setCurrentRunId(runId);
+      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
         ...current,
         ...run,
       }));
@@ -1160,15 +1238,20 @@ export function IssuePage() {
     updateIssue.mutate({ status: "in_review" });
   }
   function executeCurrentIssue() {
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
     if (uploadAttachment.isPending) {
       setExecuteNotice("附件上传中，上传完成后再启动执行。");
+      return;
+    }
+    if (isLiveRun(latestRun?.status)) {
+      setExecuteNotice("当前任务已有运行在执行中，请等待结束后再重新执行。");
       return;
     }
     if (!issue.data?.assigneeAgentId) {
       setExecuteNotice("请先分配负责人，再启动执行。");
       return;
     }
-    setExecuteNotice("");
+    setExecuteNotice(isRerunnableRun(latestRun?.status) ? "正在提交重新执行请求..." : "正在提交执行请求...");
     executeIssue.mutate();
   }
   if (issue.error) return <ErrorNotice error={issue.error} />;
@@ -1177,6 +1260,24 @@ export function IssuePage() {
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
+  const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+  const latestRunIsLive = isLiveRun(latestRun?.status);
+  const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
+  const latestRunSucceeded = latestRun?.status === "succeeded";
+  const executeButtonLabel = executeIssue.isPending
+    ? "提交中"
+    : latestRunCanReexecute
+      ? "重新执行"
+      : latestRunSucceeded
+        ? "再次执行"
+        : "启动执行";
+  const executeBlockReason = uploadAttachment.isPending
+    ? "附件上传中，上传完成后再启动执行"
+    : latestRunIsLive
+      ? "当前任务已有运行在执行中，请等待结束后再重新执行"
+      : issue.data?.assigneeAgentId
+        ? ""
+        : "请先分配负责人";
   return (
     <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {agents.error && <ErrorNotice error={agents.error} />}
@@ -1196,25 +1297,20 @@ export function IssuePage() {
                 <Badge>{issueDisplayId(issue.data)}</Badge>
                 <Badge>{statusLabel(issue.data.status)}</Badge>
                 <Badge>{priorityLabel(issue.data.priority)}</Badge>
+                {latestRun && <Badge>运行：{statusLabel(latestRun.status)}</Badge>}
               </div>
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
                 <div className="issue-header-actions">
                   <button
-                    aria-disabled={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "true" : undefined}
-                    className={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "is-disabled" : undefined}
+                    aria-disabled={executeBlockReason ? "true" : undefined}
+                    className={executeBlockReason ? "is-disabled" : undefined}
                     disabled={executeIssue.isPending}
-                    title={
-                      uploadAttachment.isPending
-                        ? "附件上传中，上传完成后再启动执行"
-                        : issue.data.assigneeAgentId
-                          ? "交给负责人启动一次运行"
-                          : "请先分配负责人"
-                    }
+                    title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
                     type="button"
                     onClick={executeCurrentIssue}
                   >
-                    启动执行
+                    {executeButtonLabel}
                   </button>
                   <button
                     className="secondary small-button"
@@ -1236,6 +1332,11 @@ export function IssuePage() {
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
             {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
+            {latestRun && isRerunnableRun(latestRun.status) && latestRun.error?.trim() && (
+              <p className="error-notice" role="status">
+                最新运行{statusLabel(latestRun.status)}：{latestRun.error.trim()}
+              </p>
+            )}
 
             <section aria-label="心跳上下文" className="issue-section-card">
               <div className="issue-section-heading">

@@ -236,7 +236,8 @@ export function ChatPage() {
   const startsNewConversation = Boolean(chat.data && agentId && agentId !== chat.data.preferredAgentId);
   const convertIssue = useMutation({
     mutationFn: (messageId: string) => chatsApi.convertToIssue(chatId, { messageId }),
-    onSuccess: ({ systemMessage }) => {
+    onSuccess: ({ issue, systemMessage }) => {
+      queryClient.setQueryData(["issue", issue.id], issue);
       queryClient.setQueryData<ChatMessage[]>(["chat-messages", chatId], (current = []) => {
         const next = new Map(current.map((message) => [message.id, message]));
         next.set(systemMessage.id, systemMessage);
@@ -245,6 +246,7 @@ export function ChatPage() {
       void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] });
     },
     onError: (error) => {
       setSendNotice(displayError(error));
@@ -268,12 +270,14 @@ export function ChatPage() {
         setDismissedApprovalIds((current) => new Set(current).add(approval.id));
       }
       void queryClient.invalidateQueries({ queryKey: ["approval", approval.id] });
+      void queryClient.invalidateQueries({ queryKey: ["approval-issues", approval.id] });
       void queryClient.invalidateQueries({ queryKey: ["messenger-approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
       void queryClient.invalidateQueries({ queryKey: ["chat-messages", chatId] });
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue"] });
     },
     onError: (error) => {
       setSendNotice(displayError(error));
