@@ -53,7 +53,12 @@ from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
 )
 
-from .logs import LogReadResult, read_local_file_log
+from .logs import (
+    LogReadResult,
+    append_local_file_log,
+    finalize_local_file_log,
+    read_local_file_log,
+)
 from .workspace_paths import organization_workspace_root
 
 
@@ -63,6 +68,26 @@ def _iso(value: datetime | None) -> str | None:
 
 def _as_record(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _operation_log_dir() -> Path:
+    return Path(
+        os.getenv(
+            "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
+            ".octopus/workspace-operation-logs",
+        )
+    )
+
+
+def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if "logBytes" in fields:
+        result["log_bytes"] = fields["logBytes"]
+    if "logSha256" in fields:
+        result["log_sha256"] = fields["logSha256"]
+    if "logCompressed" in fields:
+        result["log_compressed"] = fields["logCompressed"]
+    return result
 
 
 _WORK_PRODUCT_UPDATE_COLUMNS = {
@@ -774,7 +799,42 @@ class WorkspaceService:
                 "metadata_json": metadata,
             },
         )
+        log_ref = f"{org_id}/{row.id}.ndjson"
+        append_local_file_log(
+            _operation_log_dir(),
+            log_ref,
+            stream="system",
+            chunk=f"operation {phase} started",
+        )
+        row = await update_workspace_operation(
+            self._session,
+            row.id,
+            {
+                "log_store": "local_file",
+                "log_ref": log_ref,
+                "log_bytes": 0,
+                "log_compressed": False,
+            },
+        )
+        assert row is not None
         return self._to_operation(row)
+
+    async def append_operation_log(
+        self,
+        operation_id: str,
+        *,
+        stream: str,
+        chunk: str,
+    ) -> None:
+        row = await get_workspace_operation(self._session, operation_id)
+        if row is None or row.log_store != "local_file" or row.log_ref is None:
+            return
+        append_local_file_log(
+            _operation_log_dir(),
+            row.log_ref,
+            stream=stream,
+            chunk=chunk,
+        )
 
     async def finish_operation(
         self,
@@ -786,6 +846,15 @@ class WorkspaceService:
         stderr_excerpt: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> WorkspaceOperationData | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        log_fields: dict[str, Any] = {}
+        if row is not None and row.log_store == "local_file":
+            await self.append_operation_log(
+                operation_id,
+                stream="system",
+                chunk=f"operation finished with status {status}",
+            )
+            log_fields = finalize_local_file_log(_operation_log_dir(), row.log_ref)
         row = await update_workspace_operation(
             self._session,
             operation_id,
@@ -796,6 +865,7 @@ class WorkspaceService:
                 "stderr_excerpt": stderr_excerpt,
                 "metadata_json": metadata,
                 "finished_at": datetime.now(UTC),
+                **_database_log_fields(log_fields),
             },
         )
         return self._to_operation(row) if row is not None else None

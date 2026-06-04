@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
+import uuid
 
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -565,9 +567,60 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert metadata["source"] == "execution_workspace_scan"
 
 
-async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> (
-    None
-):
+async def test_run_preflight_and_adapter_execution_record_workspace_operations(
+    monkeypatch,
+) -> None:
+    class LoggingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            await context.on_log("stdout", "operation-ok\n")
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "operation-ok"},
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    root = Path("pytest-tmp") / f"step15-operation-logs-{uuid.uuid4().hex}"
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    monkeypatch.setenv(
+        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR", str(root / "operation-logs")
+    )
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: (root / "workspaces" / f"org_{org_id}").resolve(),
+    )
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: LoggingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: LoggingAdapter(),
+    )
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -610,10 +663,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
                 {
                     "name": "Workspace Operation Agent",
                     "agentRuntimeType": "process",
-                    "agentRuntimeConfig": {
-                        "command": sys.executable,
-                        "args": ["-c", "print('operation-ok')"],
-                    },
+                    "agentRuntimeConfig": {"command": sys.executable},
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -626,9 +676,13 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
             )
             assert run is not None
             operations = await list_workspace_operations_for_run(session, run["id"])
+            adapter_log = await WorkspaceService(session).read_operation_log(
+                operations[1].id
+            )
             await session.commit()
     finally:
         await engine.dispose()
+        shutil.rmtree(root, ignore_errors=True)
 
     assert run is not None
     assert run["status"] == "succeeded"
@@ -645,6 +699,14 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
         operations[1].stdout_excerpt == "operation-ok\r\n"
         or operations[1].stdout_excerpt == "operation-ok\n"
     )
+    assert operations[1].log_store == "local_file"
+    assert operations[1].log_ref is not None
+    assert operations[1].log_bytes is not None
+    assert operations[1].log_bytes > 0
+    assert operations[1].log_sha256 is not None
+    assert adapter_log is not None
+    assert '"stream": "stdout"' in adapter_log["content"]
+    assert "operation-ok" in adapter_log["content"]
 
 
 async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
