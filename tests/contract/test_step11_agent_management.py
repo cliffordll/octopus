@@ -955,6 +955,258 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert rows[0].status == "queued"
 
 
+async def test_successful_issue_run_with_closeout_comment_skips_passive_followup(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime
+
+    from packages.database.queries.activity_log import insert_activity_log
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="closeout-comment")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Closeout Comment Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Closeout comment",
+                status="todo",
+                assignee_agent_id=agent_id,
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": issue_id},
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+        await insert_activity_log(
+            session,
+            org_id=org_id,
+            actor_type="agent",
+            actor_id=agent_id,
+            action="issue.comment_added",
+            entity_type="issue",
+            entity_id=issue_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            details={"commentId": str(uuid.uuid4())},
+        )
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert rows == []
+
+
+async def test_successful_reviewer_run_without_decision_queues_review_closeout(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime
+
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="review-closeout")
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Review Closeout Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Needs review decision",
+                status="in_review",
+                reviewer_agent_id=reviewer_id,
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                invocation_source="review",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={
+                    "issueId": issue_id,
+                    "role": "reviewer",
+                    "wakeSource": "review",
+                },
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, reviewer_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == reviewer_id,
+                        AgentWakeupRequest.reason == "issue_review_closeout_missing",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(rows) == 1
+    assert rows[0].source == "review"
+    assert rows[0].payload == {
+        "issueId": issue_id,
+        "originRunId": run_id,
+        "previousRunId": run_id,
+        "attempt": 1,
+        "reason": "review_outcome_missing",
+    }
+
+
+async def test_issue_wakeup_defers_while_execution_locked_and_promotes_on_release(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime
+
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="deferred-issue")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    active_run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Deferred Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=active_run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": issue_id},
+                finished_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Locked issue",
+                status="in_progress",
+                assignee_agent_id=agent_id,
+                checkout_run_id=active_run_id,
+                execution_run_id=active_run_id,
+            )
+        )
+        await session.flush()
+
+        service = HeartbeatService(session)
+        deferred = await service.wakeup(
+            agent_id,
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "reason": "issue_execute_again",
+                "payload": {"issueId": issue_id, "mutation": "execute"},
+                "contextSnapshot": {
+                    "issueId": issue_id,
+                    "source": "test.defer",
+                    "wakeReason": "issue_execute_again",
+                },
+            },
+            actor_type="system",
+            actor_id="test",
+            execute_immediately=False,
+        )
+        assert deferred is None
+        wakeup = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.status == "deferred_issue_execution",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+        await service._release_issue_execution(
+            await session.get_one(HeartbeatRun, active_run_id)
+        )
+        await session.refresh(wakeup)
+        issue = await session.get_one(Issue, issue_id)
+        promoted = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == wakeup.id)
+            )
+        ).scalar_one()
+
+    assert wakeup.status == "queued"
+    assert wakeup.run_id == promoted.id
+    assert promoted.status == "queued"
+    assert promoted.context_snapshot["issueId"] == issue_id
+    assert promoted.context_snapshot["source"] == "test.defer"
+    assert issue.execution_run_id == promoted.id
+    assert issue.checkout_run_id == promoted.id
+
+
 async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_usage(
     app: FastAPI,
     session_factory: async_sessionmaker,

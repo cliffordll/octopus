@@ -77,6 +77,7 @@ from .agent_instructions import (
 )
 from .organization_skills import OrganizationSkillService, organization_skills_root
 from .agent_names import pick_unique_agent_name
+from .workspace_paths import agent_workspace_root
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
 _SENSITIVE_KEY_PATTERN = re.compile(
@@ -136,28 +137,14 @@ def _workspace_key(agent_id: str, name: str) -> str:
 
 def _agent_home_root(row: AgentRow) -> Path:
     workspace_key = _derive_url_key(row.workspace_key, row.id)
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{row.org_id}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
     workspace_key = _derive_url_key(
         cast(str | None, values.get("workspace_key")), cast(str, values["id"])
     )
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{values['org_id']}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(cast(str, values["org_id"]), workspace_key)
 
 
 def _agent_skills_root(row: AgentRow) -> Path:

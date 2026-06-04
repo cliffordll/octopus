@@ -15,12 +15,18 @@ async def actor_context_middleware(
     ):
         test_agent_id = request.headers.get("x-test-agent-id")
         test_org_id = request.headers.get("x-test-org-id")
+        run_id = (
+            request.headers.get("x-test-run-id")
+            or request.headers.get("x-rudder-run-id")
+            or request.headers.get("x-control-plane-run-id")
+        )
         if test_agent_id and test_org_id:
             request.state.actor = {
                 "type": "agent",
                 "id": test_agent_id,
                 "agentId": test_agent_id,
                 "orgId": test_org_id,
+                "runId": run_id,
                 "source": "local_test_header",
             }
     if not hasattr(request.state, "actor") and getattr(
