@@ -513,10 +513,19 @@ it("executes an assigned issue through the issue execution route", async () => {
       ]);
     }
     if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
-      return respond({ content: "persisted run log", endOffset: 17, eof: true });
+      return respond({ content: "persisted run log", endOffset: 17, eof: false, nextOffset: 17 });
+    }
+    if (path === "/api/heartbeat-runs/run-1/log?offset=17" && init?.method === "GET") {
+      return respond({ content: "\ncontinued run log", endOffset: 35, eof: true });
     }
     if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
-      return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output" }]);
+      return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output", logBytes: 40 }]);
+    }
+    if (path === "/api/workspace-operations/op-1/log" && init?.method === "GET") {
+      return respond({ content: "operation log", endOffset: 13, eof: false, nextOffset: 13 });
+    }
+    if (path === "/api/workspace-operations/op-1/log?offset=13" && init?.method === "GET") {
+      return respond({ content: "\ncontinued operation log", endOffset: 37, eof: true });
     }
     if (path === "/api/heartbeat-runs/run-1/cancel" && init?.method === "POST") {
       return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "cancelled" });
@@ -553,6 +562,12 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("persisted run log");
+  await userEvent.click(screen.getByRole("button", { name: "加载更多日志" }));
+  expect(await screen.findByText(/continued run log/)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-1/log?offset=17",
+    expect.objectContaining({ method: "GET" }),
+  );
   expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
@@ -562,6 +577,11 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByText("缺少评审结论")).toBeInTheDocument();
   expect(screen.getByText("补充关闭信号")).toBeInTheDocument();
   expect(screen.getByText("延期任务已恢复执行")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "隐藏事件" }));
+  expect(screen.getByText("事件已隐藏。")).toBeInTheDocument();
+  expect(screen.queryByText("已入队")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /显示事件/ }));
+  expect(screen.getByText("已入队")).toBeInTheDocument();
   expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
   expect(screen.getByText(/长回复内容/)).toBeInTheDocument();
   expect(screen.queryByText(/最终结论/)).not.toBeInTheDocument();
@@ -573,6 +593,14 @@ it("executes an assigned issue through the issue execution route", async () => {
   await userEvent.click(screen.getByRole("button", { name: "展开" }));
   expect(screen.getByText("queued output")).toBeInTheDocument();
   expect(screen.getByText("workspace output")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "查看操作日志" }));
+  expect((await screen.findAllByText("operation log")).length).toBeGreaterThan(0);
+  await userEvent.click(screen.getByRole("button", { name: "加载更多日志" }));
+  expect(await screen.findByText(/continued operation log/)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/workspace-operations/op-1/log?offset=13",
+    expect.objectContaining({ method: "GET" }),
+  );
   await userEvent.click(screen.getByRole("button", { name: /显示低价值事件/ }));
   expect(screen.getByText("low value")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
