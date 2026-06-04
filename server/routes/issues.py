@@ -66,6 +66,7 @@ from ..dependencies.documents import get_document_service
 from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
+from ..services.issue_review_wakeup import queue_issue_review_wakeup
 from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..services.documents import DocumentService
 from ..services.workspaces import WorkspaceService
@@ -166,6 +167,7 @@ async def create_issue_route(
             payload,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            run_id=actor.run_id,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -180,6 +182,15 @@ async def create_issue_route(
         context_source="issue.create",
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
+    )
+    await queue_issue_review_wakeup(
+        heartbeat,
+        issue,
+        mutation="create_in_review",
+        context_source="issue.create",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
     )
     return issue
 
@@ -363,6 +374,7 @@ async def update_issue_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
@@ -395,6 +407,7 @@ async def update_issue_route(
             payload,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            run_id=actor.run_id,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -405,6 +418,51 @@ async def update_issue_route(
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
+        )
+    status_changed_to_review = (
+        detail["status"] != "in_review"
+        and updated["status"] == "in_review"
+        and "status" in payload
+    )
+    status_changed_to_blocked = (
+        detail["status"] != "blocked"
+        and updated["status"] == "blocked"
+        and "status" in payload
+    )
+    reviewer_changed_in_reviewable = (
+        (
+            payload.get("reviewerAgentId") is not None
+            and payload.get("reviewerAgentId") != detail.get("reviewerAgentId")
+        )
+        and detail["status"] in {"in_review", "blocked"}
+        and updated["status"] in {"in_review", "blocked"}
+    )
+    if (
+        status_changed_to_review
+        or status_changed_to_blocked
+        or reviewer_changed_in_reviewable
+    ):
+        mutation = (
+            "status_to_in_review"
+            if status_changed_to_review
+            else "status_to_blocked"
+            if status_changed_to_blocked
+            else "reviewer_changed_blocked"
+            if updated["status"] == "blocked"
+            else "reviewer_changed_in_review"
+        )
+        await queue_issue_review_wakeup(
+            heartbeat,
+            updated,
+            mutation=mutation,
+            context_source=(
+                "issue.status_change"
+                if status_changed_to_review or status_changed_to_blocked
+                else "issue.reviewer_change"
+            ),
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+            actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
         )
     return updated
 
@@ -464,6 +522,7 @@ async def create_issue_comment_route(
         payload,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
+        run_id=actor.run_id,
     )
     return {
         "id": comment.id,
@@ -504,6 +563,7 @@ async def record_issue_review_decision_route(
             {"reviewDecision": payload},
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            run_id=actor.run_id,
         )
     except ValueError as exc:
         raise HTTPException(
