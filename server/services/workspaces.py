@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, cast
@@ -53,6 +54,7 @@ from packages.shared.types.workspace import (
 )
 
 from .logs import LogReadResult, read_local_file_log
+from .workspace_paths import organization_workspace_root
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -80,6 +82,61 @@ _WORK_PRODUCT_UPDATE_COLUMNS = {
     "metadata": "metadata_json",
     "createdByRunId": "created_by_run_id",
 }
+
+_GENERATED_FILE_EXTENSIONS = {
+    ".csv",
+    ".htm",
+    ".html",
+    ".json",
+    ".log",
+    ".md",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+_GENERATED_FILE_EXCLUDED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".octopus",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
+_GENERATED_FILE_MAX_BYTES = 1_000_000
+_GENERATED_FILE_MAX_COUNT = 20
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _iter_generated_workspace_files(root: Path, since: datetime | None) -> list[Path]:
+    candidates: list[tuple[datetime, Path]] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel_parts = path.relative_to(root).parts
+        if any(part in _GENERATED_FILE_EXCLUDED_PARTS for part in rel_parts):
+            continue
+        if path.suffix.lower() not in _GENERATED_FILE_EXTENSIONS:
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat.st_size <= 0 or stat.st_size > _GENERATED_FILE_MAX_BYTES:
+            continue
+        modified_at = datetime.fromtimestamp(stat.st_mtime, UTC)
+        if since is not None and modified_at < since:
+            continue
+        candidates.append((modified_at, path))
+    candidates.sort(key=lambda item: (item[0], item[1].as_posix()))
+    return [path for _, path in candidates[:_GENERATED_FILE_MAX_COUNT]]
 
 
 def _parse_project_policy(value: Any) -> dict[str, Any] | None:
@@ -572,6 +629,72 @@ class WorkspaceService:
             stored.append(self._to_work_product(row))
         return stored
 
+    async def persist_generated_workspace_files(
+        self,
+        *,
+        run_id: str,
+        context_snapshot: dict[str, Any] | None,
+        since: datetime | None,
+    ) -> list[IssueWorkProductData]:
+        snapshot = dict(context_snapshot or {})
+        issue_id = snapshot.get("issueId") or snapshot.get("primaryIssueId")
+        if not isinstance(issue_id, str) or not issue_id:
+            return []
+        issue = await self._session.get(Issue, issue_id)
+        if issue is None:
+            return []
+        workspace_context = snapshot.get("workspace")
+        workspace = (
+            workspace_context.get("rudderWorkspace")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        if not isinstance(workspace, dict):
+            return []
+        workspace_id = _string(workspace.get("id"))
+        cwd = _string(workspace.get("cwd"))
+        if workspace_id is None or cwd is None:
+            return []
+        root = Path(cwd).resolve()
+        if not root.is_dir():
+            return []
+        threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
+        products: list[dict[str, Any]] = []
+        for path in _iter_generated_workspace_files(root, threshold):
+            rel_path = path.relative_to(root).as_posix()
+            content = path.read_bytes()
+            content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
+            products.append(
+                {
+                    "title": rel_path,
+                    "type": "document"
+                    if path.suffix.lower() in {".md", ".txt"}
+                    else "artifact",
+                    "provider": "rudder",
+                    "externalId": f"workspace-file:{workspace_id}:{rel_path}",
+                    "status": "active",
+                    "reviewState": "none",
+                    "isPrimary": len(products) == 0,
+                    "summary": "Generated file captured from execution workspace.",
+                    "content": content,
+                    "contentType": content_type,
+                    "filename": path.name,
+                    "metadata": {
+                        "source": "execution_workspace_scan",
+                        "workspacePath": rel_path,
+                        "executionWorkspaceId": workspace_id,
+                        "byteSize": len(content),
+                    },
+                }
+            )
+        if not products:
+            return []
+        return await self.persist_run_work_products(
+            run_id=run_id,
+            context_snapshot=context_snapshot,
+            products=products,
+        )
+
     async def _archive_work_product_content(
         self, org_id: str, product: dict[str, Any]
     ) -> dict[str, Any]:
@@ -763,7 +886,7 @@ class WorkspaceService:
         return workspace
 
     def _org_workspace_root(self, org_id: str) -> Path:
-        return (Path.cwd() / ".octopus" / "workspaces" / f"org_{org_id}").resolve()
+        return organization_workspace_root(org_id)
 
     def _workspace_env(
         self,

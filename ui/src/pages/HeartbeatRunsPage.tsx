@@ -5,6 +5,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { roleLabel, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -14,7 +15,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function humanize(value?: string | null): string {
   if (!value) return "none";
-  return value;
+  return statusLabel(value);
 }
 
 function relativeTime(value?: string | null): string {
@@ -83,22 +84,22 @@ function buildHeartbeatPatch(agent: Agent, enabled: boolean): { agentRuntimeConf
 
 function schedulerState(agent: Agent): { className: string; label: string } {
   if (heartbeatEnabled(agent) && heartbeatIntervalSec(agent) > 0) {
-    return { className: "heartbeat-state-success", label: "scheduled" };
+    return { className: "heartbeat-state-success", label: "已调度" };
   }
   if (heartbeatEnabled(agent)) {
-    return { className: "heartbeat-state-warning", label: "configured_inactive" };
+    return { className: "heartbeat-state-warning", label: "已配置未启用" };
   }
-  return { className: "heartbeat-state-muted", label: "disabled" };
+  return { className: "heartbeat-state-muted", label: "未启用" };
 }
 
 function latestRunState(run: HeartbeatRun | null): { className: string; label: string } {
-  if (!run) return { className: "heartbeat-state-muted", label: "no_run" };
+  if (!run) return { className: "heartbeat-state-muted", label: "暂无运行" };
   if (run.status === "failed" || run.status === "timed_out") {
-    return { className: "heartbeat-state-danger", label: run.status };
+    return { className: "heartbeat-state-danger", label: statusLabel(run.status) };
   }
-  if (run.status === "succeeded") return { className: "heartbeat-state-success", label: run.status };
-  if (run.status === "running") return { className: "heartbeat-state-live", label: run.status };
-  if (run.status === "queued") return { className: "heartbeat-state-warning", label: run.status };
+  if (run.status === "succeeded") return { className: "heartbeat-state-success", label: statusLabel(run.status) };
+  if (run.status === "running") return { className: "heartbeat-state-live", label: statusLabel(run.status) };
+  if (run.status === "queued") return { className: "heartbeat-state-warning", label: statusLabel(run.status) };
   return { className: "heartbeat-state-muted", label: humanize(run.status) };
 }
 
@@ -199,7 +200,7 @@ export function HeartbeatRunsPage() {
                         <Link to={`/orgs/${agent.orgId}/agents/${agent.id}`}>{agent.name}</Link>
                         {latestRun && ["queued", "running"].includes(latestRun.status) && <span>Live</span>}
                       </div>
-                      <p>{humanize(agent.title ?? agent.role)} · {humanize(agent.status)}</p>
+                      <p>{agent.title ?? roleLabel(agent.role)} · {statusLabel(agent.status)}</p>
                     </div>
                     <div className="heartbeat-scheduler-cell">
                       <strong className={scheduler.className}>{scheduler.label}</strong>

@@ -51,8 +51,8 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
   expect(await screen.findByRole("heading", { name: "智能体" })).toBeInTheDocument();
   const row = await screen.findByTestId("org-heartbeat-row");
   expect(within(row).getByRole("link", { name: "Builder" })).toBeInTheDocument();
-  expect(within(row).getByText("scheduled")).toBeInTheDocument();
-  expect(within(row).getByText("running")).toBeInTheDocument();
+  expect(within(row).getByText("已调度")).toBeInTheDocument();
+  expect(within(row).getByText("运行中")).toBeInTheDocument();
   expect(within(row).getByText("检查运行状态")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "最近活动" })).toBeInTheDocument();
 

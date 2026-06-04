@@ -61,6 +61,23 @@ export interface IssueListItem {
   updatedAt: string;
 }
 
+export interface StorageHealthConfig {
+  provider?: "local_disk" | "minio" | "s3" | string | null;
+  bucket?: string | null;
+  endpoint?: string | null;
+  pathStyle?: boolean | null;
+  forcePathStyle?: boolean | null;
+}
+
+export interface ServerHealth {
+  status: string;
+  storage?: StorageHealthConfig | null;
+  storageProvider?: string | null;
+  storageBucket?: string | null;
+  storageEndpoint?: string | null;
+  storagePathStyle?: boolean | null;
+}
+
 export interface IssueDetail extends IssueListItem {
   description: string | null;
   reviewerAgentId: string | null;
@@ -72,7 +89,51 @@ export interface IssueDetail extends IssueListItem {
   completedAt: string | null;
   cancelledAt?: string | null;
   workProducts?: IssueWorkProduct[];
+  documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
+}
+
+export interface IssueDocumentSummary {
+  id: string;
+  orgId: string;
+  issueId: string;
+  key: string;
+  title: string | null;
+  format: string;
+  latestRevisionId: string | null;
+  latestRevisionNumber: number;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  updatedByAgentId: string | null;
+  updatedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDocument extends IssueDocumentSummary {
+  body: string;
+}
+
+export interface IssueDocumentRevision {
+  id: string;
+  orgId: string;
+  documentId: string;
+  issueId: string;
+  key: string;
+  revisionNumber: number;
+  body: string;
+  changeSummary: string | null;
+  createdByAgentId: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+}
+
+export interface UpsertIssueDocumentPayload {
+  title?: string | null;
+  format: "markdown";
+  body: string;
+  changeSummary?: string | null;
+  baseRevisionId?: string | null;
 }
 
 export interface IssueComment {
@@ -100,7 +161,7 @@ export interface IssueAttachment {
   originalFilename: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface IssueFilters {
@@ -671,6 +732,16 @@ export interface CreateAgentPayload {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface HireAgentPayload extends CreateAgentPayload {
+  sourceIssueId?: string | null;
+  sourceIssueIds?: string[];
+}
+
+export interface AgentHireResult {
+  agent: Agent;
+  approval: ApprovalDetail | null;
+}
+
 export interface UpdateAgentPayload {
   name?: string;
   title?: string | null;
@@ -907,6 +978,7 @@ export interface UpdateAgentInstructionsFilePayload {
 
 export interface HeartbeatRun {
   id: string;
+  runId?: string;
   orgId: string;
   agentId: string;
   issueId?: string | null;
@@ -1061,7 +1133,7 @@ export interface ChatAttachment {
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
-  contentPath: string;
+  contentPath?: string | null;
 }
 
 export interface ChatContextLink {

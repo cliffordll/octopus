@@ -52,6 +52,50 @@ def test_agent_create_lifecycle_and_invoke_use_existing_routes() -> None:
     assert requests[3].url.path == "/api/agents/agent-1/heartbeat/invoke"
 
 
+def test_agent_hire_posts_to_agent_hires() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201,
+            json={
+                "agent": {"id": "agent-1", "status": "pending_approval"},
+                "approval": {"id": "approval-1", "status": "pending"},
+            },
+        )
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "hire",
+                "--org-id",
+                "org-1",
+                "--name",
+                "Builder",
+                "--role",
+                "engineer",
+                "--runtime",
+                "process",
+                "--source-issue-id",
+                "issue-1",
+                "--source-issue",
+                "issue-2",
+            ],
+            client=client,
+            stdout=io.StringIO(),
+        )
+        == 0
+    )
+    assert requests[0].url.path == "/api/orgs/org-1/agent-hires"
+    assert requests[0].read() == (
+        b'{"name":"Builder","role":"engineer","agentRuntimeType":"process",'
+        b'"agentRuntimeConfig":{},"sourceIssueId":"issue-1","sourceIssueIds":["issue-2"]}'
+    )
+
+
 def test_agent_bootstrap_ceo_only_creates_for_empty_organization() -> None:
     requests: list[httpx.Request] = []
 
@@ -301,6 +345,7 @@ def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
                 "opencode_local",
                 "--model",
                 "openai/gpt-5",
+                "--skip-opencode-permissions",
             ],
             client=client,
         )
@@ -309,7 +354,39 @@ def test_agent_create_opencode_local_accepts_model_shortcut() -> None:
     assert requests[0].read() == (
         b'{"name":"OpenCode Agent","role":"engineer",'
         b'"agentRuntimeType":"opencode_local",'
-        b'"agentRuntimeConfig":{"model":"openai/gpt-5"}}'
+        b'"agentRuntimeConfig":{"model":"openai/gpt-5",'
+        b'"extraArgs":["--dangerously-skip-permissions"]}}'
+    )
+
+
+def test_agent_update_merges_runtime_extra_args() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-1"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "update",
+                "agent-1",
+                "--runtime",
+                "opencode_local",
+                "--runtime-config",
+                '{"model":"openai/gpt-5","extraArgs":["--verbose"]}',
+                "--skip-opencode-permissions",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert requests[0].read() == (
+        b'{"agentRuntimeType":"opencode_local","agentRuntimeConfig":'
+        b'{"model":"openai/gpt-5","extraArgs":["--verbose",'
+        b'"--dangerously-skip-permissions"]}}'
     )
 
 

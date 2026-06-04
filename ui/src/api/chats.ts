@@ -1,5 +1,5 @@
 import { jsonRequest, request, rootCauseMessage } from "./client";
-import type { ChatAttachment, ChatContextLink, ChatConversation, ChatMessage } from "./types";
+import type { ChatAttachment, ChatContextLink, ChatConversation, ChatMessage, IssueDetail } from "./types";
 
 export interface ChatListFilters {
   status?: ChatConversation["status"];
@@ -152,8 +152,8 @@ export const chatsApi = {
   convertToIssue: (
     chatId: string,
     payload: { messageId?: string | null; proposal?: Record<string, unknown> | null },
-  ): Promise<Record<string, unknown>> =>
-    jsonRequest<Record<string, unknown>>(`/api/chats/${encodeURIComponent(chatId)}/convert-to-issue`, "POST", payload),
+  ): Promise<{ issue: IssueDetail; systemMessage: ChatMessage }> =>
+    jsonRequest<{ issue: IssueDetail; systemMessage: ChatMessage }>(`/api/chats/${encodeURIComponent(chatId)}/convert-to-issue`, "POST", payload),
   resolveOperationProposal: (
     chatId: string,
     messageId: string,
