@@ -225,22 +225,30 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     assert run.status == "queued"
     assert run.invocation_source == "assignment"
     assert run.trigger_detail == "system"
-    assert run.context_snapshot == {
-        "triggeredBy": "user",
-        "actorId": "local-board",
-        "forceFreshSession": False,
-        "issueId": body["id"],
-        "source": "issue.create",
-        "wakeSource": "assignment",
-        "wakeReason": "issue_assigned",
-        "issue": {
-            "id": body["id"],
-            "title": "Assigned task",
-            "description": None,
-            "status": "todo",
-            "priority": "high",
-        },
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["triggeredBy"] == "user"
+    assert run.context_snapshot["actorId"] == "local-board"
+    assert run.context_snapshot["forceFreshSession"] is False
+    assert run.context_snapshot["issueId"] == body["id"]
+    assert run.context_snapshot["source"] == "issue.create"
+    assert run.context_snapshot["wakeSource"] == "assignment"
+    assert run.context_snapshot["wakeReason"] == "issue_assigned"
+    assert run.context_snapshot["issue"] == {
+        "id": body["id"],
+        "title": "Assigned task",
+        "description": None,
+        "status": "todo",
+        "priority": "high",
     }
+    assert run.context_snapshot["commentCursor"] is None
+    assert run.context_snapshot["documentSummaries"] == []
+    assert run.context_snapshot["ancestors"] == []
+    assert run.context_snapshot["project"] is None
+    assert run.context_snapshot["goal"] is None
+    assert run.context_snapshot["planDocument"] is None
+    assert run.context_snapshot["legacyPlanDocument"] is None
+    assert run.context_snapshot["issueDocumentsPrompt"] == ""
+    assert run.context_snapshot["wakeComment"] is None
     assert [(event.seq, event.event_type, event.message) for event in events] == [
         (1, "lifecycle", "run queued")
     ]

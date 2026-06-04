@@ -204,9 +204,13 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     assert isinstance(prompt_bytes, bytes)
     prompt = prompt_bytes.decode("utf-8")
     assert "Reply to the latest user message only" in prompt
+    assert "## Runtime Tool Capability" in prompt
     marker = "Conversation input:"
     assert marker in prompt
-    envelope = json.loads(prompt.split(marker, 1)[1].strip())
+    envelope_payload = prompt.split(marker, 1)[1].split(
+        "## Runtime Tool Capability", 1
+    )[0]
+    envelope = json.loads(envelope_payload.strip())
     assert envelope["conversation"]["id"] == conversation["id"]
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],
