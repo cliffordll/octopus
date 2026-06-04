@@ -60,7 +60,7 @@
 - 补强 workspace runtime service 生命周期：启动、绑定 run、释放、失败清理和可见状态必须与现有 run/workspace operation 查询一致。
 - 审查 workspace backup/browser 相关上游能力；只补齐任务执行闭环必须依赖的 server 行为，完整 backup/browser UI 能力不在本步骤扩张。
 - 对齐上游 `organization-workspace-browser` 的最小只读能力：server 提供组织工作区真实目录列表、文件预览和图片 content 读取；UI 的“组织 -> 工作区”页面必须消费真实 API，不再用项目/智能体数据伪造文件树。
-- 组织工作区浏览根目录固定为 `.octopus/organizations/<org_id>/workspaces`，运行产物通过 `artifacts/` 展示；该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
+- 组织工作区浏览根目录固定为 `OCTOPUS_HOME/instances/<instance_id>/organizations/<org_id>/workspaces`，默认 `~/.octopus/instances/default/organizations/<org_id>/workspaces`；运行产物通过 `artifacts/` 展示。该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
 - 每次 issue run 会预创建组织 artifacts 下的专属目录：`artifacts/issues/<issue_id>/runs/<run_id>/`。该目录属于组织工作区的一部分，UI 可通过组织工作区浏览器打开。
 
 ### 22C: Issue 执行闭环补强
