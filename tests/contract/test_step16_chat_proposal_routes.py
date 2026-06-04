@@ -11,7 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Base, ChatConversation, ChatMessage, Organization
+from packages.database.schema import (
+    Agent,
+    Base,
+    ChatConversation,
+    ChatMessage,
+    Organization,
+)
 from server.app import create_app
 
 
@@ -80,6 +86,8 @@ async def _seed_chat(
     *,
     message_kind: str,
     structured_payload: dict[str, Any],
+    replying_agent_id: str | None = None,
+    delegate_agent_id: str | None = None,
 ) -> tuple[str, str, str]:
     org_id = str(uuid.uuid4())
     conversation_id = str(uuid.uuid4())
@@ -93,6 +101,27 @@ async def _seed_chat(
                 issue_prefix="CPR",
             )
         )
+        if replying_agent_id is not None:
+            session.add(
+                Agent(
+                    id=replying_agent_id,
+                    org_id=org_id,
+                    name="Proposal Agent",
+                    role="ceo",
+                    status="idle",
+                )
+            )
+        if delegate_agent_id is not None:
+            session.add(
+                Agent(
+                    id=delegate_agent_id,
+                    org_id=org_id,
+                    name="Delegate Agent",
+                    role="engineer",
+                    status="idle",
+                    reports_to=replying_agent_id,
+                )
+            )
         session.add(
             ChatConversation(
                 id=conversation_id,
@@ -111,6 +140,7 @@ async def _seed_chat(
                 status="completed",
                 body="Proposal body",
                 structured_payload=structured_payload,
+                replying_agent_id=replying_agent_id,
             )
         )
         await session.commit()
@@ -150,6 +180,93 @@ async def test_convert_chat_issue_proposal_creates_issue_and_system_message(
         conversation = await session.get(ChatConversation, conversation_id)
         assert conversation is not None
         assert conversation.primary_issue_id == result["issue"]["id"]
+
+
+async def test_convert_chat_issue_proposal_defaults_assignee_to_replying_agent(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    _, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        replying_agent_id="agent-ceo",
+        structured_payload={
+            "issueProposal": {
+                "title": "Assigned issue",
+                "description": "From assistant proposal",
+                "priority": "medium",
+            }
+        },
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["assigneeAgentId"] == "agent-ceo"
+
+
+async def test_convert_chat_issue_proposal_delegates_ceo_issue_to_direct_report(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    _, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        replying_agent_id="agent-ceo",
+        delegate_agent_id="agent-engineer",
+        structured_payload={
+            "issueProposal": {
+                "title": "Delegate issue",
+                "description": "CEO should delegate this task.",
+                "priority": "medium",
+            }
+        },
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["assigneeAgentId"] == "agent-engineer"
+
+
+async def test_convert_chat_issue_proposal_keeps_explicit_assignee(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    _, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        replying_agent_id="agent-ceo",
+        delegate_agent_id="agent-engineer",
+        structured_payload={
+            "issueProposal": {
+                "title": "Explicit issue",
+                "description": "CEO explicitly selected an assignee.",
+                "priority": "medium",
+                "assigneeAgentId": "agent-ceo",
+            }
+        },
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["assigneeAgentId"] == "agent-ceo"
 
 
 async def test_resolve_operation_proposal_updates_message_state(
