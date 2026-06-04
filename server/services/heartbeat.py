@@ -709,6 +709,7 @@ class HeartbeatService:
 
         stdout = ""
         stderr = ""
+        adapter_operation: object | None = None
 
         async def on_log(stream: str, chunk: str) -> None:
             nonlocal sequence, stdout, stderr
@@ -716,6 +717,14 @@ class HeartbeatService:
                 stdout += chunk
             else:
                 stderr += chunk
+            if isinstance(adapter_operation, dict) and isinstance(
+                adapter_operation.get("id"), str
+            ):
+                await WorkspaceService(self._session).append_operation_log(
+                    adapter_operation["id"],
+                    stream=stream,
+                    chunk=chunk,
+                )
             await self._append_event(
                 running,
                 sequence,
