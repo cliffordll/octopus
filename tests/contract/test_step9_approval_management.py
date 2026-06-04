@@ -20,6 +20,7 @@ from starlette.responses import Response
 from packages.database.clients import async_transaction
 from packages.database.schema import (
     ActivityLog,
+    Agent,
     Approval,
     Base,
     ChatConversation,
@@ -371,6 +372,26 @@ async def test_approve_chat_issue_creation_creates_issue_and_system_message(
     approval_id, conversation_id, message_id = await _seed_chat_issue_creation_approval(
         session, org_id
     )
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id="agent-ceo",
+                    org_id=org_id,
+                    name="CEO",
+                    role="ceo",
+                    status="idle",
+                ),
+                Agent(
+                    id="agent-engineer",
+                    org_id=org_id,
+                    name="Engineer",
+                    role="engineer",
+                    status="idle",
+                    reports_to="agent-ceo",
+                ),
+            ]
+        )
 
     code, body = await _request(
         app,
@@ -388,6 +409,7 @@ async def test_approve_chat_issue_creation_creates_issue_and_system_message(
     assert issue.title == "Summarize README"
     assert issue.created_by_user_id == "board-chat"
     assert issue.created_by_agent_id is None
+    assert issue.assignee_agent_id == "agent-engineer"
     conversation = await session.get(ChatConversation, conversation_id)
     assert conversation is not None
     assert conversation.primary_issue_id == issue.id

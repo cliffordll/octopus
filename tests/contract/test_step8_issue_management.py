@@ -246,6 +246,104 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     ]
 
 
+async def test_create_in_review_issue_queues_reviewer_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Issue Reviewer",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Ready for review",
+            "status": "in_review",
+            "reviewerAgentId": reviewer_id,
+            "originKind": "manual",
+        },
+    )
+
+    assert code == 200
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == reviewer_id
+                )
+            )
+        ).scalar_one()
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == wakeup.id)
+            )
+        ).scalar_one()
+
+    assert wakeup.source == "review"
+    assert wakeup.reason == "issue_review_requested"
+    assert wakeup.payload == {
+        "issueId": body["id"],
+        "mutation": "create_in_review",
+    }
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["role"] == "reviewer"
+
+
+async def test_update_issue_to_in_review_queues_reviewer_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(session, org_id, status="todo")
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Patch Reviewer",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "in_review", "reviewerAgentId": reviewer_id},
+    )
+
+    assert code == 200
+    assert body["status"] == "in_review"
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == reviewer_id
+                )
+            )
+        ).scalar_one()
+    assert wakeup.reason == "issue_review_requested"
+    assert wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "status_to_in_review",
+    }
+
+
 async def test_update_issue_route_returns_200_and_updates(
     app: FastAPI, session: AsyncSession
 ) -> None:
@@ -639,6 +737,41 @@ async def test_issue_update_rejects_parent_cycle(
 
     assert code == 422
     assert "cycle" in body["detail"].lower()
+
+
+async def test_parent_done_auto_closes_open_children(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, status="todo")
+    child_a_id = await _seed_issue(session, org_id, title="Child A", status="todo")
+    child_b_id = await _seed_issue(session, org_id, title="Child B", status="blocked")
+    done_child_id = await _seed_issue(session, org_id, title="Child C", status="done")
+    async with async_transaction(session):
+        for issue_id in (child_a_id, child_b_id, done_child_id):
+            row = await session.get(Issue, issue_id)
+            assert row is not None
+            row.parent_id = parent_id
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{parent_id}",
+        json={"status": "done"},
+    )
+
+    assert code == 200
+    assert body["status"] == "done"
+    child_code, children = await _request(
+        app, "GET", f"/api/orgs/{org_id}/issues?parentId={parent_id}"
+    )
+    assert child_code == 200
+    assert {child["id"]: child["status"] for child in children} == {
+        child_a_id: "done",
+        child_b_id: "done",
+        done_child_id: "done",
+    }
 
 
 async def test_issue_detail_returns_association_fields_and_nulls(

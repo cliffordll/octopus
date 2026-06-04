@@ -12,6 +12,7 @@ class ActorIdentity:
     actor_type: str
     actor_id: str
     org_id: str | None = None
+    run_id: str | None = None
 
 
 def _actor_value(actor: object, key: str) -> Any:
@@ -45,6 +46,11 @@ def require_actor_identity(request: Request) -> ActorIdentity:
         org_id=(
             str(_actor_value(actor, "orgId"))
             if _actor_value(actor, "orgId") is not None
+            else None
+        ),
+        run_id=(
+            str(_actor_value(actor, "runId"))
+            if _actor_value(actor, "runId") is not None
             else None
         ),
     )

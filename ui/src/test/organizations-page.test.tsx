@@ -36,7 +36,7 @@ it("lists and creates organizations", async () => {
   expect(await screen.findByRole("link", { name: "核心团队" })).toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("组织名称"), "设计团队");
-  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "250000");
+  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "2500");
   await userEvent.type(screen.getByLabelText("品牌色"), "#3366ff");
   await userEvent.click(screen.getByLabelText("新建智能体需要审批"));
   await userEvent.selectOptions(screen.getByLabelText("默认聊天任务创建模式"), "auto_create");

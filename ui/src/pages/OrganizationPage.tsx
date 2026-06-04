@@ -8,13 +8,14 @@ import { projectsApi } from "../api/projects";
 import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, ProjectDetail, ProjectWorkspace } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { sourceLabel, statusLabel } from "../utils/display";
 
 export function OrganizationPage() {
   const { orgId = "" } = useParams();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("");
+  const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState("");
   const [brandColor, setBrandColor] = useState("");
   const [requireBoardApprovalForNewAgents, setRequireBoardApprovalForNewAgents] = useState(false);
   const [defaultChatIssueCreationMode, setDefaultChatIssueCreationMode] = useState("manual_approval");
@@ -27,7 +28,7 @@ export function OrganizationPage() {
     if (organization.data) {
       setName(organization.data.name);
       setDescription(organization.data.description ?? "");
-      setBudgetMonthlyCents(String(organization.data.budgetMonthlyCents ?? ""));
+      setBudgetMonthlyDollars(String(((organization.data.budgetMonthlyCents ?? 0) / 100).toFixed(2)));
       setBrandColor(organization.data.brandColor ?? "");
       setRequireBoardApprovalForNewAgents(Boolean(organization.data.requireBoardApprovalForNewAgents));
       setDefaultChatIssueCreationMode(organization.data.defaultChatIssueCreationMode ?? "manual_approval");
@@ -38,7 +39,7 @@ export function OrganizationPage() {
       organizationsApi.update(orgId, {
         name: name.trim(),
         description: description.trim() || null,
-        budgetMonthlyCents: budgetMonthlyCents.trim() ? Number(budgetMonthlyCents) : undefined,
+        budgetMonthlyCents: budgetMonthlyDollars.trim() ? Math.round(Number(budgetMonthlyDollars) * 100) : undefined,
         brandColor: brandColor.trim() || null,
         requireBoardApprovalForNewAgents,
         defaultChatIssueCreationMode,
@@ -76,12 +77,13 @@ export function OrganizationPage() {
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
         </label>
         <label>
-          月度预算（cents）
+          月度预算（美元）
           <input
             min="0"
+            step="0.01"
             type="number"
-            value={budgetMonthlyCents}
-            onChange={(event) => setBudgetMonthlyCents(event.target.value)}
+            value={budgetMonthlyDollars}
+            onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
           />
         </label>
         <label>
@@ -326,7 +328,7 @@ export function OrganizationStructurePage() {
                   <small>{agent.agentRuntimeType ?? "runtime"}</small>
                   <small>{agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}</small>
                 </div>
-                <Badge>{agent.status}</Badge>
+                <Badge>{statusLabel(agent.status)}</Badge>
               </Link>
             ))}
           </div>
@@ -708,17 +710,26 @@ function isCommunityOrganizationSkill(skill: OrganizationSkillListItem): boolean
 }
 
 function organizationSkillSourceText(value: string | null | undefined, builtIn: boolean, fallback = "built-in"): string {
-  if (builtIn) return "built-in";
-  if (!value) return fallback;
-  if (normalizedOrganizationSkillSource(value) === "community_preset") return "community";
-  return value;
+  if (builtIn) return "内置";
+  if (!value) return sourceLabel(fallback);
+  if (normalizedOrganizationSkillSource(value) === "community_preset") return "社区";
+  return sourceLabel(value);
+}
+
+function organizationSkillReadableSummary(skill: OrganizationSkillListItem, content?: string | null): string {
+  if (skill.description?.trim()) return skill.description.trim();
+  if (!content?.trim()) return "";
+  const withoutFrontmatter = content.replace(/^---[\s\S]*?---\s*/, "").trim();
+  const firstParagraph = withoutFrontmatter.split(/\n\s*\n/).find((paragraph) => paragraph.trim());
+  return firstParagraph?.replace(/\s+/g, " ").trim().slice(0, 360) ?? "";
 }
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
-    { title: "built-in", rows: skills.filter(isBuiltInOrganizationSkill) },
-    { title: "community", rows: skills.filter(isCommunityOrganizationSkill) },
+    { label: "内置技能", rows: skills.filter(isBuiltInOrganizationSkill), title: "built-in" },
+    { label: "社区技能", rows: skills.filter(isCommunityOrganizationSkill), title: "community" },
     {
+      label: "本地技能",
       title: "local",
       rows: skills.filter((skill) => !isBuiltInOrganizationSkill(skill) && !isCommunityOrganizationSkill(skill)),
     },
@@ -776,6 +787,7 @@ export function OrganizationSkillsPage() {
     queryFn: () => organizationSkillsApi.readFile(orgId, selectedSkill!.id, selectedPath),
     enabled: Boolean(selectedSkill),
   });
+  const readableSkillSummary = selectedSkill ? organizationSkillReadableSummary(selectedSkill, skillFile.data?.content) : "";
   const updateStatus = useQuery({
     queryKey: ["organization-skill-update-status", orgId, selectedSkill?.id],
     queryFn: () => organizationSkillsApi.updateStatus(orgId, selectedSkill!.id),
@@ -950,7 +962,7 @@ export function OrganizationSkillsPage() {
             {filteredSkillSections.map((section) => (
               <section className="organization-skill-list-section" key={section.title}>
                 <div className="organization-skill-list-section-heading">
-                  <h2>{section.title}</h2>
+                  <h2>{section.label}</h2>
                   <span>{section.rows.length}</span>
                 </div>
                 {section.rows.map((skill) => (
@@ -1015,6 +1027,12 @@ export function OrganizationSkillsPage() {
               {skillFile.error && <ErrorNotice error={skillFile.error} />}
               {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
               {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
+              {readableSkillSummary && (
+                <section className="organization-skill-readable-summary">
+                  <span>技能说明</span>
+                  <p>{readableSkillSummary}</p>
+                </section>
+              )}
               <div className="organization-skill-info-grid">
                 <div>
                   <span>来源</span>
@@ -1040,7 +1058,7 @@ export function OrganizationSkillsPage() {
                     {skillDetail.data?.usedByAgents.map((agent) => (
                       <span key={agent.id}>
                         <strong>{agent.name}</strong>
-                        <small>{agent.desired ? "desired" : "available"} · {agent.actualState ?? agent.agentRuntimeType}</small>
+                        <small>{agent.desired ? "已启用" : "可用"} · {agent.actualState ? statusLabel(agent.actualState) : agent.agentRuntimeType}</small>
                       </span>
                     ))}
                   </div>

@@ -208,10 +208,16 @@ async def test_cancel_interrupts_active_process_run(
             application, "POST", f"/api/heartbeat-runs/{run_id}/cancel", json={}
         )
         await invocation
-        await asyncio.sleep(0.05)
-        detail_code, detail = await _request(
-            application, "GET", f"/api/heartbeat-runs/{run_id}"
-        )
+        detail_code = 0
+        detail: dict[str, Any] = {}
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            detail_code, detail = await _request(
+                application, "GET", f"/api/heartbeat-runs/{run_id}"
+            )
+            if detail_code == 200 and detail["status"] == "cancelled":
+                break
+            await asyncio.sleep(0.02)
 
         assert cancel_code == 200 and cancelled["status"] == "cancelled"
         assert detail_code == 200 and detail["status"] == "cancelled"

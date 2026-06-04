@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
@@ -23,10 +23,19 @@ import type {
 import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatBytes, formatDateTime, priorityLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
+const LIVE_RUN_REFETCH_MS = 1000;
+const AGENT_REPLY_COLLAPSE_CHARS = 600;
+const AGENT_REPLY_COLLAPSE_LINES = 8;
+
+interface RunStreamCursor {
+  lastSeq: number;
+  nextOffset: number;
+}
 
 function issueDisplayId(issue: IssueDetail): string {
   return issue.identifier ?? issue.id.slice(0, 8);
@@ -51,6 +60,28 @@ function reviewDecisionBlockReason(issue: IssueDetail): string {
   return "";
 }
 
+function reviewDecisionLabel(decision: IssueReviewDecision): string {
+  switch (decision) {
+    case "approve":
+      return "通过评审";
+    case "request_changes":
+      return "请求修改";
+    case "needs_followup":
+      return "需要跟进";
+    case "blocked":
+      return "标记阻塞";
+  }
+}
+
+function reviewStatusText(issue: IssueDetail, agentsById: Map<string, Agent>): string {
+  if (!["in_review", "blocked"].includes(issue.status)) return "当前任务不在评审阶段。";
+  if (!issue.reviewerAgentId) return "未设置 Reviewer，无法提交评审结论。";
+  const reviewer = agentName(issue.reviewerAgentId, agentsById);
+  return issue.status === "blocked"
+    ? `任务已阻塞，等待 ${reviewer} 给出 closeout 或后续处理意见。`
+    : `任务正在评审中，等待 ${reviewer} 给出 closeout。`;
+}
+
 function markReviewBlockReason(issue: IssueDetail): string {
   if (!issue.reviewerAgentId) return "请先设置 Reviewer，当前任务不能标记为待评审。";
   if (issue.status === "in_review") return "当前任务已经是待评审状态。";
@@ -59,6 +90,45 @@ function markReviewBlockReason(issue: IssueDetail): string {
 
 function isLiveRun(status?: string | null): boolean {
   return status === "queued" || status === "running";
+}
+
+function isRerunnableRun(status?: string | null): boolean {
+  return status === "failed" || status === "timed_out" || status === "cancelled";
+}
+
+function isTerminalRun(status?: string | null): boolean {
+  return status === "succeeded" || isRerunnableRun(status);
+}
+
+function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
+  return run?.id || run?.runId || "";
+}
+
+function runSortTime(run: HeartbeatRun): number {
+  const value = run.createdAt ?? run.startedAt ?? run.updatedAt ?? "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): HeartbeatRun | null {
+  const merged = new Map<string, HeartbeatRun>();
+  for (const run of runs) {
+    const id = heartbeatRunId(run);
+    if (id) merged.set(id, run);
+  }
+  if (currentRun) {
+    const id = heartbeatRunId(currentRun);
+    if (id) merged.set(id, { ...merged.get(id), ...currentRun });
+  }
+  const sorted = Array.from(merged.values()).sort((left, right) => runSortTime(right) - runSortTime(left));
+  return sorted[0] ?? null;
+}
+
+function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
+  const next = new Map<number, HeartbeatRunEvent>();
+  for (const event of left) next.set(event.id, event);
+  for (const event of right) next.set(event.id, event);
+  return Array.from(next.values()).sort((leftEvent, rightEvent) => leftEvent.seq - rightEvent.seq);
 }
 
 function hasJsonObject(value: unknown): value is Record<string, unknown> {
@@ -70,14 +140,14 @@ function formattedJson(value: unknown): string {
 }
 
 function runSummary(run: HeartbeatRun | null): string {
-  if (!run) return "暂无执行记录";
+  if (!run) return "暂无运行记录";
   if (run.error?.trim()) return run.error.trim();
   const result = hasJsonObject(run.resultJson) ? run.resultJson : null;
   for (const key of ["summary", "result", "message"]) {
     const value = result?.[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return run.status;
+  return statusLabel(run.status);
 }
 
 function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
@@ -125,6 +195,10 @@ function isTextRunEvent(event: HeartbeatRunEvent): boolean {
 
 function runEventLabel(event: HeartbeatRunEvent): string {
   const eventType = event.eventType.toLowerCase();
+  if (eventType.includes("issue_review_requested")) return "请求评审";
+  if (eventType.includes("issue_review_closeout_missing")) return "缺少评审结论";
+  if (eventType.includes("issue_passive_followup")) return "补充关闭信号";
+  if (eventType.includes("issue_execution_promoted")) return "延期任务已恢复执行";
   if (isErrorRunEvent(event)) return "错误";
   if (isTextRunEvent(event)) return "Agent 回复";
   if (eventType.includes("queued")) return "入队";
@@ -139,9 +213,42 @@ function runEventBody(event: HeartbeatRunEvent): string {
   return eventPayloadText(event.payload) || event.message || "";
 }
 
+function shouldCollapseAgentReply(body: string): boolean {
+  return body.length > AGENT_REPLY_COLLAPSE_CHARS || body.split(/\r?\n/).length > AGENT_REPLY_COLLAPSE_LINES;
+}
+
+function agentReplyPreview(body: string): string {
+  const lines = body.split(/\r?\n/);
+  const linePreview = lines.slice(0, AGENT_REPLY_COLLAPSE_LINES).join("\n");
+  const preview = linePreview.length > AGENT_REPLY_COLLAPSE_CHARS
+    ? `${linePreview.slice(0, AGENT_REPLY_COLLAPSE_CHARS).trimEnd()}...`
+    : linePreview;
+  return lines.length > AGENT_REPLY_COLLAPSE_LINES && !preview.endsWith("...") ? `${preview}\n...` : preview;
+}
+
+function AgentReplyBody({ body }: { body: string }) {
+  const shouldCollapse = shouldCollapseAgentReply(body);
+  const [expanded, setExpanded] = useState(!shouldCollapse);
+  return (
+    <div className="issue-run-agent-reply-block">
+      <p className={`issue-run-agent-reply${shouldCollapse && !expanded ? " collapsed" : ""}`}>
+        {expanded ? body : agentReplyPreview(body)}
+      </p>
+      {shouldCollapse && (
+        <button
+          className="secondary small-button issue-run-agent-reply-toggle"
+          onClick={() => setExpanded((value) => !value)}
+          type="button"
+        >
+          {expanded ? "收起回复" : "展开完整回复"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function formatIssueTime(value: string | null | undefined): string {
-  if (!value) return "-";
-  return new Date(value).toLocaleString();
+  return formatDateTime(value);
 }
 
 function IssuePropertiesPanel({
@@ -170,29 +277,19 @@ function IssuePropertiesPanel({
       </div>
       <div className="issue-property-list">
         <label className="issue-property-row">
-          <span>状态</span>
-          <span className="issue-property-control-row">
-            <select
-              disabled={isUpdating}
-              value={issue.status}
-              onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
-            >
-              {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-            <button
-              className="secondary small-button"
-              disabled={isUpdating || issue.status === "in_progress"}
-              onClick={() => onUpdate({ status: "in_progress" })}
-              type="button"
-            >
-              标记进行中
-            </button>
-          </span>
+          <span>任务阶段</span>
+          <select
+            disabled={isUpdating}
+            value={issue.status}
+            onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
+          >
+            {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
+          </select>
         </label>
         <label className="issue-property-row">
           <span>优先级</span>
           <select disabled={isUpdating} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
-            {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
+            {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}
           </select>
         </label>
         <label className="issue-property-row">
@@ -283,21 +380,39 @@ function IssuePropertiesPanel({
         <div className="issue-property-row"><span>来源 ID</span><strong>{issue.originId ?? "-"}</strong></div>
         <div className="issue-property-row"><span>已启动</span><strong>{issue.startedAt ?? "-"}</strong></div>
         <div className="issue-property-row"><span>已完成</span><strong>{issue.completedAt ?? "-"}</strong></div>
-        <div className="issue-property-row"><span>已创建</span><strong>{issue.createdAt || "-"}</strong></div>
-        <div className="issue-property-row"><span>已更新</span><strong>{issue.updatedAt || "-"}</strong></div>
+        <div className="issue-property-row"><span>已创建</span><strong>{formatDateTime(issue.createdAt)}</strong></div>
+        <div className="issue-property-row"><span>已更新</span><strong>{formatDateTime(issue.updatedAt)}</strong></div>
       </div>
     </section>
   );
 }
 
 function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
-  const workProducts = issue.workProducts ?? [];
+  const queryClient = useQueryClient();
+  const workProductsQuery = useQuery({
+    queryKey: ["issue-work-products", issue.id],
+    queryFn: () => issuesApi.listWorkProducts(issue.id),
+    initialData: issue.workProducts ?? [],
+  });
+  const workProducts = workProductsQuery.data ?? [];
+  const deleteWorkProduct = useMutation({
+    mutationFn: (workProductId: string) => issuesApi.deleteWorkProduct(workProductId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issue.id] });
+      void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] });
+    },
+  });
   return (
     <section aria-label="工作产物" className="issue-section-card">
       <div className="issue-section-heading">
         <h2>工作产物</h2>
         <span className="muted">{workProducts.length}</span>
       </div>
+      <p className="muted issue-work-product-hint">
+        工作产物由智能体运行生成并由 server 记录。UI 只展示下载入口，只有点击下载时才会通过 contentPath 获取文件，不会自动写入本地仓库。
+      </p>
+      {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
+      {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
           {workProducts.map((product) => (
@@ -308,8 +423,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               </div>
               <div className="issue-work-product-meta">
                 <Badge>{product.type}</Badge>
-                <Badge>{product.status}</Badge>
-                <Badge>{product.reviewState}</Badge>
+                <Badge>{statusLabel(product.status)}</Badge>
+                <Badge>{statusLabel(product.reviewState)}</Badge>
                 {product.isPrimary && <Badge>primary</Badge>}
               </div>
               <dl className="issue-work-product-details">
@@ -317,16 +432,211 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                 {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
-                {product.contentType && <div><dt>类型</dt><dd>{product.contentType}</dd></div>}
-                {product.byteSize !== undefined && product.byteSize !== null && <div><dt>大小</dt><dd>{product.byteSize} bytes</dd></div>}
               </dl>
+              <details className="storage-object-details">
+                <summary>存储对象</summary>
+                <dl className="issue-work-product-details">
+                  <div><dt>provider</dt><dd>{product.provider}</dd></div>
+                  <div><dt>大小</dt><dd>{product.byteSize !== undefined && product.byteSize !== null ? formatBytes(product.byteSize) : "-"}</dd></div>
+                  <div><dt>contentType</dt><dd>{product.contentType ?? "-"}</dd></div>
+                  <div><dt>sha256</dt><dd>{product.sha256 ?? "-"}</dd></div>
+                </dl>
+              </details>
               <div className="issue-work-product-actions">
-                {product.contentPath && <a className="button secondary small-button" href={product.contentPath}>下载产物</a>}
+                {product.contentPath ? (
+                  <>
+                    <a className="button secondary small-button" href={product.contentPath}>下载产物文件</a>
+                    <a className="button secondary small-button" href={product.contentPath} target="_blank" rel="noreferrer">预览内容</a>
+                  </>
+                ) : (
+                  <span className="download-unavailable">不可下载</span>
+                )}
                 {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+                <button
+                  className="danger small-button"
+                  disabled={deleteWorkProduct.isPending}
+                  onClick={() => deleteWorkProduct.mutate(product.id)}
+                  type="button"
+                >
+                  删除产物
+                </button>
               </div>
             </article>
           ))}
         </div>
+      )}
+      {deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
+    </section>
+  );
+}
+
+function IssueDocumentsPanel({ issueId }: { issueId: string }) {
+  const queryClient = useQueryClient();
+  const [documentsHidden, setDocumentsHidden] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string>("");
+  const [draftKey, setDraftKey] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [changeSummary, setChangeSummary] = useState("");
+  const documents = useQuery({
+    queryKey: ["issue-documents", issueId],
+    queryFn: () => issuesApi.listDocuments(issueId),
+  });
+  useEffect(() => {
+    if (selectedKey || !documents.data?.[0]) return;
+    setSelectedKey(documents.data[0].key);
+  }, [documents.data, selectedKey]);
+  const document = useQuery({
+    queryKey: ["issue-document", issueId, selectedKey],
+    queryFn: () => issuesApi.getDocument(issueId, selectedKey),
+    enabled: Boolean(selectedKey),
+  });
+  const revisions = useQuery({
+    queryKey: ["issue-document-revisions", issueId, selectedKey],
+    queryFn: () => issuesApi.listDocumentRevisions(issueId, selectedKey),
+    enabled: Boolean(selectedKey),
+  });
+  useEffect(() => {
+    if (!document.data) return;
+    setDraftKey(document.data.key);
+    setDraftTitle(document.data.title ?? "");
+    setDraftBody(document.data.body);
+    setChangeSummary("");
+  }, [document.data]);
+  const saveDocument = useMutation({
+    mutationFn: () => issuesApi.upsertDocument(issueId, draftKey.trim(), {
+      title: draftTitle.trim() || null,
+      format: "markdown",
+      body: draftBody,
+      changeSummary: changeSummary.trim() || null,
+      baseRevisionId: document.data?.latestRevisionId ?? null,
+    }),
+    onSuccess: (saved) => {
+      setSelectedKey(saved.key);
+      void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-document", issueId, saved.key] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-document-revisions", issueId, saved.key] });
+    },
+  });
+  const deleteDocument = useMutation({
+    mutationFn: () => issuesApi.deleteDocument(issueId, selectedKey),
+    onSuccess: () => {
+      setSelectedKey("");
+      setDraftKey("");
+      setDraftTitle("");
+      setDraftBody("");
+      setChangeSummary("");
+      void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+    },
+  });
+  function startNewDocument() {
+    setSelectedKey("");
+    setDraftKey("");
+    setDraftTitle("");
+    setDraftBody("");
+    setChangeSummary("");
+  }
+  const canSave = Boolean(draftKey.trim() && draftBody.trim());
+  return (
+    <section aria-label="任务文档" className="issue-section-card">
+      <div className="issue-section-heading">
+        <h2>任务文档</h2>
+        <div className="issue-section-heading-actions">
+          <span className="muted">{documents.data?.length ?? 0}</span>
+          <button
+            className="secondary small-button"
+            onClick={() => setDocumentsHidden((value) => !value)}
+            type="button"
+          >
+            {documentsHidden ? "显示" : "隐藏"}
+          </button>
+        </div>
+      </div>
+      {!documentsHidden && (
+        <>
+          <p className="muted issue-work-product-hint">
+            文档由 server 按任务保存，支持查看正文、编辑保存、查看历史版本和删除。
+          </p>
+          {documents.error && <ErrorNotice error={documents.error} />}
+          <div className="issue-documents-layout">
+            <aside className="issue-document-list" aria-label="文档列表">
+              <button className="secondary small-button" onClick={startNewDocument} type="button">新建文档</button>
+              {documents.isLoading && <p className="muted">加载文档中...</p>}
+              {documents.isSuccess && documents.data.length === 0 && <p className="muted">暂无文档。</p>}
+              {documents.data?.map((item) => (
+                <button
+                  className={selectedKey === item.key ? "active" : ""}
+                  key={item.id}
+                  onClick={() => setSelectedKey(item.key)}
+                  type="button"
+                >
+                  <strong>{item.title || item.key}</strong>
+                  <span>{item.key} · v{item.latestRevisionNumber}</span>
+                </button>
+              ))}
+            </aside>
+            <div className="issue-document-editor">
+              {document.error && <ErrorNotice error={document.error} />}
+              <div className="issue-document-fields">
+                <label>
+                  文档 key
+                  <input
+                    disabled={Boolean(document.data)}
+                    placeholder="plan"
+                    value={draftKey}
+                    onChange={(event) => setDraftKey(event.target.value)}
+                  />
+                </label>
+                <label>
+                  标题
+                  <input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+                </label>
+              </div>
+              <label>
+                正文
+                <textarea
+                  className="issue-document-body"
+                  placeholder="输入 Markdown 文档内容"
+                  value={draftBody}
+                  onChange={(event) => setDraftBody(event.target.value)}
+                />
+              </label>
+              <label>
+                变更说明
+                <input value={changeSummary} onChange={(event) => setChangeSummary(event.target.value)} />
+              </label>
+              <div className="issue-work-product-actions">
+                <button disabled={!canSave || saveDocument.isPending} onClick={() => saveDocument.mutate()} type="button">
+                  保存文档
+                </button>
+                <button
+                  className="danger small-button"
+                  disabled={!selectedKey || deleteDocument.isPending}
+                  onClick={() => deleteDocument.mutate()}
+                  type="button"
+                >
+                  删除文档
+                </button>
+              </div>
+              {saveDocument.error && <ErrorNotice error={saveDocument.error} />}
+              {deleteDocument.error && <ErrorNotice error={deleteDocument.error} />}
+              <details className="storage-object-details">
+                <summary>历史版本</summary>
+                {revisions.error && <ErrorNotice error={revisions.error} />}
+                {revisions.isLoading && selectedKey && <p className="muted">加载历史版本中...</p>}
+                {revisions.data?.map((revision) => (
+                  <article className="issue-document-revision" key={revision.id}>
+                    <strong>v{revision.revisionNumber}</strong>
+                    <span>{revision.changeSummary || "无变更说明"} · {formatDateTime(revision.createdAt)}</span>
+                  </article>
+                ))}
+                {revisions.isSuccess && revisions.data.length === 0 && <p className="muted">暂无历史版本。</p>}
+              </details>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );
@@ -346,28 +656,29 @@ function IssueRunsPanel({
   runs: HeartbeatRun[];
 }) {
   return (
-    <section aria-label="执行记录" className="issue-section-card">
+    <section aria-label="运行记录" className="issue-section-card">
       <div className="issue-section-heading">
-        <h2>执行记录</h2>
+        <h2>运行记录</h2>
         <span className="muted">{runs.length} 次运行</span>
       </div>
       {runs.length === 0 ? (
-        <p className="muted">暂无执行记录。</p>
+        <p className="muted">暂无运行记录。</p>
       ) : (
         <div className="issue-run-record-list">
           {runs.map((run) => {
-            const displayRun = currentRun?.id === run.id ? { ...run, ...currentRun } : run;
+            const runId = heartbeatRunId(run);
+            const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
             const summary = runSummary(displayRun);
             return (
               <button
-                className={`issue-run-record${run.id === currentRunId ? " active" : ""}`}
-                key={run.id}
-                onClick={() => onSelect(run.id)}
+                className={`issue-run-record${runId === currentRunId ? " active" : ""}`}
+                key={runId}
+                onClick={() => onSelect(runId)}
                 type="button"
               >
                 <div className="issue-run-record-header">
-                  <strong>{run.id}</strong>
-                  <Badge>{displayRun.status}</Badge>
+                  <strong>{runId}</strong>
+                  <Badge>{statusLabel(displayRun.status)}</Badge>
                 </div>
                 <dl className="issue-run-record-meta">
                   <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
@@ -400,11 +711,17 @@ function IssueRunOutputPanel({
   onCancel,
   onRetry,
   runId,
+  streamActive,
+  streamError,
+  streamLog,
 }: {
   data: IssueRunPanelData;
   onCancel: () => void;
   onRetry: () => void;
   runId: string;
+  streamActive: boolean;
+  streamError: string | null;
+  streamLog: string;
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
   const [showDebugOutput, setShowDebugOutput] = useState(false);
@@ -422,15 +739,20 @@ function IssueRunOutputPanel({
   });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
+  const liveRun = isLiveRun(run?.status);
   return (
     <section aria-label="执行输出" className="issue-section-card issue-run-output">
       <div className="issue-section-heading">
         <div>
           <h2>执行输出</h2>
-          <p className="muted">本面板展示当前任务最近一次由本页面触发的运行。</p>
+          <p className="muted">
+            本面板展示当前任务最近一次由本页面触发的运行。{liveRun ? "运行中会通过 stream 动态刷新事件和输出。" : ""}
+          </p>
         </div>
         <div className="issue-run-actions">
-          {run && <Badge>{run.status}</Badge>}
+          {streamActive && <Badge>stream 连接中</Badge>}
+          {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
+          {run && <Badge>{statusLabel(run.status)}</Badge>}
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
           <button className="secondary small-button" disabled={!canCancel} onClick={onCancel} type="button">取消运行</button>
           <button className="secondary small-button" disabled={!canRetry} onClick={onRetry} type="button">重试运行</button>
@@ -439,11 +761,12 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
+      {streamError && <p className="error-notice">{streamError}</p>}
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
         <dl className="issue-run-summary">
-          <div><dt>Run ID</dt><dd>{run?.id ?? runId}</dd></div>
-          <div><dt>状态</dt><dd>{run?.status ?? "加载中"}</dd></div>
+          <div><dt>Run ID</dt><dd>{heartbeatRunId(run) || runId}</dd></div>
+          <div><dt>状态</dt><dd>{run ? statusLabel(run.status) : "加载中"}</dd></div>
           <div><dt>开始</dt><dd>{run?.startedAt ?? "-"}</dd></div>
           <div><dt>结束</dt><dd>{run?.finishedAt ?? "-"}</dd></div>
         </dl>
@@ -477,6 +800,15 @@ function IssueRunOutputPanel({
           </details>
         )}
       </section>
+      {streamLog && (
+        <section className="issue-run-output-block">
+          <div className="issue-run-output-heading">
+            <h3>实时日志</h3>
+            <Badge>stream log</Badge>
+          </div>
+          <pre className="run-excerpt inline">{streamLog}</pre>
+        </section>
+      )}
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
@@ -496,12 +828,12 @@ function IssueRunOutputPanel({
                   <span>#{event.seq}</span>
                   <strong>{runEventLabel(event)}</strong>
                   <Badge>{event.eventType}</Badge>
-                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
                   {event.stream && <Badge>{event.stream}</Badge>}
                 </div>
                 {runEventBody(event) && (
                   isTextRunEvent(event) && !isErrorRunEvent(event)
-                    ? <p className="issue-run-agent-reply">{runEventBody(event)}</p>
+                    ? <AgentReplyBody body={runEventBody(event)} />
                     : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
                 )}
                 {hasJsonObject(event.payload) && (
@@ -510,7 +842,7 @@ function IssueRunOutputPanel({
                     <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
                   </details>
                 )}
-                <small className="muted">{event.createdAt}</small>
+                <small className="muted">{formatDateTime(event.createdAt)}</small>
               </article>
             ))}
           </div>
@@ -539,7 +871,7 @@ function IssueRunOutputPanel({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{operation.status}</Badge>
+                  <Badge>{statusLabel(operation.status)}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p className="muted">{operation.command}</p>}
@@ -582,7 +914,7 @@ function IssueRunOutputPanel({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{operation.status}</Badge>
+                  <Badge>{statusLabel(operation.status)}</Badge>
                 </div>
                 {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
@@ -623,6 +955,11 @@ export function IssuePage() {
     if (!orgId || !issueId) return "";
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
+  const streamCursorRef = useRef<Record<string, RunStreamCursor>>({});
+  const refreshedTerminalRunRef = useRef("");
+  const [streamActiveRunId, setStreamActiveRunId] = useState("");
+  const [streamErrorsByRun, setStreamErrorsByRun] = useState<Record<string, string | null>>({});
+  const [streamLogsByRun, setStreamLogsByRun] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
@@ -645,7 +982,7 @@ export function IssuePage() {
     queryKey: ["issue-heartbeat-runs", issueId],
     queryFn: () => issuesApi.listRuns(issueId),
     enabled: Boolean(issueId),
-    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? 3000 : false,
+    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? LIVE_RUN_REFETCH_MS : false,
   });
   const subIssues = useQuery({
     queryKey: ["issues", orgId, "children", issueId],
@@ -659,8 +996,10 @@ export function IssuePage() {
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
     const latestRun = issueRuns.data[0];
-    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRun.id);
-    setCurrentRunId(latestRun.id);
+    const latestRunId = heartbeatRunId(latestRun);
+    if (!latestRunId) return;
+    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
+    setCurrentRunId(latestRunId);
   }, [currentRunId, issueRuns.data, issueId, orgId]);
   useEffect(() => {
     if (!reviewNotice) return;
@@ -713,6 +1052,11 @@ export function IssuePage() {
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
+  function resetRunStreamState(runId: string) {
+    streamCursorRef.current[runId] = { lastSeq: 0, nextOffset: 0 };
+    setStreamErrorsByRun((current) => ({ ...current, [runId]: null }));
+    setStreamLogsByRun((current) => ({ ...current, [runId]: "" }));
+  }
   const executeIssue = useMutation({
     mutationFn: async () => {
       if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
@@ -722,14 +1066,26 @@ export function IssuePage() {
       return issuesApi.execute(issue.data.id);
     },
     onSuccess: async (run) => {
-      setExecuteNotice("");
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
-      setCurrentRunId(run.id);
+      const runId = heartbeatRunId(run);
+      if (runId) {
+        setExecuteNotice(isLiveRun(run.status) ? `已连接到运行 ${runId}` : `已创建运行 ${runId}`);
+        localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+        resetRunStreamState(runId);
+        setCurrentRunId(runId);
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      } else {
+        setExecuteNotice("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["issues", orgId] }),
         queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-run", currentRunId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-run-events", currentRunId] }),
       ]);
     },
   });
@@ -750,20 +1106,99 @@ export function IssuePage() {
     queryKey: ["heartbeat-run", currentRunId],
     queryFn: () => heartbeatApi.get(currentRunId),
     enabled: Boolean(currentRunId),
-    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? 3000 : false,
+    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", currentRunId],
-    queryFn: () => heartbeatApi.listEvents(currentRunId),
+    queryFn: async () => {
+      const fetched = await heartbeatApi.listEvents(currentRunId);
+      const cached = queryClient.getQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId]) ?? [];
+      return mergeRunEvents(cached, fetched);
+    },
     enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const runWorkspaceOperations = useQuery({
     queryKey: ["heartbeat-run-workspace-operations", currentRunId],
     queryFn: () => heartbeatApi.listWorkspaceOperations(currentRunId),
     enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
+  useEffect(() => {
+    if (!currentRunId || !isLiveRun(runDetail.data?.status)) return;
+    const cursor = streamCursorRef.current[currentRunId] ?? { lastSeq: 0, nextOffset: 0 };
+    streamCursorRef.current[currentRunId] = cursor;
+    const controller = new AbortController();
+    setStreamActiveRunId(currentRunId);
+    setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: null }));
+    void heartbeatApi.streamRun(currentRunId, {
+      afterSeq: cursor.lastSeq,
+      offset: cursor.nextOffset,
+      pollMs: LIVE_RUN_REFETCH_MS,
+      signal: controller.signal,
+      onRun: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      },
+      onEvent: (event) => {
+        cursor.lastSeq = Math.max(cursor.lastSeq, event.seq);
+        queryClient.setQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId], (current = []) => {
+          return mergeRunEvents(current, [event]);
+        });
+      },
+      onLog: (payload) => {
+        if (typeof payload.nextOffset === "number") cursor.nextOffset = payload.nextOffset;
+        if (!payload.content) return;
+        setStreamLogsByRun((current) => ({
+          ...current,
+          [currentRunId]: `${current[currentRunId] ?? ""}${payload.content}`,
+        }));
+      },
+      onFinal: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
+          ...current,
+          ...run,
+        }));
+        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+        void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
+      },
+      onError: (error) => {
+        setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: error }));
+        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+      },
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setStreamErrorsByRun((current) => ({
+        ...current,
+        [currentRunId]: error instanceof Error ? error.message : "Run stream failed",
+      }));
+    }).finally(() => {
+      if (controller.signal.aborted) return;
+      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+    });
+    return () => {
+      controller.abort();
+      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+    };
+  }, [currentRunId, issueId, orgId, queryClient, runDetail.data?.status]);
+  useEffect(() => {
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+    const latestRunId = heartbeatRunId(latestRun);
+    if (!latestRunId || !isTerminalRun(latestRun?.status)) return;
+    const refreshKey = `${latestRunId}:${latestRun?.status}`;
+    if (refreshedTerminalRunRef.current === refreshKey) return;
+    refreshedTerminalRunRef.current = refreshKey;
+    void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+    void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+    void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
+  }, [issueId, issueRuns.data, queryClient, runDetail.data]);
   const cancelRun = useMutation({
     mutationFn: () => heartbeatApi.cancel(currentRunId),
     onSuccess: (run) => {
@@ -775,9 +1210,14 @@ export function IssuePage() {
   const retryRun = useMutation({
     mutationFn: () => heartbeatApi.retry(currentRunId),
     onSuccess: (run) => {
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
-      setCurrentRunId(run.id);
-      queryClient.setQueryData(["heartbeat-run", run.id], run);
+      const runId = heartbeatRunId(run);
+      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+      resetRunStreamState(runId);
+      setCurrentRunId(runId);
+      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+        ...current,
+        ...run,
+      }));
       void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
     },
@@ -857,15 +1297,20 @@ export function IssuePage() {
     updateIssue.mutate({ status: "in_review" });
   }
   function executeCurrentIssue() {
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
     if (uploadAttachment.isPending) {
-      setExecuteNotice("附件上传中，上传完成后再执行任务。");
+      setExecuteNotice("附件上传中，上传完成后再启动执行。");
+      return;
+    }
+    if (isLiveRun(latestRun?.status)) {
+      setExecuteNotice("当前任务已有运行在执行中，请等待结束后再重新执行。");
       return;
     }
     if (!issue.data?.assigneeAgentId) {
-      setExecuteNotice("请先分配负责人，再执行任务。");
+      setExecuteNotice("请先分配负责人，再启动执行。");
       return;
     }
-    setExecuteNotice("");
+    setExecuteNotice(isRerunnableRun(latestRun?.status) ? "正在提交重新执行请求..." : "正在提交执行请求...");
     executeIssue.mutate();
   }
   if (issue.error) return <ErrorNotice error={issue.error} />;
@@ -874,6 +1319,24 @@ export function IssuePage() {
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
+  const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+  const latestRunIsLive = isLiveRun(latestRun?.status);
+  const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
+  const latestRunSucceeded = latestRun?.status === "succeeded";
+  const executeButtonLabel = executeIssue.isPending
+    ? "提交中"
+    : latestRunCanReexecute
+      ? "重新执行"
+      : latestRunSucceeded
+        ? "再次执行"
+        : "启动执行";
+  const executeBlockReason = uploadAttachment.isPending
+    ? "附件上传中，上传完成后再启动执行"
+    : latestRunIsLive
+      ? "当前任务已有运行在执行中，请等待结束后再重新执行"
+      : issue.data?.assigneeAgentId
+        ? ""
+        : "请先分配负责人";
   return (
     <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {agents.error && <ErrorNotice error={agents.error} />}
@@ -891,27 +1354,22 @@ export function IssuePage() {
             <div className="issue-detail-title-block">
               <div className="issue-detail-kicker">
                 <Badge>{issueDisplayId(issue.data)}</Badge>
-                <Badge>{issue.data.status}</Badge>
-                <Badge>{issue.data.priority}</Badge>
+                <Badge>{statusLabel(issue.data.status)}</Badge>
+                <Badge>{priorityLabel(issue.data.priority)}</Badge>
+                {latestRun && <Badge>运行：{statusLabel(latestRun.status)}</Badge>}
               </div>
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
                 <div className="issue-header-actions">
                   <button
-                    aria-disabled={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "true" : undefined}
-                    className={(uploadAttachment.isPending || !issue.data.assigneeAgentId) ? "is-disabled" : undefined}
+                    aria-disabled={executeBlockReason ? "true" : undefined}
+                    className={executeBlockReason ? "is-disabled" : undefined}
                     disabled={executeIssue.isPending}
-                    title={
-                      uploadAttachment.isPending
-                        ? "附件上传中，上传完成后再执行任务"
-                        : issue.data.assigneeAgentId
-                          ? "触发负责人执行当前任务"
-                          : "请先分配负责人"
-                    }
+                    title={executeBlockReason || (latestRunCanReexecute ? "重新交给负责人启动一次运行" : "交给负责人启动一次运行")}
                     type="button"
                     onClick={executeCurrentIssue}
                   >
-                    执行任务
+                    {executeButtonLabel}
                   </button>
                   <button
                     className="secondary small-button"
@@ -933,6 +1391,11 @@ export function IssuePage() {
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
             {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
+            {latestRun && isRerunnableRun(latestRun.status) && latestRun.error?.trim() && (
+              <p className="error-notice" role="status">
+                最新运行{statusLabel(latestRun.status)}：{latestRun.error.trim()}
+              </p>
+            )}
 
             <section aria-label="心跳上下文" className="issue-section-card">
               <div className="issue-section-heading">
@@ -981,29 +1444,33 @@ export function IssuePage() {
             <section aria-label="评审" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>评审</h2>
-                <span className="muted">当前状态：{issue.data.status}</span>
+                <span className="muted">当前阶段：{statusLabel(issue.data.status)}</span>
+              </div>
+              <div className="issue-review-status">
+                <div>
+                  <span>Reviewer</span>
+                  <strong>{issue.data.reviewerAgentId ? agentName(issue.data.reviewerAgentId, agentsById) : "未设置"}</strong>
+                </div>
+                <div>
+                  <span>评审状态</span>
+                  <strong>{["in_review", "blocked"].includes(issue.data.status) ? "等待评审结论" : "未进入评审"}</strong>
+                </div>
+                <p>{reviewStatusText(issue.data, agentsById)}</p>
               </div>
               <div className="actions">
-                <button
-                  aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
-                  className={reviewDecisionBlockReason(issue.data) ? "is-disabled" : undefined}
-                  disabled={review.isPending}
-                  onClick={() => submitReviewDecision("approve")}
-                  title={reviewDecisionBlockReason(issue.data) || "通过当前任务评审"}
-                  type="button"
-                >
-                  通过评审
-                </button>
-                <button
-                  aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
-                  className={`secondary${reviewDecisionBlockReason(issue.data) ? " is-disabled" : ""}`}
-                  disabled={review.isPending}
-                  onClick={() => submitReviewDecision("request_changes")}
-                  title={reviewDecisionBlockReason(issue.data) || "请求修改当前任务"}
-                  type="button"
-                >
-                  请求修改
-                </button>
+                {(["approve", "request_changes", "needs_followup", "blocked"] as IssueReviewDecision[]).map((decision, index) => (
+                  <button
+                    aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
+                    className={`${index === 0 ? "" : "secondary"}${reviewDecisionBlockReason(issue.data) ? " is-disabled" : ""}`}
+                    disabled={review.isPending}
+                    key={decision}
+                    onClick={() => submitReviewDecision(decision)}
+                    title={reviewDecisionBlockReason(issue.data) || reviewDecisionLabel(decision)}
+                    type="button"
+                  >
+                    {reviewDecisionLabel(decision)}
+                  </button>
+                ))}
                 <button
                   aria-disabled={Boolean(markReviewBlockReason(issue.data))}
                   className={`secondary${markReviewBlockReason(issue.data) ? " is-disabled" : ""}`}
@@ -1041,10 +1508,15 @@ export function IssuePage() {
                 onCancel={() => cancelRun.mutate()}
                 onRetry={() => retryRun.mutate()}
                 runId={currentRunId}
+                streamActive={streamActiveRunId === currentRunId}
+                streamError={streamErrorsByRun[currentRunId] ?? null}
+                streamLog={streamLogsByRun[currentRunId] ?? ""}
               />
             )}
             {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
             {retryRun.error && <ErrorNotice error={retryRun.error} />}
+
+            <IssueDocumentsPanel issueId={issueId} />
 
             <IssueWorkProductsPanel issue={issue.data} />
 
@@ -1069,10 +1541,23 @@ export function IssuePage() {
                     <article className="issue-attachment-item" key={attachment.id}>
                       <div>
                         <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">{attachment.usage} · {attachment.contentType} · {attachment.byteSize} bytes</p>
+                        <p className="muted">附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                        <details className="storage-object-details">
+                          <summary>存储对象</summary>
+                          <dl className="issue-work-product-details">
+                            <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
+                            <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
+                            <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
+                            <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
+                          </dl>
+                        </details>
                       </div>
                       <div className="issue-attachment-actions">
-                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                        {attachment.contentPath ? (
+                          <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                        ) : (
+                          <span className="download-unavailable">不可下载</span>
+                        )}
                         <button
                           className="danger small-button"
                           disabled={deleteAttachment.isPending}
