@@ -719,3 +719,20 @@
 - 处理归属：Step 21 closed-loop QA 补强。
 - 修复记录：direct convert 路径默认使用 `replyingAgentId`；approval approve 路径默认使用 `proposedByAgentId`。如果提案智能体是 CEO，且存在可运行的直属非 CEO 下属，则默认委派给该下属；没有可用下属时回退 CEO。显式 assignee 仍优先生效，不被覆盖。
 - 验证证据：`test_convert_chat_issue_proposal_defaults_assignee_to_replying_agent`、`test_convert_chat_issue_proposal_delegates_ceo_issue_to_direct_report`、`test_convert_chat_issue_proposal_keeps_explicit_assignee` 和 `test_approve_chat_issue_creation_creates_issue_and_system_message` 覆盖 direct/approval、CEO 委派和显式 assignee 场景。
+
+### BUG-21-034: run 成功后生成文件未登记为任务工作产物
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务执行成功但 `/api/issues/{issueId}/work-products` 为空，UI 无法展示执行产物。
+- 影响范围：heartbeat run 成功收尾、受管 execution workspace、任务详情 work products。
+- 复现步骤：
+  1. 让 runtime 在任务 workspace 中生成 `CLAUDE_SUMMARY.md`、`CLAUDE.zh.md` 等文件。
+  2. runtime 只在 summary 中提到这些文件，没有结构化返回 `work_products`。
+  3. 查看 `/api/issues/{issueId}/work-products`。
+- 预期行为：server 应登记受管 workspace 中本次 run 新增/修改的有限文本产物，UI 通过既有 work-products API 展示。
+- 实际行为（修复前）：server 只持久化 adapter 显式返回的 `RuntimeExecutionResult.work_products`，不会扫描 workspace 生成文件。
+- 初步根因：Codex/Claude/OpenCode local adapters 默认只返回 stdout/summary/result_json，缺少结构化 workProducts；heartbeat 成功收尾未做 workspace 文件产物补采集。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：成功 run 结束后扫描当前受管 execution workspace `cwd` 中执行开始后新增/修改的小型文本文件，登记为 `issue_work_products` 并归档内容为 asset。扫描不解析 summary 中的任意绝对路径，避免越过 workspace 安全边界。
+- 验证证据：`test_successful_run_captures_generated_workspace_files_as_work_products` 覆盖 adapter 未返回 work_products、但 workspace 生成 `CLAUDE_SUMMARY.md` 后自动登记到 issue detail 的场景。
