@@ -1441,7 +1441,9 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     assert result.session_id_after == "thread-fallback"
     assert result.result_json is not None
     assert result.result_json["summary"] == "fallback ok"
-    assert captured["input"] == b""
+    prompt = captured["input"].decode("utf-8")
+    assert "## Runtime Tool Capability" in prompt
+    assert "Do not guess tool input schemas" in prompt
 
 
 async def test_claude_and_opencode_execute_inject_runtime_context_env(
