@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-from sqlalchemy import or_, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -39,10 +39,12 @@ from packages.database.queries.heartbeat import (
     update_wakeup_request,
 )
 from packages.database.schema import (
+    AgentWakeupRequest as AgentWakeupRequestRow,
     Agent as AgentRow,
     HeartbeatRun as HeartbeatRunRow,
     HeartbeatRunEvent as HeartbeatRunEventRow,
     Issue as IssueRow,
+    ActivityLog,
 )
 from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
 from packages.shared.constants.heartbeat import (
@@ -66,6 +68,7 @@ from .workspaces import WorkspaceService
 
 
 class HeartbeatService:
+    _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
     _start_locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _active_run_ids: ClassVar[dict[str, set[str]]] = {}
     _cancel_events: ClassVar[dict[str, asyncio.Event]] = {}
@@ -106,6 +109,13 @@ class HeartbeatService:
                     {"coalesced_count": existing.coalesced_count + 1},
                 )
                 return None
+            if existing is not None and existing.status == "deferred_issue_execution":
+                await update_wakeup_request(
+                    self._session,
+                    existing.id,
+                    {"coalesced_count": existing.coalesced_count + 1},
+                )
+                return None
         if agent.status == "paused":
             await create_wakeup_request(
                 self._session,
@@ -118,6 +128,13 @@ class HeartbeatService:
                 ),
             )
             return None
+        if await self._defer_issue_wakeup_if_locked(
+            agent,
+            payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        ):
+            return None
 
         run = await self._create_queued_run(
             agent,
@@ -129,6 +146,54 @@ class HeartbeatService:
             return self._to_run(run)
         executed = await self._start_if_capacity(agent, run)
         return self._to_run(executed)
+
+    async def _defer_issue_wakeup_if_locked(
+        self,
+        agent: AgentRow,
+        payload: WakeAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> bool:
+        context = {
+            **self._payload_context(payload.get("payload")),
+            **self._payload_context_snapshot(payload.get("contextSnapshot")),
+        }
+        issue_id = _issue_id_from_context(context)
+        if issue_id is None:
+            return False
+        if (
+            payload.get("reason") == "issue_comment_mentioned"
+            or context.get("wakeReason") == "issue_comment_mentioned"
+        ):
+            return False
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or issue.org_id != agent.org_id:
+            return False
+        if not issue.execution_run_id and not issue.checkout_run_id:
+            return False
+
+        deferred_payload = dict(payload.get("payload") or {})
+        deferred_payload[self._DEFERRED_CONTEXT_KEY] = dict(
+            payload.get("contextSnapshot") or {}
+        )
+        await create_wakeup_request(
+            self._session,
+            {
+                **self._wakeup_values(
+                    agent,
+                    {
+                        **payload,
+                        "payload": deferred_payload,
+                    },
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    status="deferred_issue_execution",
+                ),
+                "run_id": None,
+            },
+        )
+        return True
 
     async def record_invoked_activity(
         self, run: HeartbeatRun, *, actor_type: str, actor_id: str
@@ -1047,16 +1112,23 @@ class HeartbeatService:
         )
         if context.get("wakeReason") == "issue_passive_followup":
             return
+        if context.get("wakeReason") == "issue_review_closeout_missing":
+            return
         issue_id = _issue_id_from_context(context)
         if issue_id is None:
             return
         issue = await self._session.get(IssueRow, issue_id)
         if issue is None or issue.org_id != final.org_id:
             return
+        if self._is_reviewer_issue_run(agent, final, issue, context):
+            await self._queue_issue_review_closeout_if_needed(agent, final, issue)
+            return
         if issue.assignee_agent_id != agent.id or issue.status not in {
             "todo",
             "in_progress",
         }:
+            return
+        if await self._run_has_issue_closeout_signal(final, issue.id):
             return
         await self.wakeup(
             agent.id,
@@ -1096,6 +1168,104 @@ class HeartbeatService:
             execute_immediately=False,
         )
 
+    def _is_reviewer_issue_run(
+        self,
+        agent: AgentRow,
+        final: HeartbeatRunRow,
+        issue: IssueRow,
+        context: dict[str, Any],
+    ) -> bool:
+        return (
+            issue.status in {"in_review", "blocked"}
+            and issue.reviewer_agent_id == agent.id
+            and (
+                final.invocation_source == "review"
+                or context.get("role") == "reviewer"
+                or context.get("wakeSource") == "review"
+            )
+        )
+
+    async def _queue_issue_review_closeout_if_needed(
+        self, agent: AgentRow, final: HeartbeatRunRow, issue: IssueRow
+    ) -> None:
+        if await self._run_has_issue_activity(
+            final, issue.id, ("issue.review_decision_recorded",)
+        ):
+            return
+        await self.wakeup(
+            agent.id,
+            {
+                "source": "review",
+                "triggerDetail": "system",
+                "reason": "issue_review_closeout_missing",
+                "idempotencyKey": f"issue:{issue.id}:review-closeout:{final.id}",
+                "payload": {
+                    "issueId": issue.id,
+                    "originRunId": final.id,
+                    "previousRunId": final.id,
+                    "attempt": 1,
+                    "reason": "review_outcome_missing",
+                },
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "source": "issue.review_closeout_missing",
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_closeout_missing",
+                    "role": "reviewer",
+                    "reviewCloseout": {
+                        "originRunId": final.id,
+                        "previousRunId": final.id,
+                        "attempt": 1,
+                        "maxAttempts": 1,
+                    },
+                    "issue": {
+                        "id": issue.id,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "status": issue.status,
+                        "priority": issue.priority,
+                    },
+                    "reviewInstructions": (
+                        "Your previous reviewer run ended without a structured "
+                        "decision. Inspect the current issue state and record "
+                        "exactly one outcome with `control-plane issue review "
+                        "--decision approve|request_changes|needs_followup|blocked "
+                        "--comment ...`."
+                    ),
+                },
+            },
+            actor_type="system",
+            actor_id="issue_review_closeout_governance",
+            execute_immediately=False,
+        )
+
+    async def _run_has_issue_closeout_signal(
+        self, final: HeartbeatRunRow, issue_id: str
+    ) -> bool:
+        return await self._run_has_issue_activity(
+            final,
+            issue_id,
+            ("issue.comment_added", "issue.review_decision_recorded"),
+        )
+
+    async def _run_has_issue_activity(
+        self, final: HeartbeatRunRow, issue_id: str, actions: tuple[str, ...]
+    ) -> bool:
+        result = await self._session.execute(
+            select(ActivityLog.id)
+            .where(
+                and_(
+                    ActivityLog.org_id == final.org_id,
+                    ActivityLog.run_id == final.id,
+                    ActivityLog.entity_type == "issue",
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action.in_(actions),
+                )
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
         criteria = [
@@ -1121,6 +1291,123 @@ class HeartbeatService:
             .where(IssueRow.org_id == final.org_id, or_(*criteria))
             .values(**values)
         )
+        if issue_id is not None and final.status in {
+            "failed",
+            "timed_out",
+            "cancelled",
+            "succeeded",
+        }:
+            await self._promote_deferred_issue_wakeup(final.org_id, issue_id)
+
+    async def _promote_deferred_issue_wakeup(self, org_id: str, issue_id: str) -> None:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or issue.org_id != org_id:
+            return
+
+        while True:
+            result = await self._session.execute(
+                select(AgentWakeupRequestRow)
+                .where(
+                    AgentWakeupRequestRow.org_id == org_id,
+                    AgentWakeupRequestRow.status == "deferred_issue_execution",
+                )
+                .order_by(
+                    AgentWakeupRequestRow.requested_at,
+                    AgentWakeupRequestRow.id,
+                )
+            )
+            deferred = next(
+                (
+                    row
+                    for row in result.scalars().all()
+                    if _issue_id_from_context(row.payload) == issue_id
+                ),
+                None,
+            )
+            if deferred is None:
+                return
+
+            agent = await get_agent_by_id(self._session, deferred.agent_id)
+            if (
+                agent is None
+                or agent.org_id != org_id
+                or agent.status
+                in {
+                    "paused",
+                    "terminated",
+                    "pending_approval",
+                }
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    deferred.id,
+                    {
+                        "status": "failed",
+                        "finished_at": datetime.now(UTC),
+                        "error": (
+                            "Deferred wake could not be promoted: agent is not "
+                            "invokable"
+                        ),
+                    },
+                )
+                continue
+
+            payload = dict(deferred.payload or {})
+            deferred_context = payload.pop(self._DEFERRED_CONTEXT_KEY, {})
+            context_snapshot = {
+                "triggeredBy": deferred.requested_by_actor_type or "system",
+                "actorId": deferred.requested_by_actor_id or "system",
+                "forceFreshSession": False,
+                **self._payload_context(payload),
+                **(deferred_context if isinstance(deferred_context, dict) else {}),
+            }
+            run = await create_run(
+                self._session,
+                {
+                    "org_id": org_id,
+                    "agent_id": agent.id,
+                    "invocation_source": deferred.source,
+                    "trigger_detail": deferred.trigger_detail,
+                    "status": "queued",
+                    "wakeup_request_id": deferred.id,
+                    "context_snapshot": context_snapshot,
+                },
+            )
+            await update_wakeup_request(
+                self._session,
+                deferred.id,
+                {
+                    "status": "queued",
+                    "reason": "issue_execution_promoted",
+                    "payload": payload,
+                    "run_id": run.id,
+                    "claimed_at": None,
+                    "finished_at": None,
+                    "error": None,
+                },
+            )
+            now = datetime.now(UTC)
+            issue.checkout_run_id = run.id
+            issue.execution_run_id = run.id
+            issue.execution_agent_name_key = _agent_name_key(agent.name)
+            issue.execution_locked_at = now
+            issue.updated_at = now
+            await self._append_event(
+                run,
+                1,
+                "lifecycle",
+                stream="system",
+                message="run queued",
+                level="info",
+                payload={
+                    "status": "queued",
+                    "source": deferred.source,
+                    "triggerDetail": deferred.trigger_detail,
+                    "promotedFromDeferredIssueExecution": True,
+                },
+            )
+            await self._session.flush()
+            return
 
     async def _next_event_sequence(self, run_id: str) -> int:
         events = await list_run_events(self._session, run_id, limit=1000)
@@ -1353,6 +1640,11 @@ def _issue_id_from_context(context_snapshot: dict[str, Any] | None) -> str | Non
     snapshot = context_snapshot if isinstance(context_snapshot, dict) else {}
     value = snapshot.get("issueId") or snapshot.get("primaryIssueId")
     return value if isinstance(value, str) and value else None
+
+
+def _agent_name_key(name: str) -> str:
+    key = "-".join(name.strip().lower().split())
+    return key or "agent"
 
 
 def _run_summary(result_json: dict[str, Any] | None) -> str | None:
