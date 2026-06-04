@@ -7,6 +7,7 @@ import type {
   AgentInstructionsFileDetail,
   AgentInstructionsPathResult,
   AgentDetail,
+  AgentHireResult,
   AgentRuntimeEnvironmentTestResult,
   AgentRuntimeModel,
   AgentRuntimeState,
@@ -14,6 +15,7 @@ import type {
   AgentSkillSnapshot,
   AgentTaskSession,
   CreateAgentPayload,
+  HireAgentPayload,
   PrivateSkillPayload,
   ProviderQuotaResult,
   ResetAgentSessionPayload,
@@ -64,6 +66,15 @@ export const agentsApi = {
     request<AgentDetail>(agentRoot(agentId), { method: "GET" }),
   create: (orgId: string, payload: CreateAgentPayload): Promise<Agent> =>
     jsonRequest<Agent>(`/api/orgs/${encodeURIComponent(orgId)}/agents`, "POST", payload),
+  hire: (orgId: string, payload: HireAgentPayload, actorAgentId?: string): Promise<AgentHireResult> =>
+    jsonRequest<AgentHireResult>(
+      `/api/orgs/${encodeURIComponent(orgId)}/agent-hires`,
+      "POST",
+      payload,
+      actorAgentId
+        ? { headers: { "x-test-agent-id": actorAgentId, "x-test-org-id": orgId } }
+        : {},
+    ),
   update: (agentId: string, payload: UpdateAgentPayload): Promise<Agent> =>
     jsonRequest<Agent>(agentRoot(agentId), "PATCH", payload),
   configuration: (agentId: string): Promise<AgentConfiguration> =>

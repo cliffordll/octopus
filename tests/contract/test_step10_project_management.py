@@ -174,6 +174,11 @@ async def test_project_routes_create_list_update_and_delete(
     assert created["orgId"] == org_id
     assert created["urlKey"] == "control-plane"
     assert created["resources"] == []
+    expected_workspace_root = f".octopus/workspaces/org_{org_id}"
+    assert created["codebase"]["scope"] == "none"
+    assert created["codebase"]["localFolder"] is None
+    assert created["codebase"]["managedFolder"] == expected_workspace_root
+    assert created["codebase"]["effectiveLocalFolder"] == expected_workspace_root
 
     list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/projects")
     assert list_code == 200

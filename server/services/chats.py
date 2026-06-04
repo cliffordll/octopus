@@ -8,7 +8,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
-from packages.database.queries.agents import get_agent_by_id
+from packages.database.queries.agents import get_agent_by_id, list_org_agents
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.approvals import create_approval
 from packages.database.queries.chats import (
@@ -88,6 +88,21 @@ _CHAT_TRANSCRIPT_KEY = "__chatTranscript"
 class ChatService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def default_issue_assignee_for_agent(
+        self, org_id: str, proposed_by_agent_id: str
+    ) -> str:
+        proposer = await get_agent_by_id(self._session, proposed_by_agent_id)
+        if proposer is None or proposer.org_id != org_id or proposer.role != "ceo":
+            return proposed_by_agent_id
+        for candidate in await list_org_agents(self._session, org_id):
+            if (
+                candidate.reports_to == proposer.id
+                and candidate.role != "ceo"
+                and candidate.status not in {"paused", "pending_approval", "terminated"}
+            ):
+                return candidate.id
+        return proposed_by_agent_id
 
     async def list_for_org(
         self,
@@ -598,7 +613,19 @@ class ChatService:
             )
         if message is None or message.kind != "issue_proposal":
             raise ValueError("No issue proposal found for this conversation")
-        return _issue_proposal_from_payload(message.structured_payload)
+        proposal = _issue_proposal_from_payload(message.structured_payload)
+        if (
+            not proposal.get("assigneeAgentId")
+            and not proposal.get("assigneeUserId")
+            and message.replying_agent_id
+        ):
+            proposal = {
+                **proposal,
+                "assigneeAgentId": await self.default_issue_assignee_for_agent(
+                    conversation.org_id, message.replying_agent_id
+                ),
+            }
+        return proposal
 
     async def add_message_and_reply(
         self,

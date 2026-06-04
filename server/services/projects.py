@@ -58,6 +58,7 @@ from packages.shared.types.project import (
     UpdateProjectPayload,
     UpdateProjectResourceAttachmentPayload,
 )
+from .workspace_paths import organization_workspace_relative_path
 
 PROJECT_CREATE_TO_COLUMN: dict[str, str] = {
     "name": "name",
@@ -106,7 +107,7 @@ def _iso(value: date | datetime | None) -> str | None:
 def _derive_project_codebase(
     org_id: str, primary_workspace: ProjectWorkspaceData | None
 ) -> dict[str, Any]:
-    managed_folder = f".octopus/workspaces/{org_id}"
+    managed_folder = organization_workspace_relative_path(org_id)
     local_folder = primary_workspace["cwd"] if primary_workspace else None
     repo_ref = primary_workspace["repoRef"] if primary_workspace else None
     default_ref = primary_workspace["defaultRef"] if primary_workspace else None
