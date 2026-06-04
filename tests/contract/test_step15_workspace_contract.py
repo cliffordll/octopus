@@ -766,7 +766,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
     )
     monkeypatch.setattr(
         "server.services.workspaces.organization_workspace_root",
-        lambda org_id: (root / "workspaces" / f"org_{org_id}").resolve(),
+        lambda org_id: (root / "organizations" / org_id / "workspaces").resolve(),
     )
     monkeypatch.setattr(
         runtime_registry,

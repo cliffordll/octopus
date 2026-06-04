@@ -86,7 +86,7 @@ async def app(
     )
     monkeypatch.setattr(
         "server.services.workspaces.organization_workspace_root",
-        lambda org_id: (root / "workspaces" / f"org_{org_id}").resolve(),
+        lambda org_id: (root / "organizations" / org_id / "workspaces").resolve(),
     )
     monkeypatch.setattr(
         "server.services.workspaces.get_storage_service",
