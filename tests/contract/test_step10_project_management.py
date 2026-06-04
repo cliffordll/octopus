@@ -174,7 +174,7 @@ async def test_project_routes_create_list_update_and_delete(
     assert created["orgId"] == org_id
     assert created["urlKey"] == "control-plane"
     assert created["resources"] == []
-    expected_workspace_root = f".octopus/organizations/{org_id}/workspaces"
+    expected_workspace_root = f"organizations/{org_id}/workspaces"
     assert created["codebase"]["scope"] == "none"
     assert created["codebase"]["localFolder"] is None
     assert created["codebase"]["managedFolder"] == expected_workspace_root

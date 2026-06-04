@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from server.services.workspace_paths import (
+    organization_workspace_relative_path,
+    organization_workspace_root,
+    resolve_octopus_home_dir,
+    resolve_octopus_instance_root,
+)
+
+
+def test_organization_workspace_uses_octopus_instance_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+
+    assert resolve_octopus_home_dir() == (tmp_path / "home").resolve()
+    assert (
+        resolve_octopus_instance_root()
+        == (tmp_path / "home" / "instances" / "dev").resolve()
+    )
+    assert organization_workspace_relative_path("org-1") == (
+        "organizations/org-1/workspaces"
+    )
+    assert (
+        organization_workspace_root("org-1")
+        == (
+            tmp_path
+            / "home"
+            / "instances"
+            / "dev"
+            / "organizations"
+            / "org-1"
+            / "workspaces"
+        ).resolve()
+    )
+
+
+def test_octopus_home_expands_user_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("OCTOPUS_HOME", "~/.octopus-dev")
+    monkeypatch.delenv("OCTOPUS_INSTANCE_ID", raising=False)
+
+    assert resolve_octopus_home_dir() == (tmp_path / ".octopus-dev").resolve()
+    assert (
+        resolve_octopus_instance_root()
+        == (tmp_path / ".octopus-dev" / "instances" / "default").resolve()
+    )
+
+
+def test_octopus_instance_id_rejects_path_segments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "../bad")
+
+    with pytest.raises(ValueError, match="Invalid OCTOPUS_INSTANCE_ID"):
+        resolve_octopus_instance_root()
