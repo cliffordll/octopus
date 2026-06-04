@@ -680,38 +680,56 @@ class WorkspaceService:
         cwd = _string(workspace.get("cwd"))
         if workspace_id is None or cwd is None:
             return []
-        root = Path(cwd).resolve()
-        if not root.is_dir():
+        worktree_root = Path(cwd).resolve()
+        if not worktree_root.is_dir():
             return []
         threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
         products: list[dict[str, Any]] = []
-        for path in _iter_generated_workspace_files(root, threshold):
-            rel_path = path.relative_to(root).as_posix()
-            content = path.read_bytes()
-            content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
-            products.append(
-                {
-                    "title": rel_path,
-                    "type": "document"
-                    if path.suffix.lower() in {".md", ".txt"}
-                    else "artifact",
-                    "provider": "rudder",
-                    "externalId": f"workspace-file:{workspace_id}:{rel_path}",
-                    "status": "active",
-                    "reviewState": "none",
-                    "isPrimary": len(products) == 0,
-                    "summary": "Generated file captured from execution workspace.",
-                    "content": content,
-                    "contentType": content_type,
-                    "filename": path.name,
-                    "metadata": {
-                        "source": "execution_workspace_scan",
-                        "workspacePath": rel_path,
-                        "executionWorkspaceId": workspace_id,
-                        "byteSize": len(content),
-                    },
-                }
-            )
+        scan_roots = [
+            ("execution_workspace_scan", worktree_root),
+        ]
+        workspace_env = (
+            workspace_context.get("env")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        artifacts_dir = _string(workspace.get("orgArtifactsDir"))
+        if not artifacts_dir and isinstance(workspace_env, dict):
+            artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
+        if artifacts_dir:
+            artifacts_root = Path(artifacts_dir).resolve()
+            if artifacts_root.is_dir() and artifacts_root != worktree_root:
+                scan_roots.append(("organization_artifacts_scan", artifacts_root))
+        for source, root in scan_roots:
+            for path in _iter_generated_workspace_files(root, threshold):
+                if len(products) >= _GENERATED_FILE_MAX_COUNT:
+                    break
+                rel_path = path.relative_to(root).as_posix()
+                content = path.read_bytes()
+                content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
+                products.append(
+                    {
+                        "title": rel_path,
+                        "type": "document"
+                        if path.suffix.lower() in {".md", ".txt"}
+                        else "artifact",
+                        "provider": "rudder",
+                        "externalId": f"{source}:{workspace_id}:{rel_path}",
+                        "status": "active",
+                        "reviewState": "none",
+                        "isPrimary": len(products) == 0,
+                        "summary": "Generated file captured from managed workspace storage.",
+                        "content": content,
+                        "contentType": content_type,
+                        "filename": path.name,
+                        "metadata": {
+                            "source": source,
+                            "workspacePath": rel_path,
+                            "executionWorkspaceId": workspace_id,
+                            "byteSize": len(content),
+                        },
+                    }
+                )
         if not products:
             return []
         return await self.persist_run_work_products(

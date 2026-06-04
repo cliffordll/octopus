@@ -16,7 +16,10 @@ from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..provider_config import apply_provider_env, model_for_cli
-from ..tool_capabilities import append_runtime_tool_guidance
+from ..tool_capabilities import (
+    append_runtime_tool_guidance,
+    append_runtime_workspace_guidance,
+)
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 
 
@@ -35,8 +38,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     cwd = context.config.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
         raise ValueError("Codex adapter cwd must be a string")
-    prompt = append_runtime_tool_guidance(
-        runtime_prompt_from_config(context.config), "codex_local"
+    prompt = append_runtime_workspace_guidance(
+        append_runtime_tool_guidance(
+            runtime_prompt_from_config(context.config), "codex_local"
+        ),
+        context.workspace,
     )
     env = dict(os.environ)
     configured_env = context.config.get("env")

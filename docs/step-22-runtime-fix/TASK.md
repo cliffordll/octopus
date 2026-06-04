@@ -42,6 +42,7 @@
 
 - 为 `opencode_local`、`codex_local`、`claude_local` 建立 runtime tool capability 描述边界。
 - 在 runtime prompt/instructions/context 中注入可用工具、关键参数、禁止猜测 schema 的说明。
+- 在 runtime prompt 中注入 workspace output contract：可以读取任务要求的外部源码路径，但持久产物必须写入 Octopus 受管 worktree 或组织 artifacts 目录，避免写到外部源码目录后 UI 无法展示。
 - 明确 `opencode_local` 内置 `bash` 工具调用必须携带 `description` 和 `command`，避免只传 `command` 造成 schema error。
 - 将工具 schema error 从 adapter 崩溃中区分出来，保留原始 tool name、缺失字段、input 和可读诊断。
 - 对 OpenCode tool error 做结果归一化：如果 run 后续仍能继续并产生有效结果，不应仅因早期 tool error 直接覆盖最终 run error；如果进程终态失败，则错误摘要应指向首个阻断性错误和退出原因。
@@ -62,6 +63,7 @@
 
 - 用真实 issue 执行路径验证 checkout、heartbeat-context、assignment wakeup、review wakeup、passive followup 和 work product 登记。
 - 确保成功 run 产生的文件或结构化 workProducts 能稳定进入 issue documents/work-products API。
+- 成功 run 后扫描受管 worktree 与组织 artifacts 中本次执行新增/修改的有限文本产物，并登记为 issue work-products；外部源码目录只作为读取对象，不作为默认产物落点。
 - 确保 closeout、review、followup 不会因为 runtime 输出延迟、缺失 tool schema 或 workspace 产物登记失败而卡在 `in_progress`。
 - 对齐上游 runtime-kernel closeout/followup 行为，只补齐 server 已有 issue/run/workspace 模型需要的状态和事件，不发明新的项目经理式自动编排。
 
@@ -94,12 +96,14 @@
 - Step 22 最小闭环验收入口：
   `uv run pytest tests/contract/test_step22_closed_loop_acceptance.py -q`
 - Tests 覆盖 `opencode_local` tool capability/schema guidance 注入。
+- Tests 覆盖 local runtime prompt 注入 workspace output contract，明确产物写入受管 worktree/artifacts。
 - Tests 覆盖 `bash` 缺少 `description` 时返回可诊断错误，不再表现为不可解释 adapter 崩溃。
 - Tests 覆盖工具调用错误与进程取消/失败同时出现时的错误优先级。
 - Tests 覆盖 stdout/stderr/json event 在 runtime 运行期间持续进入 run events/log，UI 不需要等进程结束才能看到过程输出。
 - Tests 覆盖取消、超时、runtime error、tool error 都会形成可读实时事件，UI 不再只看到长期 `in_progress`。
 - Tests 覆盖 runtime tool capability 不改变 run API shape、状态值和 existing adapter contract。
 - Tests 或 workflow 覆盖 workspace preflight、runtime service、workspace operation log 和 work product 登记的端到端可见性。
+- Tests 或 workflow 覆盖 worktree 与 organization artifacts 中生成的文件都会登记为 issue work-products。
 - Tests 或 workflow 覆盖 issue execute 成功后 run、events/log、documents/work-products、closeout/followup 状态可查询。
 - Tests 覆盖 chat stream 与非 stream 在 issue proposal、manual approval、auto create 和 runtime error 场景下行为一致。
 - 手工或脚本化 demo 能复现：创建 issue、分配 agent、执行任务、实时看到输出、任务详情看到 run 与产物、chat/messenger 侧能解释结果。
