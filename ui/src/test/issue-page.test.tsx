@@ -1,7 +1,7 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
-import { renderApp, respond } from "./render-app";
+import { renderApp, respond, respondStream } from "./render-app";
 
 afterEach(() => {
   cleanup();
@@ -430,6 +430,35 @@ it("executes an assigned issue through the issue execution route", async () => {
     if (path === "/api/issues/issue-1/execute" && init?.method === "POST") {
       return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "queued" }, 202);
     }
+    if (path === "/api/heartbeat-runs/run-1/stream?afterSeq=0&offset=0&pollMs=1000" && init?.method === "GET") {
+      return respondStream([
+        {
+          type: "run",
+          run: {
+            id: "run-1",
+            orgId: "org-1",
+            agentId: "agent-1",
+            invocationSource: "assignment",
+            status: "running",
+            resultJson: { summary: "等待执行" },
+          },
+        },
+        {
+          type: "event",
+          event: {
+            id: 4,
+            runId: "run-1",
+            agentId: "agent-1",
+            seq: 4,
+            eventType: "runtime.text",
+            stream: "stdout",
+            message: "Stream 正在输出",
+            createdAt: "2026-06-02T10:00:03Z",
+          },
+        },
+        { type: "log", content: "stream log chunk", nextOffset: 16, eof: false },
+      ]);
+    }
     if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") {
       return respond({
         id: "run-1",
@@ -483,11 +512,15 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("region", { name: "执行记录" })).toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
+  expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
   expect(await screen.findByText("已入队")).toBeInTheDocument();
-  expect(screen.getByText("Agent 回复")).toBeInTheDocument();
+  expect(screen.getAllByText("Agent 回复")).toHaveLength(2);
   expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
   expect(screen.queryByText("queued output")).not.toBeInTheDocument();
   expect(screen.queryByText("workspace output")).not.toBeInTheDocument();
