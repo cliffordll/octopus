@@ -1133,7 +1133,7 @@ export function IssuePage() {
   const [comment, setComment] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentUploadNotice, setAttachmentUploadNotice] = useState("");
-  const [attachmentUsage, setAttachmentUsage] = useState("attachment");
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
@@ -1416,17 +1416,18 @@ export function IssuePage() {
     },
   });
   const uploadAttachment = useMutation({
-    mutationFn: () => {
-      if (!attachmentFile) throw new Error("请选择附件文件");
+    mutationFn: (file?: File) => {
+      const selectedFile = file ?? attachmentFile;
+      if (!selectedFile) throw new Error("请选择附件文件");
       return issuesApi.uploadAttachment(orgId, issueId, {
-        file: attachmentFile,
-        usage: attachmentUsage.trim() || "attachment",
+        file: selectedFile,
+        usage: "attachment",
       });
     },
-    onSuccess: () => {
-      setAttachmentUploadNotice(`已上传 ${attachmentFile?.name ?? "附件"}`);
+    onSuccess: (_, file) => {
+      setAttachmentUploadNotice(`已上传 ${file?.name ?? attachmentFile?.name ?? "附件"}`);
       setAttachmentFile(null);
-      setAttachmentUsage("attachment");
+      setAttachmentMenuOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["issue-attachments", issueId] });
     },
     onMutate: () => {
@@ -1451,8 +1452,11 @@ export function IssuePage() {
     if (comment.trim()) addComment.mutate();
   }
   function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
-    setAttachmentFile(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    setAttachmentFile(file);
     setAttachmentUploadNotice("");
+    if (file) uploadAttachment.mutate(file);
+    event.target.value = "";
   }
   function submitSubIssue(event: FormEvent) {
     event.preventDefault();
@@ -1713,12 +1717,59 @@ export function IssuePage() {
               {attachments.error && <ErrorNotice error={attachments.error} />}
               {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
               {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
-              {uploadAttachment.isPending && attachmentFile && (
-                <p className="issue-upload-status" role="status">正在上传 {attachmentFile.name}...</p>
-              )}
-              {!uploadAttachment.isPending && attachmentUploadNotice && (
-                <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
-              )}
+              <section aria-label="附件" className="issue-attachments-inline">
+                {uploadAttachment.isPending && attachmentFile && (
+                  <p className="issue-upload-status" role="status">正在上传 {attachmentFile.name}...</p>
+                )}
+                {!uploadAttachment.isPending && attachmentUploadNotice && (
+                  <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
+                )}
+                {attachments.isLoading && <p className="muted">加载附件中...</p>}
+                {attachments.data?.length ? (
+                  <div className="issue-attachment-list">
+                    {attachments.data.map((attachment) => (
+                      <article className="issue-attachment-item" key={attachment.id}>
+                        <div className="issue-attachment-content">
+                          {attachment.contentPath ? (
+                            <a
+                              className="issue-attachment-title"
+                              href={attachment.contentPath}
+                              rel="noreferrer"
+                              target="_blank"
+                              title={attachment.originalFilename ?? attachment.id}
+                            >
+                              {attachment.originalFilename ?? attachment.id}
+                            </a>
+                          ) : (
+                            <strong>{attachment.originalFilename ?? attachment.id}</strong>
+                          )}
+                          <p className="muted">{attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                          {attachment.contentPath && attachment.contentType.startsWith("image/") && (
+                            <a href={attachment.contentPath} rel="noreferrer" target="_blank">
+                              <img
+                                alt={attachment.originalFilename ?? "附件"}
+                                className="issue-attachment-preview"
+                                loading="lazy"
+                                src={attachment.contentPath}
+                              />
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          aria-label={`删除 ${attachment.originalFilename ?? attachment.id}`}
+                          className="danger small-button"
+                          disabled={deleteAttachment.isPending}
+                          onClick={() => deleteAttachment.mutate(attachment.id)}
+                          title="删除附件"
+                          type="button"
+                        >
+                          删除
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -1726,40 +1777,7 @@ export function IssuePage() {
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {attachments.data?.map((attachment) => (
-                  <article className="issue-attachment-item issue-activity-attachment" key={attachment.id}>
-                    <div className="issue-activity-avatar">F</div>
-                    <div>
-                      <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                      <p className="muted">评论附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
-                      <details className="storage-object-details">
-                        <summary>存储对象</summary>
-                        <dl className="issue-work-product-details">
-                          <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
-                          <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
-                          <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
-                          <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
-                        </dl>
-                      </details>
-                    </div>
-                    <div className="issue-attachment-actions">
-                      {attachment.contentPath ? (
-                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
-                      ) : (
-                        <span className="download-unavailable">不可下载</span>
-                      )}
-                      <button
-                        className="danger small-button"
-                        disabled={deleteAttachment.isPending}
-                        onClick={() => deleteAttachment.mutate(attachment.id)}
-                        type="button"
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </article>
-                ))}
-                {comments.isSuccess && comments.data.length === 0 && attachments.isSuccess && attachments.data.length === 0 && (
+                {comments.isSuccess && comments.data.length === 0 && (
                   <p className="muted">暂无动态。</p>
                 )}
               </div>
@@ -1768,27 +1786,25 @@ export function IssuePage() {
                   添加评论
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required />
                 </label>
-                <div className="issue-comment-attachment-row">
-                  <label>
-                    评论附件
-                    <input onChange={selectAttachment} type="file" />
-                  </label>
-                  <label>
-                    用途
-                    <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
-                  </label>
-                </div>
                 <div className="issue-comment-actions">
-                  <button
-                    className="secondary"
-                    disabled={!attachmentFile || uploadAttachment.isPending}
-                    onClick={() => {
-                      if (attachmentFile) uploadAttachment.mutate();
-                    }}
-                    type="button"
-                  >
-                    上传附件
-                  </button>
+                  <div className="issue-attachment-menu-anchor">
+                    <button
+                      className="secondary small-button"
+                      disabled={uploadAttachment.isPending}
+                      onClick={() => setAttachmentMenuOpen((open) => !open)}
+                      type="button"
+                    >
+                      {uploadAttachment.isPending ? "上传中..." : "添加附件"}
+                    </button>
+                    {attachmentMenuOpen && (
+                      <div className="issue-attachment-popover" role="menu">
+                        <label className="issue-attachment-popover-item">
+                          上传本地文件
+                          <input onChange={selectAttachment} type="file" />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                   <button type="submit">发送评论</button>
                 </div>
               </form>

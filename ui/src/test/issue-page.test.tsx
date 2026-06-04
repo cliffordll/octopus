@@ -312,9 +312,10 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
   const activityRegion = await screen.findByRole("region", { name: "动态" });
-  expect(activityRegion).toHaveTextContent("note.txt");
-  expect(screen.queryByRole("region", { name: "附件" })).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
+  const attachmentRegion = await screen.findByRole("region", { name: "附件" });
+  expect(attachmentRegion).toHaveTextContent("note.txt");
+  expect(activityRegion).toHaveTextContent("1 个文件");
+  expect(within(attachmentRegion).getByRole("link", { name: "note.txt" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
@@ -327,15 +328,15 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.upload(screen.getByLabelText("评论附件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
-  await userEvent.click(screen.getByRole("button", { name: "上传附件" }));
+  await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+  await userEvent.upload(screen.getByLabelText("上传本地文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
   expect(await screen.findByRole("status")).toHaveTextContent("已上传 upload.txt");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues/issue-1/attachments",
     expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "删除" }));
+  await userEvent.click(within(attachmentRegion).getByRole("button", { name: "删除 note.txt" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/attachments/attachment-1",
     expect.objectContaining({ method: "DELETE" }),

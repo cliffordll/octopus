@@ -3889,6 +3889,89 @@ button.danger {
   margin-left: auto;
 }
 
+.issue-attachment-summary-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.issue-attachments-inline {
+  display: grid;
+  gap: 10px;
+}
+
+.issue-attachment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.issue-attachment-content {
+  min-width: 0;
+}
+
+.issue-attachment-title {
+  color: #d7deea;
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-attachment-title:hover {
+  text-decoration: underline;
+}
+
+.issue-attachment-preview {
+  background: #0a1018;
+  border: 1px solid #263246;
+  border-radius: 8px;
+  display: block;
+  margin-top: 8px;
+  max-height: 220px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.issue-attachment-menu-anchor {
+  position: relative;
+}
+
+.issue-attachment-popover {
+  background: #0f1724;
+  border: 1px solid #263246;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 30%);
+  min-width: 180px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+}
+
+.issue-attachment-popover-item {
+  align-items: center;
+  border-radius: 8px;
+  color: #d7deea;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.issue-attachment-popover-item:hover {
+  background: #172033;
+}
+
+.issue-attachment-popover-item input {
+  display: none;
+}
+
 .issue-comment-attachment-row {
   display: grid;
   gap: 10px;
