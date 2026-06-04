@@ -335,11 +335,28 @@ class WorkspaceService:
         strategy_type = _resolve_strategy_type(
             project_policy=project_policy, issue_settings=issue_settings, mode=mode
         )
-        project_workspace_id = await self._resolve_project_workspace_id(
+        project_workspace = await self._resolve_project_workspace(
             project_id=project.id,
             policy=project_policy,
             requested_id=issue.project_workspace_id,
         )
+        project_workspace_id = (
+            project_workspace.id if project_workspace is not None else None
+        )
+        fallback_cwd: str | None = None
+        warnings: list[str] = []
+        if project_workspace is None:
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project has no workspace configured. Run will start in "
+                f'shared organization workspace "{fallback_cwd}".'
+            )
+        elif not _string(project_workspace.cwd):
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project workspace has no local cwd configured. Run will start "
+                f'in shared organization workspace "{fallback_cwd}".'
+            )
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -360,12 +377,21 @@ class WorkspaceService:
                 "strategy_type": strategy_type,
                 "name": f"{project.name} workspace",
                 "status": "active",
+                "cwd": fallback_cwd,
                 "provider_type": "git_worktree"
                 if strategy_type == "git_worktree"
                 else "local_fs",
                 "metadata_json": {
                     "resolvedForIssueId": issue.id,
                     "resolvedMode": mode,
+                    **(
+                        {
+                            "fallback": "organization_workspace",
+                            "warnings": warnings,
+                        }
+                        if fallback_cwd
+                        else {}
+                    ),
                 },
             },
         )
@@ -398,11 +424,26 @@ class WorkspaceService:
         workspace = await self._ensure_managed_workspace_paths(workspace)
         services = await self.list_runtime_services_for_workspace(workspace["id"])
         org_root = self._org_workspace_root(issue.org_id)
+        agents_dir = org_root / "agents"
+        skills_dir = org_root / "skills"
+        plans_dir = org_root / "plans"
         artifacts_dir = org_root / "artifacts"
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        for path in (org_root, agents_dir, skills_dir, plans_dir, artifacts_dir):
+            path.mkdir(parents=True, exist_ok=True)
+        workspace = self._with_organization_workspace_paths(
+            workspace=workspace,
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
         workspace_env = self._workspace_env(
             workspace=workspace,
             org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
         )
         runtime_context = {
@@ -925,28 +966,37 @@ class WorkspaceService:
             **log,
         }
 
-    async def _resolve_project_workspace_id(
+    async def _resolve_project_workspace(
         self,
         *,
         project_id: str,
         policy: dict[str, Any] | None,
         requested_id: str | None,
-    ) -> str | None:
+    ) -> Any | None:
+        workspaces = await list_project_workspaces(self._session, project_id)
         if requested_id:
-            return requested_id
+            return next(
+                (workspace for workspace in workspaces if workspace.id == requested_id),
+                None,
+            )
         policy_workspace_id = (
             policy.get("defaultProjectWorkspaceId") if policy is not None else None
         )
         if isinstance(policy_workspace_id, str):
-            return policy_workspace_id
-        workspaces = await list_project_workspaces(self._session, project_id)
+            return next(
+                (
+                    workspace
+                    for workspace in workspaces
+                    if workspace.id == policy_workspace_id
+                ),
+                None,
+            )
         primary = next(
             (workspace for workspace in workspaces if workspace.is_primary), None
         )
         if not workspaces:
             return None
-        selected = primary or workspaces[0]
-        return selected.id
+        return primary or workspaces[0]
 
     async def _ensure_managed_workspace_paths(
         self, workspace: ExecutionWorkspaceData
@@ -976,16 +1026,45 @@ class WorkspaceService:
     def _org_workspace_root(self, org_id: str) -> Path:
         return organization_workspace_root(org_id)
 
+    def _with_organization_workspace_paths(
+        self,
+        *,
+        workspace: ExecutionWorkspaceData,
+        org_root: Path,
+        agents_dir: Path,
+        skills_dir: Path,
+        plans_dir: Path,
+        artifacts_dir: Path,
+    ) -> ExecutionWorkspaceData:
+        enriched = dict(workspace)
+        enriched.update(
+            {
+                "source": workspace["providerType"],
+                "strategy": workspace["strategyType"],
+                "workspaceId": workspace["id"],
+                "orgWorkspaceRoot": str(org_root),
+                "orgAgentsDir": str(agents_dir),
+                "orgSkillsDir": str(skills_dir),
+                "orgPlansDir": str(plans_dir),
+                "orgArtifactsDir": str(artifacts_dir),
+            }
+        )
+        return cast(ExecutionWorkspaceData, enriched)
+
     def _workspace_env(
         self,
         *,
         workspace: ExecutionWorkspaceData,
         org_root: Path,
+        agents_dir: Path,
+        skills_dir: Path,
+        plans_dir: Path,
         artifacts_dir: Path,
     ) -> dict[str, str]:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
         return {
+            "RUDDER_WORKSPACE_CWD": workspace["cwd"] or "",
             "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
             "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
             "RUDDER_WORKSPACE_ID": workspace["id"],
@@ -997,6 +1076,9 @@ class WorkspaceService:
             "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": "[]",
             "RUDDER_RUNTIME_SERVICES_JSON": services_json,
             "RUDDER_ORG_WORKSPACE_ROOT": str(org_root),
+            "RUDDER_ORG_AGENTS_DIR": str(agents_dir),
+            "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
+            "RUDDER_ORG_PLANS_DIR": str(plans_dir),
             "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
         }
 

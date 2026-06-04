@@ -1454,10 +1454,6 @@ export function IssuePage() {
     setAttachmentFile(event.target.files?.[0] ?? null);
     setAttachmentUploadNotice("");
   }
-  function submitAttachment(event: FormEvent) {
-    event.preventDefault();
-    if (attachmentFile) uploadAttachment.mutate();
-  }
   function submitSubIssue(event: FormEvent) {
     event.preventDefault();
     if (subIssueTitle.trim()) createSubIssue.mutate();
@@ -1706,11 +1702,14 @@ export function IssuePage() {
 
             <IssueWorkProductsPanel issue={issue.data} latestRunStatus={latestRun?.status} />
 
-            <section aria-label="附件" className="issue-section-card">
+            <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
-                <h2>附件</h2>
-                <span className="muted">{attachments.data?.length ?? 0}</span>
+                <h2>动态</h2>
+                <span className="muted">
+                  {comments.data?.length ?? 0} 条评论 · {attachments.data?.length ?? 0} 个文件
+                </span>
               </div>
+              {comments.error && <ErrorNotice error={comments.error} />}
               {attachments.error && <ErrorNotice error={attachments.error} />}
               {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
               {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
@@ -1720,64 +1719,6 @@ export function IssuePage() {
               {!uploadAttachment.isPending && attachmentUploadNotice && (
                 <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
               )}
-              {attachments.isSuccess && attachments.data.length === 0 && <p className="muted">暂无附件。</p>}
-              {attachments.data && attachments.data.length > 0 && (
-                <div className="issue-attachment-list">
-                  {attachments.data.map((attachment) => (
-                    <article className="issue-attachment-item" key={attachment.id}>
-                      <div>
-                        <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
-                        <details className="storage-object-details">
-                          <summary>存储对象</summary>
-                          <dl className="issue-work-product-details">
-                            <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
-                            <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
-                            <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
-                            <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
-                          </dl>
-                        </details>
-                      </div>
-                      <div className="issue-attachment-actions">
-                        {attachment.contentPath ? (
-                          <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
-                        ) : (
-                          <span className="download-unavailable">不可下载</span>
-                        )}
-                        <button
-                          className="danger small-button"
-                          disabled={deleteAttachment.isPending}
-                          onClick={() => deleteAttachment.mutate(attachment.id)}
-                          type="button"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-              <form className="form issue-attachment-form" onSubmit={submitAttachment}>
-                <label>
-                  附件文件
-                  <input onChange={selectAttachment} type="file" />
-                </label>
-                <label>
-                  用途
-                  <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
-                </label>
-                <button disabled={!attachmentFile || uploadAttachment.isPending} type="submit">上传附件</button>
-              </form>
-            </section>
-
-            <section aria-label="动态" className="issue-section-card">
-              <div className="issue-section-heading">
-                <h2>动态</h2>
-                <span className="muted">
-                  {comments.data?.length ?? 0} 条记录
-                </span>
-              </div>
-              {comments.error && <ErrorNotice error={comments.error} />}
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -1785,7 +1726,40 @@ export function IssuePage() {
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {comments.isSuccess && comments.data.length === 0 && (
+                {attachments.data?.map((attachment) => (
+                  <article className="issue-attachment-item issue-activity-attachment" key={attachment.id}>
+                    <div className="issue-activity-avatar">F</div>
+                    <div>
+                      <strong>{attachment.originalFilename ?? attachment.id}</strong>
+                      <p className="muted">评论附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                      <details className="storage-object-details">
+                        <summary>存储对象</summary>
+                        <dl className="issue-work-product-details">
+                          <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
+                          <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
+                          <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
+                          <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
+                        </dl>
+                      </details>
+                    </div>
+                    <div className="issue-attachment-actions">
+                      {attachment.contentPath ? (
+                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                      ) : (
+                        <span className="download-unavailable">不可下载</span>
+                      )}
+                      <button
+                        className="danger small-button"
+                        disabled={deleteAttachment.isPending}
+                        onClick={() => deleteAttachment.mutate(attachment.id)}
+                        type="button"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {comments.isSuccess && comments.data.length === 0 && attachments.isSuccess && attachments.data.length === 0 && (
                   <p className="muted">暂无动态。</p>
                 )}
               </div>
@@ -1794,7 +1768,27 @@ export function IssuePage() {
                   添加评论
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required />
                 </label>
+                <div className="issue-comment-attachment-row">
+                  <label>
+                    评论附件
+                    <input onChange={selectAttachment} type="file" />
+                  </label>
+                  <label>
+                    用途
+                    <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
+                  </label>
+                </div>
                 <div className="issue-comment-actions">
+                  <button
+                    className="secondary"
+                    disabled={!attachmentFile || uploadAttachment.isPending}
+                    onClick={() => {
+                      if (attachmentFile) uploadAttachment.mutate();
+                    }}
+                    type="button"
+                  >
+                    上传附件
+                  </button>
                   <button type="submit">发送评论</button>
                 </div>
               </form>
