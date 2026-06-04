@@ -3743,6 +3743,39 @@ button.danger {
   font-size: 12px;
 }
 
+.issue-review-status {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+}
+
+.issue-review-status div {
+  display: grid;
+  gap: 3px;
+}
+
+.issue-review-status span {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.issue-review-status strong {
+  color: #e8edf5;
+  font-size: 13px;
+}
+
+.issue-review-status p {
+  color: #aeb9c9;
+  font-size: 13px;
+  grid-column: 1 / -1;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .issue-activity-list {
   display: flex;
   flex-direction: column;
