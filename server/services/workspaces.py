@@ -428,7 +428,17 @@ class WorkspaceService:
         skills_dir = org_root / "skills"
         plans_dir = org_root / "plans"
         artifacts_dir = org_root / "artifacts"
-        for path in (org_root, agents_dir, skills_dir, plans_dir, artifacts_dir):
+        issue_artifacts_dir = artifacts_dir / "issues" / issue.id
+        run_artifacts_dir = issue_artifacts_dir / "runs" / run_id
+        for path in (
+            org_root,
+            agents_dir,
+            skills_dir,
+            plans_dir,
+            artifacts_dir,
+            issue_artifacts_dir,
+            run_artifacts_dir,
+        ):
             path.mkdir(parents=True, exist_ok=True)
         workspace = self._with_organization_workspace_paths(
             workspace=workspace,
@@ -437,6 +447,8 @@ class WorkspaceService:
             skills_dir=skills_dir,
             plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
+            issue_artifacts_dir=issue_artifacts_dir,
+            run_artifacts_dir=run_artifacts_dir,
         )
         workspace_env = self._workspace_env(
             workspace=workspace,
@@ -445,6 +457,8 @@ class WorkspaceService:
             skills_dir=skills_dir,
             plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
+            issue_artifacts_dir=issue_artifacts_dir,
+            run_artifacts_dir=run_artifacts_dir,
         )
         runtime_context = {
             "rudderWorkspace": workspace,
@@ -737,15 +751,34 @@ class WorkspaceService:
         artifacts_dir = _string(workspace.get("orgArtifactsDir"))
         if not artifacts_dir and isinstance(workspace_env, dict):
             artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
+        artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
+        run_artifacts_dir = _string(workspace.get("runArtifactsDir"))
+        if not run_artifacts_dir and isinstance(workspace_env, dict):
+            run_artifacts_dir = _string(workspace_env.get("RUDDER_RUN_ARTIFACTS_DIR"))
+        if run_artifacts_dir:
+            run_artifacts_root = Path(run_artifacts_dir).resolve()
+            if run_artifacts_root.is_dir() and run_artifacts_root != worktree_root:
+                scan_roots.append(
+                    ("organization_run_artifacts_scan", run_artifacts_root)
+                )
         if artifacts_dir:
-            artifacts_root = Path(artifacts_dir).resolve()
+            assert artifacts_root is not None
             if artifacts_root.is_dir() and artifacts_root != worktree_root:
                 scan_roots.append(("organization_artifacts_scan", artifacts_root))
+        seen_paths: set[Path] = set()
         for source, root in scan_roots:
             for path in _iter_generated_workspace_files(root, threshold):
                 if len(products) >= _GENERATED_FILE_MAX_COUNT:
                     break
+                resolved_path = path.resolve()
+                if resolved_path in seen_paths:
+                    continue
+                seen_paths.add(resolved_path)
                 rel_path = path.relative_to(root).as_posix()
+                workspace_browser_path = _workspace_browser_path(
+                    path=path,
+                    artifacts_root=artifacts_root,
+                )
                 content = path.read_bytes()
                 content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
                 products.append(
@@ -766,6 +799,7 @@ class WorkspaceService:
                         "metadata": {
                             "source": source,
                             "workspacePath": rel_path,
+                            "workspaceBrowserPath": workspace_browser_path,
                             "executionWorkspaceId": workspace_id,
                             "byteSize": len(content),
                         },
@@ -1035,6 +1069,8 @@ class WorkspaceService:
         skills_dir: Path,
         plans_dir: Path,
         artifacts_dir: Path,
+        issue_artifacts_dir: Path,
+        run_artifacts_dir: Path,
     ) -> ExecutionWorkspaceData:
         enriched = dict(workspace)
         enriched.update(
@@ -1047,6 +1083,8 @@ class WorkspaceService:
                 "orgSkillsDir": str(skills_dir),
                 "orgPlansDir": str(plans_dir),
                 "orgArtifactsDir": str(artifacts_dir),
+                "issueArtifactsDir": str(issue_artifacts_dir),
+                "runArtifactsDir": str(run_artifacts_dir),
             }
         )
         return cast(ExecutionWorkspaceData, enriched)
@@ -1060,6 +1098,8 @@ class WorkspaceService:
         skills_dir: Path,
         plans_dir: Path,
         artifacts_dir: Path,
+        issue_artifacts_dir: Path,
+        run_artifacts_dir: Path,
     ) -> dict[str, str]:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
@@ -1080,6 +1120,8 @@ class WorkspaceService:
             "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
             "RUDDER_ORG_PLANS_DIR": str(plans_dir),
             "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
+            "RUDDER_ISSUE_ARTIFACTS_DIR": str(issue_artifacts_dir),
+            "RUDDER_RUN_ARTIFACTS_DIR": str(run_artifacts_dir),
         }
 
     async def _find_reusable_execution_workspace(
@@ -1237,3 +1279,13 @@ def _json_dump(value: Any) -> str:
 
 def _string(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _workspace_browser_path(*, path: Path, artifacts_root: Path | None) -> str | None:
+    if artifacts_root is None:
+        return None
+    try:
+        rel_path = path.resolve().relative_to(artifacts_root.resolve()).as_posix()
+    except ValueError:
+        return None
+    return f"artifacts/{rel_path}"

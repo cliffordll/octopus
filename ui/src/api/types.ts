@@ -31,6 +31,42 @@ export interface CreateOrganizationPayload {
 
 export type UpdateOrganizationPayload = Partial<CreateOrganizationPayload>;
 
+export interface OrganizationWorkspaceFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  displayLabel?: string | null;
+  entityType?: string | null;
+  agentId?: string | null;
+  agentIcon?: string | null;
+  agentRole?: string | null;
+  workspaceKey?: string | null;
+}
+
+export interface OrganizationWorkspaceFileList {
+  source: string;
+  rootPath: string;
+  repoUrl: string | null;
+  directoryPath: string;
+  rootExists: boolean;
+  entries: OrganizationWorkspaceFileEntry[];
+  message: string | null;
+}
+
+export interface OrganizationWorkspaceFileDetail {
+  source: string;
+  rootPath: string;
+  repoUrl: string | null;
+  filePath: string;
+  rootExists: boolean;
+  content: string | null;
+  contentType: string | null;
+  previewKind: "text" | "image" | "binary";
+  contentPath: string | null;
+  message: string | null;
+  truncated: boolean;
+}
+
 export type IssueStatus =
   | "backlog"
   | "todo"
@@ -525,6 +561,25 @@ export interface ProjectWorkspace {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CreateProjectWorkspacePayload {
+  name: string;
+  sourceType?: string;
+  cwd?: string | null;
+  repoUrl?: string | null;
+  repoRef?: string | null;
+  defaultRef?: string | null;
+  visibility?: string;
+  setupCommand?: string | null;
+  cleanupCommand?: string | null;
+  remoteProvider?: string | null;
+  remoteWorkspaceRef?: string | null;
+  sharedWorkspaceKey?: string | null;
+  metadata?: Record<string, unknown> | null;
+  isPrimary?: boolean;
+}
+
+export type UpdateProjectWorkspacePayload = Partial<CreateProjectWorkspacePayload>;
 
 export interface ProjectCodebase {
   configured: boolean;

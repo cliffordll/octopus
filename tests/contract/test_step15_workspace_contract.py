@@ -282,6 +282,18 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
+    assert context["workspace"]["env"]["RUDDER_ISSUE_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts" / "issues" / issue.id
+    )
+    assert context["workspace"]["env"]["RUDDER_RUN_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
+    )
+    assert workspace["issueArtifactsDir"] == str(
+        org_root / "artifacts" / "issues" / issue.id
+    )
+    assert workspace["runArtifactsDir"] == str(
+        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
+    )
 
 
 async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
@@ -612,6 +624,13 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             assert isinstance(artifacts_dir, str)
             artifact = Path(artifacts_dir) / "analysis-plan.md"
             artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
+            run_artifacts_dir = (context.env or {}).get("RUDDER_RUN_ARTIFACTS_DIR")
+            assert isinstance(run_artifacts_dir, str)
+            run_artifact = Path(run_artifacts_dir) / "python-demo" / "README.md"
+            run_artifact.parent.mkdir(parents=True, exist_ok=True)
+            run_artifact.write_text(
+                "# Python Demo\n\nGenerated run artifact.\n", encoding="utf-8"
+            )
             return RuntimeExecutionResult(
                 exit_code=0, result_json={"summary": "generated markdown files"}
             )
@@ -708,11 +727,19 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert run["status"] == "succeeded"
     result_json = run["resultJson"] or {}
     titles = {product["title"] for product in result_json["workProducts"]}
-    assert titles == {"CLAUDE_SUMMARY.md", "analysis-plan.md"}
+    assert titles == {
+        "CLAUDE_SUMMARY.md",
+        "analysis-plan.md",
+        "python-demo/README.md",
+    }
     assert all(product["contentPath"] for product in result_json["workProducts"])
     assert detail is not None
     detail_titles = {product["title"] for product in detail["workProducts"]}
-    assert detail_titles == {"CLAUDE_SUMMARY.md", "analysis-plan.md"}
+    assert detail_titles == {
+        "CLAUDE_SUMMARY.md",
+        "analysis-plan.md",
+        "python-demo/README.md",
+    }
     metadata_by_title = {
         product["title"]: product["metadata"] for product in detail["workProducts"]
     }
@@ -724,6 +751,11 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert metadata_by_title["analysis-plan.md"]["source"] == (
         "organization_artifacts_scan"
     )
+    run_metadata = metadata_by_title["python-demo/README.md"]
+    assert isinstance(run_metadata, dict)
+    assert run_metadata["source"] == "organization_run_artifacts_scan"
+    assert run_metadata["workspaceBrowserPath"].endswith("/python-demo/README.md")
+    assert "/runs/" in run_metadata["workspaceBrowserPath"]
 
 
 async def test_run_preflight_and_adapter_execution_record_workspace_operations(
@@ -766,7 +798,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
     )
     monkeypatch.setattr(
         "server.services.workspaces.organization_workspace_root",
-        lambda org_id: (root / "workspaces" / f"org_{org_id}").resolve(),
+        lambda org_id: (root / "organizations" / org_id / "workspaces").resolve(),
     )
     monkeypatch.setattr(
         runtime_registry,
