@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import get_agent_by_id, update_agent
 from packages.database.schema import Agent
+from .workspace_paths import agent_workspace_root
 from packages.shared.types.agent import (
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
@@ -459,14 +460,7 @@ def _string(value: Any) -> str | None:
 
 def _agent_home_root(row: Agent) -> Path:
     workspace_key = _slug(row.workspace_key or row.name or row.id)
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{row.org_id}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _managed_instructions_root(row: Agent) -> Path:

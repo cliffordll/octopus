@@ -54,6 +54,7 @@ from packages.shared.types.workspace import (
 )
 
 from .logs import LogReadResult, read_local_file_log
+from .workspace_paths import organization_workspace_root
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -885,7 +886,7 @@ class WorkspaceService:
         return workspace
 
     def _org_workspace_root(self, org_id: str) -> Path:
-        return (Path.cwd() / ".octopus" / "workspaces" / f"org_{org_id}").resolve()
+        return organization_workspace_root(org_id)
 
     def _workspace_env(
         self,
