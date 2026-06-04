@@ -1,10 +1,10 @@
-# Step 23: Budget / Governance
+# Step 24: Budget / Governance
 
 状态：待开发
 
 ## 依赖边界
 
-Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
+Step 23 已实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
 
 ## 任务
 
@@ -40,7 +40,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 
 ## 开发计划
 
-### 23A: Budget contract 与迁移基线
+### 24A: Budget contract 与迁移基线
 
 作用：把预算治理的上游数据模型落到 Python 版本，给 budget enforcement 提供稳定边界。
 
@@ -51,7 +51,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/shared/validators/`：新增 budget update、budget policy upsert、incident resolve validator。
 - `packages/database/schema/`：新增 `BudgetPolicy`、`BudgetIncident`。
 - `packages/database/migrations/versions/20260528_000009_budget_governance.py`：新增上游对齐表、索引和外键。
-- `tests/contract/test_step23_budget_contract.py`：覆盖 migration、validator、enum 和 schema 默认值。
+- `tests/contract/test_step24_budget_contract.py`：覆盖 migration、validator、enum 和 schema 默认值。
 
 验收：
 
@@ -59,7 +59,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `budget_policies`、`budget_incidents` 字段、索引和默认值与上游已纳入范围一致。
 - validator 拒绝负数金额、非法 budget scope/window/incident action。
 
-### 23B: Budget policy、incident 与 hard-stop enforcement
+### 24B: Budget policy、incident 与 hard-stop enforcement
 
 作用：实现上游预算策略、软阈值、硬停止、incident 和审批副作用，真正让 budget 影响新 work 的启动。
 
@@ -74,8 +74,8 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
   - `POST /api/orgs/{orgId}/budget-incidents/{incidentId}/resolve`
   - `PATCH /api/orgs/{orgId}/budgets`
   - `PATCH /api/agents/{agentId}/budgets`
-- `tests/contract/test_step23_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch。
-- `tests/workflows/test_step23_budget_workflow.py`：覆盖 soft incident、hard incident、approval、pause、resume、cancel queued/running runs。
+- `tests/contract/test_step24_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch。
+- `tests/workflows/test_step24_budget_workflow.py`：覆盖 soft incident、hard incident、approval、pause、resume、cancel queued/running runs。
 
 验收：
 
@@ -85,7 +85,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - hard stop 会暂停 organization/agent/project 并阻止后续 run 创建或启动。
 - `raise_budget_and_resume` 必须要求新 amount 大于当前 observed spend。
 
-### 23C: Quota windows 真实归集入口
+### 24C: Quota windows 真实归集入口
 
 作用：把 Step 14 的 adapter quota probe 从单 adapter 兼容响应升级为 organization 级 provider quota 聚合，但 provider 失败不能阻断普通 run。
 
@@ -94,7 +94,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/runtimes/registry.py`：补齐列出可提供 quota windows 的 adapter。
 - `server/services/quota_windows.py`：聚合 `get_runtime_quota_windows`，设置超时并把失败映射为 `{ok: false, error, windows: []}`。
 - `server/routes/costs.py`：新增 `GET /api/orgs/{orgId}/costs/quota-windows`。
-- `tests/contract/test_step23_quota_windows.py`：覆盖 org access、unknown org、provider failure、timeout、success aggregation。
+- `tests/contract/test_step24_quota_windows.py`：覆盖 org access、unknown org、provider failure、timeout、success aggregation。
 
 验收：
 
@@ -102,7 +102,7 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - 单个 provider 失败或超时返回错误项，不影响其他 provider。
 - 不把 quota windows 写成 budget，不把 quota 当作 cost；三者关系仅在 response 和文档中解释清楚。
 
-### 23D: Skills analytics 真实归集
+### 24D: Skills analytics 真实归集
 
 作用：替换 Step 14 的空兼容响应，用 run/event/activity 证据计算 agent skill loaded/requested/used 统计。
 
@@ -111,8 +111,8 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/database/queries/agent_skills.py`：新增 skill usage evidence 查询。
 - `server/services/agent_skills.py` 或独立 `server/services/skills_analytics.py`：实现 organization/agent/time window 统计。
 - 现有 runtime skills analytics route：由空响应切换为真实统计。
-- `tests/contract/test_step23_skills_analytics.py`：覆盖 response shape、时间窗口、org/agent scope。
-- `tests/workflows/test_step23_skills_analytics_workflow.py`：覆盖 loaded/requested/used evidence 计数。
+- `tests/contract/test_step24_skills_analytics.py`：覆盖 response shape、时间窗口、org/agent scope。
+- `tests/workflows/test_step24_skills_analytics_workflow.py`：覆盖 loaded/requested/used evidence 计数。
 
 验收：
 
@@ -122,10 +122,10 @@ Step 22 已实现 cost event、cost summary 和 activity query。本步骤只补
 
 ## 执行顺序
 
-1. 先执行 23A，提交 budget schema/contract/migration。
-2. 执行 23B，提交 budget policy、incident 和 hard-stop。
-3. 执行 23C，提交 quota windows 聚合。
-4. 执行 23D，提交 skills analytics 真实归集。
+1. 先执行 24A，提交 budget schema/contract/migration。
+2. 执行 24B，提交 budget policy、incident 和 hard-stop。
+3. 执行 24C，提交 quota windows 聚合。
+4. 执行 24D，提交 skills analytics 真实归集。
 
 每一段完成后先停下说明“做了什么、作用是什么、验证结果是什么”，再按用户确认进入下一段。
 
@@ -142,8 +142,8 @@ uv run pyright .
 对应子任务还需运行新增或受影响测试，例如：
 
 ```powershell
-uv run pytest tests/contract/test_step23_budget_contract.py -q
-uv run pytest tests/contract/test_step23_budget_routes.py -q
-uv run pytest tests/workflows/test_step23_budget_workflow.py -q
-uv run pytest tests/contract/test_step23_quota_windows.py -q
+uv run pytest tests/contract/test_step24_budget_contract.py -q
+uv run pytest tests/contract/test_step24_budget_routes.py -q
+uv run pytest tests/workflows/test_step24_budget_workflow.py -q
+uv run pytest tests/contract/test_step24_quota_windows.py -q
 ```

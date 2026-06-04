@@ -1,4 +1,4 @@
-# Step 25: Recovery / Observability / Compatibility
+# Step 26: Recovery / Observability / Compatibility
 
 状态：待开发
 
@@ -15,7 +15,7 @@
 
 - 本步骤用于收口和加固兼容 server 行为，不新增产品模块。
 - 不新增 runtime 类型；未纳入 runtime 仍保持可解释 unavailable/unsupported 结果。
-- 不负责 Step 22 的成本治理或 Step 24 的真实鉴权，只验证这些能力接入后的端到端可恢复与可观测。
+- 不负责 Step 23 的成本查询、Step 24 的预算治理或 Step 25 的真实鉴权，只验证这些能力接入后的端到端可恢复与可观测。
 - Step 20 已实现基础调试可见性；本步骤负责生产级恢复、兼容矩阵和完整 hardening 收口。
 
 ## 验收
