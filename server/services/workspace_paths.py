@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def organization_workspace_relative_path(org_id: str) -> str:
-    return f".octopus/workspaces/org_{org_id}"
+    return f".octopus/organizations/{org_id}/workspaces"
 
 
 def organization_workspace_root(org_id: str) -> Path:

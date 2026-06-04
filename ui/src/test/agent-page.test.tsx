@@ -795,7 +795,7 @@ it("manages skills from agent configuration", async () => {
           },
         ],
         warnings: [
-          "skillsRootPath does not exist: D:\\coding\\octopus\\.octopus\\workspaces\\org_16793a83-0fdd-4e35-84d7-7204f7f23663\\skills",
+          "skillsRootPath does not exist: D:\\coding\\octopus\\.octopus\\organizations\\16793a83-0fdd-4e35-84d7-7204f7f23663\\workspaces\\skills",
           "debug missing from managed home",
         ],
       });
