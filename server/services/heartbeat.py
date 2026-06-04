@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -840,6 +841,7 @@ class HeartbeatService:
             )
             if final_status == "succeeded":
                 await self._queue_issue_passive_followup_if_needed(agent, final)
+            await self._release_issue_execution(final)
             await self._append_event(
                 final,
                 sequence,
@@ -888,6 +890,7 @@ class HeartbeatService:
             )
             await self._update_runtime_state(agent, failed)
             await update_agent(self._session, agent.id, {"status": "error"})
+            await self._release_issue_execution(failed)
             await self._append_event(
                 failed, sequence, "error", message=message, level="error"
             )
@@ -1081,6 +1084,32 @@ class HeartbeatService:
             actor_type="system",
             actor_id="heartbeat_closeout_governance",
             execute_immediately=False,
+        )
+
+    async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
+        issue_id = _issue_id_from_context(final.context_snapshot)
+        criteria = [
+            IssueRow.execution_run_id == final.id,
+            IssueRow.checkout_run_id == final.id,
+        ]
+        if issue_id is not None:
+            criteria.append(IssueRow.id == issue_id)
+        values: dict[str, Any] = {
+            "updated_at": datetime.now(UTC),
+        }
+        if final.status in {"failed", "timed_out", "cancelled", "succeeded"}:
+            values.update(
+                {
+                    "execution_run_id": None,
+                    "checkout_run_id": None,
+                    "execution_agent_name_key": None,
+                    "execution_locked_at": None,
+                }
+            )
+        await self._session.execute(
+            update(IssueRow)
+            .where(IssueRow.org_id == final.org_id, or_(*criteria))
+            .values(**values)
         )
 
     async def _next_event_sequence(self, run_id: str) -> int:
