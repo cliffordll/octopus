@@ -62,6 +62,8 @@
 - 对齐上游 `organization-workspace-browser` 的最小只读能力：server 提供组织工作区真实目录列表、文件预览和图片 content 读取；UI 的“组织 -> 工作区”页面必须消费真实 API，不再用项目/智能体数据伪造文件树。
 - 组织工作区浏览根目录固定为 `OCTOPUS_HOME/instances/<instance_id>/organizations/<org_id>/workspaces`，默认 `~/.octopus/instances/default/organizations/<org_id>/workspaces`；运行产物通过 `artifacts/` 展示。该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
 - 每次 issue run 会预创建组织 artifacts 下的专属目录：`artifacts/issues/<issue_id>/runs/<run_id>/`。该目录属于组织工作区的一部分，UI 可通过组织工作区浏览器打开。
+- 补齐项目 workspace 管理闭环：server 暴露 project workspace CRUD；UI 项目配置页支持新增本地 cwd/repo 工作区、设为主工作区和删除。项目 workspace 是可选绑定；任务执行优先使用可用主项目工作区，不可用时 fallback 到组织共享工作区。
+- 项目 workspace CRUD 与“执行工作区策略”不是同一个配置：前者登记项目可用的 cwd/repo；后者决定 run 使用共享工作区、独立工作区或操作分支等策略。UI 必须分区展示，不能把 cwd/repo 绑定塞进策略 JSON。
 
 ### 22C: Issue 执行闭环补强
 
@@ -110,6 +112,7 @@
 - Tests 或 workflow 覆盖 workspace preflight、runtime service、workspace operation log 和 work product 登记的端到端可见性。
 - Tests 或 workflow 覆盖 worktree 与 organization artifacts 中生成的文件都会登记为 issue work-products。
 - Tests 覆盖 organization workspace browser 可列出 `artifacts/`、读取文本产物、预览图片产物，并拒绝路径越界。
+- Tests 覆盖 project workspace CRUD、主工作区切换和删除主工作区后的 fallback 主工作区选择；UI tests 覆盖项目配置页新增、设主、删除项目工作区。
 - UI tests 覆盖“组织 -> 工作区”页面从 `/api/orgs/{orgId}/workspace/files` 和 `/api/orgs/{orgId}/workspace/file` 读取真实文件树与文件内容，不再展示本地构造的假树。
 - Tests 或 workflow 覆盖 issue execute 成功后 run、events/log、documents/work-products、closeout/followup 状态可查询。
 - Tests 覆盖 chat stream 与非 stream 在 issue proposal、manual approval、auto create 和 runtime error 场景下行为一致。
