@@ -108,8 +108,9 @@ async def _seed_agent(factory: async_sessionmaker, root_path: Path) -> tuple[str
     root = (
         root_path
         / ".octopus"
+        / "organizations"
+        / org_id
         / "workspaces"
-        / f"org_{org_id}"
         / "agents"
         / "agent"
         / "instructions"
@@ -264,8 +265,9 @@ async def test_agent_instructions_bundle_reconciles_empty_default_files(
     root = (
         root_path
         / ".octopus"
+        / "organizations"
+        / org_id
         / "workspaces"
-        / f"org_{org_id}"
         / "agents"
         / "ceo"
         / "instructions"

@@ -5,7 +5,7 @@ import { agentsApi } from "../api/agents";
 import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, ProjectDetail, ProjectWorkspace } from "../api/types";
+import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { sourceLabel, statusLabel } from "../utils/display";
@@ -1186,156 +1186,6 @@ export function OrganizationSkillsPage() {
   );
 }
 
-interface WorkspaceTreeEntry {
-  children?: WorkspaceTreeEntry[];
-  content?: string | null;
-  detail?: string;
-  icon?: string;
-  isDirectory: boolean;
-  path: string;
-}
-
-function jsonFile(path: string, value: unknown, detail?: string, icon = "{}"): WorkspaceTreeEntry {
-  return {
-    content: formatJson(value),
-    detail,
-    icon,
-    isDirectory: false,
-    path,
-  };
-}
-
-function workspaceEntryLabel(entry: WorkspaceTreeEntry): string {
-  return entry.path.split("/").at(-1) ?? entry.path;
-}
-
-function sortWorkspaceEntries(entries: WorkspaceTreeEntry[]): WorkspaceTreeEntry[] {
-  return entries
-    .map((entry) => ({
-      ...entry,
-      children: entry.children ? sortWorkspaceEntries(entry.children) : entry.children,
-    }))
-    .sort((left, right) =>
-      workspaceEntryLabel(left).localeCompare(workspaceEntryLabel(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
-    );
-}
-
-function formatJson(value: unknown): string {
-  if (value === null || value === undefined) return "{}";
-  return JSON.stringify(value, null, 2);
-}
-
-function slugPath(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "item";
-}
-
-function projectWorkspaces(project: ProjectDetail): ProjectWorkspace[] {
-  if (project.workspaces && project.workspaces.length > 0) return project.workspaces;
-  if (!project.codebase) return [];
-  return [
-    {
-      id: `${project.id}-codebase-workspace`,
-      orgId: project.orgId,
-      projectId: project.id,
-      name: project.name,
-      sourceType: project.codebase.origin ?? "project",
-      cwd: project.codebase.effectiveLocalFolder ?? project.codebase.localFolder ?? null,
-      repoUrl: project.codebase.repoUrl ?? null,
-      repoRef: project.codebase.repoRef ?? null,
-      defaultRef: project.codebase.defaultRef ?? null,
-      visibility: "project",
-      setupCommand: null,
-      cleanupCommand: null,
-      remoteProvider: null,
-      remoteWorkspaceRef: null,
-      sharedWorkspaceKey: project.codebase.workspaceId ?? null,
-      metadata: null,
-      isPrimary: true,
-      runtimeServices: [],
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    },
-  ];
-}
-
-function buildWorkspaceTree(projects: ProjectDetail[], agents: Agent[], requestedPath: string | null): WorkspaceTreeEntry[] {
-  const projectChildren = projects.map((project) => ({
-    children: [
-      jsonFile(`projects/${slugPath(project.name)}/project.json`, project, "项目详情", "P"),
-      jsonFile(`projects/${slugPath(project.name)}/workspace-policy.json`, project.executionWorkspacePolicy ?? {}, "执行策略", "⚙"),
-      ...projectWorkspaces(project).map((workspace) =>
-        jsonFile(`projects/${slugPath(project.name)}/workspaces/${slugPath(workspace.name)}.json`, workspace, workspace.cwd ?? undefined, "W"),
-      ),
-    ],
-    detail: project.codebase?.effectiveLocalFolder ?? project.description ?? undefined,
-    icon: "P",
-    isDirectory: true,
-    path: `projects/${slugPath(project.name)}`,
-  }));
-  const agentChildren = agents.map((agent) => ({
-    children: [
-      jsonFile(`agents/${slugPath(agent.name)}/config.json`, agent.agentRuntimeConfig ?? {}, agent.agentRuntimeType, "⚙"),
-      jsonFile(`agents/${slugPath(agent.name)}/status.json`, {
-        id: agent.id,
-        name: agent.name,
-        role: agent.role,
-        status: agent.status,
-        reportsTo: agent.reportsTo ?? null,
-        lastHeartbeatAt: agent.lastHeartbeatAt,
-      }, "智能体状态", "S"),
-    ],
-    detail: `${agent.agentRuntimeType} · ${agent.status}`,
-    icon: "A",
-    isDirectory: true,
-    path: `agents/${slugPath(agent.name)}`,
-  }));
-  const skillFiles = agents
-    .filter((agent) => Array.isArray(agent.desiredSkills) && agent.desiredSkills.length > 0)
-    .map((agent) => jsonFile(`skills/${slugPath(agent.name)}.json`, agent.desiredSkills ?? [], agent.name, "K"));
-  const entries: WorkspaceTreeEntry[] = [
-    { children: [], detail: "运行产物", icon: "A", isDirectory: true, path: "artifacts" },
-    { children: [], detail: "构建输出", icon: "D", isDirectory: true, path: "dist" },
-    { children: [], detail: "上游兼容目录", icon: "M", isDirectory: true, path: "Microsoft" },
-    {
-      children: [
-        jsonFile("node_mode/runtime.json", {
-          agents: agents.map((agent) => ({ name: agent.name, runtime: agent.agentRuntimeType, status: agent.status })),
-        }, "runtime", "N"),
-      ],
-      detail: "Node runtime mode",
-      icon: "N",
-      isDirectory: true,
-      path: "node_mode",
-    },
-    { children: projectChildren, detail: `${projects.length} 个项目`, icon: "P", isDirectory: true, path: "plans" },
-    { children: skillFiles, detail: `${skillFiles.length} 个技能声明`, icon: "K", isDirectory: true, path: "skills" },
-    { children: projectChildren, detail: "项目源代码入口", icon: "S", isDirectory: true, path: "src" },
-    { children: agentChildren, detail: `${agents.length} 个智能体`, icon: "A", isDirectory: true, path: "agents" },
-  ];
-  if (requestedPath && !findWorkspaceEntry(entries, requestedPath)) {
-    entries.unshift({
-      content: "当前 server 未提供组织工作区文件读取接口，暂不能加载该文件内容。",
-      detail: "等待 server workspace file API",
-      icon: fileFormat(requestedPath).slice(0, 1).toUpperCase(),
-      isDirectory: false,
-      path: requestedPath,
-    });
-  }
-  return sortWorkspaceEntries(entries);
-}
-
-function findWorkspaceEntry(entries: WorkspaceTreeEntry[], path: string): WorkspaceTreeEntry | undefined {
-  for (const entry of entries) {
-    if (entry.path === path) return entry;
-    const child = entry.children ? findWorkspaceEntry(entry.children, path) : undefined;
-    if (child) return child;
-  }
-  return undefined;
-}
-
 function parentDirectories(path: string | null): Set<string> {
   if (!path) return new Set();
   const parts = path.split("/").filter(Boolean);
@@ -1349,6 +1199,15 @@ function fileFormat(path: string | null): string {
   return ext === "md" ? "markdown" : ext;
 }
 
+function displayWorkspaceFileFormat(path: string | null, detail: OrganizationWorkspaceFileDetail | undefined): string {
+  if (detail?.previewKind === "image" && detail.contentType) {
+    const subtype = detail.contentType.split("/").at(-1) ?? "image";
+    return subtype === "svg+xml" ? "svg" : subtype;
+  }
+  if (detail?.contentType === "application/pdf") return "pdf";
+  return fileFormat(path);
+}
+
 function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder"): string {
   const normalized = icon?.toLowerCase();
   if (normalized === "{}") return "workspace-tree-icon-json";
@@ -1360,22 +1219,31 @@ function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder
 function WorkspaceTreeNode({
   entry,
   expandedParents,
+  orgId,
   onSelect,
   selectedPath,
   depth = 0,
 }: {
-  entry: WorkspaceTreeEntry;
+  entry: OrganizationWorkspaceFileEntry;
   expandedParents: Set<string>;
+  orgId: string;
   onSelect: (path: string) => void;
   selectedPath: string | null;
   depth?: number;
 }) {
   const [expanded, setExpanded] = useState(expandedParents.has(entry.path));
+  const children = useQuery({
+    queryKey: ["organization-workspace-files", orgId, entry.path],
+    queryFn: () => organizationsApi.workspaceFiles(orgId, entry.path),
+    enabled: Boolean(entry.isDirectory && expanded),
+  });
   useEffect(() => {
     if (expandedParents.has(entry.path)) setExpanded(true);
   }, [entry.path, expandedParents]);
-  const label = entry.path.split("/").at(-1) ?? entry.path;
+  const icon = entry.isDirectory ? "F" : undefined;
+  const label = "displayLabel" in entry && entry.displayLabel ? entry.displayLabel : (("name" in entry && entry.name) || entry.path.split("/").at(-1) || entry.path);
   if (entry.isDirectory) {
+    const childEntries = children.data?.entries;
     return (
       <li>
         <button
@@ -1386,19 +1254,24 @@ function WorkspaceTreeNode({
           type="button"
         >
           <span aria-hidden="true" className="workspace-tree-chevron">{expanded ? "⌄" : "›"}</span>
-          <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(entry.icon, "folder")}`}>
-            {entry.icon ?? "F"}
+          <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(icon, "folder")}`}>
+            {icon ?? "F"}
           </span>
           <span className="workspace-tree-label">{label}</span>
-          {entry.detail && <small>{entry.detail}</small>}
         </button>
-        {expanded && entry.children && entry.children.length > 0 && (
+        {expanded && children.isLoading && <p className="muted workspace-tree-hint">加载中...</p>}
+        {expanded && children.error && <ErrorNotice error={children.error} />}
+        {expanded && children.data?.message && children.data.entries.length === 0 && (
+          <p className="muted workspace-tree-hint">{children.data.message}</p>
+        )}
+        {expanded && childEntries && childEntries.length > 0 && (
           <ul className="workspace-tree-list">
-            {entry.children.map((child) => (
+            {childEntries.map((child) => (
               <WorkspaceTreeNode
                 depth={depth + 1}
                 entry={child}
                 expandedParents={expandedParents}
+                orgId={orgId}
                 key={child.path}
                 onSelect={onSelect}
                 selectedPath={selectedPath}
@@ -1417,11 +1290,10 @@ function WorkspaceTreeNode({
         style={{ paddingLeft: `${depth * 14 + 28}px` }}
         type="button"
       >
-        <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(entry.icon, "file")}`}>
-          {entry.icon ?? "·"}
+        <span aria-hidden="true" className={`workspace-tree-icon ${workspaceIconClass(icon, "file")}`}>
+          {icon ?? "·"}
         </span>
         <span className="workspace-tree-label">{label}</span>
-        {entry.detail && <small>{entry.detail}</small>}
       </button>
     </li>
   );
@@ -1432,21 +1304,21 @@ export function OrganizationWorkspacesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedPath = searchParams.get("path")?.trim() || null;
   const [selectedPath, setSelectedPath] = useState<string | null>(requestedPath);
+  const queryClient = useQueryClient();
   const projects = useQuery({
     queryKey: ["projects", orgId],
     queryFn: () => projectsApi.list(orgId),
   });
-  const agents = useQuery({
-    queryKey: ["agents", orgId],
-    queryFn: () => agentsApi.list(orgId),
+  const rootFiles = useQuery({
+    queryKey: ["organization-workspace-files", orgId, ""],
+    queryFn: () => organizationsApi.workspaceFiles(orgId, ""),
   });
-  const projectList = Array.isArray(projects.data) ? projects.data : [];
-  const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const workspaceTree = useMemo(
-    () => buildWorkspaceTree(projectList, agentList, requestedPath),
-    [agentList, projectList, requestedPath],
-  );
-  const selectedEntry = selectedPath ? findWorkspaceEntry(workspaceTree, selectedPath) : undefined;
+  const selectedFile = useQuery({
+    queryKey: ["organization-workspace-file", orgId, selectedPath],
+    queryFn: () => organizationsApi.workspaceFile(orgId, selectedPath ?? ""),
+    enabled: Boolean(selectedPath),
+  });
+  const workspaceTree = rootFiles.data?.entries ?? [];
   const expandedParents = useMemo(() => parentDirectories(selectedPath), [selectedPath]);
 
   useEffect(() => {
@@ -1455,8 +1327,7 @@ export function OrganizationWorkspacesPage() {
 
   useEffect(() => {
     if (selectedPath) return;
-    const firstFile = findWorkspaceEntry(workspaceTree, "package-lock.json")
-      ?? workspaceTree.flatMap((entry) => entry.children ?? [entry]).find((entry) => !entry.isDirectory);
+    const firstFile = workspaceTree.find((entry) => !entry.isDirectory);
     if (firstFile && !firstFile.isDirectory) {
       setSelectedPath(firstFile.path);
       const next = new URLSearchParams(searchParams);
@@ -1472,33 +1343,44 @@ export function OrganizationWorkspacesPage() {
     setSearchParams(next, { replace: true });
   }
 
+  function refreshWorkspace() {
+    void queryClient.invalidateQueries({ queryKey: ["organization-workspace-files", orgId] });
+    void queryClient.invalidateQueries({ queryKey: ["organization-workspace-file", orgId] });
+  }
+
+  const selectedDetail = selectedFile.data as OrganizationWorkspaceFileDetail | undefined;
+
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization</p>
           <h1>工作区</h1>
-          <p className="muted">按上游工作区布局展示文件树和编辑区。</p>
+          <p className="muted">浏览真实组织工作区。运行产物会出现在 artifacts 目录。</p>
         </div>
-        <button disabled type="button">Refresh</button>
+        <button onClick={refreshWorkspace} type="button">Refresh</button>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}
-      {agents.error && <ErrorNotice error={agents.error} />}
+      {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
+      {selectedFile.error && <ErrorNotice error={selectedFile.error} />}
       <div className="workspace-shell-layout">
         <section className="workspace-files-card" data-testid="org-workspaces-files-card">
           <div className="workspace-card-header">
             <div>
               <h2>Files</h2>
-              <p>/</p>
+              <p>{rootFiles.data?.rootPath ?? "/"}</p>
             </div>
             <Badge>{workspaceTree.length}</Badge>
           </div>
           <div className="workspace-files-scroll">
+            {rootFiles.isLoading && <p className="muted">加载工作区中...</p>}
+            {rootFiles.data?.message && <p className="muted">{rootFiles.data.message}</p>}
             <ul className="workspace-tree-list">
               {workspaceTree.map((entry) => (
                 <WorkspaceTreeNode
                   entry={entry}
                   expandedParents={expandedParents}
+                  orgId={orgId}
                   key={entry.path}
                   onSelect={selectFile}
                   selectedPath={selectedPath}
@@ -1514,24 +1396,29 @@ export function OrganizationWorkspacesPage() {
               <p>{selectedPath ?? "Select a file to edit"}</p>
             </div>
             <div className="workspace-editor-actions">
-              {selectedPath && <span className="workspace-format-pill">{fileFormat(selectedPath)}</span>}
-              <button disabled title="当前 server 未提供组织工作区文件保存接口" type="button">Save</button>
+              {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
+              <button disabled title="当前暂只支持工作区预览" type="button">Save</button>
             </div>
           </div>
           <div className="workspace-editor-body">
             {!selectedPath ? (
               <p className="muted">Choose a file from the workspace tree to edit it.</p>
+            ) : selectedFile.isLoading ? (
+              <p className="muted">加载文件中...</p>
+            ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
+              <div className="workspace-image-preview">
+                <img alt={selectedPath} src={selectedDetail.contentPath} />
+              </div>
+            ) : selectedDetail?.previewKind === "binary" ? (
+              <p className="muted">{selectedDetail.message ?? "Binary files are not previewed."}</p>
             ) : (
-              <>
-                {!selectedEntry && <p className="error-notice">未找到选中的工作区文件。</p>}
-                <textarea
-                  aria-label="工作区文件内容"
-                  className="workspace-text-editor"
-                  readOnly
-                  spellCheck={false}
-                  value={selectedEntry?.content ?? "当前 server 未提供组织工作区文件读取接口，暂不能加载该文件内容。"}
-                />
-              </>
+              <textarea
+                aria-label="工作区文件内容"
+                className="workspace-text-editor"
+                readOnly
+                spellCheck={false}
+                value={selectedDetail?.content ?? ""}
+              />
             )}
           </div>
         </section>

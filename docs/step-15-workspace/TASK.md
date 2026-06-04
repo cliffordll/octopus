@@ -46,21 +46,24 @@ Organization
 一个本地 managed workspace 可以采用类似结构：
 
 ```text
-<org-workspace-root>/
-  org_<organization_id>/
-    agents/
-      <agent_workspace_key>/
-    skills/
-    plans/
-    executions/
-      <execution_workspace_id>/
-        worktree/
-        logs/
-        tmp/
-    artifacts/
-      issue_<issue_id>/
-        run_<run_id>/
-          <work_product_id>/
+<octopus-root>/
+  .octopus/
+    organizations/
+      <organization_id>/
+        workspaces/
+          agents/
+            <agent_workspace_key>/
+          skills/
+          plans/
+          executions/
+            <execution_workspace_id>/
+              worktree/
+              logs/
+              tmp/
+          artifacts/
+            issue_<issue_id>/
+              run_<run_id>/
+                <work_product_id>/
 ```
 
 该结构只作为 Step 15 的最小本地目录策略参考。上游兼容的关键不是目录名字本身，而是服务端持久化关系、runtime context/env、operation/service 状态和失败清理语义保持一致。

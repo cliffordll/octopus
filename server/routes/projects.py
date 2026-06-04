@@ -10,13 +10,21 @@ from packages.shared.api_paths.projects import (
     PROJECT_DETAIL_PATH,
     PROJECT_RESOURCE_DETAIL_PATH,
     PROJECT_RESOURCE_LIST_PATH,
+    PROJECT_WORKSPACE_DETAIL_PATH,
+    PROJECT_WORKSPACE_LIST_PATH,
 )
-from packages.shared.types.project import ProjectDetail, ProjectResourceAttachment
+from packages.shared.types.project import (
+    ProjectDetail,
+    ProjectResourceAttachment,
+    ProjectWorkspace,
+)
 from packages.shared.validators.project import (
     validate_create_project,
+    validate_create_project_workspace,
     validate_project_resource_attachment_input,
     validate_update_project,
     validate_update_project_resource_attachment,
+    validate_update_project_workspace,
 )
 
 from ..dependencies.access import (
@@ -152,6 +160,107 @@ async def delete_project_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
     return removed
+
+
+@router.get(PROJECT_WORKSPACE_LIST_PATH)
+async def list_project_workspaces_route(
+    id: str,
+    request: Request,
+    orgId: str | None = Query(default=None),
+    service: ProjectService = Depends(get_project_service),
+) -> list[ProjectWorkspace]:
+    detail = await _get_project_or_404(
+        id, request=request, service=service, org_id=orgId
+    )
+    return await service.list_workspaces(detail["id"])
+
+
+@router.post(PROJECT_WORKSPACE_LIST_PATH, status_code=status.HTTP_201_CREATED)
+async def create_project_workspace_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    orgId: str | None = Query(default=None),
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectWorkspace:
+    detail = await _get_project_or_404(
+        id, request=request, service=service, org_id=orgId
+    )
+    try:
+        payload = validate_create_project_workspace(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    actor = require_actor_identity(request)
+    workspace = await service.create_workspace(
+        detail["id"], payload, actor_type=actor.actor_type, actor_id=actor.actor_id
+    )
+    if workspace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+    return workspace
+
+
+@router.patch(PROJECT_WORKSPACE_DETAIL_PATH)
+async def update_project_workspace_route(
+    id: str,
+    workspaceId: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    orgId: str | None = Query(default=None),
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectWorkspace:
+    detail = await _get_project_or_404(
+        id, request=request, service=service, org_id=orgId
+    )
+    try:
+        payload = validate_update_project_workspace(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    actor = require_actor_identity(request)
+    workspace = await service.update_workspace(
+        detail["id"],
+        workspaceId,
+        payload,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if workspace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project workspace not found",
+        )
+    return workspace
+
+
+@router.delete(PROJECT_WORKSPACE_DETAIL_PATH)
+async def delete_project_workspace_route(
+    id: str,
+    workspaceId: str,
+    request: Request,
+    orgId: str | None = Query(default=None),
+    service: ProjectService = Depends(get_project_service),
+) -> ProjectWorkspace:
+    detail = await _get_project_or_404(
+        id, request=request, service=service, org_id=orgId
+    )
+    actor = require_actor_identity(request)
+    workspace = await service.remove_workspace(
+        detail["id"],
+        workspaceId,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+    )
+    if workspace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project workspace not found",
+        )
+    return workspace
 
 
 @router.get(PROJECT_RESOURCE_LIST_PATH)

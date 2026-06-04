@@ -174,7 +174,7 @@ async def test_project_routes_create_list_update_and_delete(
     assert created["orgId"] == org_id
     assert created["urlKey"] == "control-plane"
     assert created["resources"] == []
-    expected_workspace_root = f".octopus/workspaces/org_{org_id}"
+    expected_workspace_root = f"organizations/{org_id}/workspaces"
     assert created["codebase"]["scope"] == "none"
     assert created["codebase"]["localFolder"] is None
     assert created["codebase"]["managedFolder"] == expected_workspace_root
@@ -198,6 +198,97 @@ async def test_project_routes_create_list_update_and_delete(
     )
     assert delete_code == 200
     assert deleted["id"] == created["id"]
+
+
+async def test_project_workspace_routes_manage_primary_workspace(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        org = Organization(
+            url_key="step10-workspaces", name="Step 10 Workspaces", issue_prefix="S10W"
+        )
+        session.add(org)
+        await session.commit()
+        org_id = org.id
+
+    create_code, project = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/projects",
+        json={"name": "Workspace Project", "status": "planned"},
+    )
+    assert create_code == 201
+
+    first_code, first = await _request(
+        app,
+        "POST",
+        f"/api/projects/{project['id']}/workspaces",
+        json={
+            "name": "Local checkout",
+            "sourceType": "local_path",
+            "cwd": "D:/workspaces/project-a",
+            "repoUrl": "https://example.test/project-a.git",
+            "repoRef": "main",
+            "defaultRef": "main",
+            "sharedWorkspaceKey": "project-a-local",
+        },
+    )
+    assert first_code == 201
+    assert first["projectId"] == project["id"]
+    assert first["name"] == "Local checkout"
+    assert first["cwd"] == "D:/workspaces/project-a"
+    assert first["isPrimary"] is True
+
+    second_code, second = await _request(
+        app,
+        "POST",
+        f"/api/projects/{project['id']}/workspaces",
+        json={
+            "name": "Secondary checkout",
+            "sourceType": "local_path",
+            "cwd": "D:/workspaces/project-b",
+            "isPrimary": True,
+        },
+    )
+    assert second_code == 201
+    assert second["isPrimary"] is True
+
+    list_code, workspaces = await _request(
+        app, "GET", f"/api/projects/{project['id']}/workspaces"
+    )
+    assert list_code == 200
+    assert [workspace["id"] for workspace in workspaces] == [second["id"], first["id"]]
+    assert [workspace["isPrimary"] for workspace in workspaces] == [True, False]
+
+    patch_code, patched = await _request(
+        app,
+        "PATCH",
+        f"/api/projects/{project['id']}/workspaces/{first['id']}",
+        json={"name": "Primary checkout", "isPrimary": True},
+    )
+    assert patch_code == 200
+    assert patched["name"] == "Primary checkout"
+    assert patched["isPrimary"] is True
+
+    detail_code, detail = await _request(app, "GET", f"/api/projects/{project['id']}")
+    assert detail_code == 200
+    assert detail["primaryWorkspace"]["id"] == first["id"]
+    assert detail["codebase"]["localFolder"] == "D:/workspaces/project-a"
+    assert detail["codebase"]["scope"] == "project"
+
+    delete_code, deleted = await _request(
+        app, "DELETE", f"/api/projects/{project['id']}/workspaces/{first['id']}"
+    )
+    assert delete_code == 200
+    assert deleted["id"] == first["id"]
+
+    final_code, final_detail = await _request(
+        app, "GET", f"/api/projects/{project['id']}"
+    )
+    assert final_code == 200
+    assert final_detail["primaryWorkspace"]["id"] == second["id"]
+    assert final_detail["workspaces"][0]["id"] == second["id"]
 
 
 async def test_project_resource_route_resolves_shortname_with_org_context(
