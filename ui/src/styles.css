@@ -3863,17 +3863,13 @@ button.danger {
 
 .issue-comment-form {
   border-top: 1px solid #202a3b;
+  display: grid;
+  gap: 12px;
   padding-top: 14px;
 }
 
-.issue-attachment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .issue-attachment-item {
-  align-items: center;
+  align-items: flex-start;
   background: #111722;
   border: 1px solid #263246;
   border-radius: 12px;
@@ -3883,17 +3879,20 @@ button.danger {
   padding: 12px;
 }
 
+.issue-activity-attachment {
+  border-style: dashed;
+}
+
 .issue-attachment-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
-.issue-attachment-form {
-  border-top: 1px solid #202a3b;
+.issue-comment-attachment-row {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
-  padding-top: 14px;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px);
 }
 
 .issue-upload-status {

@@ -306,7 +306,9 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/work-products/wp-2",
     expect.objectContaining({ method: "DELETE" }),
   );
-  expect(await screen.findByRole("region", { name: "附件" })).toHaveTextContent("note.txt");
+  const activityRegion = await screen.findByRole("region", { name: "动态" });
+  expect(activityRegion).toHaveTextContent("note.txt");
+  expect(screen.queryByRole("region", { name: "附件" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
@@ -320,7 +322,7 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.upload(screen.getByLabelText("附件文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
+  await userEvent.upload(screen.getByLabelText("评论附件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
   await userEvent.click(screen.getByRole("button", { name: "上传附件" }));
   expect(await screen.findByRole("status")).toHaveTextContent("已上传 upload.txt");
   expect(fetchMock).toHaveBeenCalledWith(
