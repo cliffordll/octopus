@@ -2,6 +2,13 @@
 
 状态：待开发
 
+## 已提前完成
+
+- 内置技能目录中已经包含 `create-plugin` skill 及中文说明，用于保留上游 plugin authoring 相关知识。
+- Runtime/agent skills 管理和 organization skills 管理已能发现、同步、启用技能，但这不是 plugin framework。
+
+这些只属于技能内容和运行时技能管理，不代表插件子系统已经实现。
+
 ## 上游证据
 
 上游 `D:\coding\rudder` 已有独立 plugin framework，不是简单扩展点。开发前必须优先核对：
@@ -43,6 +50,12 @@
 - 实现 plugin UI 静态资源路由、UI contributions、bridge data/action 和 SSE stream。
 - 规划 Python 版本 SDK/脚手架兼容边界；优先保证 server 能加载已约定结构的插件，再考虑作者工具。
 - 补齐一方插件目录约定，Linear 插件作为上游对照目标，不在无证据情况下改成 Octopus 私有插件模型。
+
+## 剩余待开发
+
+- 当前没有 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store 或 plugin UI bridge。
+- 当前没有 `server/routes/plugins.py`、`plugin-ui-static`、plugin operations routes。
+- 当前没有 Python 版 plugin SDK/authoring scaffold，仅有内置 `create-plugin` skill 文档可作后续参考。
 
 ## 边界
 
