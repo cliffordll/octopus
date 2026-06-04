@@ -48,12 +48,10 @@ Organization
 ```text
 <org-workspace-root>/
   org_<organization_id>/
-    projects/
-      project_<project_id>/
-        workspaces/
-          <project_workspace_id>/
-            repo/
-            .octopus/
+    agents/
+      <agent_workspace_key>/
+    skills/
+    plans/
     executions/
       <execution_workspace_id>/
         worktree/
@@ -69,6 +67,8 @@ Organization
 
 Runtime adapter 在执行时应通过统一 context/env 获取 workspace 信息，例如主 workspace、workspace 列表、worktree path、repo/ref/branch、organization workspace root、artifacts dir 和 runtime services JSON，而不是直接理解数据库表关系。
 
+上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `RUDDER_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
+
 ## Preflight 的含义
 
 Preflight 是 run 正式调用 runtime adapter 之前的 workspace 预检与准备阶段。它不是独立执行模型，而是 Step 13 run 生命周期中的执行前检查点。
@@ -79,7 +79,7 @@ Preflight 需要确认：
 - issue 是否能解析到同一 organization 下的 project。
 - project 是否有可用的 project workspace 或 execution workspace 策略。
 - 是否能创建或复用 execution workspace。
-- 本地 managed workspace 目录、artifacts 目录、logs/tmp 目录是否可准备。
+- 组织共享 workspace、agents、skills、plans、artifacts 目录以及必要的 logs/tmp 目录是否可准备。
 - 注入给 adapter 的 workspace context/env 是否完整。
 
 正常执行顺序如下：
@@ -141,7 +141,8 @@ queued run
 实施记录：
 
 - `HeartbeatService._prepare_workspace_context()` 在 adapter 执行前调用 workspace preflight，并将结果写入 run `context_snapshot`。
-- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `RUDDER_WORKSPACE_ID`、`RUDDER_WORKSPACES_JSON`、`RUDDER_ORG_WORKSPACE_ROOT`、`RUDDER_ORG_ARTIFACTS_DIR`。
+- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `RUDDER_WORKSPACE_ID`、`RUDDER_WORKSPACES_JSON`、`RUDDER_ORG_WORKSPACE_ROOT`、`RUDDER_ORG_SKILLS_DIR`、`RUDDER_ORG_PLANS_DIR`、`RUDDER_ORG_ARTIFACTS_DIR`。
+- Project 没有 workspace，或选中的 project workspace 没有本地 `cwd` 时，preflight 按上游行为使用组织共享 workspace root 作为执行 cwd，并在 execution workspace metadata 中记录 `fallback=organization_workspace` 和 warning。
 - 本地 managed workspace 目录由 `WorkspaceService._ensure_managed_workspace_paths()` 统一生成，不由 route 或 adapter 拼接。
 
 ## 15E：Workspace Runtime Service 生命周期
