@@ -55,7 +55,10 @@ it("shows an issue and records comments and review decisions", async () => {
         isPrimary: true,
         healthStatus: "healthy",
         summary: "实现登录流程并等待 review",
-        metadata: null,
+        metadata: {
+          workspaceBrowserPath: "artifacts/issues/issue-1/runs/run-1/login.md",
+          workspacePath: "login.md",
+        },
         createdByRunId: "run-1",
         createdAt: "2026-05-28T09:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
@@ -267,6 +270,10 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("UI 只展示下载入口");
   expect(screen.getByRole("link", { name: "下载产物文件" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/workspaces?path=artifacts%2Fissues%2Fissue-1%2Fruns%2Frun-1%2Flogin.md",
+  );
   expect(screen.getByRole("link", { name: "预览内容" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("不可下载");
