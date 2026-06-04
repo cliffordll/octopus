@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -363,4 +363,135 @@ it("saves the selected workspace policy when the project has no existing policy"
       }),
     }),
   );
+});
+
+it("manages project workspaces from the configuration tab", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    executionWorkspacePolicy: null,
+    codebase: { configured: true, scope: "project", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "D:/coding/old", localFolder: "D:/coding/old", origin: "local_folder" },
+    workspaces: [
+      {
+        id: "workspace-1",
+        orgId: "org-1",
+        projectId: "project-1",
+        name: "旧工作区",
+        sourceType: "local_path",
+        cwd: "D:/coding/old",
+        repoUrl: null,
+        repoRef: null,
+        defaultRef: null,
+        visibility: "default",
+        setupCommand: null,
+        cleanupCommand: null,
+        remoteProvider: null,
+        remoteWorkspaceRef: null,
+        sharedWorkspaceKey: null,
+        metadata: null,
+        isPrimary: true,
+        createdAt: "",
+        updatedAt: "",
+      },
+      {
+        id: "workspace-2",
+        orgId: "org-1",
+        projectId: "project-1",
+        name: "备用工作区",
+        sourceType: "local_path",
+        cwd: "D:/coding/backup",
+        repoUrl: null,
+        repoRef: null,
+        defaultRef: null,
+        visibility: "default",
+        setupCommand: null,
+        cleanupCommand: null,
+        remoteProvider: null,
+        remoteWorkspaceRef: null,
+        sharedWorkspaceKey: null,
+        metadata: null,
+        isPrimary: false,
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
+    if (path === "/api/projects/project-1/workspaces" && init?.method === "POST") {
+      return respond({ ...project.workspaces[0], id: "workspace-3", name: "新工作区" });
+    }
+    if (path === "/api/projects/project-1/workspaces/workspace-2" && init?.method === "PATCH") {
+      return respond({ ...project.workspaces[1], isPrimary: true });
+    }
+    if (path === "/api/projects/project-1/workspaces/workspace-1" && init?.method === "DELETE") {
+      return respond(project.workspaces[0]);
+    }
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("项目工作区名称"), "新工作区");
+  await userEvent.type(screen.getByLabelText("项目工作区本地 cwd"), "D:/coding/new");
+  await userEvent.type(screen.getByLabelText("项目工作区仓库 URL"), "https://example.com/new.git");
+  await userEvent.type(screen.getByLabelText("项目工作区分支"), "main");
+  await userEvent.click(screen.getByRole("button", { name: "新增主工作区" }));
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project-1/workspaces",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "新工作区",
+          sourceType: "git_repo",
+          cwd: "D:/coding/new",
+          repoUrl: "https://example.com/new.git",
+          repoRef: "main",
+          defaultRef: "main",
+          isPrimary: true,
+        }),
+      }),
+    );
+  });
+
+  await userEvent.click(screen.getAllByRole("button", { name: "设为主工作区" })[1]);
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project-1/workspaces/workspace-2",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ isPrimary: true }),
+      }),
+    );
+  });
+
+  await userEvent.click(screen.getAllByRole("button", { name: "删除工作区" })[0]);
+  await waitFor(() => {
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project-1/workspaces/workspace-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });
