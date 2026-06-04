@@ -2,6 +2,14 @@
 
 状态：待开发
 
+## 已提前完成
+
+- Step 14 已提供 adapter 级 quota window probe 兼容入口；`codex_local`、`claude_local` 等 adapter 可返回 provider quota probe 的失败/unsupported 结构。
+- Organization 和 Agent 已有 `budgetMonthlyCents`、monthly spend 等基础字段；Agent hire payload 也能保存预算字段。
+- Messenger system thread 已支持上游 `budget-alerts` kind 的基础展示入口，但真实 budget incident 尚未产生。
+
+这些能力只是治理所需的基础证据或展示入口，不等同于预算治理闭环。
+
 ## 依赖边界
 
 Step 23 已实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
@@ -13,6 +21,13 @@ Step 23 已实现 cost event、cost summary 和 activity query。本步骤只补
 - 归集 Step 14 adapter quota window probe 输出，并与 budget/cost 查询和限制行为建立可解释联动。
 - 将 Step 14 的 quota window 兼容入口升级为真实 provider quota 读取：失败继续可解释，不阻断普通 run。
 - 明确 quota window、budget、cost 三者关系：quota 是 provider 使用窗口证据，budget 是组织/项目治理限制，cost 是 run/activity 归集结果。
+
+## 剩余待开发
+
+- 当前没有 `BudgetPolicy`、`BudgetIncident` schema/query/service，也没有 budget policy 管理 API。
+- 当前没有 hard-stop enforcement：创建 run/wakeup 前不会按预算阻断，也不会因 budget incident 暂停 organization/agent/project。
+- 当前 quota window 只有 adapter probe，缺 organization 级聚合 API 和与 budget/cost 的解释关系。
+- 当前 skills analytics 仍不是基于 run/event/activity evidence 的真实统计。
 
 ## 边界
 
