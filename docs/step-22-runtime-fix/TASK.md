@@ -58,6 +58,8 @@
 - 补齐 workspace operation log store 与 run log 的关系，避免只写内存摘要或只在最终 run result 中体现。
 - 补强 workspace runtime service 生命周期：启动、绑定 run、释放、失败清理和可见状态必须与现有 run/workspace operation 查询一致。
 - 审查 workspace backup/browser 相关上游能力；只补齐任务执行闭环必须依赖的 server 行为，完整 backup/browser UI 能力不在本步骤扩张。
+- 对齐上游 `organization-workspace-browser` 的最小只读能力：server 提供组织工作区真实目录列表、文件预览和图片 content 读取；UI 的“组织 -> 工作区”页面必须消费真实 API，不再用项目/智能体数据伪造文件树。
+- 组织工作区浏览根目录固定为 `.octopus/organizations/<org_id>/workspaces`，运行产物通过 `artifacts/` 展示；该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
 
 ### 22C: Issue 执行闭环补强
 
@@ -89,7 +91,7 @@
 - 不改变 runtime adapter 的业务触发协议；adapter 继续复用 Step 11/13/14 的 run contract，同时补充 tool capability 运行上下文。
 - 不处理 cost、budget、governance、auth 或 plugin 子系统。
 - 不把 workspace backup/browser、dashboard、calendar、automation 等上游外围能力混入本步骤；只处理当前最小执行闭环必须依赖的 server 行为。
-- 不改 UI/CLI；如发现 UI/CLI 必须配合的行为，只记录 server 已提供的契约和 UI 需要消费的字段。
+- UI 只允许补齐本步骤闭环必需的组织工作区浏览与运行可见性消费，不扩 dashboard、calendar、plugin、backup 等外围 UI；CLI 不在本步骤扩张。
 
 ## 验收
 
@@ -104,6 +106,8 @@
 - Tests 覆盖 runtime tool capability 不改变 run API shape、状态值和 existing adapter contract。
 - Tests 或 workflow 覆盖 workspace preflight、runtime service、workspace operation log 和 work product 登记的端到端可见性。
 - Tests 或 workflow 覆盖 worktree 与 organization artifacts 中生成的文件都会登记为 issue work-products。
+- Tests 覆盖 organization workspace browser 可列出 `artifacts/`、读取文本产物、预览图片产物，并拒绝路径越界。
+- UI tests 覆盖“组织 -> 工作区”页面从 `/api/orgs/{orgId}/workspace/files` 和 `/api/orgs/{orgId}/workspace/file` 读取真实文件树与文件内容，不再展示本地构造的假树。
 - Tests 或 workflow 覆盖 issue execute 成功后 run、events/log、documents/work-products、closeout/followup 状态可查询。
 - Tests 覆盖 chat stream 与非 stream 在 issue proposal、manual approval、auto create 和 runtime error 场景下行为一致。
 - 手工或脚本化 demo 能复现：创建 issue、分配 agent、执行任务、实时看到输出、任务详情看到 run 与产物、chat/messenger 侧能解释结果。
