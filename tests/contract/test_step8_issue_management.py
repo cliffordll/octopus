@@ -225,22 +225,30 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     assert run.status == "queued"
     assert run.invocation_source == "assignment"
     assert run.trigger_detail == "system"
-    assert run.context_snapshot == {
-        "triggeredBy": "user",
-        "actorId": "local-board",
-        "forceFreshSession": False,
-        "issueId": body["id"],
-        "source": "issue.create",
-        "wakeSource": "assignment",
-        "wakeReason": "issue_assigned",
-        "issue": {
-            "id": body["id"],
-            "title": "Assigned task",
-            "description": None,
-            "status": "todo",
-            "priority": "high",
-        },
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["triggeredBy"] == "user"
+    assert run.context_snapshot["actorId"] == "local-board"
+    assert run.context_snapshot["forceFreshSession"] is False
+    assert run.context_snapshot["issueId"] == body["id"]
+    assert run.context_snapshot["source"] == "issue.create"
+    assert run.context_snapshot["wakeSource"] == "assignment"
+    assert run.context_snapshot["wakeReason"] == "issue_assigned"
+    assert run.context_snapshot["issue"] == {
+        "id": body["id"],
+        "title": "Assigned task",
+        "description": None,
+        "status": "todo",
+        "priority": "high",
     }
+    assert run.context_snapshot["commentCursor"] is None
+    assert run.context_snapshot["documentSummaries"] == []
+    assert run.context_snapshot["ancestors"] == []
+    assert run.context_snapshot["project"] is None
+    assert run.context_snapshot["goal"] is None
+    assert run.context_snapshot["planDocument"] is None
+    assert run.context_snapshot["legacyPlanDocument"] is None
+    assert run.context_snapshot["issueDocumentsPrompt"] == ""
+    assert run.context_snapshot["wakeComment"] is None
     assert [(event.seq, event.event_type, event.message) for event in events] == [
         (1, "lifecycle", "run queued")
     ]
@@ -342,6 +350,123 @@ async def test_update_issue_to_in_review_queues_reviewer_wakeup(
         "issueId": issue_id,
         "mutation": "status_to_in_review",
     }
+
+
+async def test_backlog_issue_moved_to_todo_queues_assignee_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    assignee_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=assignee_id,
+                org_id=org_id,
+                name="Backlog Owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="backlog",
+        assignee_agent_id=assignee_id,
+    )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "todo"},
+    )
+
+    assert code == 200
+    assert body["status"] == "todo"
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == assignee_id
+                )
+            )
+        ).scalar_one()
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == assignee_id)
+            )
+        ).scalar_one()
+
+    assert wakeup.source == "automation"
+    assert wakeup.reason == "issue_status_changed"
+    assert wakeup.payload == {"issueId": issue_id, "mutation": "update"}
+    assert run.status == "queued"
+    assert run.invocation_source == "automation"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["source"] == "issue.status_change"
+    assert run.context_snapshot["wakeReason"] == "issue_status_changed"
+
+
+async def test_review_returned_to_assignee_queues_changes_requested_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    assignee_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=assignee_id,
+                org_id=org_id,
+                name="Review Owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_review",
+        assignee_agent_id=assignee_id,
+    )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "in_progress"},
+    )
+
+    assert code == 200
+    assert body["status"] == "in_progress"
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == assignee_id
+                )
+            )
+        ).scalar_one()
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == assignee_id)
+            )
+        ).scalar_one()
+
+    assert wakeup.source == "assignment"
+    assert wakeup.reason == "issue_changes_requested"
+    assert wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "review_changes_requested",
+    }
+    assert run.status == "queued"
+    assert run.invocation_source == "assignment"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["source"] == "issue.review_changes_requested"
+    assert run.context_snapshot["wakeReason"] == "issue_changes_requested"
 
 
 async def test_update_issue_route_returns_200_and_updates(

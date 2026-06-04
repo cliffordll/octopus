@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -525,6 +525,13 @@ class IssueService:
         detail = await self.get_by_id(issue_id)
         if detail is None:
             return None
+        documents = DocumentService(self._session)
+        document_summaries = await documents.list_issue_documents(issue_id)
+        plan_document = await documents.get_issue_document_by_key(issue_id, "plan")
+        issue_documents_prompt = _build_issue_documents_prompt(
+            plan_document=plan_document,
+            document_summaries=document_summaries,
+        )
         issue = {
             "id": detail["id"],
             "identifier": detail["identifier"],
@@ -545,10 +552,10 @@ class IssueService:
             "project": None,
             "goal": None,
             "commentCursor": None,
-            "documentSummaries": [],
-            "planDocument": None,
+            "documentSummaries": document_summaries,
+            "planDocument": plan_document,
             "legacyPlanDocument": None,
-            "issueDocumentsPrompt": "",
+            "issueDocumentsPrompt": issue_documents_prompt,
             "wakeComment": None,
         }
 
@@ -674,6 +681,99 @@ class IssueService:
             self._session
         ).list_issue_documents(row.id)
         return detail
+
+
+_ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT = 12_000
+
+
+def _build_issue_documents_prompt(
+    *,
+    plan_document: Mapping[str, Any] | None,
+    document_summaries: Sequence[Mapping[str, Any]],
+) -> str:
+    sections: list[str] = []
+    plan_key = (
+        str(plan_document.get("key")).strip()
+        if isinstance(plan_document, Mapping) and plan_document.get("key") is not None
+        else "plan"
+    )
+    plan_body = (
+        str(plan_document.get("body")).strip()
+        if isinstance(plan_document, Mapping) and plan_document.get("body") is not None
+        else ""
+    )
+    if plan_body:
+        title = (
+            str(plan_document.get("title")).strip()
+            if isinstance(plan_document, Mapping)
+            and plan_document.get("title") is not None
+            else ""
+        )
+        sections.append(
+            "\n".join(
+                [
+                    _format_issue_document_heading(plan_key, title),
+                    f"Source: issue document `{plan_key}`.",
+                    "",
+                    _truncate_issue_document_body(plan_body),
+                ]
+            )
+        )
+
+    additional = [
+        summary
+        for summary in document_summaries
+        if str(summary.get("key") or "").strip() and summary.get("key") != plan_key
+    ]
+    if additional:
+        issue_id = _read_issue_document_prompt_issue_id(plan_document, additional)
+        lines = ["### Additional Issue Documents"]
+        for summary in additional:
+            key = str(summary.get("key") or "document").strip()
+            title = str(summary.get("title") or "").strip()
+            revision = summary.get("latestRevisionNumber")
+            revision_text = (
+                f", revision {revision}" if isinstance(revision, int) else ""
+            )
+            title_text = f" - {title}" if title else ""
+            lines.append(
+                f"- `{key}`{title_text}{revision_text}. Fetch with "
+                f"`control-plane issue documents get {issue_id} {key} --json`."
+            )
+        sections.append("\n".join(lines))
+
+    if not sections:
+        return ""
+    return "\n\n".join(["## Issue Documents", *sections])
+
+
+def _format_issue_document_heading(key: str, title: str) -> str:
+    return f"### {key} - {title}" if title else f"### {key}"
+
+
+def _truncate_issue_document_body(body: str) -> str:
+    if len(body) <= _ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT:
+        return body
+    return (
+        body[:_ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT].rstrip()
+        + "\n\n[Document truncated in prompt. Fetch the full document with the "
+        "control-plane CLI.]"
+    )
+
+
+def _read_issue_document_prompt_issue_id(
+    plan_document: Mapping[str, Any] | None,
+    document_summaries: Sequence[Mapping[str, Any]],
+) -> str:
+    if isinstance(plan_document, Mapping):
+        issue_id = str(plan_document.get("issueId") or "").strip()
+        if issue_id:
+            return issue_id
+    for summary in document_summaries:
+        issue_id = str(summary.get("issueId") or "").strip()
+        if issue_id:
+            return issue_id
+    return "<issue-id>"
 
 
 def _to_list_item(row: Issue) -> IssueListItem:

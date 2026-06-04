@@ -429,6 +429,16 @@ async def update_issue_route(
         and updated["status"] == "blocked"
         and "status" in payload
     )
+    status_changed_from_backlog = (
+        detail["status"] == "backlog"
+        and updated["status"] != "backlog"
+        and "status" in payload
+    )
+    status_returned_from_review_to_assignee = (
+        detail["status"] in {"in_review", "blocked"}
+        and updated["status"] in {"in_progress", "todo"}
+        and "status" in payload
+    )
     reviewer_changed_in_reviewable = (
         (
             payload.get("reviewerAgentId") is not None
@@ -463,6 +473,28 @@ async def update_issue_route(
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
             actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
+        )
+    if status_changed_from_backlog:
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            updated,
+            reason="issue_status_changed",
+            mutation="update",
+            context_source="issue.status_change",
+            source="automation",
+            wake_source="automation",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
+    if status_returned_from_review_to_assignee:
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            updated,
+            reason="issue_changes_requested",
+            mutation="review_changes_requested",
+            context_source="issue.review_changes_requested",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
         )
     return updated
 

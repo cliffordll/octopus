@@ -124,6 +124,13 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): 
   return sorted[0] ?? null;
 }
 
+function metadataText(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata?.[key];
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
   const next = new Map<number, HeartbeatRunEvent>();
   for (const event of left) next.set(event.id, event);
@@ -429,6 +436,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               </div>
               <dl className="issue-work-product-details">
                 <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
+                <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
+                <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
                 <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
                 <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                 {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
@@ -736,6 +745,13 @@ function IssueRunOutputPanel({
     queryKey: ["workspace-operation-log", selectedOperationLogId],
     queryFn: () => heartbeatApi.getWorkspaceOperationLog(selectedOperationLogId),
     enabled: Boolean(selectedOperationLogId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", runId],
+    queryFn: () => heartbeatApi.getLog(runId),
+    enabled: Boolean(runId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
@@ -761,6 +777,7 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
+      {runLog.error && <ErrorNotice error={runLog.error} />}
       {streamError && <p className="error-notice">{streamError}</p>}
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
@@ -809,6 +826,15 @@ function IssueRunOutputPanel({
           <pre className="run-excerpt inline">{streamLog}</pre>
         </section>
       )}
+      <section className="issue-run-output-block">
+        <div className="issue-run-output-heading">
+          <h3>运行日志</h3>
+          {runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+        </div>
+        {runLog.isLoading && <p className="muted">加载运行日志中...</p>}
+        {!runLog.isLoading && !runLog.data?.content && <p className="muted">暂无运行日志。</p>}
+        {runLog.data?.content && <pre className="run-excerpt inline">{runLog.data.content}</pre>}
+      </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
@@ -877,6 +903,26 @@ function IssueRunOutputPanel({
                 {operation.command && <p className="muted">{operation.command}</p>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
+                <div className="issue-run-operation-actions">
+                  <button
+                    className="secondary small-button"
+                    type="button"
+                    onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
+                  >
+                    {selectedOperationLogId === operation.id ? "收起操作日志" : "查看操作日志"}
+                  </button>
+                  {operation.logBytes !== undefined && operation.logBytes !== null && (
+                    <span className="muted">{formatBytes(operation.logBytes)}</span>
+                  )}
+                </div>
+                {selectedOperationLogId === operation.id && (
+                  <div className="issue-run-operation-log">
+                    {operationLog.isLoading && <p className="muted">加载操作日志中...</p>}
+                    {operationLog.error && <ErrorNotice error={operationLog.error} />}
+                    {!operationLog.isLoading && !operationLog.data?.content && <p className="muted">暂无操作日志。</p>}
+                    {operationLog.data?.content && <pre className="issue-run-event-log">{operationLog.data.content}</pre>}
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -1268,10 +1314,6 @@ export function IssuePage() {
     setAttachmentFile(event.target.files?.[0] ?? null);
     setAttachmentUploadNotice("");
   }
-  function submitAttachment(event: FormEvent) {
-    event.preventDefault();
-    if (attachmentFile) uploadAttachment.mutate();
-  }
   function submitSubIssue(event: FormEvent) {
     event.preventDefault();
     if (subIssueTitle.trim()) createSubIssue.mutate();
@@ -1520,11 +1562,14 @@ export function IssuePage() {
 
             <IssueWorkProductsPanel issue={issue.data} />
 
-            <section aria-label="附件" className="issue-section-card">
+            <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
-                <h2>附件</h2>
-                <span className="muted">{attachments.data?.length ?? 0}</span>
+                <h2>动态</h2>
+                <span className="muted">
+                  {comments.data?.length ?? 0} 条评论 · {attachments.data?.length ?? 0} 个文件
+                </span>
               </div>
+              {comments.error && <ErrorNotice error={comments.error} />}
               {attachments.error && <ErrorNotice error={attachments.error} />}
               {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
               {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
@@ -1534,64 +1579,6 @@ export function IssuePage() {
               {!uploadAttachment.isPending && attachmentUploadNotice && (
                 <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
               )}
-              {attachments.isSuccess && attachments.data.length === 0 && <p className="muted">暂无附件。</p>}
-              {attachments.data && attachments.data.length > 0 && (
-                <div className="issue-attachment-list">
-                  {attachments.data.map((attachment) => (
-                    <article className="issue-attachment-item" key={attachment.id}>
-                      <div>
-                        <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
-                        <details className="storage-object-details">
-                          <summary>存储对象</summary>
-                          <dl className="issue-work-product-details">
-                            <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
-                            <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
-                            <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
-                            <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
-                          </dl>
-                        </details>
-                      </div>
-                      <div className="issue-attachment-actions">
-                        {attachment.contentPath ? (
-                          <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
-                        ) : (
-                          <span className="download-unavailable">不可下载</span>
-                        )}
-                        <button
-                          className="danger small-button"
-                          disabled={deleteAttachment.isPending}
-                          onClick={() => deleteAttachment.mutate(attachment.id)}
-                          type="button"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-              <form className="form issue-attachment-form" onSubmit={submitAttachment}>
-                <label>
-                  附件文件
-                  <input onChange={selectAttachment} type="file" />
-                </label>
-                <label>
-                  用途
-                  <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
-                </label>
-                <button disabled={!attachmentFile || uploadAttachment.isPending} type="submit">上传附件</button>
-              </form>
-            </section>
-
-            <section aria-label="动态" className="issue-section-card">
-              <div className="issue-section-heading">
-                <h2>动态</h2>
-                <span className="muted">
-                  {comments.data?.length ?? 0} 条记录
-                </span>
-              </div>
-              {comments.error && <ErrorNotice error={comments.error} />}
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -1599,7 +1586,40 @@ export function IssuePage() {
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {comments.isSuccess && comments.data.length === 0 && (
+                {attachments.data?.map((attachment) => (
+                  <article className="issue-attachment-item issue-activity-attachment" key={attachment.id}>
+                    <div className="issue-activity-avatar">F</div>
+                    <div>
+                      <strong>{attachment.originalFilename ?? attachment.id}</strong>
+                      <p className="muted">评论附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                      <details className="storage-object-details">
+                        <summary>存储对象</summary>
+                        <dl className="issue-work-product-details">
+                          <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
+                          <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
+                          <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
+                          <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
+                        </dl>
+                      </details>
+                    </div>
+                    <div className="issue-attachment-actions">
+                      {attachment.contentPath ? (
+                        <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
+                      ) : (
+                        <span className="download-unavailable">不可下载</span>
+                      )}
+                      <button
+                        className="danger small-button"
+                        disabled={deleteAttachment.isPending}
+                        onClick={() => deleteAttachment.mutate(attachment.id)}
+                        type="button"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {comments.isSuccess && comments.data.length === 0 && attachments.isSuccess && attachments.data.length === 0 && (
                   <p className="muted">暂无动态。</p>
                 )}
               </div>
@@ -1608,7 +1628,27 @@ export function IssuePage() {
                   添加评论
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required />
                 </label>
+                <div className="issue-comment-attachment-row">
+                  <label>
+                    评论附件
+                    <input onChange={selectAttachment} type="file" />
+                  </label>
+                  <label>
+                    用途
+                    <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
+                  </label>
+                </div>
                 <div className="issue-comment-actions">
+                  <button
+                    className="secondary"
+                    disabled={!attachmentFile || uploadAttachment.isPending}
+                    onClick={() => {
+                      if (attachmentFile) uploadAttachment.mutate();
+                    }}
+                    type="button"
+                  >
+                    上传附件
+                  </button>
                   <button type="submit">发送评论</button>
                 </div>
               </form>
