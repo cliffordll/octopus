@@ -16,6 +16,7 @@ import type {
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
+  LogReadResult,
   ProjectDetail,
   UpdateIssuePayload,
   WorkspaceOperation,
@@ -129,6 +130,28 @@ function metadataText(metadata: Record<string, unknown> | null | undefined, key:
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value);
+}
+
+function nextLogOffset(log: LogReadResult): number | null {
+  if (typeof log.nextOffset === "number") return log.nextOffset;
+  if (typeof log.endOffset === "number") return log.endOffset;
+  return null;
+}
+
+function AutoScrollPre({
+  className,
+  content,
+}: {
+  className: string;
+  content: string;
+}) {
+  const ref = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [content]);
+  return <pre className={className} ref={ref}>{content}</pre>;
 }
 
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
@@ -715,6 +738,79 @@ interface IssueRunPanelData {
   run: UseQueryResult<HeartbeatRun, Error>;
 }
 
+function PaginatedLogView({
+  emptyText,
+  loadMore,
+  loadingText,
+  log,
+  preClassName,
+}: {
+  emptyText: string;
+  loadMore: (offset: number) => Promise<LogReadResult>;
+  loadingText: string;
+  log: UseQueryResult<LogReadResult, Error>;
+  preClassName: string;
+}) {
+  const [content, setContent] = useState("");
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [eof, setEof] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const data = log.data;
+    if (!data) {
+      setContent("");
+      setCursor(null);
+      setEof(true);
+      setLoadMoreError(null);
+      return;
+    }
+    setContent(data.content ?? "");
+    setCursor(data.eof === false ? nextLogOffset(data) : null);
+    setEof(data.eof !== false);
+    setLoadMoreError(null);
+  }, [log.data?.content, log.data?.endOffset, log.data?.eof, log.data?.nextOffset]);
+
+  async function handleLoadMore() {
+    if (cursor === null || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = await loadMore(cursor);
+      setContent((current) => `${current}${next.content ?? ""}`);
+      setCursor(next.eof === false ? nextLogOffset(next) : null);
+      setEof(next.eof !== false);
+    } catch (error) {
+      setLoadMoreError(error instanceof Error ? error : new Error("日志读取失败"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  return (
+    <>
+      {log.isLoading && <p className="muted">{loadingText}</p>}
+      {!log.isLoading && !content && <p className="muted">{emptyText}</p>}
+      {content && <AutoScrollPre className={preClassName} content={content} />}
+      {!eof && cursor !== null && (
+        <div className="issue-run-operation-actions">
+          <button
+            className="secondary small-button"
+            disabled={loadingMore}
+            onClick={handleLoadMore}
+            type="button"
+          >
+            {loadingMore ? "读取中..." : "加载更多日志"}
+          </button>
+          <span className="muted">已读取到 {formatBytes(cursor)}</span>
+        </div>
+      )}
+      {loadMoreError && <ErrorNotice error={loadMoreError} />}
+    </>
+  );
+}
+
 function IssueRunOutputPanel({
   data,
   onCancel,
@@ -733,6 +829,7 @@ function IssueRunOutputPanel({
   streamLog: string;
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
+  const [showEvents, setShowEvents] = useState(true);
   const [showDebugOutput, setShowDebugOutput] = useState(false);
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const run = data.run.data ?? null;
@@ -823,7 +920,7 @@ function IssueRunOutputPanel({
             <h3>实时日志</h3>
             <Badge>stream log</Badge>
           </div>
-          <pre className="run-excerpt inline">{streamLog}</pre>
+          <AutoScrollPre className="run-excerpt inline" content={streamLog} />
         </section>
       )}
       <section className="issue-run-output-block">
@@ -831,60 +928,75 @@ function IssueRunOutputPanel({
           <h3>运行日志</h3>
           {runLog.data?.eof === false && <Badge>可继续读取</Badge>}
         </div>
-        {runLog.isLoading && <p className="muted">加载运行日志中...</p>}
-        {!runLog.isLoading && !runLog.data?.content && <p className="muted">暂无运行日志。</p>}
-        {runLog.data?.content && <pre className="run-excerpt inline">{runLog.data.content}</pre>}
+        <PaginatedLogView
+          emptyText="暂无运行日志。"
+          loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
+          loadingText="加载运行日志中..."
+          log={runLog}
+          preClassName="run-excerpt inline"
+        />
       </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
-          {lowValueEvents.length > 0 && (
-            <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
-              {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+          <div className="issue-run-operation-actions">
+            <button className="secondary small-button" type="button" onClick={() => setShowEvents((value) => !value)}>
+              {showEvents ? "隐藏事件" : `显示事件 ${events.length}`}
             </button>
-          )}
+            {showEvents && lowValueEvents.length > 0 && (
+              <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
+                {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+              </button>
+            )}
+          </div>
         </div>
-        {data.events.isLoading && <p className="muted">加载事件中...</p>}
-        {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
-        {visibleEvents.length > 0 && (
-          <div className="agent-run-events">
-            {visibleEvents.map((event) => (
-              <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
-                <div className="agent-run-event-header">
-                  <span>#{event.seq}</span>
-                  <strong>{runEventLabel(event)}</strong>
-                  <Badge>{event.eventType}</Badge>
-                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
-                  {event.stream && <Badge>{event.stream}</Badge>}
-                </div>
-                {runEventBody(event) && (
-                  isTextRunEvent(event) && !isErrorRunEvent(event)
-                    ? <AgentReplyBody body={runEventBody(event)} />
-                    : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
-                )}
-                {hasJsonObject(event.payload) && (
-                  <details className="issue-run-inline-details">
-                    <summary>事件详情</summary>
-                    <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
-                  </details>
-                )}
-                <small className="muted">{formatDateTime(event.createdAt)}</small>
-              </article>
-            ))}
-          </div>
-        )}
-        {showLowValueEvents && lowValueEvents.length > 0 && (
-          <div className="issue-run-low-value-events">
-            {lowValueEvents.map((event) => (
-              <article className="agent-run-event compact" key={event.id}>
-                <div className="agent-run-event-header">
-                  <span>#{event.seq}</span>
-                  <strong>{event.eventType}</strong>
-                </div>
-                {event.message && <p className="muted">{event.message}</p>}
-              </article>
-            ))}
-          </div>
+        {!showEvents ? (
+          <p className="muted">事件已隐藏。</p>
+        ) : (
+          <>
+            {data.events.isLoading && <p className="muted">加载事件中...</p>}
+            {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+            {visibleEvents.length > 0 && (
+              <div className="agent-run-events">
+                {visibleEvents.map((event) => (
+                  <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
+                    <div className="agent-run-event-header">
+                      <span>#{event.seq}</span>
+                      <strong>{runEventLabel(event)}</strong>
+                      <Badge>{event.eventType}</Badge>
+                      {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                      {event.stream && <Badge>{event.stream}</Badge>}
+                    </div>
+                    {runEventBody(event) && (
+                      isTextRunEvent(event) && !isErrorRunEvent(event)
+                        ? <AgentReplyBody body={runEventBody(event)} />
+                        : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
+                    )}
+                    {hasJsonObject(event.payload) && (
+                      <details className="issue-run-inline-details">
+                        <summary>事件详情</summary>
+                        <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
+                      </details>
+                    )}
+                    <small className="muted">{formatDateTime(event.createdAt)}</small>
+                  </article>
+                ))}
+              </div>
+            )}
+            {showLowValueEvents && lowValueEvents.length > 0 && (
+              <div className="issue-run-low-value-events">
+                {lowValueEvents.map((event) => (
+                  <article className="agent-run-event compact" key={event.id}>
+                    <div className="agent-run-event-header">
+                      <span>#{event.seq}</span>
+                      <strong>{event.eventType}</strong>
+                    </div>
+                    {event.message && <p className="muted">{event.message}</p>}
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </section>
       <section className="issue-run-output-block">
@@ -917,10 +1029,14 @@ function IssueRunOutputPanel({
                 </div>
                 {selectedOperationLogId === operation.id && (
                   <div className="issue-run-operation-log">
-                    {operationLog.isLoading && <p className="muted">加载操作日志中...</p>}
                     {operationLog.error && <ErrorNotice error={operationLog.error} />}
-                    {!operationLog.isLoading && !operationLog.data?.content && <p className="muted">暂无操作日志。</p>}
-                    {operationLog.data?.content && <pre className="issue-run-event-log">{operationLog.data.content}</pre>}
+                    <PaginatedLogView
+                      emptyText="暂无操作日志。"
+                      loadMore={(offset) => heartbeatApi.getWorkspaceOperationLog(operation.id, { offset })}
+                      loadingText="加载操作日志中..."
+                      log={operationLog}
+                      preClassName="issue-run-event-log"
+                    />
                   </div>
                 )}
               </article>
