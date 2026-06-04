@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
@@ -28,6 +28,12 @@ import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
+const LIVE_RUN_REFETCH_MS = 1000;
+
+interface RunStreamCursor {
+  lastSeq: number;
+  nextOffset: number;
+}
 
 function issueDisplayId(issue: IssueDetail): string {
   return issue.identifier ?? issue.id.slice(0, 8);
@@ -603,11 +609,17 @@ function IssueRunOutputPanel({
   onCancel,
   onRetry,
   runId,
+  streamActive,
+  streamError,
+  streamLog,
 }: {
   data: IssueRunPanelData;
   onCancel: () => void;
   onRetry: () => void;
   runId: string;
+  streamActive: boolean;
+  streamError: string | null;
+  streamLog: string;
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
   const [showDebugOutput, setShowDebugOutput] = useState(false);
@@ -625,14 +637,19 @@ function IssueRunOutputPanel({
   });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
+  const liveRun = isLiveRun(run?.status);
   return (
     <section aria-label="执行输出" className="issue-section-card issue-run-output">
       <div className="issue-section-heading">
         <div>
           <h2>执行输出</h2>
-          <p className="muted">本面板展示当前任务最近一次由本页面触发的运行。</p>
+          <p className="muted">
+            本面板展示当前任务最近一次由本页面触发的运行。{liveRun ? "运行中会通过 stream 动态刷新事件和输出。" : ""}
+          </p>
         </div>
         <div className="issue-run-actions">
+          {streamActive && <Badge>stream 连接中</Badge>}
+          {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
           {run && <Badge>{statusLabel(run.status)}</Badge>}
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
           <button className="secondary small-button" disabled={!canCancel} onClick={onCancel} type="button">取消运行</button>
@@ -642,6 +659,7 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
+      {streamError && <p className="error-notice">{streamError}</p>}
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
         <dl className="issue-run-summary">
@@ -680,6 +698,15 @@ function IssueRunOutputPanel({
           </details>
         )}
       </section>
+      {streamLog && (
+        <section className="issue-run-output-block">
+          <div className="issue-run-output-heading">
+            <h3>实时日志</h3>
+            <Badge>stream log</Badge>
+          </div>
+          <pre className="run-excerpt inline">{streamLog}</pre>
+        </section>
+      )}
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
@@ -826,6 +853,10 @@ export function IssuePage() {
     if (!orgId || !issueId) return "";
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
+  const streamCursorRef = useRef<Record<string, RunStreamCursor>>({});
+  const [streamActiveRunId, setStreamActiveRunId] = useState("");
+  const [streamErrorsByRun, setStreamErrorsByRun] = useState<Record<string, string | null>>({});
+  const [streamLogsByRun, setStreamLogsByRun] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
@@ -848,7 +879,7 @@ export function IssuePage() {
     queryKey: ["issue-heartbeat-runs", issueId],
     queryFn: () => issuesApi.listRuns(issueId),
     enabled: Boolean(issueId),
-    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? 3000 : false,
+    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? LIVE_RUN_REFETCH_MS : false,
   });
   const subIssues = useQuery({
     queryKey: ["issues", orgId, "children", issueId],
@@ -916,6 +947,11 @@ export function IssuePage() {
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
+  function resetRunStreamState(runId: string) {
+    streamCursorRef.current[runId] = { lastSeq: 0, nextOffset: 0 };
+    setStreamErrorsByRun((current) => ({ ...current, [runId]: null }));
+    setStreamLogsByRun((current) => ({ ...current, [runId]: "" }));
+  }
   const executeIssue = useMutation({
     mutationFn: async () => {
       if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
@@ -927,7 +963,12 @@ export function IssuePage() {
     onSuccess: async (run) => {
       setExecuteNotice("");
       localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
+      resetRunStreamState(run.id);
       setCurrentRunId(run.id);
+      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", run.id], (current) => ({
+        ...current,
+        ...run,
+      }));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["issues", orgId] }),
@@ -953,20 +994,85 @@ export function IssuePage() {
     queryKey: ["heartbeat-run", currentRunId],
     queryFn: () => heartbeatApi.get(currentRunId),
     enabled: Boolean(currentRunId),
-    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? 3000 : false,
+    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", currentRunId],
     queryFn: () => heartbeatApi.listEvents(currentRunId),
     enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const runWorkspaceOperations = useQuery({
     queryKey: ["heartbeat-run-workspace-operations", currentRunId],
     queryFn: () => heartbeatApi.listWorkspaceOperations(currentRunId),
     enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? 3000 : false,
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
+  useEffect(() => {
+    if (!currentRunId || !isLiveRun(runDetail.data?.status)) return;
+    const cursor = streamCursorRef.current[currentRunId] ?? { lastSeq: 0, nextOffset: 0 };
+    streamCursorRef.current[currentRunId] = cursor;
+    const controller = new AbortController();
+    setStreamActiveRunId(currentRunId);
+    setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: null }));
+    void heartbeatApi.streamRun(currentRunId, {
+      afterSeq: cursor.lastSeq,
+      offset: cursor.nextOffset,
+      pollMs: LIVE_RUN_REFETCH_MS,
+      signal: controller.signal,
+      onRun: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      },
+      onEvent: (event) => {
+        cursor.lastSeq = Math.max(cursor.lastSeq, event.seq);
+        queryClient.setQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId], (current = []) => {
+          const next = new Map(current.map((item) => [item.id, item]));
+          next.set(event.id, event);
+          return Array.from(next.values()).sort((left, right) => left.seq - right.seq);
+        });
+      },
+      onLog: (payload) => {
+        if (typeof payload.nextOffset === "number") cursor.nextOffset = payload.nextOffset;
+        if (!payload.content) return;
+        setStreamLogsByRun((current) => ({
+          ...current,
+          [currentRunId]: `${current[currentRunId] ?? ""}${payload.content}`,
+        }));
+      },
+      onFinal: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
+          ...current,
+          ...run,
+        }));
+        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+        void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+      },
+      onError: (error) => {
+        setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: error }));
+        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+      },
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setStreamErrorsByRun((current) => ({
+        ...current,
+        [currentRunId]: error instanceof Error ? error.message : "Run stream failed",
+      }));
+    }).finally(() => {
+      if (controller.signal.aborted) return;
+      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+    });
+    return () => {
+      controller.abort();
+      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
+    };
+  }, [currentRunId, issueId, orgId, queryClient, runDetail.data?.status]);
   const cancelRun = useMutation({
     mutationFn: () => heartbeatApi.cancel(currentRunId),
     onSuccess: (run) => {
@@ -979,8 +1085,12 @@ export function IssuePage() {
     mutationFn: () => heartbeatApi.retry(currentRunId),
     onSuccess: (run) => {
       localStorage.setItem(issueRunStorageKey(orgId, issueId), run.id);
+      resetRunStreamState(run.id);
       setCurrentRunId(run.id);
-      queryClient.setQueryData(["heartbeat-run", run.id], run);
+      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", run.id], (current) => ({
+        ...current,
+        ...run,
+      }));
       void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
     },
@@ -1244,6 +1354,9 @@ export function IssuePage() {
                 onCancel={() => cancelRun.mutate()}
                 onRetry={() => retryRun.mutate()}
                 runId={currentRunId}
+                streamActive={streamActiveRunId === currentRunId}
+                streamError={streamErrorsByRun[currentRunId] ?? null}
+                streamLog={streamLogsByRun[currentRunId] ?? ""}
               />
             )}
             {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
