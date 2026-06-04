@@ -669,3 +669,36 @@
 - 处理归属：Step 21。
 - 修复记录：已新增 `_scan_skill_inventory()`，内置技能 seed、组织技能创建、文件更新和响应序列化都复用该扫描逻辑；隐藏文件、缓存目录和 Python bytecode 会被排除。
 - 验证证据：contract 测试已新增 `reference/methodology.md`、`scripts/sync.py`、`templates/note.md` 的 fileInventory 断言；当前本机 pytest 执行仍被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
+
+### BUG-21-031: OpenCode local 输出超长 JSONL 单行时 run 失败
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。长上下文或大结果输出时，任务执行会直接失败，issue 无法产生产物。
+- 影响范围：`opencode_local` runtime、任务执行、run log、issue execute 闭环。
+- 复现步骤：
+  1. 使用 `opencode_local` 执行会输出较大 JSONL 单行的任务。
+  2. 查看 run error。
+- 预期行为：runtime reader 应能读取超过 asyncio 默认行限制的 JSONL 输出，并继续解析/流式转发。
+- 实际行为（修复前）：`StreamReader.readline()` 在单行超过约 64KiB 时抛出 `Separator is found, but chunk is longer than limit`，run 标记为 failed。
+- 初步根因：`packages/runtimes/opencode_local/runner.py` 使用 `readline()` 读取 stdout，继承 asyncio 的单行长度限制。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：已将 OpenCode stdout reader 改为 chunk 读取，并在内存中按换行手动切分，避免 asyncio 单行限制，同时保持 assistant delta 流式事件。
+- 验证证据：`test_opencode_stdout_reader_accepts_long_jsonl_lines` 覆盖 80KiB JSONL 单行；相关 pytest、ruff 通过。
+
+### BUG-21-032: issue-backed run 失败后未释放任务执行锁
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务 run 已失败或结束，但 issue 仍保留 `executionRunId` / `checkoutRunId`，后续执行和 UI 状态判断会被误导。
+- 影响范围：`HeartbeatService._execute_run()`、`POST /api/issues/{issueId}/execute` 触发的 run、任务详情与任务列表状态。
+- 复现步骤：
+  1. 创建已分配智能体的 issue-backed run。
+  2. 让 runtime 执行失败。
+  3. 查看 issue 的 `executionRunId`、`checkoutRunId`、`executionLockedAt`。
+- 预期行为：对齐上游 `releaseIssueExecutionAndPromote(run)` 的基础行为：run 进入终态后释放 issue 的执行锁；issue 是否完成由后续 closeout/review 链路决定，不在这里强行标记 done。
+- 实际行为（修复前）：run 失败后只更新 run/wakeup/agent，未释放 issue 执行锁。
+- 初步根因：Python heartbeat finalize 迁移了 run/wakeup/agent 终态更新，但遗漏 issue release 阶段。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：已在正常终态和异常终态后调用 `_release_issue_execution()`，清理 `executionRunId`、`checkoutRunId`、`executionAgentNameKey`、`executionLockedAt`。
+- 验证证据：`test_failed_issue_backed_run_releases_issue_execution_lock` 覆盖失败 run 后锁释放；相关 pytest、ruff 通过。
