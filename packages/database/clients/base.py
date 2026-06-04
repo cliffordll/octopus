@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import event
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import StaticPool
 
 
 def create_database_engine(url: str, *, echo: bool = False) -> AsyncEngine:
@@ -16,7 +16,7 @@ def create_database_engine(url: str, *, echo: bool = False) -> AsyncEngine:
         "",
         ":memory:",
     ):
-        engine_kwargs["poolclass"] = NullPool
+        engine_kwargs["poolclass"] = StaticPool
     engine = create_async_engine(url, **engine_kwargs)
     if engine.url.get_backend_name() == "sqlite":
         _configure_sqlite_engine(engine)
