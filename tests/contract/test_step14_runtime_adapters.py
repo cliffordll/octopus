@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import subprocess
@@ -7,7 +8,7 @@ import sys
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -20,9 +21,16 @@ from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organ
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
 from packages.runtimes.opencode_local.protocol import build_args as build_opencode_args
+from packages.runtimes.opencode_local.runner import (
+    _read_stdout as read_opencode_stdout,
+)
 from packages.runtimes.opencode_local.runner import execute as execute_opencode_local
 from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
+
+
+async def _noop_on_log(stream: str, chunk: str) -> None:
+    return None
 
 
 def test_step14_runtime_contract_exposes_adapter_paths() -> None:
@@ -73,6 +81,36 @@ def test_opencode_extra_args_are_run_subcommand_options() -> None:
         "high",
         "--dangerously-skip-permissions",
     ]
+
+
+async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
+    reader = asyncio.StreamReader()
+    long_text = "x" * 80_000
+    payload = json.dumps({"type": "text", "part": {"text": long_text}}) + "\n"
+    reader.feed_data(payload.encode())
+    reader.feed_eof()
+    events: list[dict[str, Any]] = []
+
+    async def capture_stream_event(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    class FakeProcess:
+        stdout = reader
+
+    context = RuntimeExecutionContext(
+        run_id="run-14",
+        agent_id="agent-14",
+        org_id="org-14",
+        agent_name="Long Line Agent",
+        config={},
+        on_log=_noop_on_log,
+        on_stream_event=capture_stream_event,
+    )
+
+    stdout = await read_opencode_stdout(cast(Any, FakeProcess()), context)
+
+    assert stdout == payload
+    assert events == [{"type": "assistant_delta", "delta": long_text}]
 
 
 @pytest.fixture
