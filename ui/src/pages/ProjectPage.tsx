@@ -229,14 +229,15 @@ export function ProjectPage() {
       setLeadAgentId(project.data.leadAgentId ?? "");
       setTargetDate(project.data.targetDate ?? "");
       setGoalIds((project.data.goalIds ?? (project.data.goalId ? [project.data.goalId] : [])).join(","));
-      setWorkspacePolicy(formatJson(project.data.executionWorkspacePolicy));
-      setWorkspacePolicyMode(workspacePolicyModeFromPolicy(project.data.executionWorkspacePolicy));
+      const policyMode = workspacePolicyModeFromPolicy(project.data.executionWorkspacePolicy);
+      setWorkspacePolicyMode(policyMode);
+      setWorkspacePolicy(formatJson(project.data.executionWorkspacePolicy) || workspacePolicyForMode("", policyMode));
       setWorkspacePolicyError("");
     }
   }, [project.data]);
   const update = useMutation({
     mutationFn: () => {
-      const executionWorkspacePolicy = parseJsonObject(workspacePolicy);
+      const executionWorkspacePolicy = parseJsonObject(workspacePolicy || workspacePolicyForMode("", workspacePolicyMode));
       return projectsApi.update(projectId, {
         description: description.trim() || null,
         name: projectName.trim() || project.data?.name,

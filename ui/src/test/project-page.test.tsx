@@ -303,3 +303,60 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 }, 10_000);
+
+it("saves the selected workspace policy when the project has no existing policy", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    executionWorkspacePolicy: null,
+    codebase: { configured: false, scope: "none", managedFolder: ".octopus/workspaces/org-1", effectiveLocalFolder: ".octopus/workspaces/org-1", origin: "managed_checkout" },
+    workspaces: [],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+  expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        description: null,
+        name: "控制台",
+        status: "planned",
+        leadAgentId: null,
+        targetDate: null,
+        goalIds: [],
+        executionWorkspacePolicy: {
+          enabled: true,
+          defaultMode: "shared_workspace",
+          workspaceStrategy: { mode: "shared_workspace" },
+        },
+      }),
+    }),
+  );
+});
