@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
+import json
 import shutil
 from typing import Any
 import uuid
@@ -171,6 +172,7 @@ async def test_step20_upstream_observability_paths_are_exposed() -> None:
     from packages.shared.api_paths import workspace_operations
 
     assert heartbeat.HEARTBEAT_RUN_LOG_PATH == "/api/heartbeat-runs/{runId}/log"
+    assert heartbeat.HEARTBEAT_RUN_STREAM_PATH == "/api/heartbeat-runs/{runId}/stream"
     assert heartbeat.ISSUE_HEARTBEAT_RUNS_PATH == "/api/issues/{issueId}/heartbeat-runs"
     assert (
         heartbeat.HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH
@@ -223,6 +225,28 @@ async def test_heartbeat_run_log_and_workspace_operation_routes(
     assert op_log_headers["cache-control"] == "no-cache, no-store, must-revalidate"
     assert "provision" in op_log_body["content"]
     assert op_log_body["eof"] is True
+
+
+async def test_heartbeat_run_stream_returns_incremental_ndjson(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root = app
+    _, _, _, run_id = await _seed_observed_run(factory, root)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        response = await client.get(f"/api/heartbeat-runs/{run_id}/stream")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == ["run", "event", "log", "final"]
+    assert events[0]["run"]["id"] == run_id
+    assert events[1]["event"]["seq"] == 1
+    assert events[2]["content"].startswith('{"stream":"stdout"')
+    assert events[2]["nextOffset"] > 0
+    assert events[3]["run"]["status"] == "failed"
 
 
 async def test_issue_heartbeat_runs_route_returns_task_execution_summary(
