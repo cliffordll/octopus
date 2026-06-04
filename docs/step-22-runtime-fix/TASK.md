@@ -1,6 +1,6 @@
 # Step 22: Runtime & Closed-loop Alignment Fix
 
-状态：待开发
+状态：已完成
 
 ## 目标
 
@@ -91,6 +91,8 @@
 
 ## 验收
 
+- Step 22 最小闭环验收入口：
+  `uv run pytest tests/contract/test_step22_closed_loop_acceptance.py -q`
 - Tests 覆盖 `opencode_local` tool capability/schema guidance 注入。
 - Tests 覆盖 `bash` 缺少 `description` 时返回可诊断错误，不再表现为不可解释 adapter 崩溃。
 - Tests 覆盖工具调用错误与进程取消/失败同时出现时的错误优先级。
