@@ -179,6 +179,7 @@ class IssueService:
         *,
         actor_type: str,
         actor_id: str,
+        run_id: str | None = None,
     ) -> IssueDetail:
         values = {
             ISSUE_CREATE_TO_COLUMN[key]: value
@@ -224,6 +225,7 @@ class IssueService:
             action="issue.created",
             entity_type="issue",
             entity_id=row.id,
+            run_id=run_id,
             details=dict(payload),
         )
         return await self._to_detail(row)
@@ -235,6 +237,7 @@ class IssueService:
         *,
         actor_type: str,
         actor_id: str,
+        run_id: str | None = None,
     ) -> IssueDetail | None:
         current = await get_issue_by_id(self._session, issue_id)
         if current is None:
@@ -291,6 +294,13 @@ class IssueService:
             return None
         if "parent_id" in values:
             await self._refresh_descendant_depths(row)
+        if values.get("status") == "done":
+            await self._auto_close_open_descendants(
+                row,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                run_id=run_id,
+            )
 
         if values and review_decision is None:
             await insert_activity_log(
@@ -301,6 +311,7 @@ class IssueService:
                 action="issue.updated",
                 entity_type="issue",
                 entity_id=row.id,
+                run_id=run_id,
                 details=dict(payload),
             )
         for action, details in workflow_actions:
@@ -312,9 +323,60 @@ class IssueService:
                 action=action,
                 entity_type="issue",
                 entity_id=row.id,
+                run_id=run_id,
                 details=dict(details) if details is not None else None,
             )
         return await self._to_detail(row)
+
+    async def _auto_close_open_descendants(
+        self,
+        parent: Issue,
+        *,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None,
+    ) -> None:
+        rows = (
+            (
+                await self._session.execute(
+                    select(Issue).where(Issue.org_id == parent.org_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        children_by_parent: dict[str, list[Issue]] = {}
+        for row in rows:
+            if row.parent_id is not None:
+                children_by_parent.setdefault(row.parent_id, []).append(row)
+
+        now = datetime.now(UTC)
+        stack = list(children_by_parent.get(parent.id, []))
+        while stack:
+            child = stack.pop()
+            stack.extend(children_by_parent.get(child.id, []))
+            if child.status in {"done", "cancelled"}:
+                continue
+            previous_status = child.status
+            child.status = "done"
+            child.completed_at = now
+            child.updated_at = now
+            await insert_activity_log(
+                self._session,
+                org_id=child.org_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                action="issue.auto_closed_by_parent",
+                entity_type="issue",
+                entity_id=child.id,
+                run_id=run_id,
+                details={
+                    "parentId": parent.id,
+                    "previousStatus": previous_status,
+                    "status": "done",
+                },
+            )
+        await self._session.flush()
 
     async def _apply_parent_values(
         self,
@@ -497,6 +559,7 @@ class IssueService:
         *,
         actor_type: str,
         actor_id: str,
+        run_id: str | None = None,
     ) -> IssueComment:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
@@ -521,6 +584,7 @@ class IssueService:
             action="issue.comment_added",
             entity_type="issue",
             entity_id=issue_id,
+            run_id=run_id,
             details=dict(payload),
         )
         return comment
