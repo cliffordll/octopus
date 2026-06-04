@@ -386,6 +386,7 @@ class HeartbeatService:
                 status="queued",
             ),
         )
+        context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
             {
@@ -640,6 +641,14 @@ class HeartbeatService:
                 status="queued",
             ),
         )
+        context_snapshot = {
+            "triggeredBy": actor_type,
+            "actorId": actor_id,
+            "forceFreshSession": payload.get("forceFreshSession", False),
+            **self._payload_context(payload.get("payload")),
+            **self._payload_context_snapshot(payload.get("contextSnapshot")),
+        }
+        context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
             {
@@ -649,13 +658,7 @@ class HeartbeatService:
                 "trigger_detail": payload.get("triggerDetail", "manual"),
                 "status": "queued",
                 "wakeup_request_id": wakeup.id,
-                "context_snapshot": {
-                    "triggeredBy": actor_type,
-                    "actorId": actor_id,
-                    "forceFreshSession": payload.get("forceFreshSession", False),
-                    **self._payload_context(payload.get("payload")),
-                    **self._payload_context_snapshot(payload.get("contextSnapshot")),
-                },
+                "context_snapshot": context_snapshot,
             },
         )
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
@@ -1559,6 +1562,25 @@ class HeartbeatService:
         self, context_snapshot: dict[str, Any] | None
     ) -> dict[str, Any]:
         return dict(context_snapshot) if isinstance(context_snapshot, dict) else {}
+
+    async def _enrich_issue_context_snapshot(
+        self, context_snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        issue_id = _issue_id_from_context(context_snapshot)
+        if issue_id is None:
+            return context_snapshot
+        from .issues import IssueService
+
+        heartbeat_context = await IssueService(self._session).get_heartbeat_context(
+            issue_id
+        )
+        if heartbeat_context is None:
+            return context_snapshot
+        return {
+            **heartbeat_context,
+            **context_snapshot,
+            "issue": context_snapshot.get("issue") or heartbeat_context.get("issue"),
+        }
 
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
         return heartbeat_run_to_data(row)
