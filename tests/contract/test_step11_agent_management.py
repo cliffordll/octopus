@@ -477,6 +477,43 @@ async def test_ceo_agent_can_request_hire_with_board_approval(
     assert body["approval"]["type"] == "hire_agent"
     assert body["approval"]["requestedByAgentId"] == ceo["id"]
     assert body["approval"]["requestedByUserId"] is None
+    assert body["agent"]["name"] == "engineer-1"
+    assert body["agent"]["reportsTo"] == ceo["id"]
+
+
+async def test_agent_hired_by_agent_uses_role_sequence_and_reports_to_creator(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-create-sequence")
+    _, ceo = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "CEO", "role": "ceo"},
+    )
+
+    first_code, first = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "System", "role": "engineer"},
+        headers={"x-test-agent-id": ceo["id"], "x-test-org-id": org_id},
+    )
+    second_code, second = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Builder", "role": "engineer"},
+        headers={"x-test-agent-id": ceo["id"], "x-test-org-id": org_id},
+    )
+
+    assert first_code == 201
+    assert second_code == 201
+    assert first["agent"]["name"] == "engineer-1"
+    assert first["agent"]["reportsTo"] == ceo["id"]
+    assert second["agent"]["name"] == "engineer-2"
+    assert second["agent"]["reportsTo"] == ceo["id"]
 
 
 async def test_non_ceo_agent_cannot_request_hire_without_create_permission(
