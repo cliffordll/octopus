@@ -16,6 +16,7 @@ from ..local_skills import (
     materialize_runtime_skills,
     prepare_managed_home,
 )
+from ..provider_config import apply_provider_env
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import (
     build_args,
@@ -49,6 +50,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    apply_provider_env(
+        env,
+        context.config,
+        api_key_env="ANTHROPIC_API_KEY",
+        base_url_env="ANTHROPIC_BASE_URL",
+    )
     await prepare_managed_home(
         runtime_type="claude_local",
         context=context,

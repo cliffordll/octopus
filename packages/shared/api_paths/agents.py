@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 ORG_AGENT_LIST_PATH = "/api/orgs/{orgId}/agents"
+ORG_AGENT_HIRES_PATH = "/api/orgs/{orgId}/agent-hires"
 ORG_AGENT_NAME_SUGGESTION_PATH = "/api/orgs/{orgId}/agents/name-suggestion"
 ORG_AGENT_CONFIGURATIONS_PATH = "/api/orgs/{orgId}/agent-configurations"
 ORG_ADAPTER_MODELS_PATH = "/api/orgs/{orgId}/adapters/{type}/models"
@@ -8,6 +9,7 @@ ORG_ADAPTER_TEST_ENVIRONMENT_PATH = "/api/orgs/{orgId}/adapters/{type}/test-envi
 ORG_ADAPTER_METADATA_PATH = "/api/orgs/{orgId}/adapters/{type}"
 ORG_ADAPTER_QUOTA_WINDOWS_PATH = "/api/orgs/{orgId}/adapters/{type}/quota-windows"
 AGENT_DETAIL_PATH = "/api/agents/{id}"
+AGENT_ARCHIVE_PATH = "/api/agents/{id}/archive"
 AGENT_PAUSE_PATH = "/api/agents/{id}/pause"
 AGENT_RESUME_PATH = "/api/agents/{id}/resume"
 AGENT_TERMINATE_PATH = "/api/agents/{id}/terminate"

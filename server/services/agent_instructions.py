@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import get_agent_by_id, update_agent
 from packages.database.schema import Agent
+from .workspace_paths import agent_workspace_root
 from packages.shared.types.agent import (
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
@@ -24,7 +25,16 @@ MANAGED_INSTRUCTIONS_RUNTIME_TYPES = {
 
 _ENTRY_FILE = "SOUL.md"
 _MEMORY_FILE = "MEMORY.md"
-_DEFAULT_BUNDLE_FILES = ("MEMORY.md", "HEARTBEAT.md", _ENTRY_FILE, "TOOLS.md")
+_DEFAULT_BUNDLE_FILES = (
+    "MEMORY.md",
+    "MEMORY.zh-CN.md",
+    "HEARTBEAT.md",
+    "HEARTBEAT.zh-CN.md",
+    _ENTRY_FILE,
+    "SOUL.zh-CN.md",
+    "TOOLS.md",
+    "TOOLS.zh-CN.md",
+)
 _ONBOARDING_ROOT = Path(__file__).resolve().parents[1] / "onboarding"
 _PROMPT_TEMPLATE_FILE = "promptTemplate.legacy.md"
 _EXPLICIT_INSTRUCTIONS_KEYS = (
@@ -450,14 +460,7 @@ def _string(value: Any) -> str | None:
 
 def _agent_home_root(row: Agent) -> Path:
     workspace_key = _slug(row.workspace_key or row.name or row.id)
-    return (
-        Path.cwd()
-        / ".octopus"
-        / "workspaces"
-        / f"org_{row.org_id}"
-        / "agents"
-        / workspace_key
-    ).resolve()
+    return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _managed_instructions_root(row: Agent) -> Path:

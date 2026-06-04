@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from packages.shared.constants.heartbeat import (
     HeartbeatInvocationSource,
@@ -14,6 +14,7 @@ class WakeAgentPayload(TypedDict, total=False):
     triggerDetail: WakeupTriggerDetail
     reason: str | None
     payload: dict[str, Any] | None
+    contextSnapshot: dict[str, Any] | None
     idempotencyKey: str | None
     forceFreshSession: bool
 
@@ -49,6 +50,11 @@ class HeartbeatRun(TypedDict):
     retryOfRunId: str | None
     processLossRetryCount: int
     contextSnapshot: dict[str, Any] | None
+    issueId: NotRequired[str | None]
+    issueIdentifier: NotRequired[str | None]
+    issueTitle: NotRequired[str | None]
+    projectId: NotRequired[str | None]
+    goalId: NotRequired[str | None]
     createdAt: str
     updatedAt: str
 

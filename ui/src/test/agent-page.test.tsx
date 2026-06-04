@@ -82,6 +82,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "DELETE") {
       return respond({ path: new URL(`http://local${path}`).searchParams.get("path"), content: "", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
     }
+    if (path === "/api/agents/agent-1/archive" && init?.method === "POST") return respond({ ...agent, status: "terminated" });
     return respond({ ...agent, status: "paused" });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -90,7 +91,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   const heading = await screen.findByRole("heading", { name: "Builder" });
   const header = heading.closest("header");
   expect(header).not.toBeNull();
-  expect(within(header!).getByText("idle")).toBeInTheDocument();
+  expect(within(header!).getByText("空闲")).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "分配任务" })).toBeInTheDocument();
   expect(within(header!).getByRole("link", { name: "聊天" })).toHaveAttribute(
     "href",
@@ -99,6 +100,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "暂停" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "恢复" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
+  expect(within(header!).getByRole("button", { name: "归档" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "唤醒" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行心跳" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
@@ -160,11 +162,12 @@ it("controls an agent from its overview and shows runtime status", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
-  expect(await screen.findByText("succeeded")).toBeInTheDocument();
+  expect(await screen.findByText("成功")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
   await userEvent.click(screen.getByRole("button", { name: "唤醒" }));
   await userEvent.click(screen.getByRole("button", { name: "运行心跳" }));
+  await userEvent.click(screen.getByRole("button", { name: "归档" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/pause",
     expect.objectContaining({ method: "POST" }),
@@ -177,6 +180,42 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "/api/agents/agent-1/heartbeat/invoke",
     expect.objectContaining({ method: "POST" }),
   );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/archive",
+    expect.objectContaining({ method: "POST" }),
+  );
+}, 10000);
+
+it("disables runtime actions for agents pending approval", async () => {
+  const agent = {
+    id: "agent-pending",
+    orgId: "org-1",
+    name: "Reviewer",
+    role: "qa",
+    status: "pending_approval",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-pending" && init?.method === "GET") return respond(agent);
+    if (path === "/api/agents/agent-pending/runtime-state" && init?.method === "GET") {
+      return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
+    }
+    if (path === "/api/orgs/org-1/heartbeat-runs?agentId=agent-pending" && init?.method === "GET") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-pending");
+  expect(await screen.findByRole("heading", { name: "Reviewer" })).toBeInTheDocument();
+  expect(screen.getByText("该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "分配任务" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "聊天" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "唤醒" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "运行心跳" })).toBeDisabled();
 });
 
 it("assigns a task to the current agent from a modal", async () => {
@@ -318,9 +357,9 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.clear(screen.getByLabelText("月度预算（cents）"));
-  await userEvent.type(screen.getByLabelText("月度预算（cents）"), "1000");
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"gpt"}' } });
+  await userEvent.clear(screen.getByLabelText("月度预算（美元）"));
+  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
+  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -333,7 +372,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
   const detail = screen.getByTestId("agent-runs-detail-pane");
-  expect((await within(detail).findAllByText("failed")).length).toBeGreaterThanOrEqual(1);
+  expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
   expect(within(detail).getByText("boot ok")).toBeInTheDocument();
   expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
@@ -350,29 +389,215 @@ it("validates opencode local model before saving agent configuration", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
+    }
     return respond({ ...agent, agentRuntimeType: "opencode_local" });
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
+  expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
-  expect(screen.getByText("OpenCode model 必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
+  expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/agents/agent-1",
     expect.objectContaining({ method: "PATCH" }),
   );
 
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
+  await userEvent.selectOptions(await screen.findByLabelText("模型配置"), "deepseek/deepseek-v4-flash");
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1",
     expect.objectContaining({
       method: "PATCH",
-      body: expect.stringContaining('"model":"openai/gpt-5"'),
+      body: expect.stringContaining('"model":"deepseek/deepseek-v4-flash"'),
     }),
   );
+});
+
+it("warns when the configured opencode model is not in organization runtime models", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "local/deepseek-v4-flash" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByText(/当前配置的模型不在组织模型列表中：local\/deepseek-v4-flash/)).toBeInTheDocument();
+});
+
+it("toggles opencode local skip permissions without replacing other extra args", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "opencode_local",
+    agentRuntimeConfig: {
+      model: "deepseek/deepseek-v4-flash",
+      extraArgs: ["--verbose", "--dangerously-skip-permissions"],
+    },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
+    }
+    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash", enabled: true }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ ...agent, agentRuntimeConfig: JSON.parse(String(init.body)).agentRuntimeConfig });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  const checkbox = await screen.findByLabelText("跳过 OpenCode 权限确认");
+  expect(checkbox).toBeChecked();
+  expect(screen.getByText(/仅适用于本地可信开发环境/)).toBeInTheDocument();
+
+  await userEvent.click(checkbox);
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"extraArgs":["--verbose"]'),
+    }),
+  );
+
+  await userEvent.click(checkbox);
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"extraArgs":["--verbose","--dangerously-skip-permissions"]'),
+    }),
+  );
+});
+
+it("tests agent runtime availability from configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/codex_local/test-environment" && init?.method === "POST") {
+      return respond({ agentRuntimeType: "codex_local", status: "pass", checks: [{ id: "cwd", label: "CWD", status: "pass", message: "ok" }] });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
+  expect(screen.getByText("CWD")).toBeInTheDocument();
+  expect(screen.getByText("ok")).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/adapters/codex_local/test-environment",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ agentRuntimeConfig: { model: "openai/gpt-5" } }),
+    }),
+  );
+});
+
+it("shows a model configuration input for opencode agents without configured models", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") return respond([]);
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByLabelText("模型配置")).toHaveValue("openai/gpt-5");
+});
+
+it("shows runtime test failures from configuration", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "openai/gpt-5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/opencode_local/test-environment" && init?.method === "POST") {
+      return respond({
+        agentRuntimeType: "opencode_local",
+        status: "failed",
+        checks: [{ id: "auth", label: "认证", status: "failed", message: "missing key", hint: "配置 provider key" }],
+      });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时不可用")).toBeInTheDocument();
+  expect(screen.getByText("认证")).toBeInTheDocument();
+  expect(screen.getByText("missing key")).toBeInTheDocument();
+  expect(screen.getByText("配置 provider key")).toBeInTheDocument();
+});
+
+it("treats runtime warnings as available when no checks fail", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "kimik/kimi-k2.5" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters/opencode_local/test-environment" && init?.method === "POST") {
+      return respond({
+        agentRuntimeType: "opencode_local",
+        status: "warning",
+        checks: [
+          { id: "cwd", label: "Working directory", status: "ok", message: "No cwd configured; runtime will use the server process cwd." },
+          { id: "command", label: "OpenCode CLI command", status: "ok", message: "Runtime command is resolvable." },
+          { id: "auth", label: "Authentication", status: "warning", message: "No API key env was provided; runtime may rely on local CLI login." },
+          { id: "model", label: "OpenCode model", status: "ok", message: "Configured model: kimik/kimi-k2.5" },
+        ],
+      });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await screen.findByRole("heading", { name: "智能体运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+
+  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
+  expect(screen.getByText("Authentication")).toBeInTheDocument();
+  expect(screen.getByText("警告")).toBeInTheDocument();
+  expect(screen.queryByText("智能体运行时不可用")).not.toBeInTheDocument();
 });
 
 it("shows configuration revisions, rolls back, and resets runtime session", async () => {
@@ -398,12 +623,15 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   expect(await screen.findByRole("heading", { name: "配置快照" })).toBeInTheDocument();
-  expect(await screen.findByText("2026-05-28T08:00:00Z")).toBeInTheDocument();
+  expect(await screen.findByText("2026年5月28日 16:00")).toBeInTheDocument();
   expect(await screen.findByText("issue-1")).toBeInTheDocument();
   expect(await screen.findByText("Config Revisions")).toBeInTheDocument();
   expect(await screen.findByText("revision-1")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "回滚" }));
   await userEvent.click(screen.getByRole("button", { name: "重置会话" }));
+  const resetDialog = screen.getByRole("dialog", { name: "重置会话" });
+  expect(resetDialog).toHaveTextContent("Builder");
+  await userEvent.click(within(resetDialog).getByRole("button", { name: "确认重置" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/config-revisions/revision-1/rollback",
@@ -447,8 +675,8 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
-  expect(screen.getByText("built-in")).toBeInTheDocument();
-  expect(screen.getByText("community")).toBeInTheDocument();
+  expect(screen.getByText("内置技能")).toBeInTheDocument();
+  expect(screen.getByText("社区技能")).toBeInTheDocument();
   expect(screen.getByText("外部技能")).toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
@@ -456,7 +684,7 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
 });
 
-it("manages runtime adapter probes and skills from configuration", async () => {
+it("manages skills from agent configuration", async () => {
   const agent = {
     id: "agent-1",
     orgId: "org-1",
@@ -580,19 +808,16 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByText("Runtime Adapter")).toBeInTheDocument();
-  expect(await screen.findByText("GPT-5")).toBeInTheDocument();
-  expect(await screen.findByText("not configured")).toBeInTheDocument();
-  expect(await screen.findByText("Set model and cwd before running.")).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "测试环境" }));
-  expect(await screen.findByText("CWD")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "基础配置" })).toBeInTheDocument();
+  expect(screen.queryByText("Runtime Adapter")).not.toBeInTheDocument();
+  expect(screen.queryByText("运行环境")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "测试环境" })).not.toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("link", { name: "技能" }));
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
@@ -602,7 +827,7 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   expect(await screen.findByText("debug missing from managed home")).toBeInTheDocument();
   expect(screen.queryByText(/skillsRootPath does not exist/)).not.toBeInTheDocument();
   expect(await screen.findByText("installed")).toBeInTheDocument();
-  expect((await screen.findAllByText("external")).length).toBeGreaterThanOrEqual(1);
+  expect((await screen.findAllByText("外部")).length).toBeGreaterThanOrEqual(1);
   expect(await screen.findByText("missing")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Hide" })).not.toBeInTheDocument();
@@ -610,9 +835,9 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
   expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "built-in" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
   expect(screen.getByText("Deep Research")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "community" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
@@ -623,19 +848,12 @@ it("manages runtime adapter probes and skills from configuration", async () => {
   await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
-  await userEvent.type(within(dialog).getByLabelText("名称"), "Incident Response");
-  await userEvent.type(within(dialog).getByLabelText("Short name"), "incident-response");
-  await userEvent.type(within(dialog).getByLabelText("描述"), "Handle incidents");
-  await userEvent.type(within(dialog).getByLabelText("技能内容"), "schema_version: 1\nprompt: handle it");
+  fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "Incident Response" } });
+  fireEvent.change(within(dialog).getByLabelText("Short name"), { target: { value: "incident-response" } });
+  fireEvent.change(within(dialog).getByLabelText("描述"), { target: { value: "Handle incidents" } });
+  fireEvent.change(within(dialog).getByLabelText("技能内容"), { target: { value: "schema_version: 1\nprompt: handle it" } });
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/adapters/codex_local/test-environment",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ agentRuntimeConfig: { model: "gpt-5" } }),
-    }),
-  );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/skills/sync",
     expect.objectContaining({

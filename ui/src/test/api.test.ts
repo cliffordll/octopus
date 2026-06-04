@@ -5,8 +5,12 @@ import { chatsApi } from "../api/chats";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
 import { messengerApi } from "../api/messenger";
+import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
+import { request } from "../api/client";
+import { runtimeProvidersApi } from "../api/runtimeProviders";
+import { runIntelligenceApi } from "../api/runIntelligence";
 
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
@@ -17,19 +21,36 @@ function jsonResponse(body: unknown, status = 200): Promise<Response> {
   );
 }
 
+function streamResponse(events: unknown[], status = 201): Promise<Response> {
+  return Promise.resolve(
+    new Response(events.map((event) => JSON.stringify(event)).join("\n"), {
+      status,
+      headers: { "Content-Type": "application/x-ndjson" },
+    }),
+  );
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("organization API", () => {
   it("lists organizations", async () => {
-    const fetchMock = vi.fn().mockReturnValue(jsonResponse([{ id: "org-1", name: "Core" }]));
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "org-1", name: "Core" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "org-1", name: "Core", status: "archived" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(organizationsApi.list()).resolves.toEqual([{ id: "org-1", name: "Core" }]);
+    await organizationsApi.archive("org-1");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/orgs",
       expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/orgs/org-1/archive",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
@@ -46,15 +67,104 @@ describe("organization API", () => {
   });
 });
 
+describe("runtime provider API", () => {
+  it("manages organization runtime providers and models", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ providerId: "kimi", runtimeType: "opencode_local" }]))
+      .mockReturnValueOnce(jsonResponse({ providerId: "kimi", runtimeType: "opencode_local" }, 201))
+      .mockReturnValueOnce(jsonResponse({ providerId: "kimi", enabled: false }))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2", displayName: "Kimi K2" }))
+      .mockReturnValueOnce(jsonResponse([{ modelId: "kimi/k2", displayName: "Kimi K2" }]))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2", enabled: false }))
+      .mockReturnValueOnce(jsonResponse({ modelId: "kimi/k2" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runtimeProvidersApi.listProviders("org-1", "opencode_local");
+    await runtimeProvidersApi.createProvider("org-1", {
+      runtimeType: "opencode_local",
+      providerId: "kimi",
+      name: "Kimi",
+      protocol: "openai_chat_completions",
+      baseUrl: "https://api.moonshot.cn/v1",
+      apiKey: "secret",
+      enabled: true,
+    });
+    await runtimeProvidersApi.updateProvider("org-1", "opencode_local", "kimi", { enabled: false });
+    await runtimeProvidersApi.createModel("org-1", "opencode_local", "kimi", {
+      modelId: "kimi/k2",
+      displayName: "Kimi K2",
+      enabled: true,
+    });
+    await runtimeProvidersApi.listModels("org-1", "opencode_local", "kimi");
+    await runtimeProvidersApi.updateModel("org-1", "opencode_local", "kimi", "kimi/k2", { enabled: false });
+    await runtimeProvidersApi.deleteModel("org-1", "opencode_local", "kimi", "kimi/k2");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/runtime-providers",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          runtimeType: "opencode_local",
+          providerId: "kimi",
+          name: "Kimi",
+          protocol: "openai_chat_completions",
+          baseUrl: "https://api.moonshot.cn/v1",
+          apiKey: "secret",
+          enabled: true,
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ modelId: "kimi/k2", displayName: "Kimi K2", enabled: true }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+});
+
 describe("issue API", () => {
   it("filters the issue list and posts comments", async () => {
     const fetchMock = vi
       .fn()
       .mockReturnValueOnce(jsonResponse([]))
+      .mockReturnValueOnce(jsonResponse({ id: "issue-1", assigneeAgentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ issueId: "issue-1", wakeReason: "issue_execute" }))
       .mockReturnValueOnce(jsonResponse({ id: "comment-1", body: "Ship it" }));
     vi.stubGlobal("fetch", fetchMock);
 
     await issuesApi.list("org-1", { status: "in_progress" });
+    await issuesApi.checkout("issue-1", { agentId: "agent-1", expectedStatuses: ["todo"] });
+    await issuesApi.heartbeatContext("issue-1");
     await issuesApi.addComment("issue-1", { body: "Ship it" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -64,6 +174,19 @@ describe("issue API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
+      "/api/issues/issue-1/checkout",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ agentId: "agent-1", expectedStatuses: ["todo"] }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/issues/issue-1/heartbeat-context",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/issues/issue-1/comments",
       expect.objectContaining({
         method: "POST",
@@ -77,20 +200,41 @@ describe("approval API", () => {
   it("posts approve and resubmit decisions", async () => {
     const fetchMock = vi
       .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "issue-1" }]))
+      .mockReturnValueOnce(jsonResponse([{ id: "comment-1", body: "看过了" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "comment-2", body: "继续" }, 201))
       .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "approved" }))
       .mockReturnValueOnce(jsonResponse({ id: "approval-1", status: "pending" }));
     vi.stubGlobal("fetch", fetchMock);
 
+    await approvalsApi.listIssues("approval-1");
+    await approvalsApi.listComments("approval-1");
+    await approvalsApi.addComment("approval-1", { body: "继续" });
     await approvalsApi.approve("approval-1", "Looks correct");
     await approvalsApi.resubmit("approval-1", { payload: { revised: true } });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      "/api/approvals/approval-1/issues",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/approvals/approval-1/comments",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/approvals/approval-1/comments",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "继续" }) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       "/api/approvals/approval-1/approve",
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      5,
       "/api/approvals/approval-1/resubmit",
       expect.objectContaining({
         method: "POST",
@@ -146,6 +290,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "succeeded" }))
       .mockReturnValueOnce(jsonResponse([{ id: 1, runId: "run-1", eventType: "heartbeat.started" }]))
+      .mockReturnValueOnce(jsonResponse({ content: "full log", nextOffset: 18, eof: true }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "cancelled" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-2", status: "queued", retryOfRunId: "run-1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -161,6 +306,7 @@ describe("agent and heartbeat APIs", () => {
     await heartbeatApi.list("org-1", "agent-1");
     await heartbeatApi.get("run-1");
     await heartbeatApi.listEvents("run-1", { afterSeq: 3, limit: 20 });
+    await heartbeatApi.getWorkspaceOperationLog("operation-1", { offset: 10, limitBytes: 100 });
     await heartbeatApi.cancel("run-1");
     await heartbeatApi.retry("run-1");
 
@@ -194,11 +340,16 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
+      "/api/workspace-operations/operation-1/log?offset=10&limitBytes=100",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
       "/api/heartbeat-runs/run-1/cancel",
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      8,
+      9,
       "/api/heartbeat-runs/run-1/retry",
       expect.objectContaining({ method: "POST" }),
     );
@@ -254,6 +405,8 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ id: "revision-1" }))
       .mockReturnValueOnce(jsonResponse({ id: "agent-1" }))
       .mockReturnValueOnce(jsonResponse({ agentId: "agent-1" }))
+      .mockReturnValueOnce(jsonResponse({ agentId: "agent-1", path: "soul.md" }))
+      .mockReturnValueOnce(jsonResponse({ id: "agent-1", status: "terminated" }))
       .mockReturnValueOnce(jsonResponse({ id: "run-1", status: "queued" }, 202));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -264,6 +417,8 @@ describe("agent and heartbeat APIs", () => {
     await agentsApi.configRevision("agent-1", "revision-1");
     await agentsApi.rollbackConfigRevision("agent-1", "revision-1");
     await agentsApi.resetSession("agent-1", { taskKey: "task-1" });
+    await agentsApi.updateInstructionsPath("agent-1", { path: "soul.md" });
+    await agentsApi.archive("agent-1");
     await heartbeatApi.wakeup("agent-1", {
       source: "on_demand",
       triggerDetail: "manual",
@@ -292,6 +447,19 @@ describe("agent and heartbeat APIs", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
+      "/api/agents/agent-1/instructions-path",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ path: "soul.md" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
+      "/api/agents/agent-1/archive",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      10,
       "/api/agents/agent-1/wakeup",
       expect.objectContaining({
         method: "POST",
@@ -359,6 +527,72 @@ describe("agent and heartbeat APIs", () => {
   });
 });
 
+describe("run intelligence API", () => {
+  it("loads run intelligence list, detail, events and log", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "run-1" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "run-1" }))
+      .mockReturnValueOnce(jsonResponse([{ seq: 1 }]))
+      .mockReturnValueOnce(jsonResponse({ content: "raw log", eof: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runIntelligenceApi.list("org-1", { runIdPrefix: "run", limit: 5 });
+    await runIntelligenceApi.get("run-1");
+    await runIntelligenceApi.events("run-1");
+    await runIntelligenceApi.log("run-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/run-intelligence/orgs/org-1/runs?runIdPrefix=run&limit=5",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/run-intelligence/runs/run-1/log",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});
+
+describe("organization skills API", () => {
+  it("covers import, scan-local and install-update routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "skill-1" }, 201))
+      .mockReturnValueOnce(jsonResponse({ candidates: [], imported: [] }))
+      .mockReturnValueOnce(jsonResponse({ id: "skill-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await organizationSkillsApi.import("org-1", {
+      sourcePath: "D:/skills/review",
+      slug: "review",
+      overwrite: true,
+    });
+    await organizationSkillsApi.scanLocal("org-1", {
+      rootPath: "D:/skills",
+      importDiscovered: true,
+    });
+    await organizationSkillsApi.installUpdate("org-1", "skill-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/skills/import",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/skills/scan-local",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/orgs/org-1/skills/skill-1/install-update",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});
+
 describe("chat API", () => {
   it("creates a conversation and sends a message", async () => {
     const fetchMock = vi
@@ -382,6 +616,74 @@ describe("chat API", () => {
         method: "POST",
         body: JSON.stringify({ body: "Start" }),
       }),
+    );
+  });
+
+  it("streams chat message events", async () => {
+    const events: string[] = [];
+    const fetchMock = vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "ack", userMessage: { id: "message-1", role: "user", body: "Start" } },
+      { type: "assistant_delta", delta: "Re" },
+      { type: "assistant_delta", delta: "ady" },
+      { type: "final", messages: [{ id: "message-2", role: "assistant", body: "Ready" }] },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chatsApi.addMessageStream("chat-1", { body: "Start" }, (event) => {
+      events.push(event.type);
+    });
+
+    expect(result.messages).toEqual([{ id: "message-2", role: "assistant", body: "Ready" }]);
+    expect(events).toEqual(["ack", "assistant_delta", "assistant_delta", "final"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chats/chat-1/messages/stream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ body: "Start" }),
+      }),
+    );
+  });
+
+  it("shows the root cause for SQLAlchemy stream errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(streamResponse([
+      {
+        type: "error",
+        error: "(sqlite3.OperationalError) database is locked\n[SQL: INSERT INTO chat_messages ...]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow("database is locked");
+  });
+
+  it("shows the root cause for JSON API errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse(
+      {
+        detail: "(sqlite3.OperationalError) database is locked\n[SQL: INSERT INTO chat_messages ...]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      },
+      500,
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/fails", { method: "GET" })).rejects.toThrow("database is locked");
+  });
+
+  it("shows readable storage errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse({ detail: { message: "Object not found" } }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/assets/missing/content", { method: "GET" })).rejects.toThrow("存储对象不存在");
+  });
+
+  it("shows readable opencode permission errors", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse(
+      { detail: "The user rejected permission to use this specific tool call." },
+      500,
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(request("/api/agents/agent-1/wakeup", { method: "POST" })).rejects.toThrow(
+      "OpenCode 请求了本地工具权限，但当前是 server 非交互运行，无法弹出确认。请开启“跳过 OpenCode 权限确认”，或调整任务避免本地工具调用。",
     );
   });
 

@@ -1,7 +1,8 @@
-import { cleanup, screen, within } from "@testing-library/react";
+﻿import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { renderApp, respond } from "./render-app";
+import { renderApp, respond, respondStream } from "./render-app";
 
 afterEach(() => {
   cleanup();
@@ -34,34 +35,41 @@ it("shows a composer and sends a first message through a selected agent", async 
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({
-        messages: [
-          { id: "message-1", role: "user", body: "请规划部署", status: "completed" },
-          { id: "message-2", role: "assistant", body: "已收到部署请求", status: "completed" },
-        ],
-      }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "请规划部署", status: "completed" } },
+        { type: "assistant_delta", delta: "已收到部署请求" },
+        {
+          type: "final",
+          messages: [
+            { id: "message-1", role: "user", body: "请规划部署", status: "completed" },
+            { id: "message-2", role: "assistant", body: "已收到部署请求", status: "completed" },
+          ],
+        },
+      ]);
     }
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /新建聊天/ })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "What do you want to work on?" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "你想让智能体处理什么？" })).toBeInTheDocument();
   expect(screen.queryByLabelText("标题（可选）")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toBeInTheDocument();
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "消息导航" })).queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.getByLabelText("项目")).toBeInTheDocument();
+  expect(screen.getByLabelText("任务创建模式")).toHaveValue("manual_approval");
   expect(screen.getByRole("button", { name: "发送并创建对话" })).toBeInTheDocument();
 
   expect(await screen.findByRole("option", { name: "平台项目" })).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText("项目"), "project-1");
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.selectOptions(screen.getByLabelText("任务创建模式"), "auto_create");
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
@@ -79,20 +87,21 @@ it("shows a composer and sends a first message through a selected agent", async 
       method: "POST",
       body: JSON.stringify({
         title: "请规划部署",
+        issueCreationMode: "auto_create",
         preferredAgentId: "agent-1",
         contextLinks: [{ entityType: "project", entityId: "project-1" }],
       }),
     }),
   );
+  expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
+  expect(await screen.findByText("已收到部署请求")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-2/messages",
+    "/api/chats/chat-2/messages/stream",
     expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ body: "请规划部署" }),
     }),
   );
-  expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
-  expect(await screen.findByText("已收到部署请求")).toBeInTheDocument();
 });
 
 it("creates a conversation by pressing Enter while Shift+Enter keeps a line break", async () => {
@@ -106,8 +115,8 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "第一行 第二行", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({ messages: [] }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([{ type: "final", messages: [] }]);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
       return respond({ id: "chat-2", title: "第一行 第二行", status: "active", preferredAgentId: "agent-1" });
@@ -120,7 +129,7 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "第一行{Shift>}{Enter}{/Shift}第二行");
 
@@ -131,7 +140,14 @@ it("creates a conversation by pressing Enter while Shift+Enter keeps a line brea
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/chats",
-    expect.objectContaining({ method: "POST", body: JSON.stringify({ title: "第一行\n第二行", preferredAgentId: "agent-1" }) }),
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        title: "第一行\n第二行",
+        issueCreationMode: "manual_approval",
+        preferredAgentId: "agent-1",
+      }),
+    }),
   );
 });
 
@@ -164,8 +180,11 @@ it("opens a new conversation with an error notice when no assistant reply is ret
     if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
-      return respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201);
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "你好", status: "completed" } },
+        { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+      ]);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
       return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
@@ -178,13 +197,13 @@ it("opens a new conversation with an error notice when no assistant reply is ret
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "你好{Enter}");
 
   expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
   expect(
-    await screen.findByText("首条消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
+    await screen.findByText("消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
   ).toBeInTheDocument();
 });
 
@@ -205,9 +224,9 @@ it("offers non-terminated runtime agents for a new conversation", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
-  expect(screen.getByRole("option", { name: "Runner (engineer)" })).toBeInTheDocument();
-  expect(screen.queryByRole("option", { name: "Stopped (qa)" })).not.toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Runner (工程)" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Stopped (测试)" })).not.toBeInTheDocument();
 });
 
 it("preselects the agent provided by an agent detail chat entry", async () => {
@@ -223,7 +242,7 @@ it("preselects the agent provided by an agent detail chat entry", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats?agentId=agent-1");
-  expect(await screen.findByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
 });
 
@@ -242,7 +261,7 @@ it("opens the conversation when the first reply request fails", async () => {
       conversationCreated = true;
       return respond({ id: "chat-2", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
@@ -254,15 +273,54 @@ it("opens the conversation when the first reply request fails", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "请规划部署");
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
 
   expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
-  expect(await screen.findByText("首条消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getByText("请规划部署")).toBeInTheDocument();
+  expect(await screen.findByText("消息发送失败：Chat adapter returned no assistant reply")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "打开已创建的对话" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toHaveTextContent("请规划部署");
+});
+
+it("shows the first user message immediately after creating a conversation", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/chats" && init?.method === "POST") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" }, 201);
+    }
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-1", role: "user", body: "你好", status: "completed" } },
+        { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+      ]);
+    }
+    if (path === "/api/chats/chat-2" && init?.method === "GET") {
+      return respond({ id: "chat-2", title: "你好", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-2/messages" && init?.method === "GET") {
+      return respond([]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats");
+  await screen.findByRole("option", { name: "Builder (工程)" });
+  await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
+  await userEvent.type(screen.getByLabelText("消息"), "你好");
+  await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
+
+  expect(await screen.findByRole("heading", { name: "你好" })).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getAllByText("你好")).toHaveLength(1);
 });
 
 it("opens the cached created conversation when the first reply fails and detail reload errors", async () => {
@@ -284,7 +342,7 @@ it("opens the cached created conversation when the first reply fails and detail 
       conversationCreated = true;
       return respond({ id: "chat-2", orgId: "org-1", title: "请规划部署", status: "active", preferredAgentId: "agent-1" }, 201);
     }
-    if (path === "/api/chats/chat-2/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-2/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     if (path === "/api/chats/chat-2" && init?.method === "GET") {
@@ -296,22 +354,22 @@ it("opens the cached created conversation when the first reply fails and detail 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats");
-  await screen.findByRole("option", { name: "Builder (engineer)" });
+  await screen.findByRole("option", { name: "Builder (工程)" });
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.type(screen.getByLabelText("消息"), "请规划部署");
   await userEvent.click(screen.getByRole("button", { name: "发送并创建对话" }));
 
   expect(await screen.findByRole("heading", { name: "请规划部署" })).toBeInTheDocument();
   expect(await screen.findByText(/已打开本地缓存的对话/)).toBeInTheDocument();
-  expect(await screen.findByText("No messages yet.")).toBeInTheDocument();
+  expect(within(screen.getByTestId("chat-message-thread")).getByText("请规划部署")).toBeInTheDocument();
 });
 
 it("lists conversations without sidebar filters and identifies their selected agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([
-        { id: "chat-1", title: "发布计划", status: "active", preferredAgentId: "agent-1" },
-        { id: "chat-2", title: "归档调研", status: "archived", preferredAgentId: null },
+        { id: "chat-1", title: "发布计划", status: "active", preferredAgentId: "agent-1", issueCreationMode: "auto_create", latestReplyPreview: "这是最近一条回答，会在会话列表里只显示一行", unreadCount: 99 },
+        { id: "chat-2", title: "归档调研", status: "archived", preferredAgentId: null, issueCreationMode: "manual_approval" },
         { id: "chat-3", title: "设计讨论", status: "resolved", preferredAgentId: "agent-2" },
       ]);
     }
@@ -334,10 +392,13 @@ it("lists conversations without sidebar filters and identifies their selected ag
     "href",
     "/orgs/org-1/approvals",
   );
-  expect(await within(messageNavigation).findByText("Builder")).toBeInTheDocument();
+  expect(await within(messageNavigation).findByText("这是最近一条回答，会在会话列表里只显示一行")).toBeInTheDocument();
   expect(messageNavigation).toHaveTextContent("发布计划");
   expect(messageNavigation).toHaveTextContent("归档调研");
   expect(messageNavigation).toHaveTextContent("设计讨论");
+  expect(messageNavigation).toHaveTextContent("Designer");
+  expect(within(messageNavigation).queryByText("99 未读")).not.toBeInTheDocument();
+  expect(messageNavigation.querySelector(".chat-conversation-list")).toBeInTheDocument();
   expect(screen.queryByLabelText("搜索对话")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("状态")).not.toBeInTheDocument();
   expect(within(messageNavigation).queryByLabelText("智能体")).not.toBeInTheDocument();
@@ -353,6 +414,61 @@ it("shows an empty sidebar state when no conversations exist", async () => {
 
   renderApp("/orgs/org-1/chats");
   expect(await within(screen.getByRole("navigation", { name: "消息导航" })).findByText("暂无对话")).toBeInTheDocument();
+});
+
+it("manages a conversation from the sidebar action menu", async () => {
+  let chats = [{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1" }];
+  const writeText = vi.fn();
+  Object.assign(navigator, { clipboard: { writeText } });
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond(chats);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active" }]);
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", title: chats[0]?.title ?? "支持会话", status: "active", preferredAgentId: "agent-1" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
+    if (path === "/api/chats/chat-1" && init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body)) as { title?: string; status?: string };
+      if (body.title) {
+        chats = [{ ...chats[0], title: body.title }];
+        return respond({ id: "chat-1", title: body.title, status: "active", preferredAgentId: "agent-1" });
+      }
+      if (body.status === "archived") {
+        chats = [];
+        return respond({ id: "chat-1", title: "已重命名", status: "archived", preferredAgentId: "agent-1" });
+      }
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByRole("heading", { name: "支持会话" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "支持会话 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "重命名" }));
+  await userEvent.clear(screen.getByLabelText("新会话名称"));
+  await userEvent.type(screen.getByLabelText("新会话名称"), "已重命名");
+  await userEvent.click(screen.getByRole("button", { name: "确认" }));
+
+  expect(await screen.findByRole("link", { name: /已重命名/ })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/chats/chat-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ title: "已重命名" }) }),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "已重命名 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "复制聊天 ID" }));
+  expect(writeText).toHaveBeenCalledWith("chat-1");
+
+  await userEvent.click(screen.getByRole("button", { name: "已重命名 操作" }));
+  await userEvent.click(screen.getByRole("button", { name: "归档" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/chats/chat-1",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "archived" }) }),
+  );
+  expect(screen.queryByRole("link", { name: /已重命名/ })).not.toBeInTheDocument();
 });
 
 it("shows the selected conversation and agent identity while sending messages", async () => {
@@ -372,12 +488,21 @@ it("shows the selected conversation and agent identity while sending messages", 
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([{ id: "message-1", role: "assistant", body: "已有回复", status: "completed" }]);
     }
-    return respond({
-      messages: [
-        { id: "message-2", role: "user", body: "现在状态？", status: "completed" },
-        { id: "message-3", role: "assistant", body: "新回复", status: "completed" },
-      ],
-    }, 201);
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
+      return respondStream([
+        { type: "ack", userMessage: { id: "message-2", role: "user", body: "现在状态？", status: "completed" } },
+        { type: "assistant_delta", delta: "新" },
+        { type: "assistant_delta", delta: "回复" },
+        {
+          type: "final",
+          messages: [
+            { id: "message-2", role: "user", body: "现在状态？", status: "completed" },
+            { id: "message-3", role: "assistant", body: "新回复", status: "completed" },
+          ],
+        },
+      ]);
+    }
+    return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
@@ -387,7 +512,7 @@ it("shows the selected conversation and agent identity while sending messages", 
   expect(screen.getByRole("link", { name: /支持会话/ })).toHaveClass("active");
   expect(screen.getByLabelText("对话智能体")).toBeDisabled();
   expect(screen.getByLabelText("对话智能体")).toHaveValue("agent-1");
-  expect(screen.getByRole("option", { name: "Builder (engineer)" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByText("对话智能体")).not.toBeInTheDocument();
   expect(screen.getByLabelText("对话智能体").closest(".chat-context-controls")).toContainElement(
     screen.getByRole("button", { name: "发送" }),
@@ -399,7 +524,7 @@ it("shows the selected conversation and agent identity while sending messages", 
   await userEvent.type(screen.getByLabelText("消息"), "现在状态？");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-1/messages",
+    "/api/chats/chat-1/messages/stream",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "现在状态？" }) }),
   );
   expect(await screen.findByText("新回复")).toBeInTheDocument();
@@ -426,6 +551,7 @@ it("shows existing conversation context as readonly controls with a skill dropdo
         title: "支持会话",
         status: "active",
         preferredAgentId: "agent-1",
+        issueCreationMode: "auto_create",
         contextLinks: [{
           id: "link-1",
           orgId: "org-1",
@@ -452,7 +578,9 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(screen.getByLabelText("项目")).toBeDisabled();
   expect(screen.getByLabelText("项目")).toHaveTextContent("平台项目");
   expect(screen.getByLabelText("对话智能体")).toBeDisabled();
-  expect(screen.queryByRole("option", { name: "Reviewer (reviewer)" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("任务创建模式")).toBeDisabled();
+  expect(screen.getByLabelText("任务创建模式")).toHaveTextContent("自动创建");
+  expect(screen.queryByRole("option", { name: "Reviewer (评审)" })).not.toBeInTheDocument();
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
@@ -461,6 +589,262 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(await screen.findByText("deploy")).toBeInTheDocument();
   await userEvent.click(screen.getByLabelText("消息"));
   expect(skillDropdown).not.toHaveAttribute("open");
+});
+
+it("creates an issue from a chat issue proposal", async () => {
+  const requests: Array<{ path: string; body?: string }> = [];
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    requests.push({ path, body: typeof init?.body === "string" ? init.body : undefined });
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", orgId: "org-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      return respond([{
+        id: "message-1",
+        role: "assistant",
+        kind: "issue_proposal",
+        body: "请确认是否创建该任务？",
+        status: "completed",
+        structuredPayload: {
+          issueProposal: {
+            title: "读取 README.md 并生成标题文档",
+            description: "读取 README.md 的内容，总结并生成一个标题文档。",
+            priority: "medium",
+          },
+        },
+      }]);
+    }
+    if (path === "/api/chats/chat-1/convert-to-issue" && init?.method === "POST") {
+      return respond({
+        issue: { id: "issue-1", title: "读取 README.md 并生成标题文档", identifier: "OCT-1" },
+        systemMessage: {
+          id: "system-1",
+          role: "system",
+          kind: "system_event",
+          body: "Created issue OCT-1 from this chat conversation.",
+          status: "completed",
+          structuredPayload: {
+            eventType: "issue_created",
+            issueId: "issue-1",
+            issueIdentifier: "OCT-1",
+            sourceMessageId: "message-1",
+          },
+        },
+      }, 201);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByText("任务提案")).toBeInTheDocument();
+  expect(screen.getByText("读取 README.md 并生成标题文档")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+  expect(requests).toContainEqual({
+    path: "/api/chats/chat-1/convert-to-issue",
+    body: JSON.stringify({ messageId: "message-1" }),
+  });
+  expect(await screen.findByText("任务创建成功")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /OCT-1 · 任务已创建/ })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
+  expect(screen.queryByText("Created issue OCT-1 from this chat conversation.")).not.toBeInTheDocument();
+});
+
+it("approves a chat issue proposal through the approval API and shows the created issue event", async () => {
+  const requests: Array<{ path: string; body?: string }> = [];
+  let approvalStatus = "pending";
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    requests.push({ path, body: typeof init?.body === "string" ? init.body : undefined });
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({
+        id: "chat-1",
+        orgId: "org-1",
+        title: "支持会话",
+        status: "active",
+        preferredAgentId: "agent-1",
+        issueCreationMode: "manual_approval",
+        primaryIssue: approvalStatus === "approved"
+          ? { id: "issue-1", identifier: "OCT-1", title: "读取 README.md 并生成标题文档", status: "open", priority: "medium" }
+          : null,
+      });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      const proposalMessage = {
+        id: "message-1",
+        role: "assistant",
+        kind: "issue_proposal",
+        body: "请确认是否创建该任务？",
+        status: "completed",
+        approvalId: "approval-1",
+        structuredPayload: {
+          issueProposal: {
+            title: "读取 README.md 并生成标题文档",
+            description: "读取 README.md 的内容，总结并生成一个标题文档。",
+            priority: "medium",
+          },
+        },
+      };
+      return respond(approvalStatus === "approved"
+        ? [
+            proposalMessage,
+            {
+              id: "system-1",
+              role: "system",
+              kind: "system_event",
+              body: "Created issue OCT-1 from this chat conversation.",
+              status: "completed",
+              structuredPayload: {
+                eventType: "issue_created",
+                issueId: "issue-1",
+                issueIdentifier: "OCT-1",
+                sourceMessageId: "message-1",
+              },
+            },
+          ]
+        : [proposalMessage]);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    if (path === "/api/approvals/approval-1" && init?.method === "GET") {
+      return respond({ id: "approval-1", orgId: "org-1", type: "chat_issue_creation", status: approvalStatus, payload: {} });
+    }
+    if (path === "/api/approvals/approval-1/approve" && init?.method === "POST") {
+      approvalStatus = "approved";
+      return respond({ id: "approval-1", orgId: "org-1", type: "chat_issue_creation", status: "approved", payload: {} });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByText("任务创建待确认")).toBeInTheDocument();
+  expect(screen.getByText("待审批")).toBeInTheDocument();
+  expect(screen.getByText("读取 README.md 并生成标题文档")).toBeInTheDocument();
+  expect(screen.queryByText("任务提案")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "同意" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "拒绝" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "需修改" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "同意" }));
+  expect(requests).toContainEqual({
+    path: "/api/approvals/approval-1/approve",
+    body: "{}",
+  });
+  expect(await screen.findByText("任务创建成功")).toBeInTheDocument();
+  const createdIssueLink = screen.getByText("任务创建成功").closest("a");
+  expect(createdIssueLink).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
+  expect(screen.queryByText("任务创建待确认")).not.toBeInTheDocument();
+});
+
+it("shows an approved chat issue proposal as syncing until the issue-created event arrives", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", orgId: "org-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      return respond([{
+        id: "message-1",
+        role: "assistant",
+        kind: "issue_proposal",
+        body: "请确认是否创建该任务？",
+        status: "completed",
+        approvalId: "approval-1",
+        structuredPayload: {
+          issueProposal: {
+            title: "读取 CLAUDE.md 并生成标题文档",
+            description: "读取 CLAUDE.md 的内容，总结并生成一个标题文档。",
+            priority: "medium",
+          },
+        },
+      }]);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    if (path === "/api/approvals/approval-1" && init?.method === "GET") {
+      return respond({ id: "approval-1", orgId: "org-1", type: "chat_issue_creation", status: "approved", payload: {} });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  expect(await screen.findByText("任务创建结果同步中")).toBeInTheDocument();
+  expect(screen.getByText("已同意")).toBeInTheDocument();
+  expect(screen.getByText("审批已同意，正在刷新任务创建结果。")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "查看审批" })).not.toBeInTheDocument();
+});
+
+it("does not keep showing a rejected chat issue approval prompt", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", orgId: "org-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      return respond([{
+        id: "message-1",
+        role: "assistant",
+        kind: "issue_proposal",
+        body: "请确认是否创建该任务？",
+        status: "completed",
+        approvalId: "approval-1",
+        structuredPayload: {
+          issueProposal: {
+            title: "读取 CLAUDE.md 并输出总结文件",
+            description: "读取 CLAUDE.md 的内容并生成一份总结文件。",
+            priority: "medium",
+          },
+        },
+      }]);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    if (path === "/api/approvals/approval-1" && init?.method === "GET") {
+      return respond({ id: "approval-1", orgId: "org-1", type: "chat_issue_creation", status: "rejected", payload: {} });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+  await screen.findByText("请确认是否创建该任务？");
+  await waitFor(() => {
+    expect(screen.queryByText("任务创建待确认")).not.toBeInTheDocument();
+  });
+  expect(screen.queryByText("已拒绝")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "查看审批" })).not.toBeInTheDocument();
 });
 
 it("sends a message from an existing conversation by pressing Enter", async () => {
@@ -480,7 +864,10 @@ it("sends a message from an existing conversation by pressing Enter", async () =
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    return respond({ messages: [] }, 201);
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
+      return respondStream([{ type: "final", messages: [] }]);
+    }
+    return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
@@ -489,7 +876,7 @@ it("sends a message from an existing conversation by pressing Enter", async () =
   await userEvent.type(screen.getByLabelText("消息"), "你好{Enter}");
 
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/chats/chat-1/messages",
+    "/api/chats/chat-1/messages/stream",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "你好" }) }),
   );
 });
@@ -509,7 +896,7 @@ it("shows the user's message immediately after clicking send", async () => {
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return new Promise<Response>((resolve) => {
         resolvePost = resolve;
       });
@@ -519,7 +906,7 @@ it("shows the user's message immediately after clicking send", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  await screen.findByText("No messages yet.");
+  await screen.findByText("暂无消息");
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
@@ -527,9 +914,13 @@ it("shows the user's message immediately after clicking send", async () => {
   const messageThread = screen.getByTestId("chat-message-thread");
   expect(await within(messageThread).findByText("Thinking", { exact: false })).toBeInTheDocument();
   expect(within(messageThread).getByText("Builder")).toBeInTheDocument();
+  expect(within(messageThread).queryByText("message")).not.toBeInTheDocument();
+  expect(within(messageThread).queryByText("completed")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息")).toHaveValue("");
 
-  resolvePost(respond({ messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] }, 201));
+  resolvePost(respondStream([
+    { type: "final", messages: [{ id: "message-1", role: "user", body: "你好", status: "completed" }] },
+  ]));
   expect(
     await within(messageThread).findByText("消息发送失败：智能体没有返回消息。请检查所选智能体运行配置后重试。"),
   ).toBeInTheDocument();
@@ -557,7 +948,7 @@ it("shows an empty thread prompt for a conversation without messages", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  expect(await screen.findByText("No messages yet.")).toBeInTheDocument();
+  expect(await screen.findByText("暂无消息")).toBeInTheDocument();
   expect(await screen.findByText("向 Builder 发送第一条消息开始对话。")).toBeInTheDocument();
 });
 
@@ -578,7 +969,7 @@ it("explains a failed reply without discarding the message draft", async () => {
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Chat adapter returned no assistant reply" }, 502);
     }
     return respond([]);
@@ -609,7 +1000,7 @@ it("renders send errors in the message thread instead of expanding the composer"
       return respond({ id: "chat-1", title: "排查问题", status: "active", preferredAgentId: "agent-1" });
     }
     if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
-    if (path === "/api/chats/chat-1/messages" && init?.method === "POST") {
+    if (path === "/api/chats/chat-1/messages/stream" && init?.method === "POST") {
       return respond({ detail: "Request failed (500)" }, 500);
     }
     return respond([]);
@@ -617,7 +1008,7 @@ it("renders send errors in the message thread instead of expanding the composer"
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/chats/chat-1");
-  await screen.findByText("No messages yet.");
+  await screen.findByText("暂无消息");
   await userEvent.type(screen.getByLabelText("消息"), "你好");
   await userEvent.click(screen.getByRole("button", { name: "发送" }));
 

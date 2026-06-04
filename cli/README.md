@@ -27,6 +27,7 @@ uv run python -m cli org list
 uv run python -m cli org get <org-id>
 uv run python -m cli org create --name "Demo"
 uv run python -m cli org update <org-id> --name "Renamed"
+uv run python -m cli org archive <org-id>
 ```
 
 `organization` 仍可作为 `org` 的兼容名称使用。
@@ -73,9 +74,11 @@ uv run python -m cli agent task-sessions <agent-id>
 
 ```powershell
 uv run python -m cli agent create --org-id <org-id> --name Builder --role engineer --runtime codex_local
+uv run python -m cli agent hire --org-id <org-id> --name Builder --role engineer --runtime codex_local --source-issue-id <issue-id>
 uv run python -m cli agent pause <agent-id>
 uv run python -m cli agent resume <agent-id>
 uv run python -m cli agent terminate <agent-id>
+uv run python -m cli agent archive <agent-id>
 uv run python -m cli agent invoke <agent-id>
 ```
 

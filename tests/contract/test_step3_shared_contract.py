@@ -17,6 +17,7 @@ from packages.shared.api_paths.issues import (
     ORG_ISSUE_LIST_PATH,
 )
 from packages.shared.api_paths.organizations import (
+    ORG_ARCHIVE_PATH,
     ORG_DETAIL_PATH,
     ORG_LIST_PATH,
 )
@@ -58,6 +59,7 @@ from packages.shared.validators.organization import (
 def test_org_paths_values() -> None:
     assert ORG_LIST_PATH == "/api/orgs"
     assert ORG_DETAIL_PATH == "/api/orgs/{orgId}"
+    assert ORG_ARCHIVE_PATH == "/api/orgs/{orgId}/archive"
 
 
 def test_issue_paths_values() -> None:
@@ -156,8 +158,16 @@ def test_validate_update_organization_invalid_bool_raises() -> None:
 
 
 def test_validate_create_issue_happy() -> None:
-    payload = validate_create_issue({"title": "Demo issue"})
+    payload = validate_create_issue(
+        {
+            "title": "Demo issue",
+            "createdByAgentId": "agent-1",
+            "createdByUserId": None,
+        }
+    )
     assert payload["title"] == "Demo issue"
+    assert payload.get("createdByAgentId") == "agent-1"
+    assert payload.get("createdByUserId") is None
 
 
 def test_validate_create_issue_missing_title_raises() -> None:

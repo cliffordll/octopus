@@ -8,7 +8,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
-from packages.database.queries.agents import get_agent_by_id
+from packages.database.queries.agents import get_agent_by_id, list_org_agents
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.approvals import create_approval
 from packages.database.queries.chats import (
@@ -73,7 +73,9 @@ from packages.shared.types.chat import (
     UpdateChatConversationPayload,
     UpdateChatConversationUserStatePayload,
 )
+from packages.shared.types.issue import CreateIssuePayload
 from .issues import IssueService
+from .runtime_providers import inject_runtime_provider_config
 
 
 class ChatAvailabilityError(ValueError):
@@ -86,6 +88,21 @@ _CHAT_TRANSCRIPT_KEY = "__chatTranscript"
 class ChatService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def default_issue_assignee_for_agent(
+        self, org_id: str, proposed_by_agent_id: str
+    ) -> str:
+        proposer = await get_agent_by_id(self._session, proposed_by_agent_id)
+        if proposer is None or proposer.org_id != org_id or proposer.role != "ceo":
+            return proposed_by_agent_id
+        for candidate in await list_org_agents(self._session, org_id):
+            if (
+                candidate.reports_to == proposer.id
+                and candidate.role != "ceo"
+                and candidate.status not in {"paused", "pending_approval", "terminated"}
+            ):
+                return candidate.id
+        return proposed_by_agent_id
 
     async def list_for_org(
         self,
@@ -406,22 +423,30 @@ class ChatService:
         if conversation is None:
             return None
         proposal = await self._issue_proposal_for_conversion(conversation, payload)
+        issue_payload: CreateIssuePayload = {
+            "title": proposal["title"],
+            "description": proposal.get("description"),
+            "priority": proposal.get("priority", "medium"),
+            "createdByAgentId": actor_id if actor_type == "agent" else None,
+            "createdByUserId": actor_id if actor_type == "board" else None,
+            "originKind": "manual",
+            "originId": conversation.id,
+        }
+        for optional_key in (
+            "projectId",
+            "goalId",
+            "parentId",
+            "assigneeAgentId",
+            "assigneeUserId",
+            "reviewerAgentId",
+            "reviewerUserId",
+        ):
+            if optional_key in proposal:
+                issue_payload[optional_key] = proposal[optional_key]
+
         issue = await IssueService(self._session).create_issue(
             conversation.org_id,
-            {
-                "title": proposal["title"],
-                "description": proposal.get("description"),
-                "priority": proposal.get("priority", "medium"),
-                "projectId": proposal.get("projectId"),
-                "goalId": proposal.get("goalId"),
-                "parentId": proposal.get("parentId"),
-                "assigneeAgentId": proposal.get("assigneeAgentId"),
-                "assigneeUserId": proposal.get("assigneeUserId"),
-                "reviewerAgentId": proposal.get("reviewerAgentId"),
-                "reviewerUserId": proposal.get("reviewerUserId"),
-                "originKind": "manual",
-                "originId": conversation.id,
-            },
+            issue_payload,
             actor_type=actor_type,
             actor_id=actor_id,
         )
@@ -454,6 +479,7 @@ class ChatService:
                     "eventType": "issue_created",
                     "issueId": issue["id"],
                     "issueIdentifier": issue["identifier"],
+                    "sourceMessageId": payload.get("messageId"),
                 },
             },
         )
@@ -587,7 +613,19 @@ class ChatService:
             )
         if message is None or message.kind != "issue_proposal":
             raise ValueError("No issue proposal found for this conversation")
-        return _issue_proposal_from_payload(message.structured_payload)
+        proposal = _issue_proposal_from_payload(message.structured_payload)
+        if (
+            not proposal.get("assigneeAgentId")
+            and not proposal.get("assigneeUserId")
+            and message.replying_agent_id
+        ):
+            proposal = {
+                **proposal,
+                "assigneeAgentId": await self.default_issue_assignee_for_agent(
+                    conversation.org_id, message.replying_agent_id
+                ),
+            }
+        return proposal
 
     async def add_message_and_reply(
         self,
@@ -596,6 +634,7 @@ class ChatService:
         *,
         cancel_event: Any | None = None,
         on_stream_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        commit_after_user_message: bool = False,
     ) -> CreatedChatMessages:
         conversation = await get_conversation(self._session, conversation_id)
         if conversation is None:
@@ -657,6 +696,8 @@ class ChatService:
             await on_stream_event(
                 {"type": "ack", "userMessage": self._to_message(user_message)}
             )
+        if commit_after_user_message:
+            await self._session.commit()
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
@@ -675,6 +716,12 @@ class ChatService:
             **runtime_context,
             "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
         }
+        config = await inject_runtime_provider_config(
+            self._session,
+            org_id=agent.org_id,
+            runtime_type=agent.agent_runtime_type,
+            config=config,
+        )
         transcript: list[ChatStreamTranscriptEntry] = []
 
         async def capture_stream_event(event: dict[str, Any]) -> None:
@@ -703,21 +750,29 @@ class ChatService:
             raise RuntimeError("Chat request timed out")
         if result.error_message or (result.exit_code or 0) != 0:
             raise RuntimeError(result.error_message or "Chat adapter execution failed")
-        summary = str((result.result_json or {}).get("summary") or "").strip()
+        result_json = _normalized_assistant_result(result.result_json or {})
+        summary = str(result_json.get("summary") or "").strip()
         if not summary:
             raise RuntimeError("Chat adapter returned no assistant reply")
-        result_json = result.result_json or {}
         assistant_kind = _assistant_kind(result_json.get("kind"))
         structured_payload = _with_persisted_transcript(
             _assistant_structured_payload(result_json), transcript
         )
-        approval_id = await self._create_proposal_approval(
-            conversation,
-            kind=assistant_kind,
-            structured_payload=structured_payload,
-            requested_by_user_id=conversation.created_by_user_id,
-            replying_agent_id=agent.id,
+        should_auto_create_issue = (
+            assistant_kind == "issue_proposal"
+            and _chat_issue_creation_mode(conversation.issue_creation_mode)
+            == "auto_create"
+            and not conversation.plan_mode
         )
+        approval_id = None
+        if not should_auto_create_issue:
+            approval_id = await self._create_proposal_approval(
+                conversation,
+                kind=assistant_kind,
+                structured_payload=structured_payload,
+                requested_by_user_id=conversation.created_by_user_id,
+                replying_agent_id=agent.id,
+            )
         assistant_message_at = max(
             datetime.now(UTC), user_message_at + timedelta(microseconds=1)
         )
@@ -742,12 +797,19 @@ class ChatService:
         await touch_conversation(
             self._session, conversation.id, assistant_message.created_at
         )
-        return {
-            "messages": [
-                self._to_message(user_message),
-                self._to_message(assistant_message),
-            ]
-        }
+        messages = [self._to_message(user_message), self._to_message(assistant_message)]
+        if should_auto_create_issue:
+            converted = await self.convert_to_issue(
+                conversation.id,
+                {"messageId": assistant_message.id},
+                actor_type="agent",
+                actor_id=agent.id,
+            )
+            if converted is not None:
+                messages.append(converted["systemMessage"])
+        if commit_after_user_message:
+            await self._session.commit()
+        return {"messages": messages}
 
     async def _create_proposal_approval(
         self,
@@ -798,12 +860,12 @@ class ChatService:
         conversation: ChatConversationRow,
         latest_user_message: ChatMessageRow,
     ) -> str:
-        """Build the JSON envelope passed to the runtime adapter as ``promptTemplate``.
+        """Build the chat prompt passed to the runtime adapter as ``promptTemplate``.
 
-        Mirrors upstream ``chat-assistant.helpers.ts:154-208`` ``buildPrompt``:
-        ships ``conversation`` metadata, hydrated ``contextLinks`` and the most
-        recent 12 non-superseded messages (oldest first). The trailing entry is
-        the message the agent should respond to.
+        Mirrors the upstream composition pattern: explicit chat-scene
+        instructions first, then a JSON ``Conversation input`` envelope with
+        conversation metadata, hydrated ``contextLinks`` and the most recent 12
+        non-superseded messages.
         """
 
         messages = await list_messages(self._session, conversation.id)
@@ -812,7 +874,7 @@ class ChatService:
             recent.append(latest_user_message)
             recent = recent[-12:]
         context_links = await self._context_links_for_conversation(conversation.id)
-        return json.dumps(
+        envelope = json.dumps(
             {
                 "conversation": {
                     "id": conversation.id,
@@ -826,6 +888,14 @@ class ChatService:
                     "primaryIssueId": conversation.primary_issue_id,
                 },
                 "contextLinks": [_context_link_summary(link) for link in context_links],
+                "latestUserMessage": {
+                    "id": latest_user_message.id,
+                    "role": latest_user_message.role,
+                    "kind": latest_user_message.kind,
+                    "status": latest_user_message.status,
+                    "body": latest_user_message.body,
+                    "structuredPayload": latest_user_message.structured_payload,
+                },
                 "recentMessages": [
                     {
                         "id": row.id,
@@ -840,6 +910,37 @@ class ChatService:
             },
             ensure_ascii=False,
             indent=2,
+        )
+        return "\n\n".join(
+            [
+                "You are the selected agent, replying inside Octopus's chat scene.",
+                (
+                    "Reply to the latest user message only. Use recentMessages "
+                    "only as conversation context."
+                ),
+                (
+                    "Do not summarize or analyze the JSON envelope unless the "
+                    "latest user message explicitly asks you to do that."
+                ),
+                (
+                    "Always reply in the same language as the latest user "
+                    "message unless it explicitly asks for another language."
+                ),
+                (
+                    "If the latest user message asks to create a task, issue, "
+                    "work item, or ticket, do not create it directly. Do not "
+                    "create files. Do not run commands. Return a single JSON "
+                    'object with summary, kind="issue_proposal", '
+                    "and structuredPayload.issueProposal containing title, "
+                    "description, priority, assigneeAgentId, projectId, goalId, "
+                    "or parentId when known. auto_create is a server-side issue "
+                    "conversion mode, not permission for you to execute the "
+                    "requested task. The UI/server will convert the proposal "
+                    "according to the conversation issueCreationMode."
+                ),
+                "Conversation input:",
+                envelope,
+            ]
         )
 
     async def _to_conversation(
@@ -1111,6 +1212,66 @@ def _assistant_structured_payload(
     if isinstance(value, dict):
         return value
     return None
+
+
+def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
+    summary = result_json.get("summary")
+    if not isinstance(summary, str):
+        return result_json
+    parsed = _json_object(summary)
+    if parsed is None:
+        return result_json
+    kind = parsed.get("kind")
+    structured_payload = parsed.get("structuredPayload")
+    parsed_summary = parsed.get("summary")
+    if (
+        kind not in CHAT_MESSAGE_KINDS
+        or not isinstance(structured_payload, dict)
+        or not isinstance(parsed_summary, str)
+        or not parsed_summary.strip()
+    ):
+        return result_json
+    return {
+        **result_json,
+        "summary": parsed_summary.strip(),
+        "kind": kind,
+        "structuredPayload": structured_payload,
+    }
+
+
+def _json_object(value: str) -> dict[str, Any] | None:
+    candidates = [value.strip(), *_fenced_json_candidates(value)]
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _fenced_json_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    marker = "```"
+    start = 0
+    while True:
+        fence_start = value.find(marker, start)
+        if fence_start == -1:
+            return candidates
+        content_start = fence_start + len(marker)
+        line_end = value.find("\n", content_start)
+        if line_end == -1:
+            return candidates
+        language = value[content_start:line_end].strip().lower()
+        fence_end = value.find(marker, line_end + 1)
+        if fence_end == -1:
+            return candidates
+        if language in {"", "json"}:
+            candidate = value[line_end + 1 : fence_end].strip()
+            if candidate:
+                candidates.append(candidate)
+        start = fence_end + len(marker)
 
 
 def _chat_transcript_from_payload(

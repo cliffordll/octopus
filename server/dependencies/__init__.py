@@ -10,6 +10,7 @@ from .access import (
     require_organization_access,
 )
 from .database import get_session
+from .documents import get_document_service
 from .issues import get_issue_service
 from .orgs import get_org_service
 from .projects import get_project_service
@@ -19,6 +20,7 @@ from .goals import get_goal_service
 
 __all__ = [
     "get_session",
+    "get_document_service",
     "ActorIdentity",
     "require_actor_identity",
     "require_board_access",

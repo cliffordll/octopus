@@ -29,6 +29,21 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     get_parser.add_argument("approval_id")
     get_parser.set_defaults(handler=get_approval)
 
+    issues_parser = actions.add_parser(
+        "issues", help="List issues linked to an approval"
+    )
+    issues_parser.add_argument("approval_id")
+    issues_parser.set_defaults(handler=list_approval_issues)
+
+    comments_parser = actions.add_parser("comments", help="List approval comments")
+    comments_parser.add_argument("approval_id")
+    comments_parser.set_defaults(handler=list_approval_comments)
+
+    comment_parser = actions.add_parser("comment", help="Add an approval comment")
+    comment_parser.add_argument("approval_id")
+    comment_parser.add_argument("--body", required=True)
+    comment_parser.set_defaults(handler=add_approval_comment)
+
     create_parser = actions.add_parser("create", help="Create an approval")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument(
@@ -71,6 +86,22 @@ def list_approvals(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def get_approval(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/approvals/{args.approval_id}")
+
+
+def list_approval_issues(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/approvals/{args.approval_id}/issues")
+
+
+def list_approval_comments(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/approvals/{args.approval_id}/comments")
+
+
+def add_approval_comment(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/approvals/{args.approval_id}/comments",
+        json={"body": args.body},
+    )
 
 
 def create_approval(args: argparse.Namespace, client: ApiClient) -> Any:

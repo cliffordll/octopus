@@ -19,6 +19,7 @@ from .chats import (
     ChatConversationUserState,
     ChatMessage,
 )
+from .documents import Document, DocumentRevision, IssueDocument
 from .approvals import Approval
 from .approval_comments import ApprovalComment
 from .issue_approvals import IssueApproval
@@ -30,6 +31,7 @@ from .organization_skills import OrganizationSkill
 from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
+from .runtime_providers import RuntimeModel, RuntimeProvider
 from .workspaces import (
     ExecutionWorkspace,
     IssueWorkProduct,
@@ -56,6 +58,9 @@ __all__ = [
     "ChatConversation",
     "ChatConversationUserState",
     "ChatMessage",
+    "Document",
+    "DocumentRevision",
+    "IssueDocument",
     "Approval",
     "ApprovalComment",
     "IssueApproval",
@@ -70,6 +75,8 @@ __all__ = [
     "ProjectGoal",
     "OrganizationResource",
     "ProjectResourceAttachment",
+    "RuntimeProvider",
+    "RuntimeModel",
     "ProjectWorkspace",
     "ExecutionWorkspace",
     "WorkspaceRuntimeService",

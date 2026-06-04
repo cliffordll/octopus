@@ -5,7 +5,9 @@ import type {
   AgentConfiguration,
   AgentInstructionsBundle,
   AgentInstructionsFileDetail,
+  AgentInstructionsPathResult,
   AgentDetail,
+  AgentHireResult,
   AgentRuntimeEnvironmentTestResult,
   AgentRuntimeModel,
   AgentRuntimeState,
@@ -13,12 +15,14 @@ import type {
   AgentSkillSnapshot,
   AgentTaskSession,
   CreateAgentPayload,
+  HireAgentPayload,
   PrivateSkillPayload,
   ProviderQuotaResult,
   ResetAgentSessionPayload,
   RuntimeAdapterMetadata,
   UpdateAgentInstructionsBundlePayload,
   UpdateAgentInstructionsFilePayload,
+  UpdateAgentInstructionsPathPayload,
   UpdateAgentPayload,
 } from "./types";
 
@@ -62,6 +66,15 @@ export const agentsApi = {
     request<AgentDetail>(agentRoot(agentId), { method: "GET" }),
   create: (orgId: string, payload: CreateAgentPayload): Promise<Agent> =>
     jsonRequest<Agent>(`/api/orgs/${encodeURIComponent(orgId)}/agents`, "POST", payload),
+  hire: (orgId: string, payload: HireAgentPayload, actorAgentId?: string): Promise<AgentHireResult> =>
+    jsonRequest<AgentHireResult>(
+      `/api/orgs/${encodeURIComponent(orgId)}/agent-hires`,
+      "POST",
+      payload,
+      actorAgentId
+        ? { headers: { "x-test-agent-id": actorAgentId, "x-test-org-id": orgId } }
+        : {},
+    ),
   update: (agentId: string, payload: UpdateAgentPayload): Promise<Agent> =>
     jsonRequest<Agent>(agentRoot(agentId), "PATCH", payload),
   configuration: (agentId: string): Promise<AgentConfiguration> =>
@@ -105,6 +118,11 @@ export const agentsApi = {
     payload: UpdateAgentInstructionsBundlePayload,
   ): Promise<AgentInstructionsBundle> =>
     jsonRequest<AgentInstructionsBundle>(`${agentRoot(agentId)}/instructions-bundle`, "PATCH", payload),
+  updateInstructionsPath: (
+    agentId: string,
+    payload: UpdateAgentInstructionsPathPayload,
+  ): Promise<AgentInstructionsPathResult> =>
+    jsonRequest<AgentInstructionsPathResult>(`${agentRoot(agentId)}/instructions-path`, "PATCH", payload),
   readInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsFileDetail> =>
     request<AgentInstructionsFileDetail>(
       `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
@@ -129,4 +147,6 @@ export const agentsApi = {
     jsonRequest<Agent>(`${agentRoot(agentId)}/resume`, "POST", {}),
   terminate: (agentId: string): Promise<Agent> =>
     jsonRequest<Agent>(`${agentRoot(agentId)}/terminate`, "POST", {}),
+  archive: (agentId: string): Promise<Agent> =>
+    jsonRequest<Agent>(`${agentRoot(agentId)}/archive`, "POST", {}),
 };

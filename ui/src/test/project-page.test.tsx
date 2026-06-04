@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -199,10 +199,8 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
-  await userEvent.clear(screen.getByLabelText("执行工作区策略 JSON"));
-  fireEvent.change(screen.getByLabelText("执行工作区策略 JSON"), {
-    target: { value: '{"enabled":true,"defaultMode":"isolated_workspace"}' },
-  });
+  await userEvent.click(screen.getByLabelText(/独立工作区/));
+  expect(screen.getByText("isolated_workspace")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -215,7 +213,11 @@ it("updates a project and manages its resource attachments", async () => {
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
         goalIds: ["goal-1", "goal-2"],
-        executionWorkspacePolicy: { enabled: true, defaultMode: "isolated_workspace" },
+        executionWorkspacePolicy: {
+          enabled: true,
+          defaultMode: "isolated_workspace",
+          workspaceStrategy: { mode: "isolated_workspace" },
+        },
       }),
     }),
   );
@@ -275,18 +277,18 @@ it("updates a project and manages its resource attachments", async () => {
   const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
   expect(projectIssueCard).not.toBeNull();
   expect(projectIssueCard).toHaveTextContent("创建时间");
-  expect(projectIssueCard).toHaveTextContent("2026-05-28T10:00:00Z");
+  expect(projectIssueCard).toHaveTextContent("2026年5月28日 18:00");
   expect(projectIssueCard).toHaveTextContent("归属");
   expect(projectIssueCard).toHaveTextContent("Builder");
   const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
   expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("3");
   expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("2");
-  expect(within(issueSummary as HTMLElement).getByText("blocked").closest(".summary-metric")).toHaveTextContent("1");
-  expect(within(issueSummary as HTMLElement).getByText("done").closest(".summary-metric")).toHaveTextContent("1");
-  expect(screen.getByRole("heading", { name: "in_progress" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "blocked" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "done" })).toBeInTheDocument();
+  expect(within(issueSummary as HTMLElement).getByText("阻塞").closest(".summary-metric")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("已完成").closest(".summary-metric")).toHaveTextContent("1");
+  expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "等待接口确认" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-2",
@@ -301,3 +303,60 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 }, 10_000);
+
+it("saves the selected workspace policy when the project has no existing policy", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    executionWorkspacePolicy: null,
+    codebase: { configured: false, scope: "none", managedFolder: ".octopus/workspaces/org-1", effectiveLocalFolder: ".octopus/workspaces/org-1", origin: "managed_checkout" },
+    workspaces: [],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+  expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+        description: null,
+        name: "控制台",
+        status: "planned",
+        leadAgentId: null,
+        targetDate: null,
+        goalIds: [],
+        executionWorkspacePolicy: {
+          enabled: true,
+          defaultMode: "shared_workspace",
+          workspaceStrategy: { mode: "shared_workspace" },
+        },
+      }),
+    }),
+  );
+});

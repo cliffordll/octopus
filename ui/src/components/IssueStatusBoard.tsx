@@ -1,13 +1,14 @@
 import { Link } from "react-router-dom";
 import type { Agent, IssueListItem, IssueStatus, ProjectDetail } from "../api/types";
 import { Badge } from "./Badge";
+import { formatDateTime, priorityLabel, statusLabel } from "../utils/display";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 
 type IssueWithCreatedAt = IssueListItem & { createdAt?: string | null };
 
 function issueStatusLabel(status: IssueStatus): string {
-  return status;
+  return statusLabel(status);
 }
 
 function issuesByStatus(issues: IssueListItem[]): Record<IssueStatus, IssueListItem[]> {
@@ -27,7 +28,7 @@ function issuesByStatus(issues: IssueListItem[]): Record<IssueStatus, IssueListI
 }
 
 function issueCreatedAt(issue: IssueListItem): string {
-  return (issue as IssueWithCreatedAt).createdAt || issue.updatedAt || "-";
+  return formatDateTime((issue as IssueWithCreatedAt).createdAt || issue.updatedAt);
 }
 
 function issueOwner(issue: IssueListItem, agentNameById: Map<string, string>): string {
@@ -64,8 +65,8 @@ export function IssueStatusBoard({
       <div className="project-issue-status-summary">
         <div className="summary-metric"><span>总数</span><strong>{issues.length}</strong></div>
         <div className="summary-metric"><span>活跃</span><strong>{activeIssueCount}</strong></div>
-        <div className="summary-metric"><span>blocked</span><strong>{groupedIssues.blocked.length}</strong></div>
-        <div className="summary-metric"><span>done</span><strong>{groupedIssues.done.length}</strong></div>
+        <div className="summary-metric"><span>阻塞</span><strong>{groupedIssues.blocked.length}</strong></div>
+        <div className="summary-metric"><span>已完成</span><strong>{groupedIssues.done.length}</strong></div>
       </div>
       <div className="project-issue-status-groups">
         {ISSUE_STATUSES.map((issueStatus) => (
@@ -82,24 +83,24 @@ export function IssueStatusBoard({
             ) : (
               <div className="project-issue-status-list">
                 {groupedIssues[issueStatus].map((issue) => (
-                  <article className="project-issue-status-row" key={issue.id}>
+                  <Link
+                    aria-label={issue.title}
+                    className="project-issue-status-row"
+                    key={issue.id}
+                    to={`/orgs/${orgId}/issues/${issue.id}`}
+                  >
                     <div className="project-issue-card-topline">
                       <span className="identifier">{issue.identifier ?? "-"}</span>
-                      <Badge>{issue.priority}</Badge>
+                      <Badge>{priorityLabel(issue.priority)}</Badge>
                     </div>
-                    <Link
-                      aria-label={issue.title}
-                      className="project-issue-title"
-                      to={`/orgs/${orgId}/issues/${issue.id}`}
-                    >
-                      {issue.title}
-                    </Link>
+                    <span className="project-issue-title">{issue.title}</span>
                     <dl className="project-issue-card-meta">
                       <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
                       <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById)}</dd></div>
                       {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
                     </dl>
-                  </article>
+                    <span className="project-issue-card-action">查看详情 / 执行输出</span>
+                  </Link>
                 ))}
               </div>
             )}

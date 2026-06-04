@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -229,6 +230,7 @@ async def test_wakeup_executes_process_runtime_and_records_failed_run(
     assert persisted_run.status == "failed"
     assert [event.event_type for event in events] == [
         "lifecycle",
+        "lifecycle",
         "adapter.invoke",
         "error",
     ]
@@ -236,3 +238,65 @@ async def test_wakeup_executes_process_runtime_and_records_failed_run(
         "agent.created",
         "heartbeat.invoked",
     ]
+
+
+async def test_failed_issue_backed_run_releases_issue_execution_lock(
+    session: AsyncSession,
+) -> None:
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org = await _seed_org(session)
+    agent = Agent(
+        org_id=org.id,
+        name="Broken Issue Executor",
+        role="engineer",
+        status="idle",
+        agent_runtime_config={},
+    )
+    issue = Issue(
+        org_id=org.id,
+        title="Failing issue execution",
+        status="in_progress",
+        assignee_agent_id=agent.id,
+        origin_kind="manual",
+    )
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        session.add_all([agent, issue])
+        await session.flush()
+        queued = await heartbeat.wakeup(
+            agent.id,
+            {
+                "source": "assignment",
+                "reason": "issue_execute",
+                "payload": {"issueId": issue.id},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_execute",
+                },
+            },
+            actor_type="system",
+            actor_id="issue-execution-test",
+            execute_immediately=False,
+        )
+        assert queued is not None
+        issue.execution_run_id = queued["id"]
+        issue.checkout_run_id = queued["id"]
+        issue.execution_agent_name_key = "broken-issue-executor"
+        issue.execution_locked_at = datetime.now(UTC)
+
+    resumed = await heartbeat.resume_queued_runs(agent.id)
+
+    assert len(resumed) == 1
+    executed = resumed[0]
+    assert executed["status"] == "failed"
+    persisted_run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    persisted_issue = (await session.execute(select(Issue))).scalar_one()
+    assert persisted_run.status == "failed"
+    assert persisted_issue.status == "in_progress"
+    assert persisted_issue.execution_run_id is None
+    assert persisted_issue.checkout_run_id is None
+    assert persisted_issue.execution_agent_name_key is None
+    assert persisted_issue.execution_locked_at is None

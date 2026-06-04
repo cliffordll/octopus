@@ -3,11 +3,18 @@ import type {
   CreateIssuePayload,
   IssueAttachment,
   IssueComment,
+  IssueDocument,
+  IssueDocumentRevision,
+  IssueDocumentSummary,
   IssueDetail,
   IssueFilters,
   IssueListItem,
   IssueReviewDecision,
+  HeartbeatRun,
+  CheckoutIssuePayload,
   UpdateIssuePayload,
+  UpsertIssueDocumentPayload,
+  IssueWorkProduct,
 } from "./types";
 
 function issueRoot(issueId: string): string {
@@ -30,10 +37,35 @@ export const issuesApi = {
   },
   get: (issueId: string): Promise<IssueDetail> =>
     request<IssueDetail>(issueRoot(issueId), { method: "GET" }),
+  listDocuments: (issueId: string): Promise<IssueDocumentSummary[]> =>
+    request<IssueDocumentSummary[]>(`${issueRoot(issueId)}/documents`, { method: "GET" }),
+  getDocument: (issueId: string, key: string): Promise<IssueDocument> =>
+    request<IssueDocument>(`${issueRoot(issueId)}/documents/${encodeURIComponent(key)}`, { method: "GET" }),
+  upsertDocument: (issueId: string, key: string, payload: UpsertIssueDocumentPayload): Promise<IssueDocument> =>
+    request<IssueDocument>(`${issueRoot(issueId)}/documents/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  listDocumentRevisions: (issueId: string, key: string): Promise<IssueDocumentRevision[]> =>
+    request<IssueDocumentRevision[]>(`${issueRoot(issueId)}/documents/${encodeURIComponent(key)}/revisions`, { method: "GET" }),
+  deleteDocument: (issueId: string, key: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`${issueRoot(issueId)}/documents/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  listWorkProducts: (issueId: string): Promise<IssueWorkProduct[]> =>
+    request<IssueWorkProduct[]>(`${issueRoot(issueId)}/work-products`, { method: "GET" }),
+  deleteWorkProduct: (workProductId: string): Promise<IssueWorkProduct> =>
+    request<IssueWorkProduct>(`/api/work-products/${encodeURIComponent(workProductId)}`, { method: "DELETE" }),
   create: (orgId: string, payload: CreateIssuePayload): Promise<IssueDetail> =>
     jsonRequest<IssueDetail>(`/api/orgs/${encodeURIComponent(orgId)}/issues`, "POST", payload),
   update: (issueId: string, payload: UpdateIssuePayload): Promise<IssueDetail> =>
     jsonRequest<IssueDetail>(issueRoot(issueId), "PATCH", payload),
+  checkout: (issueId: string, payload: CheckoutIssuePayload): Promise<IssueDetail> =>
+    jsonRequest<IssueDetail>(`${issueRoot(issueId)}/checkout`, "POST", payload),
+  execute: (issueId: string): Promise<HeartbeatRun> =>
+    jsonRequest<HeartbeatRun>(`${issueRoot(issueId)}/execute`, "POST", {}),
+  heartbeatContext: (issueId: string): Promise<Record<string, unknown>> =>
+    request<Record<string, unknown>>(`${issueRoot(issueId)}/heartbeat-context`, { method: "GET" }),
+  listRuns: (issueId: string): Promise<HeartbeatRun[]> =>
+    request<HeartbeatRun[]>(`${issueRoot(issueId)}/heartbeat-runs`, { method: "GET" }),
   listComments: (issueId: string): Promise<IssueComment[]> =>
     request<IssueComment[]>(`${issueRoot(issueId)}/comments`, { method: "GET" }),
   listAttachments: (issueId: string): Promise<IssueAttachment[]> =>

@@ -27,6 +27,17 @@ it("shows an approval and submits a board decision", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/comments" && init?.method === "POST") {
+      return respond({
+        id: "comment-1",
+        approvalId: "approval-1",
+        body: "请补充风险说明",
+        authorUserId: "board-local",
+        createdAt: "",
+      }, 201);
+    }
     return respond(approval);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -37,8 +48,24 @@ it("shows an approval and submits a board decision", async () => {
   expect(within(messageNavigation).getByRole("link", { name: "审批管理" })).toHaveClass("active");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByText(/"amount": 1000/)).toBeInTheDocument();
+  expect(screen.getByText("评论不会改变审批状态；如需处理审批，请使用右侧同意、拒绝或请求修改。")).toBeInTheDocument();
+
+  await userEvent.type(screen.getByLabelText("审批评论"), "请补充风险说明");
+  await userEvent.click(screen.getByRole("button", { name: "添加评论" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/approvals/approval-1/comments",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ body: "请补充风险说明" }),
+    }),
+  );
+  expect(await screen.findByText("评论已添加。评论只记录沟通内容，不会改变审批状态。")).toBeInTheDocument();
+  expect(screen.getByLabelText("审批评论")).toHaveValue("");
 
   await userEvent.type(screen.getByLabelText("决策备注"), "额度合理");
+  const decisionActions = screen.getByRole("button", { name: "同意" }).closest(".approval-actions");
+  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "拒绝" }));
+  expect(decisionActions).toContainElement(screen.getByRole("button", { name: "请求修改" }));
   await userEvent.clear(screen.getByLabelText("决策 Payload JSON"));
   fireEvent.change(screen.getByLabelText("决策 Payload JSON"), { target: { value: '{"approvedLimit":1000}' } });
   await userEvent.click(screen.getByRole("button", { name: "同意" }));
@@ -69,6 +96,8 @@ it("resubmits an approval with edited payload", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/issues" && init?.method === "GET") return respond([]);
+    if (path === "/api/approvals/approval-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/approvals/approval-1/resubmit" && init?.method === "POST") {
       return respond({ ...approval, status: "pending", payload: { action: "new" } });
     }
@@ -96,7 +125,7 @@ it("shows approval management cards and resolves a pending approval", async () =
     {
       id: "approval-1",
       orgId: "org-1",
-      type: "chat_operation",
+      type: "chat_issue_creation",
       status: "pending",
       requestedByAgentId: "agent-1",
       requestedByUserId: null,
@@ -108,7 +137,29 @@ it("shows approval management cards and resolves a pending approval", async () =
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([{ id: "agent-1", orgId: "org-1", name: "Reviewer", role: "reviewer", status: "active" }]);
     }
-    if (path === "/api/orgs/org-1/approvals" && init?.method === "GET") return respond(approvals);
+    if (path === "/api/orgs/org-1/messenger/approvals" && init?.method === "GET") {
+      return respond({
+        summary: { unreadCount: 1, needsAttention: true, preview: "读取 README.md 并生成标题文档" },
+        detail: {
+          description: "Approvals needing attention",
+          items: [{
+            approval: {
+              ...approvals[0],
+              payload: {
+                proposedIssue: {
+                  title: "读取 README.md 并生成标题文档",
+                  description: "读取 README.md 的内容。",
+                },
+              },
+              decisionNote: null,
+              decidedByUserId: null,
+              decidedAt: null,
+              updatedAt: "2026-05-28T04:00:00.000Z",
+            },
+          }],
+        },
+      });
+    }
     if (path === "/api/orgs/org-1/approvals" && init?.method === "POST") {
       return respond({ id: "approval-2", orgId: "org-1", type: "chat_operation", status: "pending", requestedByAgentId: "agent-1", requestedByUserId: null, createdAt: "", payload: {} }, 201);
     }
@@ -121,7 +172,13 @@ it("shows approval management cards and resolves a pending approval", async () =
 
   renderApp("/orgs/org-1/approvals");
   expect(await screen.findByRole("heading", { name: "审批管理" })).toBeInTheDocument();
-  expect(await screen.findByRole("heading", { name: "chat_operation" })).toBeInTheDocument();
+  const statusFilter = screen.getByRole("group", { name: "审批状态筛选" });
+  expect(within(statusFilter).getByRole("button", { name: "待审批" })).toBeInTheDocument();
+  expect(within(statusFilter).getByRole("button", { name: "需修改" })).toBeInTheDocument();
+  expect(within(statusFilter).getByRole("button", { name: "已同意" })).toBeInTheDocument();
+  expect(within(statusFilter).getByRole("button", { name: "已拒绝" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "读取 README.md 并生成标题文档" })).toBeInTheDocument();
+  expect(screen.getByText("chat_issue_creation")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "创建审批" }));
   const dialog = screen.getByRole("dialog");
   await userEvent.selectOptions(within(dialog).getByLabelText("审批类型"), "chat_operation");
