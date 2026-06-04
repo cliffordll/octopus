@@ -158,6 +158,11 @@ function AutoScrollPre({
   return <pre className={className} ref={ref}>{content}</pre>;
 }
 
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
   const next = new Map<number, HeartbeatRunEvent>();
   for (const event of left) next.set(event.id, event);
@@ -493,6 +498,14 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
                   </>
                 ) : (
                   <span className="download-unavailable">不可下载</span>
+                )}
+                {metadataString(product.metadata, "workspaceBrowserPath") && (
+                  <Link
+                    className="button secondary small-button"
+                    to={`/orgs/${issue.orgId}/workspaces?path=${encodeURIComponent(metadataString(product.metadata, "workspaceBrowserPath") ?? "")}`}
+                  >
+                    在工作区打开
+                  </Link>
                 )}
                 {product.url && <a className="button secondary small-button" href={product.url}>打开运行产物</a>}
                 <button

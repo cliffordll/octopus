@@ -285,7 +285,7 @@ uv run server
 ```text
 .agents/skills
 server/skills/bundled
-.octopus/workspaces
+.octopus/organizations
 ```
 
 如果 `cwd` 不对，服务端可能找不到预期的本地资源。
@@ -303,7 +303,7 @@ Octopus 运行中的组织、项目、agent 把共享文件、计划、产物、
 当前 server 里组织技能工作区类似：
 
 ```text
-.octopus/workspaces/org_<org-id>/skills/<slug>
+.octopus/organizations/<org-id>/workspaces/skills/<slug>
 ```
 
 这属于 Octopus 产品内部管理的 workspace 数据，不等同于 repo 根目录，也不等同于 `CODEX_HOME`。
@@ -385,7 +385,7 @@ cwd
   ├─ server/skills/bundled
   │  └─ Octopus 产品内置技能来源
   │
-  └─ .octopus/workspaces/org_<org-id>/skills
+  └─ .octopus/organizations/<org-id>/workspaces/skills
      └─ Octopus 组织本地技能工作区
 
 CODEX_HOME

@@ -58,6 +58,7 @@ it("shows an issue and records comments and review decisions", async () => {
         metadata: {
           source: "execution_workspace_scan",
           workspacePath: "docs/login-flow.md",
+          workspaceBrowserPath: "artifacts/issues/issue-1/runs/run-1/login.md",
         },
         createdByRunId: "run-1",
         createdAt: "2026-05-28T09:00:00Z",
@@ -272,6 +273,10 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("docs/login-flow.md");
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("下载只读取 contentPath");
   expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/workspaces?path=artifacts%2Fissues%2Fissue-1%2Fruns%2Frun-1%2Flogin.md",
+  );
   expect(screen.getByRole("link", { name: "预览内容" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "打开运行产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("不可下载");
