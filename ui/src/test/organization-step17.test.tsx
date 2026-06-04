@@ -81,7 +81,7 @@ it("shows organization skills and edits the selected skill file", async () => {
           description: "Review code changes",
           markdown: "# Review",
           sourceType: "local_path",
-          sourceLocator: ".octopus/workspaces/org_org-1/skills/review",
+          sourceLocator: ".octopus/organizations/org-1/workspaces/skills/review",
           sourceRef: null,
           trustLevel: "markdown_only",
           compatibility: "compatible",
@@ -97,8 +97,8 @@ it("shows organization skills and edits the selected skill file", async () => {
           editableReason: null,
           sourceLabel: "Local organization skill",
           sourceBadge: "local",
-          sourcePath: ".octopus/workspaces/org_org-1/skills/review",
-          workspaceEditPath: ".octopus/workspaces/org_org-1/skills/review/SKILL.md",
+          sourcePath: ".octopus/organizations/org-1/workspaces/skills/review",
+          workspaceEditPath: ".octopus/organizations/org-1/workspaces/skills/review/SKILL.md",
         },
         {
           id: "skill-community",
@@ -201,8 +201,8 @@ it("shows organization skills and edits the selected skill file", async () => {
     "/api/orgs/org-1/skills/skill-1/install-update",
     expect.objectContaining({ method: "POST" }),
   );
-  expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review")).toBeInTheDocument();
-  expect(screen.getByText(".octopus/workspaces/org_org-1/skills/review/SKILL.md")).toBeInTheDocument();
+  expect(screen.getByText(".octopus/organizations/org-1/workspaces/skills/review")).toBeInTheDocument();
+  expect(screen.getByText(".octopus/organizations/org-1/workspaces/skills/review/SKILL.md")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /references/ })).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByRole("button", { name: /checklist.md/ })).not.toBeInTheDocument();
