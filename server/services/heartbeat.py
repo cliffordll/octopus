@@ -788,6 +788,16 @@ class HeartbeatService:
                 context_snapshot=running.context_snapshot,
                 products=result.work_products,
             )
+            if final_status == "succeeded":
+                work_products.extend(
+                    await WorkspaceService(
+                        self._session
+                    ).persist_generated_workspace_files(
+                        run_id=running.id,
+                        context_snapshot=running.context_snapshot,
+                        since=running.started_at,
+                    )
+                )
             final = await update_run(
                 self._session,
                 running.id,
