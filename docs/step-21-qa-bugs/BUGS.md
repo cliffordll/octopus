@@ -50,6 +50,7 @@
 | BUG-21-027 | fixed | P1 | 是 | run 成功后缺少上游式 issue close-out governance | Step 21 | `test_successful_issue_run_without_closeout_queues_passive_followup` |
 | BUG-21-028 | fixed | P1 | 是 | chat `auto_create` issue proposal 没有自动落成任务 | Step 21 | `test_auto_create_chat_issue_proposal_creates_issue` |
 | BUG-21-029 | fixed | P2 | 否 | issue documents 与 work-products 只有聚合/预留，缺上游独立 API | Step 21 | `pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed |
+| BUG-21-030 | fixed | P2 | 否 | 任务执行过程只能轮询 events/log，缺 run 级动态输出流接口 | Step 21 | `pytest tests/contract/test_step20_observability.py::test_heartbeat_run_stream_returns_incremental_ndjson -q` passed |
 
 ## 记录模板
 
@@ -96,6 +97,27 @@
   - 新增 work-product create/update/delete/list route，并复用现有 `IssueWorkProduct` model 与 `WorkspaceService` 转换逻辑。
   - `GET /api/issues/{id}` 增加 `documentSummaries`，继续保留 `workProducts` 聚合。
 - 验证证据：`pytest tests/contract/test_step21_issue_documents_work_products.py -q` 2 passed；`pyright server packages tests/contract/test_step21_issue_documents_work_products.py` 0 errors；目标 `ruff check` passed。
+
+### BUG-21-030: 任务执行过程缺 run 级动态输出流接口
+
+- 状态：fixed
+- 严重级别：P2
+- 是否阻塞最小闭环：否。已有 `events?afterSeq=` 与 `log?offset=` 轮询接口可用，但 UI 若要动态展示执行过程，需要自行组合多个轮询请求。
+- 影响范围：任务详情页执行过程展示、run timeline/log 实时刷新、UI 对任务执行进度的用户反馈。
+- 复现步骤：
+  1. 执行一个 issue，拿到 `runId`。
+  2. 期望打开单个实时输出接口，例如 `GET /api/heartbeat-runs/{runId}/stream`。
+  3. 当前只能分别轮询 `GET /api/heartbeat-runs/{runId}`、`/events?afterSeq=` 和 `/log?offset=`。
+- 预期行为：server 提供 run 级 NDJSON stream，连接后返回初始 run 状态，并持续输出新增 events/log，run 结束时输出 final。
+- 实际行为（修复前）：缺少 `GET /api/heartbeat-runs/{runId}/stream`。
+- 初步根因：Step 20 已补 observability 轮询 API，Step 16 只补 chat stream，尚未将同样的动态输出能力扩展到 heartbeat run。
+- 处理归属：Step 21。属于最小闭环可视化补强，不引入 WebSocket 或复杂实时基础设施。
+- 修复记录：
+  - 新增 shared path `HEARTBEAT_RUN_STREAM_PATH`。
+  - 新增 `GET /api/heartbeat-runs/{runId}/stream`，返回 `application/x-ndjson`。
+  - stream 事件类型：`run`、`event`、`log`、`final`、`error`。
+  - stream 每轮用短事务读取 run/events/log，避免长连接持有 SQLite 事务。
+- 验证证据：`pytest tests/contract/test_step20_observability.py::test_heartbeat_run_stream_returns_incremental_ndjson -q` passed。
 
 ### BUG-21-001: 智能体说明文件右侧内容显示为空需确认 server 读取语义
 
@@ -647,3 +669,70 @@
 - 处理归属：Step 21。
 - 修复记录：已新增 `_scan_skill_inventory()`，内置技能 seed、组织技能创建、文件更新和响应序列化都复用该扫描逻辑；隐藏文件、缓存目录和 Python bytecode 会被排除。
 - 验证证据：contract 测试已新增 `reference/methodology.md`、`scripts/sync.py`、`templates/note.md` 的 fileInventory 断言；当前本机 pytest 执行仍被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
+
+### BUG-21-031: OpenCode local 输出超长 JSONL 单行时 run 失败
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。长上下文或大结果输出时，任务执行会直接失败，issue 无法产生产物。
+- 影响范围：`opencode_local` runtime、任务执行、run log、issue execute 闭环。
+- 复现步骤：
+  1. 使用 `opencode_local` 执行会输出较大 JSONL 单行的任务。
+  2. 查看 run error。
+- 预期行为：runtime reader 应能读取超过 asyncio 默认行限制的 JSONL 输出，并继续解析/流式转发。
+- 实际行为（修复前）：`StreamReader.readline()` 在单行超过约 64KiB 时抛出 `Separator is found, but chunk is longer than limit`，run 标记为 failed。
+- 初步根因：`packages/runtimes/opencode_local/runner.py` 使用 `readline()` 读取 stdout，继承 asyncio 的单行长度限制。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：已将 OpenCode stdout reader 改为 chunk 读取，并在内存中按换行手动切分，避免 asyncio 单行限制，同时保持 assistant delta 流式事件。
+- 验证证据：`test_opencode_stdout_reader_accepts_long_jsonl_lines` 覆盖 80KiB JSONL 单行；相关 pytest、ruff 通过。
+
+### BUG-21-032: issue-backed run 失败后未释放任务执行锁
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务 run 已失败或结束，但 issue 仍保留 `executionRunId` / `checkoutRunId`，后续执行和 UI 状态判断会被误导。
+- 影响范围：`HeartbeatService._execute_run()`、`POST /api/issues/{issueId}/execute` 触发的 run、任务详情与任务列表状态。
+- 复现步骤：
+  1. 创建已分配智能体的 issue-backed run。
+  2. 让 runtime 执行失败。
+  3. 查看 issue 的 `executionRunId`、`checkoutRunId`、`executionLockedAt`。
+- 预期行为：对齐上游 `releaseIssueExecutionAndPromote(run)` 的基础行为：run 进入终态后释放 issue 的执行锁；issue 是否完成由后续 closeout/review 链路决定，不在这里强行标记 done。
+- 实际行为（修复前）：run 失败后只更新 run/wakeup/agent，未释放 issue 执行锁。
+- 初步根因：Python heartbeat finalize 迁移了 run/wakeup/agent 终态更新，但遗漏 issue release 阶段。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：已在正常终态和异常终态后调用 `_release_issue_execution()`，清理 `executionRunId`、`checkoutRunId`、`executionAgentNameKey`、`executionLockedAt`。
+- 验证证据：`test_failed_issue_backed_run_releases_issue_execution_lock` 覆盖失败 run 后锁释放；相关 pytest、ruff 通过。
+
+### BUG-21-033: chat 提案创建任务后未默认分配给提案智能体
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务创建成功但没有 `assigneeAgentId`，后续 `POST /api/issues/{issueId}/execute` 会因为未分配智能体而无法执行。
+- 影响范围：`manual_approval` 确认创建任务、`POST /api/chats/{conversationId}/convert-to-issue`、任务列表默认执行者展示。
+- 复现步骤：
+  1. 智能体在 chat 中返回 `issue_proposal`。
+  2. 通过审批确认创建任务，或调用 `convert-to-issue`。
+  3. 查看创建出来的 issue。
+- 预期行为：如果 proposal 没有显式 `assigneeAgentId` / `assigneeUserId`，server 应默认把任务分配给提出该任务的智能体（`proposedByAgentId` 或 assistant message `replyingAgentId`）。
+- 实际行为（修复前）：审批由 board/user 确认后，`IssueService.create_issue()` 不会自动使用提案智能体，导致 `assigneeAgentId` 为空。
+- 初步根因：`ChatService.convert_to_issue()` 只取 issueProposal 内容，没有把 assistant message 的 `replyingAgentId` 带入默认 assignee；`ApprovalService` 也没有把 approval payload 的 `proposedByAgentId` 注入 proposed issue。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：direct convert 路径默认使用 `replyingAgentId`；approval approve 路径默认使用 `proposedByAgentId`。如果提案智能体是 CEO，且存在可运行的直属非 CEO 下属，则默认委派给该下属；没有可用下属时回退 CEO。显式 assignee 仍优先生效，不被覆盖。
+- 验证证据：`test_convert_chat_issue_proposal_defaults_assignee_to_replying_agent`、`test_convert_chat_issue_proposal_delegates_ceo_issue_to_direct_report`、`test_convert_chat_issue_proposal_keeps_explicit_assignee` 和 `test_approve_chat_issue_creation_creates_issue_and_system_message` 覆盖 direct/approval、CEO 委派和显式 assignee 场景。
+
+### BUG-21-034: run 成功后生成文件未登记为任务工作产物
+
+- 状态：fixed
+- 严重级别：P1
+- 是否阻塞最小闭环：是。任务执行成功但 `/api/issues/{issueId}/work-products` 为空，UI 无法展示执行产物。
+- 影响范围：heartbeat run 成功收尾、受管 execution workspace、任务详情 work products。
+- 复现步骤：
+  1. 让 runtime 在任务 workspace 中生成 `CLAUDE_SUMMARY.md`、`CLAUDE.zh.md` 等文件。
+  2. runtime 只在 summary 中提到这些文件，没有结构化返回 `work_products`。
+  3. 查看 `/api/issues/{issueId}/work-products`。
+- 预期行为：server 应登记受管 workspace 中本次 run 新增/修改的有限文本产物，UI 通过既有 work-products API 展示。
+- 实际行为（修复前）：server 只持久化 adapter 显式返回的 `RuntimeExecutionResult.work_products`，不会扫描 workspace 生成文件。
+- 初步根因：Codex/Claude/OpenCode local adapters 默认只返回 stdout/summary/result_json，缺少结构化 workProducts；heartbeat 成功收尾未做 workspace 文件产物补采集。
+- 处理归属：Step 21 closed-loop QA 补强。
+- 修复记录：成功 run 结束后扫描当前受管 execution workspace `cwd` 中执行开始后新增/修改的小型文本文件，登记为 `issue_work_products` 并归档内容为 asset。扫描不解析 summary 中的任意绝对路径，避免越过 workspace 安全边界。
+- 验证证据：`test_successful_run_captures_generated_workspace_files_as_work_products` 覆盖 adapter 未返回 work_products、但 workspace 生成 `CLAUDE_SUMMARY.md` 后自动登记到 issue detail 的场景。

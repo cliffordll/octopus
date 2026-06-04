@@ -414,6 +414,15 @@ small {
   margin: 0;
 }
 
+.storage-settings-card {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
 .settings-section-content > .runtime-settings {
   height: 100%;
   overflow: hidden;
@@ -468,6 +477,54 @@ small {
 
 .settings-section-heading-copy .eyebrow {
   margin: 0;
+}
+
+.settings-preference-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.settings-preference-row {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.settings-preference-row span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.settings-preference-row small {
+  color: var(--muted);
+}
+
+.settings-locale-tabs {
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+}
+
+.settings-locale-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 0.4rem 0.8rem;
+}
+
+.settings-locale-tabs button.active {
+  background: rgba(59, 130, 246, 0.22);
+  color: var(--text);
 }
 
 .runtime-provider-title-line h3,
@@ -1391,6 +1448,107 @@ small {
   gap: 6px;
 }
 
+.workspace-policy-config {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-policy-options {
+  border: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.workspace-policy-options legend {
+  color: #8792a6;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.workspace-policy-option {
+  align-items: flex-start;
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.workspace-policy-option:hover,
+.workspace-policy-option.selected {
+  border-color: #4f7cff;
+  background: #101827;
+}
+
+.workspace-policy-option input {
+  margin-top: 3px;
+  width: auto;
+}
+
+.workspace-policy-option span {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-policy-option strong {
+  flex: 0 0 auto;
+  color: #e8edf5;
+  font-size: 13px;
+}
+
+.workspace-policy-option small {
+  color: #8792a6;
+  flex: 1 1 auto;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-policy-preview {
+  background: #070b12;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.workspace-policy-preview-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.workspace-policy-preview-heading strong {
+  color: #e8edf5;
+  font-size: 13px;
+}
+
+.workspace-policy-preview pre {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.workspace-policy-advanced summary {
+  color: #9aa6b8;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .project-workspace-grid {
   display: grid;
   gap: 12px;
@@ -1496,6 +1654,102 @@ small {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.storage-object-details {
+  color: #9aa8bc;
+  font-size: 12px;
+}
+
+.storage-object-details summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.storage-object-details[open] {
+  display: grid;
+  gap: 8px;
+}
+
+.download-unavailable {
+  align-items: center;
+  background: #151b24;
+  border: 1px solid #2c3648;
+  border-radius: 999px;
+  color: #8f9bad;
+  display: inline-flex;
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.issue-work-product-hint {
+  margin: -4px 0 10px;
+}
+
+.issue-documents-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(150px, 0.32fr) minmax(0, 1fr);
+}
+
+.issue-document-list {
+  background: #0f1622;
+  border: 1px solid #232d3d;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.issue-document-list button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #d7deea;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 8px;
+  text-align: left;
+}
+
+.issue-document-list button:hover,
+.issue-document-list button.active {
+  background: #172235;
+  border-color: #34445d;
+}
+
+.issue-document-list span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.issue-document-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.issue-document-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(140px, 0.35fr) minmax(0, 1fr);
+}
+
+.issue-document-body {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.issue-document-revision {
+  border-top: 1px solid #202938;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 8px 0;
 }
 
 .workspace-shell-layout {
@@ -1952,6 +2206,11 @@ small {
   overflow: clip;
 }
 
+.project-issue-status-group:has(> .muted) {
+  background: #0a1018;
+  min-height: 132px;
+}
+
 .project-issue-status-heading {
   align-items: center;
   background: #101722;
@@ -2010,6 +2269,8 @@ small {
 }
 
 .project-issue-status-group > .muted {
+  color: #68758a;
+  font-size: 12px;
   margin: 0;
   padding: 14px;
 }
@@ -2091,6 +2352,17 @@ small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-issue-card-action {
+  align-self: flex-start;
+  background: rgba(59, 130, 196, 0.16);
+  border: 1px solid rgba(77, 148, 216, 0.38);
+  border-radius: 999px;
+  color: #b9dcff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
 }
 
 .heartbeat-filter {
@@ -3395,11 +3667,18 @@ button.danger {
   gap: 8px;
 }
 
+.issue-header-actions,
+.issue-sidebar-actions {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .issue-title-row {
   align-items: flex-start;
   display: flex;
   gap: 18px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .issue-header-actions > button,
@@ -3421,6 +3700,9 @@ button.danger {
   font-size: var(--text-page);
   line-height: var(--line-tight);
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .issue-description {
@@ -3443,6 +3725,13 @@ button.danger {
   justify-content: space-between;
 }
 
+.issue-section-heading-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 .issue-section-heading h2 {
   color: #e8edf5;
   font-size: 14px;
@@ -3452,6 +3741,39 @@ button.danger {
 
 .issue-section-heading .muted {
   font-size: 12px;
+}
+
+.issue-review-status {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+}
+
+.issue-review-status div {
+  display: grid;
+  gap: 3px;
+}
+
+.issue-review-status span {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.issue-review-status strong {
+  color: #e8edf5;
+  font-size: 13px;
+}
+
+.issue-review-status p {
+  color: #aeb9c9;
+  font-size: 13px;
+  grid-column: 1 / -1;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .issue-activity-list {
@@ -4013,8 +4335,18 @@ button.danger {
   padding: 10px 12px;
 }
 
+.info-notice {
+  background: #151b2b;
+  border: 1px solid #2d3a5f;
+  border-radius: 6px;
+  color: #b9c7ff;
+  margin: 12px 0;
+  padding: 10px 12px;
+}
+
 .error-notice.compact,
-.success-notice.compact {
+.success-notice.compact,
+.info-notice.compact {
   margin: 0;
 }
 
@@ -4048,15 +4380,25 @@ pre {
   gap: 8px;
 }
 
-.approval-toolbar button {
+.approval-status-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.approval-status-filter button,
+.approval-toolbar > button {
   background: #111827;
   border: 1px solid #223047;
   color: #9aa7bc;
+  min-width: 0;
   padding: 7px 12px;
 }
 
-.approval-toolbar button.active,
-.approval-toolbar button:hover {
+.approval-status-filter button.active,
+.approval-status-filter button:hover,
+.approval-toolbar > button.active,
+.approval-toolbar > button:hover {
   background: #172235;
   border-color: #3d8bfd;
   color: #e8f2ff;
@@ -4090,14 +4432,22 @@ pre {
   margin: 2px 0 0;
 }
 
+.approval-card-subtitle {
+  color: #8b98ad;
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
 .approval-card-payload {
   background: #0a1018;
   border: 1px solid #1d293b;
   border-radius: 10px;
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 12px;
+  text-align: left;
 }
 
 .approval-card-payload span,
@@ -4117,8 +4467,27 @@ pre {
   padding-top: 12px;
 }
 
+.approval-actions > button,
+.approval-actions > .button {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  height: 30px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 30px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .approval-empty-state {
   max-width: 640px;
+}
+
+.org-content-full .approval-empty-state {
+  max-width: none;
+  width: 100%;
 }
 
 .approval-detail-layout {
@@ -4144,6 +4513,27 @@ pre {
 
 .approval-note p {
   margin: 6px 0 0;
+}
+
+.approval-comment-hint {
+  margin-top: -8px;
+}
+
+.approval-comment-form {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approval-comment-form textarea {
+  min-height: 92px;
+  resize: vertical;
+  width: 100%;
+}
+
+.approval-comment-form button {
+  align-self: flex-end;
 }
 
 .approval-decision-panel textarea {
@@ -4303,6 +4693,22 @@ pre {
 .agent-property-row select,
 .agent-property-row textarea {
   width: 100%;
+}
+
+.agent-toggle-row > div {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.agent-toggle-row input[type="checkbox"] {
+  margin-top: 2px;
+  width: auto;
+}
+
+.agent-toggle-row small {
+  color: #8f9bad;
+  line-height: 1.5;
 }
 
 .agent-property-actions {
@@ -4821,6 +5227,28 @@ pre {
   gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 12px 18px;
+}
+
+.organization-skill-readable-summary {
+  background: #0f1622;
+  border-bottom: 1px solid #202a3b;
+  display: grid;
+  gap: 6px;
+  padding: 12px 18px;
+}
+
+.organization-skill-readable-summary span {
+  color: #7f8ea5;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+.organization-skill-readable-summary p {
+  color: #d9e5f5;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
 }
 
 .organization-skill-info-grid div {
@@ -5832,6 +6260,21 @@ pre {
   white-space: pre-wrap;
 }
 
+.issue-run-agent-reply-block {
+  display: grid;
+  gap: 6px;
+}
+
+.issue-run-agent-reply.collapsed {
+  max-height: 160px;
+  overflow: hidden;
+  position: relative;
+}
+
+.issue-run-agent-reply-toggle {
+  justify-self: flex-start;
+}
+
 .issue-run-low-value-events {
   border-top: 1px dashed #263244;
   display: flex;
@@ -6217,6 +6660,13 @@ pre {
   min-width: 0;
 }
 
+.chat-message-source {
+  color: #738195;
+  display: inline-block;
+  font-size: 11px;
+  margin-top: 5px;
+}
+
 .chat-agent-avatar {
   align-items: center;
   background: #1d2a3d;
@@ -6238,8 +6688,204 @@ pre {
   white-space: pre-wrap;
 }
 
+.chat-issue-proposal-card {
+  align-items: center;
+  background: #0f1726;
+  border: 1px solid #27344d;
+  border-radius: 12px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 12px;
+}
+
+.chat-issue-proposal-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-issue-proposal-card span,
+.chat-issue-proposal-card small {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-issue-proposal-card strong {
+  color: #e6edf7;
+  font-size: 14px;
+}
+
+.chat-issue-proposal-card p {
+  color: #b9c7db;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-issue-proposal-card button {
+  flex: 0 0 auto;
+}
+
+.chat-issue-created-card {
+  align-items: center;
+  background: #0f1a27;
+  border: 1px solid #28425f;
+  border-radius: 12px;
+  color: inherit;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.chat-issue-created-card:hover {
+  background: #132236;
+  border-color: #3b82c4;
+}
+
+.chat-issue-created-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-issue-created-card span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-issue-created-card strong {
+  color: #e6edf7;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-approval-prompt {
+  align-items: center;
+  background: #101826;
+  border: 1px solid #2f4360;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+}
+
+.chat-approval-prompt div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-approval-prompt span {
+  color: #8f9bad;
+  font-size: 11px;
+}
+
+.chat-approval-prompt-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.chat-approval-status {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.chat-approval-status.pending {
+  background: #2a200f;
+  color: #f8d37b;
+}
+
+.chat-approval-status.unconfirmed {
+  background: #172033;
+  color: #b9c7db;
+}
+
+.chat-approval-status.revision_requested {
+  background: #251b32;
+  color: #d8b4fe;
+}
+
+.chat-approval-status.approved {
+  background: #102a1a;
+  color: #86efac;
+}
+
+.chat-approval-status.rejected,
+.chat-approval-status.cancelled {
+  background: #33151a;
+  color: #fca5a5;
+}
+
+.chat-approval-prompt strong {
+  color: #e8f0fb;
+  font-size: 14px;
+}
+
+.chat-approval-prompt p {
+  color: #b9c7db;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.chat-approval-actions {
+  align-items: center;
+  display: flex !important;
+  flex: 0 0 auto;
+  gap: 8px !important;
+}
+
+.chat-approval-prompt button,
+.chat-approval-prompt a {
+  flex: 0 0 auto;
+}
+
 .chat-message.thinking {
   color: #c8d4e5;
+}
+
+.chat-linked-issue-card {
+  align-items: center;
+  background: #101722;
+  border: 1px solid #263346;
+  border-radius: 14px;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.chat-linked-issue-card:hover {
+  background: #142033;
+  border-color: #3b82c4;
+}
+
+.chat-linked-issue-card span {
+  color: #7f8ea5;
+  display: block;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.chat-linked-issue-card strong {
+  color: #edf4ff;
+  font-size: 13px;
 }
 
 .chat-thinking-text {
@@ -6291,6 +6937,11 @@ pre {
 .chat-attachment-chip span {
   color: #8f9bad;
   font-size: 11px;
+}
+
+.chat-attachment-chip.disabled {
+  color: #8f9bad;
+  cursor: default;
 }
 
 .chat-empty-thread {

@@ -267,15 +267,26 @@ async def _read_stdout(
 ) -> str:
     if process.stdout is None:
         return ""
-    chunks: list[str] = []
+    chunks: list[bytes] = []
+    line_buffer = bytearray()
     while True:
-        line = await process.stdout.readline()
-        if not line:
+        chunk = await process.stdout.read(65_536)
+        if not chunk:
             break
-        text = line.decode(errors="replace")
-        chunks.append(text)
-        await _emit_opencode_stream_event(context, text)
-    return "".join(chunks)
+        chunks.append(chunk)
+        line_buffer.extend(chunk)
+        while True:
+            newline = line_buffer.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(line_buffer[: newline + 1])
+            del line_buffer[: newline + 1]
+            await _emit_opencode_stream_event(context, line.decode(errors="replace"))
+    if line_buffer:
+        await _emit_opencode_stream_event(
+            context, bytes(line_buffer).decode(errors="replace")
+        )
+    return b"".join(chunks).decode(errors="replace")
 
 
 async def _read_stderr(process: asyncio.subprocess.Process) -> str:

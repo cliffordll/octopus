@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRuntimeType, RuntimeModel, RuntimeProvider } from "../api/types";
+import { isEnglishLocale } from "../utils/locale";
 import { MODEL_PROVIDER_RUNTIMES } from "../utils/runtimeModels";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
@@ -9,6 +10,7 @@ import { ErrorNotice } from "./ErrorNotice";
 const DEFAULT_PROTOCOL = "openai_chat_completions";
 
 export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
+  const english = isEnglishLocale();
   const queryClient = useQueryClient();
   const [runtimeType, setRuntimeType] = useState<AgentRuntimeType>("opencode_local");
   const [providerId, setProviderId] = useState("");
@@ -183,13 +185,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
 
   function confirmDeleteProvider(provider: RuntimeProvider) {
     const providerName = provider.name || provider.providerId;
-    if (!window.confirm(`确认删除 Provider：${providerName}？`)) return;
+    if (!window.confirm(english ? `Delete provider: ${providerName}?` : `确认删除 Provider：${providerName}？`)) return;
     deleteProvider.mutate(provider);
   }
 
   function confirmDeleteModel(providerId: string, model: RuntimeModel) {
     const modelName = model.displayName || model.modelId;
-    if (!window.confirm(`确认删除模型：${modelName}？`)) return;
+    if (!window.confirm(english ? `Delete model: ${modelName}?` : `确认删除模型：${modelName}？`)) return;
     deleteModel.mutate({ providerId, model });
   }
 
@@ -221,12 +223,14 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
         <div className="settings-section-heading-copy">
           <p className="eyebrow">Runtime Providers</p>
           <div className="runtime-provider-title-line">
-            <h3>模型供应商</h3>
-            <p className="muted">维护当前组织的运行时 provider 和 model。</p>
+            <h3>{english ? "Runtime Providers" : "模型供应商"}</h3>
+            <p className="muted">
+              {english ? "Manage runtime providers and models for the current organization." : "维护当前组织的运行时 provider 和 model。"}
+            </p>
           </div>
         </div>
         <label className="runtime-type-select">
-          运行时
+          {english ? "Runtime" : "运行时"}
           <select
             value={runtimeType}
             onChange={(event) => {
@@ -247,7 +251,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
           <div className="runtime-settings-title-actions">
             <span>{providerRows.length}</span>
             <button className="secondary small-button" onClick={() => setProviderDialogOpen(true)} type="button">
-              新建 Provider
+              {english ? "New Provider" : "新建 Provider"}
             </button>
           </div>
         </div>
@@ -286,10 +290,10 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <div className="task-modal-header">
               <div>
                 <p className="eyebrow">Runtime Provider</p>
-                <h2>新建 Provider</h2>
+                <h2>{english ? "New Provider" : "新建 Provider"}</h2>
               </div>
               <button className="secondary small-button" onClick={() => setProviderDialogOpen(false)} type="button">
-                关闭
+                {english ? "Close" : "关闭"}
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
@@ -298,11 +302,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <input value={providerId} onChange={(event) => setProviderId(event.target.value)} required />
               </label>
               <label>
-                Provider 名称
+                {english ? "Provider name" : "Provider 名称"}
                 <input value={providerName} onChange={(event) => setProviderName(event.target.value)} />
               </label>
               <label>
-                协议
+                {english ? "Protocol" : "协议"}
                 <input value={protocol} onChange={(event) => setProtocol(event.target.value)} />
               </label>
               <label>
@@ -314,8 +318,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
               </label>
               <div className="task-modal-actions">
-              <button className="secondary" onClick={clearProviderForm} type="button">取消</button>
-                <button disabled={createProvider.isPending} type="submit">保存 Provider</button>
+              <button className="secondary" onClick={clearProviderForm} type="button">{english ? "Cancel" : "取消"}</button>
+                <button disabled={createProvider.isPending} type="submit">{english ? "Save Provider" : "保存 Provider"}</button>
               </div>
               {createProvider.error && <ErrorNotice error={createProvider.error} />}
             </form>
@@ -334,11 +338,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <div className="task-modal-header">
               <div>
                 <p className="eyebrow">Runtime Provider</p>
-                <h2>编辑 Provider</h2>
+                <h2>{english ? "Edit Provider" : "编辑 Provider"}</h2>
                 <p className="muted">{editingProvider.providerId}</p>
               </div>
               <button className="secondary small-button" onClick={clearProviderForm} type="button">
-                关闭
+                {english ? "Close" : "关闭"}
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
@@ -347,11 +351,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <input disabled value={providerId} />
               </label>
               <label>
-                Provider 名称
+                {english ? "Provider name" : "Provider 名称"}
                 <input value={providerName} onChange={(event) => setProviderName(event.target.value)} />
               </label>
               <label>
-                协议
+                {english ? "Protocol" : "协议"}
                 <input value={protocol} onChange={(event) => setProtocol(event.target.value)} />
               </label>
               <label>
@@ -360,11 +364,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
               </label>
               <label>
                 API Key
-                <input placeholder={editingProvider.hasApiKey ? "留空表示不修改" : ""} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+                <input placeholder={editingProvider.hasApiKey ? (english ? "Leave blank to keep unchanged" : "留空表示不修改") : ""} value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
               </label>
               <div className="task-modal-actions">
-                <button className="secondary" onClick={clearProviderForm} type="button">取消</button>
-                <button disabled={updateProvider.isPending} type="submit">保存 Provider</button>
+                <button className="secondary" onClick={clearProviderForm} type="button">{english ? "Cancel" : "取消"}</button>
+                <button disabled={updateProvider.isPending} type="submit">{english ? "Save Provider" : "保存 Provider"}</button>
               </div>
               {updateProvider.error && <ErrorNotice error={updateProvider.error} />}
             </form>
@@ -383,11 +387,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <div className="task-modal-header">
               <div>
                 <p className="eyebrow">Runtime Model</p>
-                <h2>新建 Model</h2>
+                <h2>{english ? "New Model" : "新建 Model"}</h2>
                 <p className="muted">Provider: {modelDialogProviderId}</p>
               </div>
               <button className="secondary small-button" onClick={() => setModelDialogProviderId("")} type="button">
-                关闭
+                {english ? "Close" : "关闭"}
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitModel}>
@@ -396,12 +400,12 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <input value={modelId} onChange={(event) => setModelId(event.target.value)} required />
               </label>
               <label>
-                模型显示名称
+                {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
               <div className="task-modal-actions">
-              <button className="secondary" onClick={clearModelForm} type="button">取消</button>
-                <button disabled={createModel.isPending} type="submit">保存 Model</button>
+              <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
+                <button disabled={createModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
               </div>
               {createModel.error && <ErrorNotice error={createModel.error} />}
             </form>
@@ -420,11 +424,11 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <div className="task-modal-header">
               <div>
                 <p className="eyebrow">Runtime Model</p>
-                <h2>编辑 Model</h2>
+                <h2>{english ? "Edit Model" : "编辑 Model"}</h2>
                 <p className="muted">Provider: {editingModel.providerId}</p>
               </div>
               <button className="secondary small-button" onClick={clearModelForm} type="button">
-                关闭
+                {english ? "Close" : "关闭"}
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitModel}>
@@ -433,12 +437,12 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <input disabled value={modelId} />
               </label>
               <label>
-                模型显示名称
+                {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
               <div className="task-modal-actions">
-                <button className="secondary" onClick={clearModelForm} type="button">取消</button>
-                <button disabled={updateModel.isPending} type="submit">保存 Model</button>
+                <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
+                <button disabled={updateModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
               </div>
               {updateModel.error && <ErrorNotice error={updateModel.error} />}
             </form>
@@ -478,6 +482,7 @@ function ProviderModelGroup({
     enabled: Boolean(orgId && provider.providerId),
   });
   const providerName = provider.name || provider.providerId;
+  const english = isEnglishLocale();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   function closeMenu() {
     setOpenMenu(null);
@@ -488,8 +493,8 @@ function ProviderModelGroup({
         <div>
           <strong>{providerName}</strong>
           <span>{provider.providerId}</span>
-          <small>{provider.baseUrl ?? "未设置 Base URL"}</small>
-          <em>{provider.hasApiKey ? "已配置 API Key" : "未配置 API Key"}</em>
+          <small>{provider.baseUrl ?? (english ? "No Base URL" : "未设置 Base URL")}</small>
+          <em>{provider.hasApiKey ? (english ? "API key configured" : "已配置 API Key") : (english ? "API key missing" : "未配置 API Key")}</em>
         </div>
         <div className="runtime-provider-actions">
           <div
@@ -517,7 +522,7 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  新增模型
+                  {english ? "New model" : "新增模型"}
                 </button>
                 <button
                   onClick={() => {
@@ -527,7 +532,7 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  编辑
+                  {english ? "Edit" : "编辑"}
                 </button>
                 <button
                   onClick={() => {
@@ -537,7 +542,7 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  {provider.enabled === false ? "启用" : "禁用"}
+                  {provider.enabled === false ? (english ? "Enable" : "启用") : (english ? "Disable" : "禁用")}
                 </button>
                 <button
                   className="danger"
@@ -548,7 +553,7 @@ function ProviderModelGroup({
                   role="menuitem"
                   type="button"
                 >
-                  删除
+                  {english ? "Delete" : "删除"}
                 </button>
               </div>
             )}
@@ -562,32 +567,32 @@ function ProviderModelGroup({
               <div className="runtime-model-row-main">
                 <div className="runtime-model-title-line">
                   <strong>{model.displayName || model.modelId}</strong>
-                  <Badge>{model.enabled === false ? "disabled" : "enabled"}</Badge>
+                  <Badge>{model.enabled === false ? (english ? "disabled" : "已禁用") : (english ? "enabled" : "已启用")}</Badge>
                 </div>
                 <div className="runtime-model-actions">
                   <button
-                    aria-label={model.enabled === false ? "启用" : "禁用"}
+                    aria-label={model.enabled === false ? (english ? "Enable" : "启用") : (english ? "Disable" : "禁用")}
                     className="secondary icon-action-button small-button"
                     onClick={() => onToggleModel(model)}
-                    title={model.enabled === false ? "启用" : "禁用"}
+                    title={model.enabled === false ? (english ? "Enable" : "启用") : (english ? "Disable" : "禁用")}
                     type="button"
                   >
                     <span aria-hidden="true">{model.enabled === false ? "▶" : "⏸"}</span>
                   </button>
                   <button
-                    aria-label="编辑"
+                    aria-label={english ? "Edit" : "编辑"}
                     className="secondary icon-action-button small-button"
                     onClick={() => onEditModel(model)}
-                    title="编辑"
+                    title={english ? "Edit" : "编辑"}
                     type="button"
                   >
                     <span aria-hidden="true">✎</span>
                   </button>
                   <button
-                    aria-label="删除"
+                    aria-label={english ? "Delete" : "删除"}
                     className="secondary danger icon-action-button small-button"
                     onClick={() => onDeleteModel(model)}
-                    title="删除"
+                    title={english ? "Delete" : "删除"}
                     type="button"
                   >
                     <span aria-hidden="true">×</span>

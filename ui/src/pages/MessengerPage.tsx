@@ -4,11 +4,12 @@ import { messengerApi } from "../api/messenger";
 import { Badge } from "../components/Badge";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { statusLabel } from "../utils/display";
 
 const SYSTEM_THREADS = [
-  { key: "failed-runs", label: "failed-runs" },
-  { key: "budget-alerts", label: "budget-alerts" },
-  { key: "join-requests", label: "join-requests" },
+  { key: "failed-runs", label: "失败运行" },
+  { key: "budget-alerts", label: "预算提醒" },
+  { key: "join-requests", label: "加入申请" },
 ];
 
 export function MessengerPage() {
@@ -39,7 +40,7 @@ export function MessengerPage() {
           {threads.data?.map((thread) => (
             <article className="summary-card" key={thread.threadKey}>
               <div className="meta-line">
-                <Badge>{thread.kind}</Badge>
+                <Badge>{statusLabel(thread.kind)}</Badge>
                 {thread.needsAttention && <Badge>需关注</Badge>}
                 {thread.unreadCount > 0 && <Badge>{thread.unreadCount} 未读</Badge>}
               </div>

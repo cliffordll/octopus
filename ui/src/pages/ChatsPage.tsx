@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { ChatMessage } from "../api/types";
 import { ChatsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { roleLabel } from "../utils/display";
 
 function skillLabel(entry: Record<string, unknown>) {
   const value = entry.selectionKey ?? entry.key ?? entry.runtimeName ?? entry.name ?? entry.slug ?? entry.id ?? entry.shortName;
@@ -124,7 +125,7 @@ export function ChatsPage() {
       </header>
       <section className="panel chat-panel">
         <div className="chat-empty-state">
-          <h2>What do you want to work on?</h2>
+          <h2>你想让智能体处理什么？</h2>
           <p className="muted">选择智能体并发送第一条消息。</p>
         </div>
         <form className="form chat-composer" onSubmit={submit}>
@@ -165,7 +166,7 @@ export function ChatsPage() {
               >
                 <option value="">选择智能体</option>
                 {chatAgentList.map((agent) => (
-                  <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>
+                  <option key={agent.id} value={agent.id}>{agent.name} ({roleLabel(agent.role)})</option>
                 ))}
               </select>
             </label>
