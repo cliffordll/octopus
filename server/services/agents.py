@@ -76,7 +76,6 @@ from .agent_instructions import (
     normalize_instructions_paths,
 )
 from .organization_skills import OrganizationSkillService, organization_skills_root
-from .agent_names import pick_unique_agent_name
 from .workspace_paths import agent_workspace_root
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -315,8 +314,7 @@ class AgentService:
 
     async def suggest_name(self, org_id: str) -> str:
         existing = await list_org_agents(self._session, org_id)
-        name = pick_unique_agent_name([(row.name, row.status) for row in existing])
-        return self._deduplicate_name(name, existing)
+        return self._next_role_sequence_name(DEFAULT_AGENT_ROLE, existing)
 
     async def create_agent(
         self,
@@ -417,17 +415,21 @@ class AgentService:
         status: AgentStatus,
         activity_action: str,
     ) -> Agent:
+        role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
         manager_id = payload.get("reportsTo")
+        if "reportsTo" not in payload and actor_type == "agent":
+            manager_id = actor_id
         if manager_id is not None:
             await self._validate_manager(org_id, manager_id)
         existing = await list_org_agents(self._session, org_id)
         requested_name = str(payload.get("name", "")).strip()
-        candidate_name = requested_name or pick_unique_agent_name(
-            [(row.name, row.status) for row in existing]
-        )
-        name = self._deduplicate_name(candidate_name, existing)
+        if self._should_use_role_sequence_name(
+            requested_name, role=role, actor_type=actor_type
+        ):
+            name = self._next_role_sequence_name(role, existing)
+        else:
+            name = self._deduplicate_name(requested_name, existing)
         agent_id = str(uuid.uuid4())
-        role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
         agent_runtime_type = payload.get("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
         agent_runtime_config = normalize_instructions_paths(
             dict(payload.get("agentRuntimeConfig", {}))
@@ -443,7 +445,7 @@ class AgentService:
             "icon": payload.get("icon")
             or f"{AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX}{uuid.uuid4()}",
             "status": status,
-            "reports_to": payload.get("reportsTo"),
+            "reports_to": manager_id,
             "capabilities": payload.get("capabilities"),
             "agent_runtime_type": agent_runtime_type,
             "agent_runtime_config": agent_runtime_config,
@@ -1109,6 +1111,38 @@ class AgentService:
         while _derive_url_key(f"{requested} {index}") in used:
             index += 1
         return f"{requested} {index}"
+
+    def _should_use_role_sequence_name(
+        self, requested: str, *, role: AgentRole, actor_type: str
+    ) -> bool:
+        if actor_type == "agent":
+            return True
+        if not requested:
+            return True
+        return _derive_url_key(requested) == _derive_url_key(role)
+
+    def _next_role_sequence_name(
+        self, role: AgentRole, existing: Sequence[AgentRow]
+    ) -> str:
+        prefix = _derive_url_key(role)
+        used: set[int] = set()
+        for row in existing:
+            if row.status == "terminated":
+                continue
+            key = _derive_url_key(row.name)
+            if key == prefix:
+                used.add(1)
+                continue
+            marker = f"{prefix}-"
+            if not key.startswith(marker):
+                continue
+            suffix = key[len(marker) :]
+            if suffix.isdigit():
+                used.add(int(suffix))
+        index = 1
+        while index in used:
+            index += 1
+        return f"{prefix}-{index}"
 
     async def _chain_of_command(self, row: AgentRow) -> list[AgentChainOfCommandEntry]:
         chain: list[AgentChainOfCommandEntry] = []
