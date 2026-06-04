@@ -5,6 +5,8 @@ import type {
   OrganizationDetail,
   OrganizationResource,
   OrganizationSummary,
+  OrganizationWorkspaceFileDetail,
+  OrganizationWorkspaceFileList,
   UpdateOrganizationPayload,
   UpdateOrganizationResourcePayload,
 } from "./types";
@@ -40,5 +42,15 @@ export const organizationsApi = {
     request<OrganizationResource>(
       `${root}/${encodeURIComponent(orgId)}/resources/${encodeURIComponent(resourceId)}`,
       { method: "DELETE" },
+    ),
+  workspaceFiles: (orgId: string, path = ""): Promise<OrganizationWorkspaceFileList> =>
+    request<OrganizationWorkspaceFileList>(
+      `${root}/${encodeURIComponent(orgId)}/workspace/files?path=${encodeURIComponent(path)}`,
+      { method: "GET" },
+    ),
+  workspaceFile: (orgId: string, path: string): Promise<OrganizationWorkspaceFileDetail> =>
+    request<OrganizationWorkspaceFileDetail>(
+      `${root}/${encodeURIComponent(orgId)}/workspace/file?path=${encodeURIComponent(path)}`,
+      { method: "GET" },
     ),
 };
