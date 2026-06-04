@@ -90,9 +90,13 @@ async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
     reader.feed_data(payload.encode())
     reader.feed_eof()
     events: list[dict[str, Any]] = []
+    logs: list[tuple[str, str]] = []
 
     async def capture_stream_event(event: dict[str, Any]) -> None:
         events.append(event)
+
+    async def capture_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
 
     class FakeProcess:
         stdout = reader
@@ -103,7 +107,7 @@ async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
         org_id="org-14",
         agent_name="Long Line Agent",
         config={},
-        on_log=_noop_on_log,
+        on_log=capture_log,
         on_stream_event=capture_stream_event,
     )
 
@@ -111,6 +115,116 @@ async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
 
     assert stdout == payload
     assert events == [{"type": "assistant_delta", "delta": long_text}]
+    assert {stream for stream, _ in logs} == {"stdout"}
+    assert "".join(chunk for _, chunk in logs) == payload
+
+
+async def test_opencode_prompt_includes_bash_tool_schema_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_prompt = ""
+    unique = uuid.uuid4().hex
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            nonlocal captured_prompt
+            captured_prompt = (payload or b"").decode()
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful OpenCode process must not be killed")
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_opencode_local(
+        RuntimeExecutionContext(
+            run_id="run-tool-guidance",
+            agent_id=f"agent-tool-guidance-{unique}",
+            org_id=f"org-tool-guidance-{unique}",
+            agent_name="OpenCode",
+            config={"command": "opencode-test", "promptTemplate": "Do the task."},
+            on_log=_noop_on_log,
+            workspace={
+                "rudderWorkspace": {
+                    "cwd": "D:/octopus/worktree",
+                    "worktreePath": "D:/octopus/worktree",
+                    "orgArtifactsDir": "D:/octopus/artifacts",
+                }
+            },
+        )
+    )
+
+    assert "Do the task." in captured_prompt
+    assert "bash" in captured_prompt
+    assert "description" in captured_prompt
+    assert "command" in captured_prompt
+    assert "Do not guess tool input schemas" in captured_prompt
+    assert "## Workspace Output Contract" in captured_prompt
+    assert "D:/octopus/worktree" in captured_prompt
+    assert "D:/octopus/artifacts" in captured_prompt
+    assert (
+        "Do not write generated deliverables into external source paths"
+        in captured_prompt
+    )
+
+
+async def test_opencode_tool_error_with_later_text_is_diagnostic_not_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unique = uuid.uuid4().hex
+    stdout = (
+        '{"type":"tool_use","part":{"tool":"bash","state":{"status":"error",'
+        '"error":"SchemaError(Missing key at [\\"description\\"])"}}}\n'
+        '{"type":"text","part":{"text":"finished anyway"}}\n'
+    ).encode()
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return stdout, b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful OpenCode process must not be killed")
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        RuntimeExecutionContext(
+            run_id="run-tool-diagnostic",
+            agent_id=f"agent-tool-diagnostic-{unique}",
+            org_id=f"org-tool-diagnostic-{unique}",
+            agent_name="OpenCode",
+            config={"command": "opencode-test"},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "finished anyway"
+    assert result.result_json["toolErrors"] == [
+        'SchemaError(Missing key at ["description"])'
+    ]
 
 
 @pytest.fixture
@@ -1341,7 +1455,9 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     assert result.session_id_after == "thread-fallback"
     assert result.result_json is not None
     assert result.result_json["summary"] == "fallback ok"
-    assert captured["input"] == b""
+    prompt = captured["input"].decode("utf-8")
+    assert "## Runtime Tool Capability" in prompt
+    assert "Do not guess tool input schemas" in prompt
 
 
 async def test_claude_and_opencode_execute_inject_runtime_context_env(

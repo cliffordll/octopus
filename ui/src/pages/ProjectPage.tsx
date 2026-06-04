@@ -114,6 +114,16 @@ function nullableText(value: string | null | undefined): string {
   return value && value.trim() ? value : "未设置";
 }
 
+function joinWorkspacePath(root: string | null | undefined, child: string): string {
+  const base = root?.trim();
+  if (!base) return "未设置";
+  return `${base.replace(/[\\/]+$/, "")}/${child}`;
+}
+
+function projectHasLocalWorkspace(workspaces: ProjectWorkspace[]): boolean {
+  return workspaces.some((workspace) => Boolean(workspace.cwd?.trim()));
+}
+
 function roleCount(
   resources: Array<{ role: ProjectResourceRole }>,
   role: ProjectResourceRole,
@@ -136,6 +146,12 @@ function resourceKindMark(kind: OrganizationResource["kind"] | undefined): strin
 }
 
 function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCodebase; workspaces: ProjectWorkspace[] }) {
+  const hasLocalWorkspace = projectHasLocalWorkspace(workspaces);
+  const usesOrgWorkspaceFallback = !hasLocalWorkspace;
+  const orgWorkspaceRoot = codebase?.managedFolder ?? codebase?.effectiveLocalFolder ?? null;
+  const effectiveCwd = hasLocalWorkspace
+    ? codebase?.effectiveLocalFolder ?? codebase?.localFolder
+    : orgWorkspaceRoot;
   return (
     <section className="project-workspace-grid" aria-label="项目工作区">
       <article className="project-workspace-card">
@@ -147,8 +163,15 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
           <div><dt>来源</dt><dd>{codebase?.origin ?? "未设置"}</dd></div>
           <div><dt>仓库</dt><dd>{nullableText(codebase?.repoUrl)}</dd></div>
           <div><dt>分支</dt><dd>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
-          <div><dt>本地目录</dt><dd>{nullableText(codebase?.effectiveLocalFolder ?? codebase?.localFolder)}</dd></div>
+          <div><dt>执行目录</dt><dd>{nullableText(effectiveCwd)}</dd></div>
+          <div><dt>产物目录</dt><dd>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
         </dl>
+        {usesOrgWorkspaceFallback && (
+          <div className="project-workspace-fallback">
+            <strong>将使用组织共享工作区</strong>
+            <span>当前项目没有可用的本地项目工作区。任务运行时会 fallback 到组织共享工作区，持久报告、截图和文档应写入 artifacts。</span>
+          </div>
+        )}
       </article>
       <article className="project-workspace-card">
         <div className="project-workspace-card-heading">
@@ -156,15 +179,19 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
           <Badge>{workspaces.length}</Badge>
         </div>
         <div className="project-workspace-list">
+          {workspaces.length === 0 && (
+            <p className="project-workspace-empty">暂无项目工作区。任务运行时会使用组织共享工作区。</p>
+          )}
           {workspaces.map((workspace) => (
             <div className="project-workspace-item" key={workspace.id}>
               <div>
                 <strong>{workspace.name}</strong>
-                <span>{nullableText(workspace.cwd)}</span>
+                <span>{workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}</span>
               </div>
               <div className="project-workspace-badges">
                 {workspace.isPrimary && <Badge>主工作区</Badge>}
                 <Badge>{workspace.sourceType}</Badge>
+                {!workspace.cwd?.trim() && <Badge>组织工作区 fallback</Badge>}
                 {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
               </div>
             </div>
