@@ -48,11 +48,14 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.chats import get_chat_service
+from ..services.chat_generation_locks import (
+    cancel_active_chat_generation,
+    claim_chat_generation,
+)
 from ..services.chats import ChatAvailabilityError, ChatService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["chats"])
-_ACTIVE_STREAM_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
 
 
 async def _get_conversation_or_404(
@@ -437,14 +440,13 @@ async def add_chat_message_stream_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
 
-    if id in _ACTIVE_STREAM_CANCEL_EVENTS:
+    cancel_event = asyncio.Event()
+    release_generation = claim_chat_generation(id, cancel_event)
+    if release_generation is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A chat reply is already being generated for this conversation",
         )
-
-    cancel_event = asyncio.Event()
-    _ACTIVE_STREAM_CANCEL_EVENTS[id] = cancel_event
 
     async def event_stream():
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -486,7 +488,7 @@ async def add_chat_message_stream_route(
                 task.cancel()
             yield _stream_line({"type": "error", "error": str(exc), "messageId": None})
         finally:
-            _ACTIVE_STREAM_CANCEL_EVENTS.pop(id, None)
+            release_generation()
 
     return StreamingResponse(
         event_stream(),
@@ -502,11 +504,7 @@ async def stop_chat_message_stream_route(
     service: ChatService = Depends(get_chat_service),
 ) -> dict[str, bool]:
     await _get_conversation_or_404(id, request=request, service=service)
-    cancel_event = _ACTIVE_STREAM_CANCEL_EVENTS.get(id)
-    if cancel_event is None:
-        return {"stopped": False}
-    cancel_event.set()
-    return {"stopped": True}
+    return {"stopped": cancel_active_chat_generation(id)}
 
 
 def _stream_line(event: dict[str, Any]) -> str:

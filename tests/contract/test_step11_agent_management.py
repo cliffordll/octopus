@@ -1288,7 +1288,10 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         "skills.bundled.enabled=false",
         "-",
     )
-    assert captured["stdin"] == b"Complete the assigned task."
+    prompt = captured["stdin"].decode("utf-8")
+    assert prompt.startswith("Complete the assigned task.")
+    assert "## Runtime Tool Capability" in prompt
+    assert "Do not guess tool input schemas" in prompt
     assert run["sessionIdAfter"] == "thread-11e"
     assert run["usageJson"] == {
         "inputTokens": 12,

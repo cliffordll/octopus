@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
+import uuid
 
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -213,6 +215,152 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
     assert workspace["sourceIssueId"] == issue.id
     assert workspace["mode"] == "isolated_workspace"
     assert workspace["strategyType"] == "git_worktree"
+
+
+async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-org-workspace",
+                name="Step 15 Org Workspace",
+                issue_prefix="ORG",
+            )
+            session.add(org)
+            await session.flush()
+            project = await ProjectService(session).create_project(
+                org.id,
+                {"name": "Org Workspace Fallback"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use organization workspace",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-org-workspace",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        f'Project has no workspace configured. Run will start in shared organization workspace "{org_root}".'
+    ]
+    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_ORG_WORKSPACE_ROOT"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts"
+    )
+
+
+async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-empty-cwd",
+                name="Step 15 Empty Cwd",
+                issue_prefix="ECW",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Workspace Without Cwd"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Remote Metadata Only",
+                    "cwd": None,
+                    "repoUrl": "https://example.test/org/repo.git",
+                    "repoRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use organization workspace for empty cwd",
+                project_workspace_id=project_workspace["id"]
+                if project_workspace is not None
+                else None,
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-empty-cwd",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert project_workspace is not None
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] == project_workspace["id"]
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        "Project workspace has no local cwd configured. Run will start "
+        f'in shared organization workspace "{org_root}".'
+    ]
 
 
 async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
@@ -460,9 +608,12 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             assert isinstance(workspace, str)
             report = Path(workspace) / "CLAUDE_SUMMARY.md"
             report.write_text("# Summary\n\nGenerated by runtime.\n", encoding="utf-8")
+            artifacts_dir = (context.env or {}).get("RUDDER_ORG_ARTIFACTS_DIR")
+            assert isinstance(artifacts_dir, str)
+            artifact = Path(artifacts_dir) / "analysis-plan.md"
+            artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
             return RuntimeExecutionResult(
-                exit_code=0,
-                result_json={"summary": "generated CLAUDE_SUMMARY.md"},
+                exit_code=0, result_json={"summary": "generated markdown files"}
             )
 
         async def test_environment(self, config):
@@ -556,18 +707,79 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert run is not None
     assert run["status"] == "succeeded"
     result_json = run["resultJson"] or {}
-    assert result_json["workProducts"][0]["title"] == "CLAUDE_SUMMARY.md"
-    assert result_json["workProducts"][0]["contentPath"] is not None
+    titles = {product["title"] for product in result_json["workProducts"]}
+    assert titles == {"CLAUDE_SUMMARY.md", "analysis-plan.md"}
+    assert all(product["contentPath"] for product in result_json["workProducts"])
     assert detail is not None
-    assert detail["workProducts"][0]["title"] == "CLAUDE_SUMMARY.md"
-    metadata = detail["workProducts"][0]["metadata"]
-    assert metadata is not None
-    assert metadata["source"] == "execution_workspace_scan"
+    detail_titles = {product["title"] for product in detail["workProducts"]}
+    assert detail_titles == {"CLAUDE_SUMMARY.md", "analysis-plan.md"}
+    metadata_by_title = {
+        product["title"]: product["metadata"] for product in detail["workProducts"]
+    }
+    assert metadata_by_title["CLAUDE_SUMMARY.md"] is not None
+    assert metadata_by_title["analysis-plan.md"] is not None
+    assert metadata_by_title["CLAUDE_SUMMARY.md"]["source"] == (
+        "execution_workspace_scan"
+    )
+    assert metadata_by_title["analysis-plan.md"]["source"] == (
+        "organization_artifacts_scan"
+    )
 
 
-async def test_run_preflight_and_adapter_execution_record_workspace_operations() -> (
-    None
-):
+async def test_run_preflight_and_adapter_execution_record_workspace_operations(
+    monkeypatch,
+) -> None:
+    class LoggingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            await context.on_log("stdout", "operation-ok\n")
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "operation-ok"},
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    root = Path("pytest-tmp") / f"step15-operation-logs-{uuid.uuid4().hex}"
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    monkeypatch.setenv(
+        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR", str(root / "operation-logs")
+    )
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: (root / "workspaces" / f"org_{org_id}").resolve(),
+    )
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: LoggingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: LoggingAdapter(),
+    )
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -610,10 +822,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
                 {
                     "name": "Workspace Operation Agent",
                     "agentRuntimeType": "process",
-                    "agentRuntimeConfig": {
-                        "command": sys.executable,
-                        "args": ["-c", "print('operation-ok')"],
-                    },
+                    "agentRuntimeConfig": {"command": sys.executable},
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -626,9 +835,13 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
             )
             assert run is not None
             operations = await list_workspace_operations_for_run(session, run["id"])
+            adapter_log = await WorkspaceService(session).read_operation_log(
+                operations[1].id
+            )
             await session.commit()
     finally:
         await engine.dispose()
+        shutil.rmtree(root, ignore_errors=True)
 
     assert run is not None
     assert run["status"] == "succeeded"
@@ -645,6 +858,14 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations()
         operations[1].stdout_excerpt == "operation-ok\r\n"
         or operations[1].stdout_excerpt == "operation-ok\n"
     )
+    assert operations[1].log_store == "local_file"
+    assert operations[1].log_ref is not None
+    assert operations[1].log_bytes is not None
+    assert operations[1].log_bytes > 0
+    assert operations[1].log_sha256 is not None
+    assert adapter_log is not None
+    assert '"stream": "stdout"' in adapter_log["content"]
+    assert "operation-ok" in adapter_log["content"]
 
 
 async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
