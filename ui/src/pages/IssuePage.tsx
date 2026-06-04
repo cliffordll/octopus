@@ -138,6 +138,10 @@ function nextLogOffset(log: LogReadResult): number | null {
   return null;
 }
 
+function isWorkspaceProvisionOperation(operation: WorkspaceOperation): boolean {
+  return operation.phase === "workspace_provision";
+}
+
 function AutoScrollPre({
   className,
   content,
@@ -417,7 +421,7 @@ function IssuePropertiesPanel({
   );
 }
 
-function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
+function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"] }) {
   const queryClient = useQueryClient();
   const workProductsQuery = useQuery({
     queryKey: ["issue-work-products", issue.id],
@@ -433,16 +437,23 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
     },
   });
   return (
-    <section aria-label="工作产物" className="issue-section-card">
+    <section aria-label="运行产物" className="issue-section-card">
       <div className="issue-section-heading">
-        <h2>工作产物</h2>
+        <h2>运行产物</h2>
         <span className="muted">{workProducts.length}</span>
       </div>
       <p className="muted issue-work-product-hint">
-        工作产物由智能体运行生成并由 server 记录。UI 只展示下载入口，只有点击下载时才会通过 contentPath 获取文件，不会自动写入本地仓库。
+        运行产物是智能体执行后生成并由 server 记录的交付文件。下载只读取 contentPath，不会写入本地工作区。
       </p>
       {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
       {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
+      {!workProductsQuery.isLoading && workProducts.length === 0 && (
+        <p className="muted">
+          {latestRunStatus === "succeeded"
+            ? "最新运行已成功，但 server 没有登记受管产物。可能没有生成文件，或文件写到了工作区 / artifacts 之外的路径。"
+            : "暂无运行产物。任务执行成功后，server 会把受管工作区或 artifacts 中的产物登记到这里。"}
+        </p>
+      )}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
           {workProducts.map((product) => (
@@ -477,13 +488,13 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               <div className="issue-work-product-actions">
                 {product.contentPath ? (
                   <>
-                    <a className="button secondary small-button" href={product.contentPath}>下载产物文件</a>
+                    <a className="button secondary small-button" href={product.contentPath}>下载运行产物</a>
                     <a className="button secondary small-button" href={product.contentPath} target="_blank" rel="noreferrer">预览内容</a>
                   </>
                 ) : (
                   <span className="download-unavailable">不可下载</span>
                 )}
-                {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+                {product.url && <a className="button secondary small-button" href={product.url}>打开运行产物</a>}
                 <button
                   className="danger small-button"
                   disabled={deleteWorkProduct.isPending}
@@ -830,6 +841,7 @@ function IssueRunOutputPanel({
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
   const [showEvents, setShowEvents] = useState(true);
+  const [showRunLog, setShowRunLog] = useState(true);
   const [showDebugOutput, setShowDebugOutput] = useState(false);
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const run = data.run.data ?? null;
@@ -926,15 +938,24 @@ function IssueRunOutputPanel({
       <section className="issue-run-output-block">
         <div className="issue-run-output-heading">
           <h3>运行日志</h3>
-          {runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+          <div className="issue-run-operation-actions">
+            {showRunLog && runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+            <button className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
+              {showRunLog ? "隐藏运行日志" : "显示运行日志"}
+            </button>
+          </div>
         </div>
-        <PaginatedLogView
-          emptyText="暂无运行日志。"
-          loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
-          loadingText="加载运行日志中..."
-          log={runLog}
-          preClassName="run-excerpt inline"
-        />
+        {!showRunLog ? (
+          <p className="muted">运行日志已隐藏。</p>
+        ) : (
+          <PaginatedLogView
+            emptyText="暂无运行日志。"
+            loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
+            loadingText="加载运行日志中..."
+            log={runLog}
+            preClassName="run-excerpt inline"
+          />
+        )}
       </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
@@ -1021,7 +1042,7 @@ function IssueRunOutputPanel({
                     type="button"
                     onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
                   >
-                    {selectedOperationLogId === operation.id ? "收起操作日志" : "查看操作日志"}
+                    {selectedOperationLogId === operation.id ? "收起步骤日志" : "查看该步骤日志"}
                   </button>
                   {operation.logBytes !== undefined && operation.logBytes !== null && (
                     <span className="muted">{formatBytes(operation.logBytes)}</span>
@@ -1029,6 +1050,9 @@ function IssueRunOutputPanel({
                 </div>
                 {selectedOperationLogId === operation.id && (
                   <div className="issue-run-operation-log">
+                    {isWorkspaceProvisionOperation(operation) && (
+                      <p className="muted">该日志为运行日志中的 workspace_provision 片段。</p>
+                    )}
                     {operationLog.error && <ErrorNotice error={operationLog.error} />}
                     <PaginatedLogView
                       emptyText="暂无操作日志。"
@@ -1680,7 +1704,7 @@ export function IssuePage() {
 
             <IssueDocumentsPanel issueId={issueId} />
 
-            <IssueWorkProductsPanel issue={issue.data} />
+            <IssueWorkProductsPanel issue={issue.data} latestRunStatus={latestRun?.status} />
 
             <section aria-label="附件" className="issue-section-card">
               <div className="issue-section-heading">

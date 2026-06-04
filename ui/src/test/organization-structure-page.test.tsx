@@ -88,11 +88,13 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(await screen.findByRole("heading", { name: "工作区" })).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-files-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-editor-card")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "工作区文件" })).toBeInTheDocument();
+  expect(screen.getByText("/ · 代码、配置和工作现场文件")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Editor" })).toBeInTheDocument();
   expect(screen.queryByText("Project Workspaces")).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "项目工作区" })).not.toBeInTheDocument();
   expect(screen.getByText("artifacts")).toBeInTheDocument();
+  expect(screen.getByText("运行产物")).toBeInTheDocument();
   expect(screen.getByText("dist")).toBeInTheDocument();
   expect(screen.getByText("Microsoft")).toBeInTheDocument();
   expect(screen.getByText("node_mode")).toBeInTheDocument();

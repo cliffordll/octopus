@@ -1488,8 +1488,8 @@ export function OrganizationWorkspacesPage() {
         <section className="workspace-files-card" data-testid="org-workspaces-files-card">
           <div className="workspace-card-header">
             <div>
-              <h2>Files</h2>
-              <p>/</p>
+              <h2>工作区文件</h2>
+              <p>/ · 代码、配置和工作现场文件</p>
             </div>
             <Badge>{workspaceTree.length}</Badge>
           </div>
