@@ -217,6 +217,152 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
     assert workspace["strategyType"] == "git_worktree"
 
 
+async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-org-workspace",
+                name="Step 15 Org Workspace",
+                issue_prefix="ORG",
+            )
+            session.add(org)
+            await session.flush()
+            project = await ProjectService(session).create_project(
+                org.id,
+                {"name": "Org Workspace Fallback"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use organization workspace",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-org-workspace",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        f'Project has no workspace configured. Run will start in shared organization workspace "{org_root}".'
+    ]
+    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_ORG_WORKSPACE_ROOT"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts"
+    )
+
+
+async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-empty-cwd",
+                name="Step 15 Empty Cwd",
+                issue_prefix="ECW",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Workspace Without Cwd"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Remote Metadata Only",
+                    "cwd": None,
+                    "repoUrl": "https://example.test/org/repo.git",
+                    "repoRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use organization workspace for empty cwd",
+                project_workspace_id=project_workspace["id"]
+                if project_workspace is not None
+                else None,
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-empty-cwd",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert project_workspace is not None
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] == project_workspace["id"]
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        "Project workspace has no local cwd configured. Run will start "
+        f'in shared organization workspace "{org_root}".'
+    ]
+
+
 async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
