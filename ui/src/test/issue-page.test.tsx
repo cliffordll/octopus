@@ -339,6 +339,14 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/issues/issue-1/review-decision",
     expect.objectContaining({ method: "POST" }),
   );
+  expect(screen.getByRole("region", { name: "评审" })).toHaveTextContent("等待 Builder 给出 closeout");
+  expect(screen.getByRole("button", { name: "需要跟进" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "标记阻塞" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "需要跟进" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/review-decision",
+    expect.objectContaining({ method: "POST", body: JSON.stringify({ decision: "needs_followup" }) }),
+  );
 
   await userEvent.type(screen.getByLabelText("子任务名称"), "新增子任务");
   await userEvent.click(screen.getByRole("button", { name: "添加子任务" }));
@@ -498,6 +506,10 @@ it("executes an assigned issue through the issue execution route", async () => {
         { id: 1, runId: "run-1", agentId: "agent-1", seq: 1, eventType: "heartbeat.queued", message: "已入队", createdAt: "2026-06-02T10:00:00Z" },
         { id: 2, runId: "run-1", agentId: "agent-1", seq: 2, eventType: "runtime.text", stream: "stdout", message: "Agent 正在处理任务", createdAt: "2026-06-02T10:00:01Z" },
         { id: 3, runId: "run-1", agentId: "agent-1", seq: 3, eventType: "step_start", message: "low value", createdAt: "2026-06-02T10:00:02Z" },
+        { id: 6, runId: "run-1", agentId: "agent-1", seq: 6, eventType: "issue_review_requested", message: "review requested", createdAt: "2026-06-02T10:00:05Z" },
+        { id: 7, runId: "run-1", agentId: "agent-1", seq: 7, eventType: "issue_review_closeout_missing", message: "missing closeout", createdAt: "2026-06-02T10:00:06Z" },
+        { id: 8, runId: "run-1", agentId: "agent-1", seq: 8, eventType: "issue_passive_followup", message: "followup", createdAt: "2026-06-02T10:00:07Z" },
+        { id: 9, runId: "run-1", agentId: "agent-1", seq: 9, eventType: "issue_execution_promoted", message: "promoted", createdAt: "2026-06-02T10:00:08Z" },
       ]);
     }
     if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
@@ -519,7 +531,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("button", { name: "标记待评审" })).toHaveAttribute("aria-disabled", "true");
   await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
   expect(screen.getByText("请先设置 Reviewer，当前任务不能评审。")).toBeInTheDocument();
-  expect(screen.getByText("已创建运行 run-1")).toBeInTheDocument();
+  expect(screen.getByText("已连接到运行 run-1")).toBeInTheDocument();
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
@@ -542,6 +554,10 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
   expect(await screen.findByText("已入队")).toBeInTheDocument();
   expect(screen.getAllByText("Agent 回复")).toHaveLength(3);
+  expect(screen.getByText("请求评审")).toBeInTheDocument();
+  expect(screen.getByText("缺少评审结论")).toBeInTheDocument();
+  expect(screen.getByText("补充关闭信号")).toBeInTheDocument();
+  expect(screen.getByText("延期任务已恢复执行")).toBeInTheDocument();
   expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
   expect(screen.getByText(/长回复内容/)).toBeInTheDocument();
   expect(screen.queryByText(/最终结论/)).not.toBeInTheDocument();
@@ -812,6 +828,60 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("run-succeeded");
   expect(screen.getByText("运行：成功")).toBeInTheDocument();
+});
+
+it("refreshes issue runs when execute returns no new run id", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-4",
+    title: "等待已有运行",
+    description: "server 可能延期或复用已有运行",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 4,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/execute" && init?.method === "POST") return respond({ status: "deferred" }, 202);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
+
+  expect(screen.getByRole("status")).toHaveTextContent("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/heartbeat-runs",
+    expect.objectContaining({ method: "GET" }),
+  );
 });
 
 it("explains why an unassigned issue cannot be executed", async () => {

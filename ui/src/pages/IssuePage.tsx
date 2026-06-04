@@ -60,6 +60,28 @@ function reviewDecisionBlockReason(issue: IssueDetail): string {
   return "";
 }
 
+function reviewDecisionLabel(decision: IssueReviewDecision): string {
+  switch (decision) {
+    case "approve":
+      return "通过评审";
+    case "request_changes":
+      return "请求修改";
+    case "needs_followup":
+      return "需要跟进";
+    case "blocked":
+      return "标记阻塞";
+  }
+}
+
+function reviewStatusText(issue: IssueDetail, agentsById: Map<string, Agent>): string {
+  if (!["in_review", "blocked"].includes(issue.status)) return "当前任务不在评审阶段。";
+  if (!issue.reviewerAgentId) return "未设置 Reviewer，无法提交评审结论。";
+  const reviewer = agentName(issue.reviewerAgentId, agentsById);
+  return issue.status === "blocked"
+    ? `任务已阻塞，等待 ${reviewer} 给出 closeout 或后续处理意见。`
+    : `任务正在评审中，等待 ${reviewer} 给出 closeout。`;
+}
+
 function markReviewBlockReason(issue: IssueDetail): string {
   if (!issue.reviewerAgentId) return "请先设置 Reviewer，当前任务不能标记为待评审。";
   if (issue.status === "in_review") return "当前任务已经是待评审状态。";
@@ -173,6 +195,10 @@ function isTextRunEvent(event: HeartbeatRunEvent): boolean {
 
 function runEventLabel(event: HeartbeatRunEvent): string {
   const eventType = event.eventType.toLowerCase();
+  if (eventType.includes("issue_review_requested")) return "请求评审";
+  if (eventType.includes("issue_review_closeout_missing")) return "缺少评审结论";
+  if (eventType.includes("issue_passive_followup")) return "补充关闭信号";
+  if (eventType.includes("issue_execution_promoted")) return "延期任务已恢复执行";
   if (isErrorRunEvent(event)) return "错误";
   if (isTextRunEvent(event)) return "Agent 回复";
   if (eventType.includes("queued")) return "入队";
@@ -1041,19 +1067,25 @@ export function IssuePage() {
     },
     onSuccess: async (run) => {
       const runId = heartbeatRunId(run);
-      setExecuteNotice(`已创建运行 ${runId}`);
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-      resetRunStreamState(runId);
-      setCurrentRunId(runId);
-      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
-        ...current,
-        ...run,
-      }));
+      if (runId) {
+        setExecuteNotice(isLiveRun(run.status) ? `已连接到运行 ${runId}` : `已创建运行 ${runId}`);
+        localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+        resetRunStreamState(runId);
+        setCurrentRunId(runId);
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      } else {
+        setExecuteNotice("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["issues", orgId] }),
         queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-run", currentRunId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-run-events", currentRunId] }),
       ]);
     },
   });
@@ -1414,27 +1446,31 @@ export function IssuePage() {
                 <h2>评审</h2>
                 <span className="muted">当前阶段：{statusLabel(issue.data.status)}</span>
               </div>
+              <div className="issue-review-status">
+                <div>
+                  <span>Reviewer</span>
+                  <strong>{issue.data.reviewerAgentId ? agentName(issue.data.reviewerAgentId, agentsById) : "未设置"}</strong>
+                </div>
+                <div>
+                  <span>评审状态</span>
+                  <strong>{["in_review", "blocked"].includes(issue.data.status) ? "等待评审结论" : "未进入评审"}</strong>
+                </div>
+                <p>{reviewStatusText(issue.data, agentsById)}</p>
+              </div>
               <div className="actions">
-                <button
-                  aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
-                  className={reviewDecisionBlockReason(issue.data) ? "is-disabled" : undefined}
-                  disabled={review.isPending}
-                  onClick={() => submitReviewDecision("approve")}
-                  title={reviewDecisionBlockReason(issue.data) || "通过当前任务评审"}
-                  type="button"
-                >
-                  通过评审
-                </button>
-                <button
-                  aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
-                  className={`secondary${reviewDecisionBlockReason(issue.data) ? " is-disabled" : ""}`}
-                  disabled={review.isPending}
-                  onClick={() => submitReviewDecision("request_changes")}
-                  title={reviewDecisionBlockReason(issue.data) || "请求修改当前任务"}
-                  type="button"
-                >
-                  请求修改
-                </button>
+                {(["approve", "request_changes", "needs_followup", "blocked"] as IssueReviewDecision[]).map((decision, index) => (
+                  <button
+                    aria-disabled={Boolean(reviewDecisionBlockReason(issue.data))}
+                    className={`${index === 0 ? "" : "secondary"}${reviewDecisionBlockReason(issue.data) ? " is-disabled" : ""}`}
+                    disabled={review.isPending}
+                    key={decision}
+                    onClick={() => submitReviewDecision(decision)}
+                    title={reviewDecisionBlockReason(issue.data) || reviewDecisionLabel(decision)}
+                    type="button"
+                  >
+                    {reviewDecisionLabel(decision)}
+                  </button>
+                ))}
                 <button
                   aria-disabled={Boolean(markReviewBlockReason(issue.data))}
                   className={`secondary${markReviewBlockReason(issue.data) ? " is-disabled" : ""}`}
