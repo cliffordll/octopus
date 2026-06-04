@@ -40,6 +40,43 @@ async def create_project_workspace(
     return row
 
 
+async def get_project_workspace(
+    session: AsyncSession, project_id: str, workspace_id: str
+) -> ProjectWorkspace | None:
+    result = await session.execute(
+        select(ProjectWorkspace).where(
+            ProjectWorkspace.project_id == project_id,
+            ProjectWorkspace.id == workspace_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def update_project_workspace(
+    session: AsyncSession, workspace_id: str, fields: Mapping[str, Any]
+) -> ProjectWorkspace | None:
+    values = dict(fields)
+    values["updated_at"] = datetime.now(UTC)
+    result = await session.execute(
+        update(ProjectWorkspace)
+        .where(ProjectWorkspace.id == workspace_id)
+        .values(**values)
+        .returning(ProjectWorkspace)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_project_workspace(
+    session: AsyncSession, workspace_id: str
+) -> ProjectWorkspace | None:
+    result = await session.execute(
+        delete(ProjectWorkspace)
+        .where(ProjectWorkspace.id == workspace_id)
+        .returning(ProjectWorkspace)
+    )
+    return result.scalar_one_or_none()
+
+
 async def clear_primary_project_workspace(
     session: AsyncSession, *, org_id: str, project_id: str
 ) -> None:

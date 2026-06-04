@@ -214,6 +214,10 @@ export function ProjectPage() {
   const [workspacePolicy, setWorkspacePolicy] = useState("");
   const [workspacePolicyMode, setWorkspacePolicyMode] = useState<WorkspacePolicyMode>("shared_workspace");
   const [workspacePolicyError, setWorkspacePolicyError] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [workspaceCwd, setWorkspaceCwd] = useState("");
+  const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
+  const [workspaceRepoRef, setWorkspaceRepoRef] = useState("");
   const [attachCatalogOpen, setAttachCatalogOpen] = useState(false);
   const [createResourceOpen, setCreateResourceOpen] = useState(false);
   const [newResourceName, setNewResourceName] = useState("");
@@ -288,6 +292,36 @@ export function ProjectPage() {
     void queryClient.invalidateQueries({ queryKey: ["project-resources", projectId] });
     void queryClient.invalidateQueries({ queryKey: ["organization-resources", orgId] });
   };
+  const invalidateProject = () => {
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
+  };
+  const createWorkspace = useMutation({
+    mutationFn: () => projectsApi.createWorkspace(projectId, {
+      name: workspaceName.trim(),
+      sourceType: workspaceRepoUrl.trim() ? "git_repo" : "local_path",
+      cwd: workspaceCwd.trim() || null,
+      repoUrl: workspaceRepoUrl.trim() || null,
+      repoRef: workspaceRepoRef.trim() || null,
+      defaultRef: workspaceRepoRef.trim() || null,
+      isPrimary: true,
+    }),
+    onSuccess: () => {
+      setWorkspaceName("");
+      setWorkspaceCwd("");
+      setWorkspaceRepoUrl("");
+      setWorkspaceRepoRef("");
+      invalidateProject();
+    },
+  });
+  const setPrimaryWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.updateWorkspace(projectId, workspaceId, { isPrimary: true }),
+    onSuccess: invalidateProject,
+  });
+  const removeWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.removeWorkspace(projectId, workspaceId),
+    onSuccess: invalidateProject,
+  });
   const addResource = useMutation({
     mutationFn: (payload: { resourceId: string; role?: ProjectResourceRole; note?: string | null; sortOrder?: number }) =>
       projectsApi.addResource(projectId, {
@@ -373,6 +407,9 @@ export function ProjectPage() {
   function submitInlineResource(event: FormEvent) {
     event.preventDefault();
     if (newResourceName.trim() && newResourceLocator.trim()) createAndAttachResource.mutate();
+  }
+  function submitWorkspace() {
+    if (workspaceName.trim()) createWorkspace.mutate();
   }
   const projectIssues = issues.data ?? [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
@@ -534,8 +571,96 @@ export function ProjectPage() {
               </div>
             </div>
             <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
+            <section className="project-workspace-manager" aria-label="项目工作区管理">
+              <div className="panel-heading">
+                <div>
+                  <h2>项目工作区</h2>
+                  <p className="muted">可选绑定项目专属 cwd。任务执行时会优先使用可用的主工作区；未配置或不可用时 fallback 到组织共享工作区。</p>
+                </div>
+              </div>
+              <div className="project-resource-grid">
+                <label>
+                  名称
+                  <input
+                    aria-label="项目工作区名称"
+                    value={workspaceName}
+                    onChange={(event) => setWorkspaceName(event.target.value)}
+                    placeholder="主工作区"
+                  />
+                </label>
+                <label>
+                  本地 cwd
+                  <input
+                    aria-label="项目工作区本地 cwd"
+                    value={workspaceCwd}
+                    onChange={(event) => setWorkspaceCwd(event.target.value)}
+                    placeholder="D:/coding/project"
+                  />
+                </label>
+                <label>
+                  仓库 URL
+                  <input
+                    aria-label="项目工作区仓库 URL"
+                    value={workspaceRepoUrl}
+                    onChange={(event) => setWorkspaceRepoUrl(event.target.value)}
+                    placeholder="https://github.com/acme/project.git"
+                  />
+                </label>
+                <label>
+                  分支
+                  <input
+                    aria-label="项目工作区分支"
+                    value={workspaceRepoRef}
+                    onChange={(event) => setWorkspaceRepoRef(event.target.value)}
+                    placeholder="main"
+                  />
+                </label>
+              </div>
+              <div className="project-property-actions">
+                <button
+                  disabled={!workspaceName.trim() || createWorkspace.isPending}
+                  onClick={submitWorkspace}
+                  type="button"
+                >
+                  新增主工作区
+                </button>
+              </div>
+              <div className="project-workspace-list">
+                {(project.data.workspaces ?? []).map((workspace) => (
+                  <div className="project-workspace-item" key={workspace.id}>
+                    <div>
+                      <strong>{workspace.name}</strong>
+                      <span>{workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}</span>
+                    </div>
+                    <div className="project-workspace-badges">
+                      {workspace.isPrimary && <Badge>主工作区</Badge>}
+                      <Badge>{workspace.sourceType}</Badge>
+                      <button
+                        className="secondary small-button"
+                        disabled={workspace.isPrimary || setPrimaryWorkspace.isPending}
+                        onClick={() => setPrimaryWorkspace.mutate(workspace.id)}
+                        type="button"
+                      >
+                        设为主工作区
+                      </button>
+                      <button
+                        className="danger small-button"
+                        disabled={removeWorkspace.isPending}
+                        onClick={() => removeWorkspace.mutate(workspace.id)}
+                        type="button"
+                      >
+                        删除工作区
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
             {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
             {update.error && <ErrorNotice error={update.error} />}
+            {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
+            {setPrimaryWorkspace.error && <ErrorNotice error={setPrimaryWorkspace.error} />}
+            {removeWorkspace.error && <ErrorNotice error={removeWorkspace.error} />}
             {removeProject.error && <ErrorNotice error={removeProject.error} />}
             <div className="project-property-actions">
               <button type="submit">保存项目</button>

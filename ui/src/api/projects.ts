@@ -1,11 +1,14 @@
 import { jsonRequest, request } from "./client";
 import type {
   CreateProjectPayload,
+  CreateProjectWorkspacePayload,
   ProjectDetail,
   ProjectResourceAttachment,
   ProjectResourceAttachmentInput,
+  ProjectWorkspace,
   UpdateProjectPayload,
   UpdateProjectResourceAttachmentPayload,
+  UpdateProjectWorkspacePayload,
 } from "./types";
 
 function projectRoot(projectId: string): string {
@@ -27,6 +30,25 @@ export const projectsApi = {
     jsonRequest<ProjectDetail>(projectRoot(projectId), "PATCH", payload),
   remove: (projectId: string): Promise<ProjectDetail> =>
     request<ProjectDetail>(projectRoot(projectId), { method: "DELETE" }),
+  listWorkspaces: (projectId: string): Promise<ProjectWorkspace[]> =>
+    request<ProjectWorkspace[]>(`${projectRoot(projectId)}/workspaces`, { method: "GET" }),
+  createWorkspace: (projectId: string, payload: CreateProjectWorkspacePayload): Promise<ProjectWorkspace> =>
+    jsonRequest<ProjectWorkspace>(`${projectRoot(projectId)}/workspaces`, "POST", payload),
+  updateWorkspace: (
+    projectId: string,
+    workspaceId: string,
+    payload: UpdateProjectWorkspacePayload,
+  ): Promise<ProjectWorkspace> =>
+    jsonRequest<ProjectWorkspace>(
+      `${projectRoot(projectId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+      "PATCH",
+      payload,
+    ),
+  removeWorkspace: (projectId: string, workspaceId: string): Promise<ProjectWorkspace> =>
+    request<ProjectWorkspace>(
+      `${projectRoot(projectId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+      { method: "DELETE" },
+    ),
   listResources: (projectId: string): Promise<ProjectResourceAttachment[]> =>
     request<ProjectResourceAttachment[]>(`${projectRoot(projectId)}/resources`, { method: "GET" }),
   addResource: (

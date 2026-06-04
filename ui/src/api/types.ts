@@ -562,6 +562,25 @@ export interface ProjectWorkspace {
   updatedAt: string;
 }
 
+export interface CreateProjectWorkspacePayload {
+  name: string;
+  sourceType?: string;
+  cwd?: string | null;
+  repoUrl?: string | null;
+  repoRef?: string | null;
+  defaultRef?: string | null;
+  visibility?: string;
+  setupCommand?: string | null;
+  cleanupCommand?: string | null;
+  remoteProvider?: string | null;
+  remoteWorkspaceRef?: string | null;
+  sharedWorkspaceKey?: string | null;
+  metadata?: Record<string, unknown> | null;
+  isPrimary?: boolean;
+}
+
+export type UpdateProjectWorkspacePayload = Partial<CreateProjectWorkspacePayload>;
+
 export interface ProjectCodebase {
   configured: boolean;
   scope: string;

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 import re
 from typing import Any, cast
@@ -19,7 +19,10 @@ from packages.database.queries.projects import (
 from packages.database.queries.workspaces import (
     clear_primary_project_workspace,
     create_project_workspace,
+    delete_project_workspace,
+    get_project_workspace,
     list_project_workspaces,
+    update_project_workspace,
 )
 from packages.database.queries.resources import (
     create_organization_resource,
@@ -47,11 +50,13 @@ from packages.shared.constants.project import (
     ProjectStatus,
 )
 from packages.shared.types.project import (
+    CreateProjectWorkspacePayload,
     CreateProjectPayload,
     CreateProjectInlineResourceInput,
     OrganizationResource as OrganizationResourceData,
     ProjectDetail,
     ProjectWorkspace as ProjectWorkspaceData,
+    UpdateProjectWorkspacePayload,
     ProjectGoalRef,
     ProjectResourceAttachment as ProjectResourceAttachmentData,
     ProjectResourceAttachmentInput,
@@ -133,6 +138,30 @@ def _derive_repo_name(repo_url: str | None) -> str | None:
     cleaned = repo_url.rstrip("/")
     name = cleaned.rsplit("/", 1)[-1].removesuffix(".git")
     return name or None
+
+
+def _workspace_payload_to_columns(payload: Mapping[str, Any]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    field_map = {
+        "name": "name",
+        "sourceType": "source_type",
+        "cwd": "cwd",
+        "repoUrl": "repo_url",
+        "repoRef": "repo_ref",
+        "defaultRef": "default_ref",
+        "visibility": "visibility",
+        "setupCommand": "setup_command",
+        "cleanupCommand": "cleanup_command",
+        "remoteProvider": "remote_provider",
+        "remoteWorkspaceRef": "remote_workspace_ref",
+        "sharedWorkspaceKey": "shared_workspace_key",
+        "metadata": "metadata_json",
+        "isPrimary": "is_primary",
+    }
+    for payload_key, column_key in field_map.items():
+        if payload_key in payload:
+            values[column_key] = payload[payload_key]
+    return values
 
 
 def _resolve_goal_ids(
@@ -323,7 +352,7 @@ class ProjectService:
     async def create_workspace(
         self,
         project_id: str,
-        payload: dict[str, Any],
+        payload: CreateProjectWorkspacePayload,
         *,
         actor_type: str,
         actor_id: str,
@@ -344,18 +373,10 @@ class ProjectService:
                 "project_id": project.id,
                 "name": str(payload.get("name") or "Workspace").strip(),
                 "source_type": str(payload.get("sourceType") or "local_path"),
-                "cwd": payload.get("cwd"),
-                "repo_url": payload.get("repoUrl"),
-                "repo_ref": payload.get("repoRef"),
-                "default_ref": payload.get("defaultRef") or payload.get("repoRef"),
                 "visibility": payload.get("visibility") or "default",
-                "setup_command": payload.get("setupCommand"),
-                "cleanup_command": payload.get("cleanupCommand"),
-                "remote_provider": payload.get("remoteProvider"),
-                "remote_workspace_ref": payload.get("remoteWorkspaceRef"),
-                "shared_workspace_key": payload.get("sharedWorkspaceKey"),
-                "metadata_json": payload.get("metadata"),
                 "is_primary": is_primary,
+                **_workspace_payload_to_columns(payload),
+                "default_ref": payload.get("defaultRef") or payload.get("repoRef"),
             },
         )
         await insert_activity_log(
@@ -369,6 +390,75 @@ class ProjectService:
             details={"projectId": project.id, "name": row.name},
         )
         return self._to_workspace(row)
+
+    async def update_workspace(
+        self,
+        project_id: str,
+        workspace_id: str,
+        payload: UpdateProjectWorkspacePayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ProjectWorkspaceData | None:
+        existing = await get_project_workspace(self._session, project_id, workspace_id)
+        if existing is None:
+            return None
+        values = _workspace_payload_to_columns(payload)
+        if payload.get("isPrimary") is True:
+            await clear_primary_project_workspace(
+                self._session, org_id=existing.org_id, project_id=project_id
+            )
+            values["is_primary"] = True
+        row = await update_project_workspace(self._session, workspace_id, values)
+        if row is None:
+            return None
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="project.workspace.updated",
+            entity_type="project_workspace",
+            entity_id=row.id,
+            details={"projectId": project_id, "name": row.name},
+        )
+        return self._to_workspace(row)
+
+    async def remove_workspace(
+        self,
+        project_id: str,
+        workspace_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> ProjectWorkspaceData | None:
+        existing = await get_project_workspace(self._session, project_id, workspace_id)
+        if existing is None:
+            return None
+        detail = self._to_workspace(existing)
+        row = await delete_project_workspace(self._session, workspace_id)
+        if row is None:
+            return None
+        if row.is_primary:
+            remaining = await list_project_workspaces(self._session, project_id)
+            if remaining:
+                await clear_primary_project_workspace(
+                    self._session, org_id=row.org_id, project_id=project_id
+                )
+                await update_project_workspace(
+                    self._session, remaining[0].id, {"is_primary": True}
+                )
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="project.workspace.deleted",
+            entity_type="project_workspace",
+            entity_id=row.id,
+            details={"projectId": project_id, "name": row.name},
+        )
+        return detail
 
     async def add_resource_attachment(
         self,
