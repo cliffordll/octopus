@@ -77,7 +77,7 @@ function formattedJson(value: unknown): string {
 }
 
 function runSummary(run: HeartbeatRun | null): string {
-  if (!run) return "暂无执行记录";
+  if (!run) return "暂无运行记录";
   if (run.error?.trim()) return run.error.trim();
   const result = hasJsonObject(run.resultJson) ? run.resultJson : null;
   for (const key of ["summary", "result", "message"]) {
@@ -176,24 +176,14 @@ function IssuePropertiesPanel({
       </div>
       <div className="issue-property-list">
         <label className="issue-property-row">
-          <span>状态</span>
-          <span className="issue-property-control-row">
-            <select
-              disabled={isUpdating}
-              value={issue.status}
-              onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
-            >
-              {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
-            </select>
-            <button
-              className="secondary small-button"
-              disabled={isUpdating || issue.status === "in_progress"}
-              onClick={() => onUpdate({ status: "in_progress" })}
-              type="button"
-            >
-              标记进行中
-            </button>
-          </span>
+          <span>任务阶段</span>
+          <select
+            disabled={isUpdating}
+            value={issue.status}
+            onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
+          >
+            {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
+          </select>
         </label>
         <label className="issue-property-row">
           <span>优先级</span>
@@ -555,13 +545,13 @@ function IssueRunsPanel({
   runs: HeartbeatRun[];
 }) {
   return (
-    <section aria-label="执行记录" className="issue-section-card">
+    <section aria-label="运行记录" className="issue-section-card">
       <div className="issue-section-heading">
-        <h2>执行记录</h2>
+        <h2>运行记录</h2>
         <span className="muted">{runs.length} 次运行</span>
       </div>
       {runs.length === 0 ? (
-        <p className="muted">暂无执行记录。</p>
+        <p className="muted">暂无运行记录。</p>
       ) : (
         <div className="issue-run-record-list">
           {runs.map((run) => {
@@ -1171,11 +1161,11 @@ export function IssuePage() {
   }
   function executeCurrentIssue() {
     if (uploadAttachment.isPending) {
-      setExecuteNotice("附件上传中，上传完成后再执行任务。");
+      setExecuteNotice("附件上传中，上传完成后再启动执行。");
       return;
     }
     if (!issue.data?.assigneeAgentId) {
-      setExecuteNotice("请先分配负责人，再执行任务。");
+      setExecuteNotice("请先分配负责人，再启动执行。");
       return;
     }
     setExecuteNotice("");
@@ -1216,15 +1206,15 @@ export function IssuePage() {
                     disabled={executeIssue.isPending}
                     title={
                       uploadAttachment.isPending
-                        ? "附件上传中，上传完成后再执行任务"
+                        ? "附件上传中，上传完成后再启动执行"
                         : issue.data.assigneeAgentId
-                          ? "触发负责人执行当前任务"
+                          ? "交给负责人启动一次运行"
                           : "请先分配负责人"
                     }
                     type="button"
                     onClick={executeCurrentIssue}
                   >
-                    执行任务
+                    启动执行
                   </button>
                   <button
                     className="secondary small-button"
@@ -1294,7 +1284,7 @@ export function IssuePage() {
             <section aria-label="评审" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>评审</h2>
-                <span className="muted">当前状态：{statusLabel(issue.data.status)}</span>
+                <span className="muted">当前阶段：{statusLabel(issue.data.status)}</span>
               </div>
               <div className="actions">
                 <button

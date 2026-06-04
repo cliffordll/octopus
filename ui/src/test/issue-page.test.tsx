@@ -249,7 +249,7 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(properties).toHaveTextContent("层级");
   expect(properties).toHaveTextContent("已启动");
   expect(properties).toHaveTextContent("已完成");
-  await userEvent.selectOptions(screen.getByLabelText("状态"), "in_progress");
+  await userEvent.selectOptions(screen.getByLabelText("任务阶段"), "in_progress");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
     expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }),
@@ -491,7 +491,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues/issue-1");
-  const executeButton = await screen.findByRole("button", { name: "执行任务" });
+  const executeButton = await screen.findByRole("button", { name: "启动执行" });
   expect(executeButton).not.toHaveAttribute("aria-disabled");
   await userEvent.click(executeButton);
   expect(screen.getByRole("button", { name: "通过评审" })).toHaveAttribute("aria-disabled", "true");
@@ -508,8 +508,8 @@ it("executes an assigned issue through the issue execution route", async () => {
     "/api/issues/issue-1/execute",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
-  expect(await screen.findByRole("region", { name: "执行记录" })).toHaveTextContent("运行输出摘要");
-  expect(screen.getByRole("region", { name: "执行记录" })).toHaveTextContent("等待执行");
+  expect(await screen.findByRole("region", { name: "运行记录" })).toHaveTextContent("运行输出摘要");
+  expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
@@ -581,11 +581,11 @@ it("explains why an unassigned issue cannot be executed", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues/issue-1");
-  const executeButton = await screen.findByRole("button", { name: "执行任务" });
+  const executeButton = await screen.findByRole("button", { name: "启动执行" });
   expect(executeButton).toHaveAttribute("aria-disabled", "true");
   expect(executeButton).not.toBeDisabled();
   await userEvent.click(executeButton);
-  expect(screen.getByRole("status")).toHaveTextContent("请先分配负责人，再执行任务。");
+  expect(screen.getByRole("status")).toHaveTextContent("请先分配负责人，再启动执行。");
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/issues/issue-1/execute",
     expect.objectContaining({ method: "POST" }),
