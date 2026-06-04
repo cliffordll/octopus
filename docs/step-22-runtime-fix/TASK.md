@@ -43,6 +43,7 @@
 - 为 `opencode_local`、`codex_local`、`claude_local` 建立 runtime tool capability 描述边界。
 - 在 runtime prompt/instructions/context 中注入可用工具、关键参数、禁止猜测 schema 的说明。
 - 在 runtime prompt 中注入 workspace output contract：可以读取任务要求的外部源码路径，但持久产物必须写入 Octopus 受管 worktree 或组织 artifacts 目录，避免写到外部源码目录后 UI 无法展示。
+- 在 runtime prompt/env 中注入 issue/run 专属产物目录：`RUDDER_ISSUE_ARTIFACTS_DIR` 与 `RUDDER_RUN_ARTIFACTS_DIR`。单次执行产生的持久文件优先写入 run 目录；跨 run 共享的任务级文件写入 issue 目录。
 - 明确 `opencode_local` 内置 `bash` 工具调用必须携带 `description` 和 `command`，避免只传 `command` 造成 schema error。
 - 将工具 schema error 从 adapter 崩溃中区分出来，保留原始 tool name、缺失字段、input 和可读诊断。
 - 对 OpenCode tool error 做结果归一化：如果 run 后续仍能继续并产生有效结果，不应仅因早期 tool error 直接覆盖最终 run error；如果进程终态失败，则错误摘要应指向首个阻断性错误和退出原因。
@@ -60,12 +61,14 @@
 - 审查 workspace backup/browser 相关上游能力；只补齐任务执行闭环必须依赖的 server 行为，完整 backup/browser UI 能力不在本步骤扩张。
 - 对齐上游 `organization-workspace-browser` 的最小只读能力：server 提供组织工作区真实目录列表、文件预览和图片 content 读取；UI 的“组织 -> 工作区”页面必须消费真实 API，不再用项目/智能体数据伪造文件树。
 - 组织工作区浏览根目录固定为 `.octopus/organizations/<org_id>/workspaces`，运行产物通过 `artifacts/` 展示；该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
+- 每次 issue run 会预创建组织 artifacts 下的专属目录：`artifacts/issues/<issue_id>/runs/<run_id>/`。该目录属于组织工作区的一部分，UI 可通过组织工作区浏览器打开。
 
 ### 22C: Issue 执行闭环补强
 
 - 用真实 issue 执行路径验证 checkout、heartbeat-context、assignment wakeup、review wakeup、passive followup 和 work product 登记。
 - 确保成功 run 产生的文件或结构化 workProducts 能稳定进入 issue documents/work-products API。
 - 成功 run 后扫描受管 worktree 与组织 artifacts 中本次执行新增/修改的有限文本产物，并登记为 issue work-products；外部源码目录只作为读取对象，不作为默认产物落点。
+- run 专属 artifacts 目录扫描结果登记为 issue work-products 时，metadata 必须带 `workspaceBrowserPath`，让 UI 能从任务产物直接跳转到“组织 -> 工作区”中的真实文件位置。
 - 确保 closeout、review、followup 不会因为 runtime 输出延迟、缺失 tool schema 或 workspace 产物登记失败而卡在 `in_progress`。
 - 对齐上游 runtime-kernel closeout/followup 行为，只补齐 server 已有 issue/run/workspace 模型需要的状态和事件，不发明新的项目经理式自动编排。
 

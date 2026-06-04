@@ -159,6 +159,10 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
                     "cwd": "D:/octopus/worktree",
                     "worktreePath": "D:/octopus/worktree",
                     "orgArtifactsDir": "D:/octopus/artifacts",
+                    "issueArtifactsDir": "D:/octopus/artifacts/issues/ISSUE-1",
+                    "runArtifactsDir": (
+                        "D:/octopus/artifacts/issues/ISSUE-1/runs/run-tool-guidance"
+                    ),
                 }
             },
         )
@@ -172,6 +176,11 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
     assert "D:/octopus/artifacts" in captured_prompt
+    assert "D:/octopus/artifacts/issues/ISSUE-1" in captured_prompt
+    assert "D:/octopus/artifacts/issues/ISSUE-1/runs/run-tool-guidance" in (
+        captured_prompt
+    )
+    assert "Prefer the run artifacts directory" in captured_prompt
     assert (
         "Do not write generated deliverables into external source paths"
         in captured_prompt
@@ -1237,6 +1246,10 @@ async def test_codex_execute_injects_runtime_context_env(
                     "orgSkillsDir": "D:/orgs/org-14/skills",
                     "orgPlansDir": "D:/orgs/org-14/plans",
                     "orgArtifactsDir": "D:/orgs/org-14/artifacts",
+                    "issueArtifactsDir": "D:/orgs/org-14/artifacts/issues/issue-14",
+                    "runArtifactsDir": (
+                        "D:/orgs/org-14/artifacts/issues/issue-14/runs/run-14"
+                    ),
                 },
                 "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
                 "rudderRuntimePrimaryUrl": "http://svc",
@@ -1278,6 +1291,12 @@ async def test_codex_execute_injects_runtime_context_env(
     assert captured_env["RUDDER_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
     assert captured_env["RUDDER_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
     assert captured_env["RUDDER_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
+    assert captured_env["RUDDER_ISSUE_ARTIFACTS_DIR"] == (
+        "D:/orgs/org-14/artifacts/issues/issue-14"
+    )
+    assert captured_env["RUDDER_RUN_ARTIFACTS_DIR"] == (
+        "D:/orgs/org-14/artifacts/issues/issue-14/runs/run-14"
+    )
     assert captured_env["RUDDER_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'
     )
