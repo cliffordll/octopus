@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import { projectsApi } from "../api/projects";
 import type { ProjectStatus } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const STATUSES: ProjectStatus[] = ["backlog", "planned", "in_progress", "completed", "cancelled"];
@@ -28,29 +29,29 @@ export function ProjectCreateDialog({ onClose, orgId }: { onClose: () => void; o
     if (name.trim()) create.mutate();
   }
   return (
-    <div aria-label="Add Project" aria-modal="true" className="modal-backdrop" role="dialog">
+    <div aria-label="创建项目" aria-modal="true" className="modal-backdrop" role="dialog">
       <form className="panel form task-modal task-create-modal project-create-dialog" onSubmit={submit}>
         <div className="task-modal-header">
           <div>
             <p className="eyebrow">Project</p>
-            <h2>Add Project</h2>
+            <h2>创建项目</h2>
           </div>
-          <button className="secondary small-button" onClick={onClose} type="button">Close</button>
+          <button className="secondary small-button" onClick={onClose} type="button">关闭</button>
         </div>
         <label>
-          Project Name
+          项目名称
           <input value={name} onChange={(event) => setName(event.target.value)} required />
         </label>
         <label>
-          Project Status
+          项目状态
           <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
-            {STATUSES.map((item) => <option key={item}>{item}</option>)}
+            {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
           </select>
         </label>
         {create.error && <ErrorNotice error={create.error} />}
         <div className="task-modal-actions">
-          <button className="secondary" onClick={onClose} type="button">Cancel</button>
-          <button disabled={create.isPending} type="submit">Create Project</button>
+          <button className="secondary" onClick={onClose} type="button">取消</button>
+          <button disabled={create.isPending} type="submit">创建项目</button>
         </div>
       </form>
     </div>
@@ -79,16 +80,16 @@ export function ProjectsPage() {
       <header className="page-header">
         <div>
           <p className="eyebrow">Projects</p>
-          <h1>Projects</h1>
-          <p className="muted">Project workspaces under the current organization.</p>
+          <h1>项目</h1>
+          <p className="muted">当前组织下的项目工作区。</p>
         </div>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}
       {projects.isSuccess && projects.data.length === 0 && (
         <section className="panel project-empty-state">
-          <h2>No projects yet.</h2>
-          <p className="muted">Create a project to manage configuration, resources, and issues.</p>
-          <button type="button" onClick={() => setDialogOpen(true)}>Add Project</button>
+          <h2>暂无项目</h2>
+          <p className="muted">创建项目后可管理配置、资源和任务。</p>
+          <button type="button" onClick={() => setDialogOpen(true)}>创建项目</button>
         </section>
       )}
       {(dialogOpen || shouldOpenCreate) && <ProjectCreateDialog onClose={closeDialog} orgId={orgId} />}
