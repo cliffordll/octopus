@@ -338,6 +338,10 @@ it("saves the selected workspace policy when the project has no existing policy"
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
   expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
+  expect(screen.getByText("将使用组织共享工作区")).toBeInTheDocument();
+  expect(screen.getByText(".octopus/workspaces/org-1")).toBeInTheDocument();
+  expect(screen.getByText(".octopus/workspaces/org-1/artifacts")).toBeInTheDocument();
+  expect(screen.getByText("暂无项目工作区。任务运行时会使用组织共享工作区。")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
 
   expect(fetchMock).toHaveBeenCalledWith(

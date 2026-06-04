@@ -62,9 +62,29 @@ from packages.shared.types.heartbeat import (
 )
 
 from .agents import AgentConflictError
-from .logs import LogReadResult, read_local_file_log
+from .logs import (
+    LogReadResult,
+    append_local_file_log,
+    finalize_local_file_log,
+    read_local_file_log,
+)
 from .runtime_providers import inject_runtime_provider_config
 from .workspaces import WorkspaceService
+
+
+def _run_log_dir() -> Path:
+    return Path(os.getenv("OCTOPUS_RUN_LOG_DIR", ".octopus/run-logs"))
+
+
+def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if "logBytes" in fields:
+        result["log_bytes"] = fields["logBytes"]
+    if "logSha256" in fields:
+        result["log_sha256"] = fields["logSha256"]
+    if "logCompressed" in fields:
+        result["log_compressed"] = fields["logCompressed"]
+    return result
 
 
 class HeartbeatService:
@@ -287,10 +307,45 @@ class HeartbeatService:
         if run.log_store != "local_file":
             return {"content": "", "endOffset": 0, "eof": True}
         return read_local_file_log(
-            Path(os.getenv("OCTOPUS_RUN_LOG_DIR", ".octopus/run-logs")),
+            _run_log_dir(),
             run.log_ref,
             offset=offset,
             limit_bytes=limit_bytes,
+        )
+
+    async def _initialize_run_log(self, run: HeartbeatRunRow) -> HeartbeatRunRow:
+        log_ref = f"{run.org_id}/{run.id}.ndjson"
+        append_local_file_log(
+            _run_log_dir(),
+            log_ref,
+            stream="system",
+            chunk="run log initialized",
+        )
+        updated = await update_run(
+            self._session,
+            run.id,
+            {
+                "log_store": "local_file",
+                "log_ref": log_ref,
+                "log_bytes": 0,
+                "log_compressed": False,
+            },
+        )
+        assert updated is not None
+        return updated
+
+    async def _append_run_log(
+        self, run: HeartbeatRunRow, *, stream: str, chunk: str
+    ) -> None:
+        if run.log_store != "local_file" or run.log_ref is None:
+            return
+        append_local_file_log(_run_log_dir(), run.log_ref, stream=stream, chunk=chunk)
+
+    def _finalize_run_log_fields(self, run: HeartbeatRunRow) -> dict[str, Any]:
+        if run.log_store != "local_file":
+            return {}
+        return _database_log_fields(
+            finalize_local_file_log(_run_log_dir(), run.log_ref)
         )
 
     async def cancel_run(self, run_id: str) -> HeartbeatRun | None:
@@ -386,6 +441,7 @@ class HeartbeatService:
                 status="queued",
             ),
         )
+        context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
             {
@@ -404,6 +460,7 @@ class HeartbeatService:
                 "context_snapshot": context_snapshot,
             },
         )
+        run = await self._initialize_run_log(run)
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
         if not execute_immediately:
             return self._to_run(run)
@@ -581,6 +638,7 @@ class HeartbeatService:
                     "context_snapshot": {"resumedFromPaused": True},
                 },
             )
+            run = await self._initialize_run_log(run)
             await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
             resumed.append(
                 self._to_run(
@@ -640,6 +698,14 @@ class HeartbeatService:
                 status="queued",
             ),
         )
+        context_snapshot = {
+            "triggeredBy": actor_type,
+            "actorId": actor_id,
+            "forceFreshSession": payload.get("forceFreshSession", False),
+            **self._payload_context(payload.get("payload")),
+            **self._payload_context_snapshot(payload.get("contextSnapshot")),
+        }
+        context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
             {
@@ -649,15 +715,10 @@ class HeartbeatService:
                 "trigger_detail": payload.get("triggerDetail", "manual"),
                 "status": "queued",
                 "wakeup_request_id": wakeup.id,
-                "context_snapshot": {
-                    "triggeredBy": actor_type,
-                    "actorId": actor_id,
-                    "forceFreshSession": payload.get("forceFreshSession", False),
-                    **self._payload_context(payload.get("payload")),
-                    **self._payload_context_snapshot(payload.get("contextSnapshot")),
-                },
+                "context_snapshot": context_snapshot,
             },
         )
+        run = await self._initialize_run_log(run)
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
         await self._append_event(
             run,
@@ -709,6 +770,7 @@ class HeartbeatService:
 
         stdout = ""
         stderr = ""
+        adapter_operation: object | None = None
 
         async def on_log(stream: str, chunk: str) -> None:
             nonlocal sequence, stdout, stderr
@@ -716,6 +778,15 @@ class HeartbeatService:
                 stdout += chunk
             else:
                 stderr += chunk
+            if isinstance(adapter_operation, dict) and isinstance(
+                adapter_operation.get("id"), str
+            ):
+                await WorkspaceService(self._session).append_operation_log(
+                    adapter_operation["id"],
+                    stream=stream,
+                    chunk=chunk,
+                )
+            await self._append_run_log(running, stream=stream, chunk=chunk)
             await self._append_event(
                 running,
                 sequence,
@@ -881,6 +952,7 @@ class HeartbeatService:
                     "signal": result.signal,
                     "usage_json": result.usage_json,
                     "session_id_after": result.session_id_after,
+                    **self._finalize_run_log_fields(running),
                     "result_json": {
                         **(result.result_json or {}),
                         **(
@@ -935,6 +1007,7 @@ class HeartbeatService:
             if running.status == "cancelled":
                 return running
             message = str(exc)
+            await self._append_run_log(running, stream="stderr", chunk=message)
             await self._finish_adapter_workspace_operation(
                 locals().get("adapter_operation"),
                 status="failed",
@@ -949,6 +1022,7 @@ class HeartbeatService:
                     "finished_at": datetime.now(UTC),
                     "error": message,
                     "error_code": "adapter_failed",
+                    **self._finalize_run_log_fields(running),
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,
                 },
@@ -1373,6 +1447,7 @@ class HeartbeatService:
                     "context_snapshot": context_snapshot,
                 },
             )
+            run = await self._initialize_run_log(run)
             await update_wakeup_request(
                 self._session,
                 deferred.id,
@@ -1550,6 +1625,25 @@ class HeartbeatService:
         self, context_snapshot: dict[str, Any] | None
     ) -> dict[str, Any]:
         return dict(context_snapshot) if isinstance(context_snapshot, dict) else {}
+
+    async def _enrich_issue_context_snapshot(
+        self, context_snapshot: dict[str, Any]
+    ) -> dict[str, Any]:
+        issue_id = _issue_id_from_context(context_snapshot)
+        if issue_id is None:
+            return context_snapshot
+        from .issues import IssueService
+
+        heartbeat_context = await IssueService(self._session).get_heartbeat_context(
+            issue_id
+        )
+        if heartbeat_context is None:
+            return context_snapshot
+        return {
+            **heartbeat_context,
+            **context_snapshot,
+            "issue": context_snapshot.get("issue") or heartbeat_context.get("issue"),
+        }
 
     def _to_run(self, row: HeartbeatRunRow) -> HeartbeatRun:
         return heartbeat_run_to_data(row)

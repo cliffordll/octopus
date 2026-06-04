@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 ActorType = Literal["user", "agent", "system"]
+WakeupSource = Literal["timer", "assignment", "review", "on_demand", "automation"]
 
 
 async def queue_issue_assignment_wakeup(
@@ -21,6 +22,8 @@ async def queue_issue_assignment_wakeup(
     reason: str,
     mutation: str,
     context_source: str,
+    source: WakeupSource = "assignment",
+    wake_source: str = "assignment",
     actor_type: ActorType,
     actor_id: str,
 ) -> None:
@@ -29,14 +32,14 @@ async def queue_issue_assignment_wakeup(
         return
 
     payload: WakeAgentPayload = {
-        "source": "assignment",
+        "source": source,
         "triggerDetail": "system",
         "reason": reason,
         "payload": {"issueId": issue["id"], "mutation": mutation},
         "contextSnapshot": {
             "issueId": issue["id"],
             "source": context_source,
-            "wakeSource": "assignment",
+            "wakeSource": wake_source,
             "wakeReason": reason,
             "issue": {
                 "id": issue["id"],

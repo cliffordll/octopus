@@ -205,7 +205,9 @@ async def test_claude_local_executes_stream_json_and_normalizes_result(
     )
     assert "--verbose" in capture["argv"]
     assert capture["argv"][capture["argv"].index("--model") + 1] == "claude-test-model"
-    assert capture["prompt"] == "Respond from Claude."
+    assert capture["prompt"].startswith("Respond from Claude.")
+    assert "## Runtime Tool Capability" in capture["prompt"]
+    assert "Do not guess tool input schemas" in capture["prompt"]
     assert result.exit_code == 0
     assert result.session_id_after == "claude-session-1"
     assert result.usage_json == {
@@ -375,7 +377,10 @@ async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> 
     assert capture["argv"][capture["argv"].index("--format") + 1] == "json"
     assert capture["argv"][capture["argv"].index("--model") + 1] == "openai/gpt-5"
     assert capture["argv"][capture["argv"].index("--variant") + 1] == "default"
-    assert capture["prompt"] == "Respond from OpenCode."
+    assert capture["prompt"].startswith("Respond from OpenCode.")
+    assert "## Runtime Tool Capability" in capture["prompt"]
+    assert "Do not guess tool input schemas" in capture["prompt"]
+    assert "`bash` requires both `description` and `command`" in capture["prompt"]
     assert result.exit_code == 0
     assert result.session_id_after == "ses_123"
     assert result.usage_json == {
