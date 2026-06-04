@@ -37,7 +37,7 @@ it("shows the organization workspace file tree and editor", async () => {
     if (path === "/api/orgs/org-1/workspace/files?path=" && init?.method === "GET") {
       return respond({
         source: "org_root",
-        rootPath: "D:/coding/octopus/.octopus/organizations/org-1/workspaces",
+        rootPath: "C:/Users/test/.octopus/instances/default/organizations/org-1/workspaces",
         repoUrl: null,
         directoryPath: "",
         rootExists: true,
@@ -52,7 +52,7 @@ it("shows the organization workspace file tree and editor", async () => {
     if (path === "/api/orgs/org-1/workspace/files?path=artifacts" && init?.method === "GET") {
       return respond({
         source: "org_root",
-        rootPath: "D:/coding/octopus/.octopus/organizations/org-1/workspaces",
+        rootPath: "C:/Users/test/.octopus/instances/default/organizations/org-1/workspaces",
         repoUrl: null,
         directoryPath: "artifacts",
         rootExists: true,
@@ -63,7 +63,7 @@ it("shows the organization workspace file tree and editor", async () => {
     if (path === "/api/orgs/org-1/workspace/file?path=artifacts%2Fsummary.md" && init?.method === "GET") {
       return respond({
         source: "org_root",
-        rootPath: "D:/coding/octopus/.octopus/organizations/org-1/workspaces",
+        rootPath: "C:/Users/test/.octopus/instances/default/organizations/org-1/workspaces",
         repoUrl: null,
         filePath: "artifacts/summary.md",
         rootExists: true,
@@ -118,7 +118,7 @@ it("keeps the selected workspace file from the path query", async () => {
     if (path === "/api/orgs/org-1/workspace/files?path=" && init?.method === "GET") {
       return respond({
         source: "org_root",
-        rootPath: "D:/coding/octopus/.octopus/organizations/org-1/workspaces",
+        rootPath: "C:/Users/test/.octopus/instances/default/organizations/org-1/workspaces",
         repoUrl: null,
         directoryPath: "",
         rootExists: true,
@@ -129,7 +129,7 @@ it("keeps the selected workspace file from the path query", async () => {
     if (path === "/api/orgs/org-1/workspace/file?path=package-lock.json" && init?.method === "GET") {
       return respond({
         source: "org_root",
-        rootPath: "D:/coding/octopus/.octopus/organizations/org-1/workspaces",
+        rootPath: "C:/Users/test/.octopus/instances/default/organizations/org-1/workspaces",
         repoUrl: null,
         filePath: "package-lock.json",
         rootExists: true,

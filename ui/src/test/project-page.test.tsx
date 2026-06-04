@@ -32,7 +32,7 @@ it("updates a project and manages its resource attachments", async () => {
       defaultRef: "main",
       repoName: "octopus",
       localFolder: "D:/coding/octopus",
-      managedFolder: ".octopus/organizations/org-1/workspaces",
+      managedFolder: "organizations/org-1/workspaces",
       effectiveLocalFolder: "D:/coding/octopus",
       origin: "project_workspace",
     },
@@ -321,7 +321,7 @@ it("saves the selected workspace policy when the project has no existing policy"
     pauseReason: null,
     pausedAt: null,
     executionWorkspacePolicy: null,
-    codebase: { configured: false, scope: "none", managedFolder: ".octopus/organizations/org-1/workspaces", effectiveLocalFolder: ".octopus/organizations/org-1/workspaces", origin: "managed_checkout" },
+    codebase: { configured: false, scope: "none", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "organizations/org-1/workspaces", origin: "managed_checkout" },
     workspaces: [],
     primaryWorkspace: null,
     resources: [],
@@ -339,8 +339,8 @@ it("saves the selected workspace policy when the project has no existing policy"
   renderApp("/orgs/org-1/projects/project-1/configuration");
   expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
   expect(screen.getByText("将使用组织共享工作区")).toBeInTheDocument();
-  expect(screen.getByText(".octopus/organizations/org-1/workspaces")).toBeInTheDocument();
-  expect(screen.getByText(".octopus/organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
+  expect(screen.getByText("organizations/org-1/workspaces")).toBeInTheDocument();
+  expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
   expect(screen.getByText("暂无项目工作区。任务运行时会使用组织共享工作区。")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
 
