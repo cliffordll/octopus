@@ -123,6 +123,30 @@ class UpdateProjectPayload(ProjectMutationFields, total=False):
     name: str
 
 
+class ProjectWorkspaceFields(TypedDict, total=False):
+    sourceType: str
+    cwd: str | None
+    repoUrl: str | None
+    repoRef: str | None
+    defaultRef: str | None
+    visibility: str
+    setupCommand: str | None
+    cleanupCommand: str | None
+    remoteProvider: str | None
+    remoteWorkspaceRef: str | None
+    sharedWorkspaceKey: str | None
+    metadata: dict[str, Any] | None
+    isPrimary: bool
+
+
+class CreateProjectWorkspacePayload(ProjectWorkspaceFields):
+    name: str
+
+
+class UpdateProjectWorkspacePayload(ProjectWorkspaceFields, total=False):
+    name: str
+
+
 class UpdateProjectResourceAttachmentPayload(TypedDict, total=False):
     role: ProjectResourceAttachmentRole
     note: str | None
