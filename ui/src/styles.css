@@ -1607,6 +1607,35 @@ small {
   overflow-wrap: anywhere;
 }
 
+.project-workspace-fallback {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.14), rgba(15, 23, 42, 0.6));
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.project-workspace-fallback strong {
+  color: #f8d99b;
+  font-size: 12px;
+}
+
+.project-workspace-fallback span,
+.project-workspace-empty {
+  color: #9aa6b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.project-workspace-empty {
+  background: #111722;
+  border: 1px dashed #2b374b;
+  border-radius: 10px;
+  margin: 0;
+  padding: 12px;
+}
+
 .project-workspace-list,
 .issue-work-product-list {
   display: flex;
