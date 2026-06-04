@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { organizationsApi } from "../api/organizations";
+import { initializeLocalePreference, LOCALE_CHANGE_EVENT } from "../utils/locale";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
 import { ProjectCreateDialog } from "../pages/ProjectsPage";
 import { OrganizationSettingsPanel } from "./OrganizationSettingsPanel";
@@ -20,6 +21,7 @@ export function AppShell() {
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [locale, setLocale] = useState(() => initializeLocalePreference());
   const productMenuRef = useRef<HTMLDivElement>(null);
   const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
@@ -34,6 +36,16 @@ export function AppShell() {
   const selectedOrganization =
     organizationList.find((organization) => organization.id === activeOrganizationId) ?? organizationList[0];
   const selectedOrganizationId = activeOrganizationId ?? selectedOrganization?.id;
+
+  useEffect(() => {
+    function rerenderOnLocaleChange() {
+      setLocale(initializeLocalePreference());
+    }
+    window.addEventListener(LOCALE_CHANGE_EVENT, rerenderOnLocaleChange);
+    return () => {
+      window.removeEventListener(LOCALE_CHANGE_EVENT, rerenderOnLocaleChange);
+    };
+  }, []);
 
   useEffect(() => {
     function closeMenusOnOutsideInteraction(event: MouseEvent | FocusEvent) {
@@ -204,7 +216,7 @@ export function AppShell() {
           </button>
         </div>
       </aside>
-      <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`}>
+      <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`} key={locale}>
         <Outlet />
       </main>
       {agentCreateOpen && selectedOrganizationId && (

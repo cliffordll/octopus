@@ -9,6 +9,7 @@ import type { Goal, GoalLevel, GoalStatus, IssueListItem, ProjectDetail } from "
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
+import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const LEVELS: GoalLevel[] = ["organization", "team", "agent", "task"];
@@ -39,33 +40,33 @@ function WorkSection({
   linkedIssues: IssueListItem[];
 }) {
   if (linkedProjects.length === 0 && linkedIssues.length === 0) {
-    return <section className="panel"><p className="muted">No linked work yet.</p></section>;
+    return <section className="panel"><p className="muted">暂无关联工作。</p></section>;
   }
   return (
     <div className="goal-work-sections">
       <section className="panel">
-        <h2>Projects ({linkedProjects.length})</h2>
+        <h2>项目 ({linkedProjects.length})</h2>
         <div className="list">
           {linkedProjects.map((project) => (
             <article className="row" key={project.id}>
               <Link to={`/orgs/${orgId}/projects/${project.id}`}>{project.name}</Link>
-              <Badge>{project.status}</Badge>
+              <Badge>{statusLabel(project.status)}</Badge>
             </article>
           ))}
-          {linkedProjects.length === 0 && <p className="muted">No linked projects.</p>}
+          {linkedProjects.length === 0 && <p className="muted">暂无关联项目。</p>}
         </div>
       </section>
       <section className="panel">
-        <h2>Issues ({linkedIssues.length})</h2>
+        <h2>任务 ({linkedIssues.length})</h2>
         <div className="list">
           {linkedIssues.map((issue) => (
             <article className="issue-row" key={issue.id}>
               <span className="identifier">{issue.identifier ?? "-"}</span>
               <Link to={`/orgs/${orgId}/issues/${issue.id}`}>{issue.title}</Link>
-              <Badge>{issue.status}</Badge>
+              <Badge>{statusLabel(issue.status)}</Badge>
             </article>
           ))}
-          {linkedIssues.length === 0 && <p className="muted">No linked issues.</p>}
+          {linkedIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
         </div>
       </section>
     </div>
@@ -148,7 +149,7 @@ export function GoalPage() {
           <Link className="back-link" to={`/orgs/${orgId}/goals`}>返回 Goals</Link>
           <div className="agent-title-row">
             <h1>{goal.data?.title ?? "Goal"}</h1>
-            {goal.data && <Badge>{goal.data.status}</Badge>}
+            {goal.data && <Badge>{statusLabel(goal.data.status)}</Badge>}
           </div>
         </div>
         {goal.data && (
@@ -166,7 +167,7 @@ export function GoalPage() {
             <SummaryMetric label="Sub-goals" value={childGoals.length} />
             <SummaryMetric label="Projects" value={linkedProjects.length} />
             <SummaryMetric label="Issues" value={linkedIssues.length} />
-            <SummaryMetric label="Updated" value={goal.data.updatedAt || "-"} />
+            <SummaryMetric label="Updated" value={formatDateTime(goal.data.updatedAt)} />
           </div>
           <nav aria-label="目标详情导航" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/goals/${goalId}/work`}>Work ({linkedProjects.length + linkedIssues.length})</NavLink>
@@ -203,7 +204,7 @@ export function GoalPage() {
                 <label>
                   Status
                   <select value={status} onChange={(event) => setStatus(event.target.value as GoalStatus)}>
-                    {STATUSES.map((item) => <option key={item}>{item}</option>)}
+                    {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
                   </select>
                 </label>
               </div>

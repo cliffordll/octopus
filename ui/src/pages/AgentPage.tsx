@@ -8,6 +8,7 @@ import type { AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, He
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
@@ -23,6 +24,7 @@ const RUNTIMES: AgentRuntimeType[] = [
   "openclaw_gateway",
   "hermes_local",
 ];
+const OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions";
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -45,6 +47,22 @@ function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): 
   if (!supportsRuntimeModels(runtime)) return config;
   const model = typeof config.model === "string" ? config.model.trim() : "";
   return { ...config, model: validateModelReference(model) };
+}
+
+function runtimeConfigExtraArgs(config: Record<string, unknown>): string[] {
+  return Array.isArray(config.extraArgs)
+    ? config.extraArgs.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function hasOpenCodeSkipPermissions(config: Record<string, unknown>): boolean {
+  return runtimeConfigExtraArgs(config).includes(OPENCODE_SKIP_PERMISSIONS_ARG);
+}
+
+function setOpenCodeSkipPermissions(config: Record<string, unknown>, enabled: boolean): Record<string, unknown> {
+  const extraArgs = runtimeConfigExtraArgs(config).filter((item) => item !== OPENCODE_SKIP_PERMISSIONS_ARG);
+  if (enabled) extraArgs.push(OPENCODE_SKIP_PERMISSIONS_ARG);
+  return extraArgs.length > 0 ? { ...config, extraArgs } : Object.fromEntries(Object.entries(config).filter(([key]) => key !== "extraArgs"));
 }
 
 function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
@@ -183,11 +201,11 @@ function InstructionFileTree({
 }
 
 function formatRunTime(value?: string | null): string {
-  return value || "无";
+  return formatDateTime(value);
 }
 
 function summarizeRun(run: HeartbeatRun | null): string {
-  if (!run) return "No runs yet.";
+  if (!run) return "暂无运行记录。";
   if (run.error?.trim()) return run.error.trim();
   const summary = run.resultJson?.summary ?? run.resultJson?.result ?? run.resultJson?.message;
   return typeof summary === "string" && summary.trim() ? summary.trim() : run.id;
@@ -331,18 +349,18 @@ function skillAliases(entry: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-type SkillSourceGroup = "built-in" | "community" | "组织技能" | "外部技能";
+type SkillSourceGroup = "内置技能" | "社区技能" | "组织技能" | "外部技能";
 
 function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
   const sourceClass = skillSourceKind(entry);
-  if (isBuiltInSkillEntry(entry)) return "built-in";
-  if (isCommunitySkillEntry(entry)) return "community";
+  if (isBuiltInSkillEntry(entry)) return "内置技能";
+  if (isCommunitySkillEntry(entry)) return "社区技能";
   if (sourceClass === "organization") return "组织技能";
   return "外部技能";
 }
 
 function skillState(entry: Record<string, unknown>): string {
-  return skillField(entry, ["state", "status"], "available");
+  return statusLabel(skillField(entry, ["state", "status"], "available"));
 }
 
 function skillSourceLabel(entry: Record<string, unknown>): string {
@@ -352,11 +370,11 @@ function skillSourceLabel(entry: Record<string, unknown>): string {
 }
 
 function skillDisplaySourceText(value: string | null | undefined, bundled: boolean): string {
-  if (bundled) return "built-in";
+  if (bundled) return "内置";
   if (!value) return "-";
   const normalized = normalizeSkillSource(value);
-  if (normalized === "community_preset") return "community";
-  return value;
+  if (normalized === "community_preset") return "社区";
+  return sourceLabel(value);
 }
 
 function isBuiltInSkillEntry(entry: Record<string, unknown>): boolean {
@@ -392,7 +410,7 @@ function AgentRunDetail({
   if (!run) {
     return (
       <section className="panel agent-run-detail-card">
-        <p className="muted">No runs yet.</p>
+        <p className="muted">暂无运行记录。</p>
       </section>
     );
   }
@@ -409,8 +427,8 @@ function AgentRunDetail({
       <div className="agent-run-detail-header">
         <div>
           <div className="meta-line">
-            <Badge>{run.status}</Badge>
-            <Badge>{run.invocationSource}</Badge>
+            <Badge>{statusLabel(run.status)}</Badge>
+            <Badge>{sourceLabel(run.invocationSource)}</Badge>
             {run.triggerDetail && <Badge>{run.triggerDetail}</Badge>}
           </div>
           <h2>{run.id.slice(0, 8)}</h2>
@@ -420,8 +438,8 @@ function AgentRunDetail({
       </div>
       <dl className="detail-grid compact">
         <div><dt>Run ID</dt><dd>{run.id}</dd></div>
-        <div><dt>Started</dt><dd>{formatRunTime(run.startedAt)}</dd></div>
-        <div><dt>Finished</dt><dd>{formatRunTime(run.finishedAt)}</dd></div>
+        <div><dt>开始时间</dt><dd>{formatRunTime(run.startedAt)}</dd></div>
+        <div><dt>结束时间</dt><dd>{formatRunTime(run.finishedAt)}</dd></div>
         <div><dt>Exit</dt><dd>{run.exitCode ?? "无"}</dd></div>
         <div><dt>Error Code</dt><dd>{run.errorCode ?? "无"}</dd></div>
         <div><dt>Retry Of</dt><dd>{run.retryOfRunId ?? "无"}</dd></div>
@@ -432,7 +450,7 @@ function AgentRunDetail({
           <div><span>Input</span><strong>{runMetric(run, "inputTokens")}</strong></div>
           <div><span>Output</span><strong>{runMetric(run, "outputTokens")}</strong></div>
           <div><span>Cached</span><strong>{runMetric(run, "cachedInputTokens")}</strong></div>
-          <div><span>Cost</span><strong>{runMetric(run, "costCents")}</strong></div>
+          <div><span>Cost</span><strong>{formatMoneyCents(Number(runMetric(run, "costCents")) || 0)}</strong></div>
         </div>
       )}
       {hasSession && (
@@ -496,12 +514,12 @@ function AgentRunDetail({
                 <div className="agent-run-event-header">
                   <span>#{event.seq}</span>
                   <strong>{event.eventType}</strong>
-                  {event.level && <Badge>{event.level}</Badge>}
+                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
                   {event.stream && <Badge>{event.stream}</Badge>}
                 </div>
                 {event.message && <p>{event.message}</p>}
                 {hasJsonObject(event.payload) && <pre className="agent-run-json">{formattedJson(event.payload)}</pre>}
-                <small className="muted">{event.createdAt}</small>
+                <small className="muted">{formatDateTime(event.createdAt)}</small>
               </article>
             ))}
           </div>
@@ -527,7 +545,7 @@ function AgentRunDetail({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{operation.status}</Badge>
+                  <Badge>{statusLabel(operation.status)}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p>{operation.command}</p>}
@@ -552,7 +570,7 @@ export function AgentPage() {
   const [capabilities, setCapabilities] = useState("");
   const [reportsTo, setReportsTo] = useState("");
   const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
-  const [budgetMonthlyCents, setBudgetMonthlyCents] = useState("0");
+  const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState("0");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
   const [desiredSkills, setDesiredSkills] = useState("");
@@ -634,7 +652,7 @@ export function AgentPage() {
     setCapabilities(agent.data.capabilities ?? "");
     setReportsTo(agent.data.reportsTo ?? "");
     setRuntime(agent.data.agentRuntimeType);
-    setBudgetMonthlyCents(String(agent.data.budgetMonthlyCents ?? 0));
+    setBudgetMonthlyDollars(String(((agent.data.budgetMonthlyCents ?? 0) / 100).toFixed(2)));
     setAgentRuntimeConfig(JSON.stringify(agent.data.agentRuntimeConfig ?? {}, null, 2));
     setRuntimeConfig(JSON.stringify(agent.data.runtimeConfig ?? {}, null, 2));
     setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
@@ -762,7 +780,7 @@ export function AgentPage() {
         agentRuntimeType: runtime,
         agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
         runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
-        budgetMonthlyCents: Number(budgetMonthlyCents),
+        budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars || 0) * 100),
       });
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
@@ -794,7 +812,20 @@ export function AgentPage() {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
   }
-  const canChat = agent.data?.status !== "terminated";
+  function toggleOpenCodeSkipPermissions(enabled: boolean) {
+    try {
+      const config = readJsonObjectSafe(agentRuntimeConfig);
+      setAgentRuntimeConfig(JSON.stringify(setOpenCodeSkipPermissions(config, enabled), null, 2));
+      setConfigurationError(null);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
+    }
+  }
+  const isPendingApproval = agent.data?.status === "pending_approval";
+  const isTerminated = agent.data?.status === "terminated";
+  const isPaused = agent.data?.status === "paused";
+  const operationalDisabled = isPendingApproval || isTerminated;
+  const canChat = !operationalDisabled;
   const runRows = Array.isArray(runs.data) ? runs.data : [];
   const sortedRuns = useMemo(
     () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
@@ -828,6 +859,8 @@ export function AgentPage() {
     supportsRuntimeModels(runtime)
       ? (readJsonObjectSafe(agentRuntimeConfig).model as string | undefined) ?? ""
       : "";
+  const opencodeSkipPermissionsEnabled =
+    runtime === "opencode_local" && hasOpenCodeSkipPermissions(readJsonObjectSafe(agentRuntimeConfig));
   const selectedRuntimeModelKnown =
     !selectedRuntimeModel || runtimeModelOptions.some((model) => runtimeModelReference(model) === selectedRuntimeModel);
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
@@ -937,11 +970,11 @@ export function AgentPage() {
             <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
             <div className="agent-title-row">
               <h1>{agent.data?.name ?? "载入中..."}</h1>
-              {agent.data && <Badge>{agent.data.status}</Badge>}
+              {agent.data && <Badge>{statusLabel(agent.data.status)}</Badge>}
             </div>
             {agent.data && (
               <div className="agent-header-meta">
-                <Badge>{agent.data.role}</Badge>
+                <Badge>{roleLabel(agent.data.role)}</Badge>
                 <Badge>{agent.data.agentRuntimeType}</Badge>
                 <span>{agent.data.title ?? "No title"}</span>
               </div>
@@ -950,7 +983,7 @@ export function AgentPage() {
         </div>
         {agent.data && (
           <div className="agent-header-actions">
-            <button className="secondary" onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
+            <button className="secondary" disabled={operationalDisabled} onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
             {activeTab === "configuration" && (
               <button className="secondary" disabled={resetSession.isPending} onClick={() => setResetSessionDialogOpen(true)} type="button">
                 重置会话
@@ -961,15 +994,16 @@ export function AgentPage() {
             ) : (
               <button className="secondary" disabled type="button">聊天</button>
             )}
-            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => action.mutate("pause")}>暂停</button>
-            <button className="secondary" disabled={agent.data.status !== "paused"} type="button" onClick={() => action.mutate("resume")}>恢复</button>
-            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("terminate")}>终止</button>
-            <button className="danger" disabled={agent.data.status === "terminated"} type="button" onClick={() => action.mutate("archive")}>归档</button>
-            <button className="secondary" disabled={agent.data.status === "terminated" || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
-            <button disabled={agent.data.status === "paused" || agent.data.status === "terminated"} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
+            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => action.mutate("pause")}>暂停</button>
+            <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
+            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
+            <button className="secondary" disabled={operationalDisabled || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
+            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
           </div>
         )}
       </header>
+      {isPendingApproval && <p className="info-notice">该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。</p>}
       {action.error && <ErrorNotice error={action.error} />}
       {invoke.error && <ErrorNotice error={invoke.error} />}
       {wakeup.error && <ErrorNotice error={wakeup.error} />}
@@ -987,16 +1021,16 @@ export function AgentPage() {
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">Latest Run</p>
-                  <h2>{selectedRun ? selectedRun.id.slice(0, 8) : "No runs yet"}</h2>
+                  <h2>{selectedRun ? selectedRun.id.slice(0, 8) : "暂无运行记录"}</h2>
                   <p className="muted">{summarizeRun(selectedRun)}</p>
                 </div>
-                {selectedRun && <Badge>{selectedRun.status}</Badge>}
+                {selectedRun && <Badge>{statusLabel(selectedRun.status)}</Badge>}
               </div>
               <dl className="detail-grid compact">
-                <div><dt>Source</dt><dd>{selectedRun?.invocationSource ?? "-"}</dd></div>
-                <div><dt>Started</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
-                <div><dt>Finished</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
-                <div><dt>Last Heartbeat</dt><dd>{agent.data.lastHeartbeatAt ?? "暂无"}</dd></div>
+                <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
+                <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
+                <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
+                <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
               </dl>
             </section>
             <section className="panel">
@@ -1009,10 +1043,10 @@ export function AgentPage() {
               {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
               {runtimeState.data && (
                 <div className="agent-summary-grid">
-                  <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
+                  <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
                   <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
                   <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
-                  <div className="summary-metric"><span>Cost</span><strong>{runtimeState.data.totalCostCents} cents</strong></div>
+                  <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
                 </div>
               )}
             </section>
@@ -1025,7 +1059,7 @@ export function AgentPage() {
               </div>
               <dl className="agent-properties">
                 <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
-                <div><dt>角色</dt><dd>{agent.data.role}</dd></div>
+                <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
                 <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
                 <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
               </dl>
@@ -1181,6 +1215,22 @@ export function AgentPage() {
                           )}
                         </label>
                       )}
+                      {runtime === "opencode_local" && (
+                        <label className="agent-property-row agent-toggle-row">
+                          <span>跳过 OpenCode 权限确认</span>
+                          <div>
+                            <input
+                              aria-label="跳过 OpenCode 权限确认"
+                              checked={opencodeSkipPermissionsEnabled}
+                              type="checkbox"
+                              onChange={(event) => toggleOpenCodeSkipPermissions(event.target.checked)}
+                            />
+                            <small>
+                              开启后 OpenCode 会使用 --dangerously-skip-permissions，自动批准未显式拒绝的本地工具权限请求。仅适用于本地可信开发环境。
+                            </small>
+                          </div>
+                        </label>
+                      )}
                       <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
                     </div>
                     <div className="agent-runtime-test-row">
@@ -1195,7 +1245,7 @@ export function AgentPage() {
                               {runtimeTestResult.checks.map((check) => (
                                 <li key={check.id ?? check.label ?? check.message}>
                                   <span>{check.label ?? check.id ?? "检查项"}</span>
-                                  <Badge>{check.status ?? "unknown"}</Badge>
+                                  <Badge>{check.status ? statusLabel(check.status) : "未知"}</Badge>
                                   {check.message && <span>{check.message}</span>}
                                   {check.hint && <small>{check.hint}</small>}
                                 </li>
@@ -1213,8 +1263,8 @@ export function AgentPage() {
                       <p className="muted">预算、技能偏好和运行上下文策略。</p>
                     </div>
                     <div className="agent-property-list">
-                      <label className="agent-property-row"><span>月度预算（cents）</span><input min="0" type="number" value={budgetMonthlyCents} onChange={(event) => setBudgetMonthlyCents(event.target.value)} required /></label>
-                      <label className="agent-property-row"><span>Desired Skills</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
+                      <label className="agent-property-row"><span>月度预算（美元）</span><input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} required /></label>
+                      <label className="agent-property-row"><span>期望技能</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
                       <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
                     </div>
                   </section>
@@ -1260,10 +1310,10 @@ export function AgentPage() {
                 {configuration.error && <ErrorNotice error={configuration.error} />}
                 {configuration.data && (
                   <div className="agent-summary-grid">
-                    <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ?? "未知"}</strong></div>
-                    <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ?? "未知"}</strong></div>
+                    <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ? statusLabel(configuration.data.status) : "未知"}</strong></div>
+                    <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ? roleLabel(configuration.data.role) : "未知"}</strong></div>
                     <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
-                    <div className="summary-metric"><span>更新时间</span><strong>{configuration.data.updatedAt ?? "未记录"}</strong></div>
+                    <div className="summary-metric"><span>更新时间</span><strong>{formatDateTime(configuration.data.updatedAt)}</strong></div>
                   </div>
                 )}
               </section>
@@ -1280,7 +1330,7 @@ export function AgentPage() {
                 {runtimeState.data && (
                   <div className="agent-summary-grid">
                     <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ?? "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
                   </div>
                 )}
                 <div className="list">
@@ -1288,9 +1338,9 @@ export function AgentPage() {
                     <article className="row" key={session.id}>
                       <div>
                         <strong>{session.taskKey}</strong>
-                        <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {session.updatedAt}</p>
+                        <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {formatDateTime(session.updatedAt)}</p>
                       </div>
-                      <Badge>{session.status}</Badge>
+                      <Badge>{statusLabel(session.status)}</Badge>
                     </article>
                   ))}
                 </div>
@@ -1354,8 +1404,8 @@ export function AgentPage() {
                 </section>
               )}
               {[
-                { label: "built-in", rows: builtInSkillEntries },
-                { label: "community", rows: communitySkillEntries },
+                { label: "内置技能", rows: builtInSkillEntries },
+                { label: "社区技能", rows: communitySkillEntries },
                 { label: "组织技能", rows: organizationSkillEntries },
                 { label: "外部技能", rows: externalSkillEntries },
               ].map((group) => (
@@ -1496,7 +1546,7 @@ export function AgentPage() {
                   <p className="muted">最近运行</p>
                 </div>
               </div>
-              {runs.isSuccess && sortedRuns.length === 0 && <p className="muted">No runs yet.</p>}
+              {runs.isSuccess && sortedRuns.length === 0 && <p className="muted">暂无运行记录。</p>}
               {sortedRuns.map((run) => (
                 <button
                   className={`agent-run-list-button ${selectedRun?.id === run.id ? "selected" : ""}`}
@@ -1508,7 +1558,7 @@ export function AgentPage() {
                     <strong>{run.id.slice(0, 8)}</strong>
                     <small>{summarizeRun(run)}</small>
                   </span>
-                  <Badge>{run.status}</Badge>
+                    <Badge>{statusLabel(run.status)}</Badge>
                 </button>
               ))}
             </aside>
