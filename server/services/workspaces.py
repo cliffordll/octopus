@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -63,6 +62,7 @@ from .logs import (
 from . import workspace_paths as workspace_paths_module
 from .workspace_paths import (
     ensure_organization_workspace_root,
+    ensure_octopus_workspace_operation_log_dir,
     organization_workspace_root,
 )
 
@@ -76,12 +76,7 @@ def _as_record(value: Any) -> dict[str, Any]:
 
 
 def _operation_log_dir() -> Path:
-    return Path(
-        os.getenv(
-            "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
-            ".octopus/workspace-operation-logs",
-        )
-    )
+    return ensure_octopus_workspace_operation_log_dir()
 
 
 def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
@@ -1062,12 +1057,7 @@ class WorkspaceService:
             log: LogReadResult = {"content": "", "endOffset": 0, "eof": True}
         else:
             log = read_local_file_log(
-                Path(
-                    os.getenv(
-                        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
-                        ".octopus/workspace-operation-logs",
-                    )
-                ),
+                ensure_octopus_workspace_operation_log_dir(),
                 row.log_ref,
                 offset=offset,
                 limit_bytes=limit_bytes,

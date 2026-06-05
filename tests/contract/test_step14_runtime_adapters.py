@@ -995,9 +995,25 @@ async def test_codex_execute_uses_default_managed_codex_home(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     default_home = (
-        tmp_path / ".octopus" / "runtime-homes" / "codex_local" / "org-14" / "agent-14"
+        tmp_path
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
+        / "org-14"
+        / "codex-home"
+        / "agents"
+        / "agent-14"
     )
-    skill_dir = default_home / "skills" / "default-skill"
+    legacy_home = (
+        tmp_path
+        / "octopus-home"
+        / "runtime-homes"
+        / "codex_local"
+        / "org-14"
+        / "agent-14"
+    )
+    skill_dir = legacy_home / "skills" / "default-skill"
     skill_dir.mkdir(parents=True)
     skill_dir.joinpath("SKILL.md").write_text(
         "# Default Skill\n\nDefault managed skill.", encoding="utf-8"
@@ -1044,6 +1060,8 @@ async def test_codex_execute_uses_default_managed_codex_home(
     )
 
     assert captured_env["CODEX_HOME"] == str(default_home)
+    assert not skill_dir.exists()
+    assert (default_home / "skills" / "default-skill" / "SKILL.md").is_file()
     assert result.result_json is not None
     assert result.result_json["loadedSkills"] == [
         {
@@ -1626,11 +1644,12 @@ async def test_opencode_execute_materializes_database_provider_config(
 
     managed_config_path = (
         tmp_path
-        / ".octopus"
-        / "runtime-homes"
-        / "opencode_local"
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
         / "org-14"
-        / "agent-14"
+        / "opencode-home"
         / "home"
         / ".config"
         / "opencode"
