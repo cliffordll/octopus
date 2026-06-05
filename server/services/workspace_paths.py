@@ -80,6 +80,42 @@ def resolve_octopus_server_log_dir() -> Path:
     return (resolve_octopus_instance_root() / "logs").resolve()
 
 
+def resolve_octopus_storage_dir() -> Path:
+    raw_dir = os.environ.get("OCTOPUS_STORAGE_DIR", "").strip()
+    if raw_dir:
+        return _expand_home_prefix(raw_dir).resolve()
+    return (resolve_octopus_instance_data_root() / "storage").resolve()
+
+
+def legacy_octopus_storage_dir() -> Path:
+    return (resolve_octopus_home_dir() / "storage").resolve()
+
+
+def ensure_octopus_storage_dir() -> Path:
+    return _ensure_canonical_path(
+        resolve_octopus_storage_dir(),
+        legacy_octopus_storage_dir(),
+    )
+
+
+def resolve_octopus_workspace_operation_log_dir() -> Path:
+    raw_dir = os.environ.get("OCTOPUS_WORKSPACE_OPERATION_LOG_DIR", "").strip()
+    if raw_dir:
+        return _expand_home_prefix(raw_dir).resolve()
+    return (resolve_octopus_server_log_dir() / "workspace-operation-logs").resolve()
+
+
+def legacy_octopus_workspace_operation_log_dir() -> Path:
+    return (resolve_octopus_home_dir() / "workspace-operation-logs").resolve()
+
+
+def ensure_octopus_workspace_operation_log_dir() -> Path:
+    return _ensure_canonical_path(
+        resolve_octopus_workspace_operation_log_dir(),
+        legacy_octopus_workspace_operation_log_dir(),
+    )
+
+
 def organization_workspace_relative_path(org_id: str) -> str:
     return f"organizations/{org_id}/workspaces"
 
@@ -97,8 +133,13 @@ def legacy_organization_workspace_root(org_id: str) -> Path:
 
 
 def ensure_organization_workspace_root(org_id: str) -> Path:
-    canonical = organization_workspace_root(org_id)
-    legacy = legacy_organization_workspace_root(org_id)
+    return _ensure_canonical_path(
+        organization_workspace_root(org_id),
+        legacy_organization_workspace_root(org_id),
+    )
+
+
+def _ensure_canonical_path(canonical: Path, legacy: Path) -> Path:
     if legacy == canonical:
         canonical.mkdir(parents=True, exist_ok=True)
         return canonical

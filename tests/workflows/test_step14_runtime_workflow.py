@@ -323,7 +323,7 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/claude_local/org-claude/agent-claude/home"
+        "octopus-home/instances/test/organizations/org-claude/claude-home/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
@@ -524,7 +524,7 @@ async def test_opencode_local_injects_desired_skills_into_managed_home(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
     )
     assert capture["skillText"] == "# Review\n\nReview code changes."
     assert result.result_json is not None
@@ -579,7 +579,7 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
@@ -614,11 +614,12 @@ async def test_opencode_local_syncs_opencode_config_into_managed_home(
     )
     managed_home = (
         tmp_path
-        / ".octopus"
-        / "runtime-homes"
-        / "opencode_local"
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
         / "org-opencode"
-        / "agent-opencode"
+        / "opencode-home"
         / "home"
     )
     managed_home.joinpath(".config", "opencode").mkdir(parents=True)

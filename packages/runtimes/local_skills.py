@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+from .paths import ensure_managed_runtime_home
 from .skills import skill_snapshot_from_root
 from .types import RuntimeExecutionContext
 
@@ -104,12 +105,11 @@ def _desired_runtime_name(value: str) -> str:
 
 def _default_home(runtime_type: str, context: RuntimeExecutionContext) -> Path:
     return (
-        Path.cwd()
-        / ".octopus"
-        / "runtime-homes"
-        / runtime_type
-        / context.org_id
-        / context.agent_id
+        ensure_managed_runtime_home(
+            runtime_type,
+            org_id=context.org_id,
+            agent_id=context.agent_id,
+        )
         / "home"
     )
 
