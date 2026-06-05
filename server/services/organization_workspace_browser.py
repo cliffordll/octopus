@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.organizations import get_organization_by_id
 
-from .workspace_paths import organization_workspace_root
+from .workspace_paths import ensure_organization_workspace_root
 
 MAX_PREVIEW_BYTES = 200_000
 HIDDEN_WORKSPACE_ENTRY_NAMES = {".DS_Store", ".cache", ".npm", ".nvm"}
@@ -254,7 +254,7 @@ class OrganizationWorkspaceBrowserService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Organization not found",
             )
-        root = organization_workspace_root(org_id)
+        root = ensure_organization_workspace_root(org_id)
         for child in ("agents", "skills", "plans", "artifacts"):
             (root / child).mkdir(parents=True, exist_ok=True)
         return root
