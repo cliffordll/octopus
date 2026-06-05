@@ -1218,14 +1218,6 @@ function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder
 
 function workspaceEntryLabel(entry: OrganizationWorkspaceFileEntry): string {
   const name = entry.name || entry.path.split("/").at(-1) || entry.path;
-  if (entry.displayLabel) return entry.displayLabel === name ? name : `${entry.displayLabel} ${name}`;
-  const normalizedPath = entry.path.replace(/\\/g, "/");
-  if (normalizedPath === "agents") return "智能体 agents";
-  if (normalizedPath === "artifacts") return "产物 artifacts";
-  if (normalizedPath === "skills") return "技能 skills";
-  if (normalizedPath === "plans") return "计划 plans";
-  if (normalizedPath === "artifacts/issues") return "任务产物 issues";
-  if (normalizedPath.endsWith("/runs")) return "运行产物 runs";
   return name;
 }
 
