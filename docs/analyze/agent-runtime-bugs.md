@@ -2,12 +2,14 @@
 
 ## Bug 列表
 
-当前记录：2 个。
+当前记录：4 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
 | 1 | Agent skill 未启用 | 已修复 |
 | 2 | 组织工作区 legacy layout 可能导致 UI 文件树为空 | 已修复 |
+| 3 | Agent workspace home 未初始化 `life/`、`memory/`、`skills/` | 已修复 |
+| 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -151,3 +153,127 @@ executions/
 - 新 run 产物落在 canonical `workspaces/artifacts/` 或 `workspaces/executions/` 下。
 - legacy `.octopus/organizations/<orgId>/workspaces` 不再被新写入。
 - `tests/contract/test_workspace_paths.py` 覆盖 legacy layout 迁移。
+
+## 3. Agent workspace home 未初始化 `life/`、`memory/`、`skills/`
+
+### 背景
+
+上游 agent workspace home 通常位于：
+
+```text
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/
+```
+
+该目录除了 `instructions/`，还应作为 agent 长期资料根目录，包含：
+
+```text
+instructions/
+skills/
+life/
+memory/
+```
+
+其中：
+
+- `instructions/`：说明文件 bundle，例如 `SOUL.md`、`HEARTBEAT.md`、`TOOLS.md`、`MEMORY.md`。
+- `skills/`：agent-private skill package 根目录，例如 `skills/<slug>/SKILL.md`。
+- `life/`：长期结构化记忆目录，供 `para-memory-files` 等 skill 使用。
+- `memory/`：每日或会话时间线记忆目录，例如 `memory/YYYY-MM-DD.md`。
+
+注意：`instructions/MEMORY.md` 和 `memory/` 目录不是同一个东西。前者是说明文件 bundle 里的长期偏好/操作模式文件；后者是运行中不断追加的时间线记忆目录。
+
+### 症状
+
+- 上游同类目录下能看到 `life/`、`memory/`、`skills/`，当前本地 agent workspace home 下没有。
+- UI “组织 - 工作区 - 文件 - agents/<agent>/” 下只看到 `instructions/`，或目录为空。
+- `para-memory-files` skill 和 onboarding 文档引用 `$AGENT_HOME/life/`、`$AGENT_HOME/memory/`，但磁盘上没有对应目录。
+- agent private skill 只有在首次创建私有 skill 时才出现 `skills/`，空目录不会提前展示。
+
+### 影响边界
+
+- `skills/` 缺失会影响 agent-private skill 的可见性和 workspace browser 的一致性。
+- `life/`、`memory/` 缺失不一定会让当前 run 直接失败，但属于上游目录约定未 materialize，运行时写记忆时会缺少预期落点。
+- 这不是 `agent_enabled_skills` 为空的问题；那张表表达“启用了哪些 skill”，这里表达“agent 长期 home 是否具备上游约定目录”。
+
+### 修复
+
+- 新建 agent 时，server 会在 agent workspace home 下初始化 `instructions/`、`skills/`、`life/`、`memory/`。
+- 准备 runtime config、查询或同步 skills 时，也会对已有 agent 补齐这些目录。
+- `agentSkillsRootPath` 指向已创建的 `<agent workspace home>/skills/`。
+
+### 验收
+
+- 新建 agent 后，canonical instance path 下出现：
+
+```text
+.octopus/instances/default/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/instructions/
+.octopus/instances/default/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/skills/
+.octopus/instances/default/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/life/
+.octopus/instances/default/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/memory/
+```
+
+- 已有 agent 下一次准备 runtime config 或查询/sync skills 后，也会补齐上述目录。
+- `tests/workflows/test_step11_agent_workflow.py` 覆盖目录初始化。
+
+## 4. SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录
+
+### 背景
+
+开发阶段常见启动方式是在仓库根目录使用默认 SQLite：
+
+```text
+D:\coding\octopus\octopus.db
+```
+
+此时组织工作区、agent workspace home、runtime home、storage/logs 等本地文件也应该落在同一个开发数据根附近：
+
+```text
+D:\coding\octopus\.octopus
+```
+
+正式或桌面运行可以把数据都放到用户目录，但 DB 和 Octopus home 必须一起切换，而不是 DB 在仓库、workspace 在用户目录。
+
+### 症状
+
+- `octopus.db` 在 `D:\coding\octopus\octopus.db`。
+- 新建 agent 后，`agents.agent_runtime_config.instructionsRootPath` 指向：
+
+```text
+C:\Users\<user>\.octopus\instances\default\organizations\<orgId>\workspaces\agents\<agentWorkspaceKey>\instructions
+```
+
+- VSCode 打开的 `D:\coding\octopus\.octopus` 没变化。
+- 同一个 DB 中同时存在旧 agent 指向 repo-local `.octopus`，新 agent 指向 user-home `.octopus`。
+
+### 根因
+
+旧逻辑中：
+
+- `OCTOPUS_DATABASE_URL` 默认是 `sqlite+aiosqlite:///./octopus.db`。
+- `OCTOPUS_HOME` 未设置时默认是 `~/.octopus`。
+
+因此在仓库根目录启动 server 时，DB 和 workspace home 默认就不是同源目录。
+
+### 修复
+
+- 显式设置 `OCTOPUS_HOME` 时仍以显式配置为准。
+- 未设置 `OCTOPUS_HOME` 且 `OCTOPUS_DATABASE_URL` 是本地 SQLite 文件时，默认 Octopus home 改为数据库文件同级的 `.octopus/`。
+- 使用 PostgreSQL、`:memory:` 或无法解析本地 DB 文件时，才退回 `~/.octopus`。
+
+### 验收
+
+仓库根目录开发启动时，默认路径应是：
+
+```text
+D:\coding\octopus\octopus.db
+D:\coding\octopus\.octopus\instances\default\organizations\<orgId>\workspaces
+```
+
+如果正式/桌面运行希望使用用户目录，需要同时设置：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/data/octopus.db"
+$env:OCTOPUS_HOME = "C:/Users/<user>/.octopus"
+```
+
+或者由启动器保证这两个值来自同一个 instance 数据根。
