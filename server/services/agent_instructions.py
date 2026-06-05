@@ -370,6 +370,31 @@ class AgentInstructionsService:
 
     async def _reconcile_bundle(self, row: Agent) -> Agent:
         state = _bundle_state(row)
+        exported_files = (
+            _export_files(row)
+            if state["mode"] == "managed" and isinstance(state["rootPath"], Path)
+            else None
+        )
+        managed_root = _managed_instructions_root(row)
+        if (
+            state["mode"] == "managed"
+            and isinstance(state["rootPath"], Path)
+            and state["rootPath"] != managed_root
+        ):
+            managed_root.mkdir(parents=True, exist_ok=True)
+            if exported_files:
+                _write_bundle(managed_root, exported_files)
+            config = _apply_bundle_config(
+                dict(row.agent_runtime_config),
+                mode="managed",
+                root=managed_root,
+                entry_file=str(state["entryFile"]),
+            )
+            updated = await update_agent(
+                self._session, row.id, {"agent_runtime_config": config}
+            )
+            row = updated or row
+            state = _bundle_state(row)
         if state["mode"] == "managed" and isinstance(state["rootPath"], Path):
             _write_bundle(state["rootPath"], _default_bundle(row.role))
         if (
@@ -459,7 +484,7 @@ def _string(value: Any) -> str | None:
 
 
 def _agent_home_root(row: Agent) -> Path:
-    workspace_key = _slug(row.workspace_key or row.name or row.id)
+    workspace_key = row.workspace_key or _slug(row.name or row.id)
     return agent_workspace_root(row.org_id, workspace_key)
 
 

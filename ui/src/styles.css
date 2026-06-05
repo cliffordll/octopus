@@ -6076,6 +6076,12 @@ pre {
   margin: 0;
 }
 
+.agent-skill-selection-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .agent-skill-install-card label {
   color: #8792a6;
   display: flex;
@@ -6094,6 +6100,24 @@ pre {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.agent-skill-current-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-skill-current-list code {
+  background: #111722;
+  border: 1px solid #2b3548;
+  border-radius: 999px;
+  color: #cdd8e8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 9px;
 }
 
 .skill-yaml-textarea {
