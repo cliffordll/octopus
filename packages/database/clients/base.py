@@ -18,6 +18,7 @@ def _configure_sqlite_engine(engine: AsyncEngine) -> None:
     def _set_sqlite_pragmas(dbapi_connection: Any, _: object) -> None:
         cursor = dbapi_connection.cursor()
         try:
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.execute("PRAGMA journal_mode=TRUNCATE")
         finally:
             cursor.close()

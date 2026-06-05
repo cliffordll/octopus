@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import pytest
 from fastapi import FastAPI, Request
@@ -169,6 +171,38 @@ async def test_org_workspace_browser_supports_image_content(
 
 
 @pytest.mark.anyio
+async def test_org_workspace_browser_downloads_directory_archive(
+    app: FastAPI, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    org_id = await _seed_org(session_factory)
+    root = organization_workspace_root(org_id)
+    report = root / "artifacts" / "reports" / "summary.md"
+    data = root / "artifacts" / "reports" / "data.json"
+    hidden = root / "artifacts" / ".cache" / "hidden.txt"
+    report.parent.mkdir(parents=True)
+    hidden.parent.mkdir(parents=True)
+    report.write_bytes(b"# Summary\n")
+    data.write_bytes(b'{"ok": true}')
+    hidden.write_bytes(b"hidden")
+
+    archive_code, content = await _request(
+        app,
+        "GET",
+        f"/api/orgs/{org_id}/workspace/archive?path=artifacts",
+        org_id=org_id,
+    )
+
+    assert archive_code == 200
+    assert isinstance(content, bytes)
+    with ZipFile(BytesIO(content)) as archive:
+        names = set(archive.namelist())
+        assert "artifacts/reports/summary.md" in names
+        assert "artifacts/reports/data.json" in names
+        assert "artifacts/.cache/hidden.txt" not in names
+        assert archive.read("artifacts/reports/summary.md") == b"# Summary\n"
+
+
+@pytest.mark.anyio
 async def test_org_workspace_browser_rejects_path_escape(
     app: FastAPI, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -180,3 +214,12 @@ async def test_org_workspace_browser_rejects_path_escape(
 
     assert code == 422
     assert "inside the organization workspace root" in body["detail"]
+
+    archive_code, archive_body = await _request(
+        app,
+        "GET",
+        f"/api/orgs/{org_id}/workspace/archive?path=../outside",
+        org_id=org_id,
+    )
+    assert archive_code == 422
+    assert "inside the organization workspace root" in archive_body["detail"]

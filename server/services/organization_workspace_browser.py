@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 import mimetypes
 from typing import Literal, TypedDict
 from urllib.parse import urlencode
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +74,14 @@ class OrganizationWorkspaceFileDetail(TypedDict):
 
 @dataclass(frozen=True)
 class OrganizationWorkspaceAttachmentFile:
+    normalized_path: str
+    original_filename: str
+    content_type: str
+    content: bytes
+
+
+@dataclass(frozen=True)
+class OrganizationWorkspaceArchiveFile:
     normalized_path: str
     original_filename: str
     content_type: str
@@ -201,6 +211,42 @@ class OrganizationWorkspaceBrowserService:
             content=content,
         )
 
+    async def read_archive_file(
+        self, org_id: str, requested_path: str
+    ) -> OrganizationWorkspaceArchiveFile:
+        root = await self._resolve_workspace_root(org_id)
+        target, normalized = _resolve_within_root(root, requested_path)
+        if not root.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The workspace root is not available on this machine yet.",
+            )
+        if not target.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Path not found inside the organization workspace",
+            )
+        archive = BytesIO()
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as zip_file:
+            if target.is_file():
+                zip_file.write(target, normalized or target.name)
+            else:
+                for child in sorted(target.rglob("*")):
+                    if _is_hidden_workspace_path(child, root):
+                        continue
+                    rel_path = _to_portable_path(child.relative_to(root))
+                    if child.is_dir():
+                        zip_file.writestr(f"{rel_path}/", b"")
+                    elif child.is_file():
+                        zip_file.write(child, rel_path)
+        archive_name = _archive_filename(normalized)
+        return OrganizationWorkspaceArchiveFile(
+            normalized_path=normalized,
+            original_filename=archive_name,
+            content_type="application/zip",
+            content=archive.getvalue(),
+        )
+
     async def _resolve_workspace_root(self, org_id: str) -> Path:
         organization = await get_organization_by_id(self._session, org_id)
         if organization is None:
@@ -230,6 +276,18 @@ def _resolve_within_root(root: Path, requested_path: str) -> tuple[Path, str]:
 
 def _to_portable_path(value: Path) -> str:
     return value.as_posix() if str(value) != "." else ""
+
+
+def _is_hidden_workspace_path(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root)
+    return any(part in HIDDEN_WORKSPACE_ENTRY_NAMES for part in relative.parts)
+
+
+def _archive_filename(normalized_path: str) -> str:
+    if not normalized_path:
+        return "workspace.zip"
+    name = Path(normalized_path).name or "workspace"
+    return f"{name}.zip"
 
 
 def _missing_root_list(root: Path) -> OrganizationWorkspaceFileList:
