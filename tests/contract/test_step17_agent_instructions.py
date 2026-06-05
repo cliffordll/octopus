@@ -256,6 +256,114 @@ async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
 
+async def test_agent_instructions_bundle_rehomes_stale_managed_root(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root_path = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    stale_root = root_path / "old-home" / "agents" / "rehomed-agent" / "instructions"
+    stale_root.mkdir(parents=True)
+    stale_root.joinpath("SOUL.md").write_text("# Stale Soul\n", encoding="utf-8")
+    stale_root.joinpath("MEMORY.md").write_text("Carry this forward.", encoding="utf-8")
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="rehome-instructions-org",
+                name="Rehome Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Rehomed Agent",
+                workspace_key="rehomed-agent",
+                role="individual_contributor",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "instructionsRootPath": str(stale_root),
+                    "instructionsEntryFile": "SOUL.md",
+                    "instructionsFilePath": str(stale_root / "SOUL.md"),
+                },
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+    async with factory() as session:
+        row = await session.get(Agent, agent_id)
+        assert row is not None
+        config = row.agent_runtime_config
+
+    expected_root = (
+        root_path
+        / ".octopus"
+        / "instances"
+        / "default"
+        / "organizations"
+        / org_id
+        / "workspaces"
+        / "agents"
+        / "rehomed-agent"
+        / "instructions"
+    ).resolve()
+    assert bundle_code == 200
+    assert bundle["rootPath"] == str(expected_root)
+    assert config["instructionsRootPath"] == str(expected_root)
+    assert config["instructionsFilePath"] == str(expected_root / "SOUL.md")
+    assert (expected_root / "SOUL.md").read_text(encoding="utf-8") == "# Stale Soul\n"
+    assert (
+        expected_root / "MEMORY.md"
+    ).read_text(encoding="utf-8") == "Carry this forward."
+
+
+async def test_agent_instructions_managed_root_preserves_workspace_key(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _ = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="workspace-key-org",
+                name="Workspace Key Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="CEO 1",
+                workspace_key="ceo-1--623d0e91",
+                role="individual_contributor",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "promptTemplate": "# Soul",
+                },
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+
+    assert bundle_code == 200
+    assert "/agents/ceo-1--623d0e91/instructions" in bundle["rootPath"].replace(
+        "\\", "/"
+    )
+
+
 async def test_agent_instructions_bundle_reconciles_empty_default_files(
     app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
