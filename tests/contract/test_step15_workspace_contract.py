@@ -297,6 +297,71 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     )
 
 
+async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-projectless-issue",
+                name="Step 15 Projectless Issue",
+                issue_prefix="PLI",
+            )
+            session.add(org)
+            await session.flush()
+            issue = Issue(
+                org_id=org.id,
+                title="Use organization workspace without project",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-projectless-issue",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert context["projectId"] is None
+    assert context["executionWorkspaceId"] is None
+    assert workspace["id"] is None
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        f'Issue has no project configured. Run will start in shared organization workspace "{org_root}".'
+    ]
+    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_RUN_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
+    )
+    assert workspace["runArtifactsDir"] == str(
+        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
+    )
+
+
 async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
     tmp_path: Path, monkeypatch
 ) -> None:

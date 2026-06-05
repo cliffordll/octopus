@@ -59,9 +59,17 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         workspace_context.get("worktreePath") or workspace_context.get("cwd")
     )
     artifacts_dir = _string(workspace_context.get("orgArtifactsDir"))
+    conversation_artifacts_dir = _string(
+        workspace_context.get("conversationArtifactsDir")
+    )
     issue_artifacts_dir = _string(workspace_context.get("issueArtifactsDir"))
     run_artifacts_dir = _string(workspace_context.get("runArtifactsDir"))
-    if not worktree and not artifacts_dir and not issue_artifacts_dir:
+    if (
+        not worktree
+        and not artifacts_dir
+        and not conversation_artifacts_dir
+        and not issue_artifacts_dir
+    ):
         return ""
     lines = [
         "## Workspace Output Contract",
@@ -72,6 +80,10 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         lines.append(f"- Workspace worktree: `{worktree}`")
     if artifacts_dir:
         lines.append(f"- Organization artifacts directory: `{artifacts_dir}`")
+    if conversation_artifacts_dir:
+        lines.append(
+            f"- Conversation artifacts directory: `{conversation_artifacts_dir}`"
+        )
     if issue_artifacts_dir:
         lines.append(f"- Issue artifacts directory: `{issue_artifacts_dir}`")
     if run_artifacts_dir:

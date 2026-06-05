@@ -73,6 +73,11 @@ def apply_runtime_context_env(
     _set_env(env, "RUDDER_ORG_PLANS_DIR", workspace_context.get("orgPlansDir"))
     _set_env(env, "RUDDER_ORG_ARTIFACTS_DIR", workspace_context.get("orgArtifactsDir"))
     _set_env(
+        env,
+        "RUDDER_CONVERSATION_ARTIFACTS_DIR",
+        workspace_context.get("conversationArtifactsDir"),
+    )
+    _set_env(
         env, "RUDDER_ISSUE_ARTIFACTS_DIR", workspace_context.get("issueArtifactsDir")
     )
     _set_env(env, "RUDDER_RUN_ARTIFACTS_DIR", workspace_context.get("runArtifactsDir"))
