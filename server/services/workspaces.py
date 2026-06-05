@@ -59,7 +59,11 @@ from .logs import (
     finalize_local_file_log,
     read_local_file_log,
 )
-from .workspace_paths import organization_workspace_root
+from . import workspace_paths as workspace_paths_module
+from .workspace_paths import (
+    ensure_organization_workspace_root,
+    organization_workspace_root,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -1058,7 +1062,9 @@ class WorkspaceService:
         return workspace
 
     def _org_workspace_root(self, org_id: str) -> Path:
-        return organization_workspace_root(org_id)
+        if organization_workspace_root is not workspace_paths_module.organization_workspace_root:
+            return organization_workspace_root(org_id)
+        return ensure_organization_workspace_root(org_id)
 
     def _with_organization_workspace_paths(
         self,
