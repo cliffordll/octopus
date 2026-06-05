@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
+from anyio import CancelScope
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -455,19 +457,38 @@ async def add_chat_message_stream_route(
             await queue.put(event)
 
         async def run_reply() -> CreatedChatMessages:
-            async with session_factory() as session:
+            session = session_factory()
+            try:
                 service = ChatService(session)
-                try:
-                    return await service.add_message_and_reply(
-                        id,
-                        payload,
-                        cancel_event=cancel_event,
-                        on_stream_event=on_stream_event,
-                        commit_after_user_message=True,
-                    )
-                except Exception:
+                result = await service.add_message_and_reply(
+                    id,
+                    payload,
+                    cancel_event=cancel_event,
+                    on_stream_event=on_stream_event,
+                    commit_after_user_message=True,
+                )
+                with CancelScope(shield=True):
+                    await session.commit()
+                return result
+            except BaseException:
+                with CancelScope(shield=True):
                     await session.rollback()
-                    raise
+                raise
+            finally:
+                with CancelScope(shield=True):
+                    await session.close()
+
+        async def cancel_reply_task() -> None:
+            cancel_event.set()
+            if not task.done():
+                with contextlib.suppress(
+                    TimeoutError, asyncio.CancelledError, Exception
+                ):
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
         task = asyncio.create_task(run_reply())
         try:
@@ -483,9 +504,11 @@ async def add_chat_message_stream_route(
                 yield _stream_line(event)
             result = await task
             yield _stream_line({"type": "final", "messages": result["messages"]})
+        except asyncio.CancelledError:
+            await cancel_reply_task()
+            raise
         except Exception as exc:
-            if not task.done():
-                task.cancel()
+            await cancel_reply_task()
             yield _stream_line({"type": "error", "error": str(exc), "messageId": None})
         finally:
             release_generation()

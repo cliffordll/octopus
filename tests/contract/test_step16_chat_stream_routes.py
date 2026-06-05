@@ -46,7 +46,18 @@ class BlockingChatAdapter:
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         self._started.set()
-        await self._release.wait()
+        if context.cancel_event is not None:
+            release_task = asyncio.create_task(self._release.wait())
+            cancel_task = asyncio.create_task(context.cancel_event.wait())
+            done, pending = await asyncio.wait(
+                {release_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            if cancel_task in done:
+                raise asyncio.CancelledError
+        else:
+            await self._release.wait()
         self._finished.set()
         return RuntimeExecutionResult(
             exit_code=0, result_json={"summary": "blocking stream reply"}
