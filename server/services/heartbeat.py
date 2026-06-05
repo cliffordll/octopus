@@ -61,7 +61,7 @@ from packages.shared.types.heartbeat import (
     WakeAgentPayload,
 )
 
-from .agents import AgentConflictError
+from .agents import AgentConflictError, prepare_agent_runtime_config
 from .logs import (
     LogReadResult,
     append_local_file_log,
@@ -830,18 +830,18 @@ class HeartbeatService:
             adapter_operation = await self._begin_adapter_workspace_operation(
                 running, workspace_context
             )
-            runtime_config = dict(agent.agent_runtime_config)
-            runtime_context = runtime_config.get("_octopus")
-            if not isinstance(runtime_context, dict):
-                runtime_context = {}
-            runtime_config["_octopus"] = {
-                **runtime_context,
-                "agentId": agent.id,
-                "agentName": agent.name,
-                "context": running.context_snapshot or {},
-                "sessionIdBefore": running.session_id_before,
-                "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
-            }
+            runtime_config = await prepare_agent_runtime_config(
+                self._session,
+                agent,
+                extra_octopus={
+                    "agentName": agent.name,
+                    "context": running.context_snapshot or {},
+                    "sessionIdBefore": running.session_id_before,
+                    "desiredSkills": await list_enabled_skill_keys(
+                        self._session, agent.id
+                    ),
+                },
+            )
             workspace_env = None
             workspace_payload = None
             if workspace_context is not None:

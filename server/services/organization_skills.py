@@ -591,7 +591,9 @@ class OrganizationSkillConflictError(ValueError):
 
 
 def organization_skills_root(org_id: str) -> Path:
-    return (ensure_organization_workspace_root(org_id) / "skills").resolve()
+    root = (ensure_organization_workspace_root(org_id) / "skills").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _org_skill_dir(org_id: str, slug: str) -> Path:
