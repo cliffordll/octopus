@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -69,11 +68,12 @@ from .logs import (
     read_local_file_log,
 )
 from .runtime_providers import inject_runtime_provider_config
+from .workspace_paths import resolve_octopus_run_log_dir
 from .workspaces import WorkspaceService
 
 
 def _run_log_dir() -> Path:
-    return Path(os.getenv("OCTOPUS_RUN_LOG_DIR", ".octopus/run-logs"))
+    return resolve_octopus_run_log_dir()
 
 
 def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:

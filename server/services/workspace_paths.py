@@ -62,6 +62,24 @@ def resolve_octopus_instance_root() -> Path:
     ).resolve()
 
 
+def resolve_octopus_instance_data_root() -> Path:
+    return (resolve_octopus_instance_root() / "data").resolve()
+
+
+def resolve_octopus_run_log_dir() -> Path:
+    raw_dir = os.environ.get("OCTOPUS_RUN_LOG_DIR", "").strip()
+    if raw_dir:
+        return _expand_home_prefix(raw_dir).resolve()
+    return (resolve_octopus_instance_data_root() / "run-logs").resolve()
+
+
+def resolve_octopus_server_log_dir() -> Path:
+    raw_dir = os.environ.get("OCTOPUS_LOG_DIR", "").strip()
+    if raw_dir:
+        return _expand_home_prefix(raw_dir).resolve()
+    return (resolve_octopus_instance_root() / "logs").resolve()
+
+
 def organization_workspace_relative_path(org_id: str) -> str:
     return f"organizations/{org_id}/workspaces"
 

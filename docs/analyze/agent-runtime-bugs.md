@@ -2,7 +2,7 @@
 
 ## Bug 列表
 
-当前记录：6 个。
+当前记录：8 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
@@ -12,6 +12,8 @@
 | 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
 | 5 | 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径 | 已修复 |
 | 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
+| 7 | Run logs 默认不在 instance `data/run-logs` 下 | 已修复 |
+| 8 | 缺少 instance-scoped server/app 文件日志目录 | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -380,3 +382,69 @@ agents/ceo-1-623d0e91/
 - `agentSkillsRootPath` 的父目录名等于 DB 中的 `workspace_key`。
 - managed instructions root 保留 `workspace_key` 中的双连字符。
 - 新触发 runtime config 或 instructions bundle 后，不再创建被二次 normalize 的空目录。
+
+## 7. Run logs 默认不在 instance `data/run-logs` 下
+
+### 背景
+
+上游 Rudder 的 run log store 默认挂在 instance root 下：
+
+```text
+<RUDDER_HOME>/instances/<RUDDER_INSTANCE_ID>/data/run-logs
+```
+
+Octopus 之前默认写到：
+
+```text
+<OCTOPUS_HOME>/run-logs
+```
+
+这会绕开 `OCTOPUS_INSTANCE_ID`，导致不同本地 instance 的 heartbeat/runtime run 日志可能混在同一个目录，也不利于按 instance 清理、备份或迁移。
+
+### 修复
+
+- `OCTOPUS_RUN_LOG_DIR` 显式设置时继续优先生效。
+- 未设置时，默认改为：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/data/run-logs
+```
+
+### 验收
+
+- 默认开发路径变为：
+
+```text
+D:\coding\octopus\.octopus\instances\default\data\run-logs
+```
+
+- `tests/contract/test_step20_observability.py` 覆盖默认路径和 env override。
+
+## 8. 缺少 instance-scoped server/app 文件日志目录
+
+### 背景
+
+上游 Rudder 有两类日志目录：
+
+```text
+<RUDDER_HOME>/instances/<instance>/logs
+<RUDDER_HOME>/instances/<instance>/data/run-logs
+```
+
+其中 `logs/` 是 server/app 自身日志，`data/run-logs/` 是 agent run 的执行日志。Octopus 之前只有 run log store，没有初始化 instance-scoped server/app file log 目录。
+
+### 修复
+
+- server 启动时创建并配置：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/logs/octopus.log
+```
+
+- `OCTOPUS_LOG_DIR` 显式设置时可覆盖该目录。
+- `OCTOPUS_LOG_LEVEL` 同时用于控制文件 handler 的日志等级。
+
+### 验收
+
+- `uv run server` 启动时会创建 instance `logs/` 目录和 `octopus.log` 文件。
+- `tests/contract/test_step2_server_skeleton.py` 覆盖 server main 的日志目录初始化。
