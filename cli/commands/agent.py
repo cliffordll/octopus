@@ -150,7 +150,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.set_defaults(handler=create_agent)
     hire_parser = actions.add_parser("hire")
     hire_parser.add_argument("--org-id", required=True)
-    hire_parser.add_argument("--name", required=True)
+    hire_parser.add_argument("--name")
     hire_parser.add_argument("--role", required=True, choices=ROLES)
     hire_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
     hire_parser.add_argument("--runtime-config", default="{}")
@@ -437,14 +437,21 @@ def update_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> A
 
 
 def _agent_create_payload(args: argparse.Namespace) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "name": args.name,
-        "role": args.role,
-        "agentRuntimeType": args.runtime,
-        "agentRuntimeConfig": _runtime_config(
-            args.runtime, args.runtime_config, args.model, _runtime_extra_args(args)
-        ),
-    }
+    payload: dict[str, Any] = {}
+    if args.name:
+        payload["name"] = args.name
+    payload.update(
+        {
+            "role": args.role,
+            "agentRuntimeType": args.runtime,
+            "agentRuntimeConfig": _runtime_config(
+                args.runtime,
+                args.runtime_config,
+                args.model,
+                _runtime_extra_args(args),
+            ),
+        }
+    )
     if args.icon:
         payload["icon"] = args.icon
     if args.desired_skill:
