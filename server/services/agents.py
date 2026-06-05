@@ -97,6 +97,7 @@ _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "budgetMonthlyCents",
     "metadata",
 )
+_AGENT_WORKSPACE_HOME_DIRS = ("instructions", "skills", "life", "memory")
 
 
 class AgentConflictError(ValueError):
@@ -148,7 +149,15 @@ def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
 
 
 def _agent_skills_root(row: AgentRow) -> Path:
-    return _agent_home_root(row) / "skills"
+    return _ensure_agent_workspace_layout(_agent_home_root(row)) / "skills"
+
+
+def _ensure_agent_workspace_layout(agent_home: Path) -> Path:
+    root = agent_home.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    for dirname in _AGENT_WORKSPACE_HOME_DIRS:
+        (root / dirname).mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -254,19 +263,44 @@ def _organization_skill_selection_key(key: str) -> str:
     return key if key.startswith("org:") else f"org:{key}"
 
 
-def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+def _runtime_config_with_context(
+    row: AgentRow, base_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     organization_root = str(organization_skills_root(row.org_id))
-    config = dict(row.agent_runtime_config)
+    agent_home = _ensure_agent_workspace_layout(_agent_home_root(row))
+    config = dict(base_config if base_config is not None else row.agent_runtime_config)
     config.setdefault("skillsRootPath", organization_root)
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        runtime_context = {}
     return {
         **config,
         "_octopus": {
+            **runtime_context,
             "orgId": row.org_id,
             "agentId": row.id,
             "organizationSkillsRootPath": organization_root,
-            "agentSkillsRootPath": str(_agent_skills_root(row)),
+            "agentSkillsRootPath": str(agent_home / "skills"),
         },
     }
+
+
+async def prepare_agent_runtime_config(
+    session: AsyncSession,
+    row: AgentRow,
+    *,
+    base_config: dict[str, Any] | None = None,
+    extra_octopus: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    await OrganizationSkillService(session).list(row.org_id)
+    config = _runtime_config_with_context(row, base_config)
+    if extra_octopus:
+        runtime_context = config.get("_octopus")
+        config["_octopus"] = {
+            **(runtime_context if isinstance(runtime_context, dict) else {}),
+            **extra_octopus,
+        }
+    return config
 
 
 def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
@@ -457,8 +491,9 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        agent_home = _ensure_agent_workspace_layout(_agent_home_root_from_values(values))
         next_runtime_config = materialize_default_instructions_for_new_agent(
-            row, _agent_home_root_from_values(values)
+            row, agent_home
         )
         if next_runtime_config is not None:
             updated = await update_agent(
