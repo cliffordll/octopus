@@ -15,6 +15,7 @@ from typing import Any
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_skills import configure_managed_profile_env
 from ..provider_config import apply_provider_env, model_for_cli
 from ..paths import ensure_managed_runtime_home
 from ..tool_capabilities import (
@@ -629,6 +630,7 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
     env["HOME"] = str(managed_home)
     env["USERPROFILE"] = str(managed_home)
     env.setdefault("AGENT_HOME", str(managed_home))
+    configure_managed_profile_env(env, managed_home)
     env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
     if linked:
         await on_log(

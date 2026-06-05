@@ -16,7 +16,13 @@ from packages.database.queries.organizations import get_organization_by_id
 from .workspace_paths import ensure_organization_workspace_root
 
 MAX_PREVIEW_BYTES = 200_000
-HIDDEN_WORKSPACE_ENTRY_NAMES = {".DS_Store", ".cache", ".npm", ".nvm"}
+HIDDEN_WORKSPACE_ENTRY_NAMES = {
+    ".DS_Store",
+    ".cache",
+    ".npm",
+    ".nvm",
+    "Microsoft",
+}
 TEXT_CONTENT_TYPES = {
     ".md": "text/markdown",
     ".markdown": "text/markdown",
@@ -107,7 +113,7 @@ class OrganizationWorkspaceBrowserService:
 
         entries: list[OrganizationWorkspaceFileEntry] = []
         for child in target.iterdir():
-            if child.name in HIDDEN_WORKSPACE_ENTRY_NAMES:
+            if _is_hidden_workspace_path(child, root):
                 continue
             rel_path = _to_portable_path(child.relative_to(root))
             entries.append(

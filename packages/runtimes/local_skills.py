@@ -23,6 +23,7 @@ async def prepare_managed_home(
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     env.setdefault("AGENT_HOME", str(home))
+    configure_managed_profile_env(env, home)
     env["RUDDER_OPERATOR_HOME"] = str(operator_home)
     if linked:
         await context.on_log(
@@ -34,6 +35,22 @@ async def prepare_managed_home(
             ),
         )
     return home
+
+
+def configure_managed_profile_env(env: dict[str, str], home: Path) -> None:
+    env["APPDATA"] = str(home / "AppData" / "Roaming")
+    env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+    env["XDG_CONFIG_HOME"] = str(home / ".config")
+    env["XDG_CACHE_HOME"] = str(home / ".cache")
+    env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+    for key in (
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+    ):
+        Path(env[key]).mkdir(parents=True, exist_ok=True)
 
 
 def desired_skills_from_config(config: dict[str, Any]) -> list[str]:

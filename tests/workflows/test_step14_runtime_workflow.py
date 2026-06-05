@@ -5,6 +5,7 @@ import sys
 import threading
 from collections.abc import AsyncIterator, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -584,6 +585,50 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
     assert capture["credential"] == "token=test\n"
+
+
+async def test_opencode_local_keeps_profile_cache_inside_managed_home(
+    tmp_path,
+) -> None:
+    capture_path = tmp_path / "opencode-profile-env.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os",
+                "keys = ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({key: os.environ.get(key) for key in keys}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'opencode-session'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-profile-env",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    home = Path(capture["HOME"])
+    assert Path(capture["USERPROFILE"]) == home
+    assert Path(capture["APPDATA"]) == home / "AppData" / "Roaming"
+    assert Path(capture["LOCALAPPDATA"]) == home / "AppData" / "Local"
+    assert Path(capture["XDG_CONFIG_HOME"]) == home / ".config"
+    assert Path(capture["XDG_CACHE_HOME"]) == home / ".cache"
+    assert Path(capture["XDG_DATA_HOME"]) == home / ".local" / "share"
 
 
 async def test_opencode_local_syncs_opencode_config_into_managed_home(
