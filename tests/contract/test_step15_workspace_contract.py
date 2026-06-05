@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import shutil
@@ -898,6 +899,90 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
     assert adapter_log is not None
     assert '"stream": "stdout"' in adapter_log["content"]
     assert "operation-ok" in adapter_log["content"]
+
+
+async def test_runtime_log_callbacks_are_serialized_for_one_session(
+    monkeypatch,
+) -> None:
+    class ConcurrentLoggingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            await asyncio.gather(
+                context.on_log("stdout", "stdout-one\n"),
+                context.on_log("stderr", "stderr-one\n"),
+            )
+            return RuntimeExecutionResult(exit_code=0, result_json={"summary": "ok"})
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: ConcurrentLoggingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: ConcurrentLoggingAdapter(),
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-concurrent-log",
+                name="Step 15 Concurrent Log",
+                issue_prefix="CLG",
+            )
+            session.add(org)
+            await session.flush()
+            agent = await AgentService(session).create_agent(
+                org.id,
+                {
+                    "name": "Concurrent Log Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"reason": "concurrent_log_regression"}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert run is not None
+            events = await HeartbeatService(session).list_events(run["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run["status"] == "succeeded"
+    messages = [event["message"] for event in events]
+    assert "stdout-one\n" in messages
+    assert "stderr-one\n" in messages
 
 
 async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
