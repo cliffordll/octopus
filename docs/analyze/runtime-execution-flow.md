@@ -142,6 +142,13 @@ run 正式调用 runtime adapter 前，server 应做 workspace preflight：
 - 生成 workspace context 和 env。
 - 记录 workspace operation，说明 runtime 将在哪个 cwd 执行。
 
+这些步骤不只是“设置输出物目录”。它们同时确定两类路径：
+
+- runtime execution cwd：子进程启动目录，决定相对路径默认读写到哪里。
+- durable artifact directories：server 注入给 runtime 的稳定产物目录，决定报告、截图、CSV、handoff 文件等交付物应该放哪里。
+
+二者不能混用。`cwd` 是执行位置，不等于产物归档位置；artifacts 目录是交付物的优先落点，不等于源码工作目录。
+
 如果 preflight 失败，adapter 不应继续执行，run/event/log 要记录可读失败原因。
 
 ### 3.3 Runtime Config 汇总
@@ -275,10 +282,14 @@ OpenCode 这类本地 runtime 需要 managed home 中的配置文件，但不应
 
 `cwd` 是 runtime 子进程启动目录，优先级应是：
 
-1. 显式 runtime config cwd。
-2. issue/project 解析出的 project workspace cwd。
-3. execution workspace 或 organization workspace fallback。
-4. server 进程启动目录。
+1. issue/project run 解析出的 execution workspace cwd。
+2. project workspace cwd。
+3. organization workspace fallback。
+4. 非 issue/project run 的显式 runtime config cwd。
+
+issue/project run 一旦解析出 workspace cwd，server 应使用该 cwd 覆盖 agent runtime config 里的旧 `cwd`。否则旧 agent 配置可能把任务带回 server 启动目录或 repo 根目录，例如 `D:/coding/octopus`，导致相对路径产物泄漏到开发仓库。
+
+server 进程启动目录不能作为 issue/project run 的默认执行 cwd。它只是 server 自己运行的位置，不代表用户希望 agent 修改或写入的项目目录。
 
 `fallback` 不是特殊功能名，只表示首选目录不可用时的备用目录。例如优先使用 `D:/workspaces/project-a`；如果项目没有配置 cwd，则可能退回到 `.octopus/instances/<instanceId>/organizations/<orgId>/workspaces/executions/<executionWorkspaceId>/worktree/`。
 
@@ -441,9 +452,27 @@ runtime 产生 stdout/stderr 时，server 应实时写入：
 
 智能体产生文件时，推荐落点：
 
-- run 级产物：`organization workspace/artifacts/issues/<issue_id>/runs/<run_id>/`
-- issue 级共享产物：`organization workspace/artifacts/issues/<issue_id>/`
-- 项目源码修改：项目工作区 cwd 内，但需要明确登记为工作产物或变更。
+- run 级 durable 产物：`organization workspace/artifacts/issues/<issue_id>/runs/<run_id>/`
+- issue 级共享 durable 产物：`organization workspace/artifacts/issues/<issue_id>/`
+- 项目源码修改：项目工作区 `cwd` 内，但需要明确登记为源码变更或 work product。
+
+runtime 会通过 env 获得产物目录：
+
+```text
+RUDDER_ORG_ARTIFACTS_DIR
+RUDDER_ISSUE_ARTIFACTS_DIR
+RUDDER_RUN_ARTIFACTS_DIR
+```
+
+本地 control-plane skill 也会提供同语义变量：
+
+```text
+CONTROL_PLANE_ORG_ARTIFACTS_DIR
+CONTROL_PLANE_ISSUE_ARTIFACTS_DIR
+CONTROL_PLANE_RUN_ARTIFACTS_DIR
+```
+
+如果 agent 只是写相对路径，例如 `report.md`，文件会落到 runtime `cwd`。这适合源码修改或临时工作文件，但不适合作为稳定交付物。报告、截图、CSV、mockup、日志摘要等 durable output 应优先写入 `RUDDER_RUN_ARTIFACTS_DIR`。
 
 server 成功 run 后应扫描受管 worktree 和组织 artifacts 中本次新增/修改文件，并登记为 issue work products。
 

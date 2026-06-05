@@ -2,7 +2,7 @@
 
 ## Bug 列表
 
-当前记录：8 个。
+当前记录：9 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
@@ -14,6 +14,7 @@
 | 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
 | 7 | Run logs 默认不在 instance `data/run-logs` 下 | 已修复 |
 | 8 | 缺少 instance-scoped server/app 文件日志目录 | 已修复 |
+| 9 | Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录 | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -448,3 +449,51 @@ D:\coding\octopus\.octopus\instances\default\data\run-logs
 
 - `uv run server` 启动时会创建 instance `logs/` 目录和 `octopus.log` 文件。
 - `tests/contract/test_step2_server_skeleton.py` 覆盖 server main 的日志目录初始化。
+
+## 9. Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录
+
+### 背景
+
+Octopus runtime 有两类路径：
+
+- `cwd`：runtime 子进程实际启动目录。相对路径读写默认发生在这里。
+- artifacts dir：server 为 org/issue/run 准备的 durable output 目录，例如 `workspaces/artifacts/issues/<issueId>/runs/<runId>/`。
+
+`cwd` 不是产物归档目录。报告、截图、CSV、mockup、handoff 文件等 durable output 应优先写到 `RUDDER_RUN_ARTIFACTS_DIR` 或对应 control-plane artifacts env。
+
+### 症状
+
+- agent run 后，仓库根目录 `D:\coding\octopus` 下出现 `hello.py`、`ACCEPTANCE.md`、报告文件等任务产物。
+- 同一 run 的 organization workspace artifacts 目录存在，但目标产物没有写进去。
+- issue/project 已经绑定到 workspace，但 runtime 仍在旧 cwd 下执行。
+
+### 根因
+
+旧逻辑中，heartbeat 执行前会先读取 agent 的 `agent_runtime_config`。如果里面已经有 `cwd`，workspace preflight 解析出的 `rudderWorkspace.cwd` 不会覆盖它：
+
+```text
+agent_runtime_config.cwd wins over workspace cwd
+```
+
+这会导致历史 agent 配置、开发期手动配置或 server 启动目录相关配置把 issue run 带回 repo 根目录。runtime 再写相对路径时，产物就会落到 `D:\coding\octopus`。
+
+同时，部分测试 adapter 也把交付物写到 `context.config["cwd"]`，等于把“执行目录”误当成“产物目录”，容易把错误语义固化。
+
+### 修复
+
+- issue/project run 只要 workspace preflight 解析出 `rudderWorkspace.cwd`，heartbeat 执行时就用该 cwd 覆盖 agent runtime config 中的旧 `cwd`。
+- 非 issue/project run 仍可继续使用 agent runtime config 中的显式 `cwd`。
+- 闭环验收测试中的 durable output 示例改为写 `RUDDER_RUN_ARTIFACTS_DIR`，不再示范把交付物写 cwd。
+
+### 验收
+
+- agent runtime config 即使保存了 `cwd=D:\coding\octopus`，issue run 仍会在 workspace resolver 解析出的 cwd 下执行。
+- 相对路径写入不会再因为旧 agent cwd 配置落到 repo 根目录。
+- durable output 示例写入：
+
+```text
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/issues/<issueId>/runs/<runId>/
+```
+
+- `tests/contract/test_step15_workspace_contract.py` 覆盖 issue run workspace cwd 覆盖旧 agent runtime cwd。
+- `tests/contract/test_step22_closed_loop_acceptance.py` 覆盖闭环产物写入 run artifacts。

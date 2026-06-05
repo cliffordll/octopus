@@ -744,9 +744,7 @@ class WorkspaceService:
             return []
         threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
         products: list[dict[str, Any]] = []
-        scan_roots = [
-            ("execution_workspace_scan", worktree_root),
-        ]
+        scan_roots: list[tuple[str, Path]] = []
         workspace_env = (
             workspace_context.get("env")
             if isinstance(workspace_context, dict)
@@ -769,6 +767,7 @@ class WorkspaceService:
             assert artifacts_root is not None
             if artifacts_root.is_dir() and artifacts_root != worktree_root:
                 scan_roots.append(("organization_artifacts_scan", artifacts_root))
+        scan_roots.append(("execution_workspace_scan", worktree_root))
         seen_paths: set[Path] = set()
         for source, root in scan_roots:
             for path in _iter_generated_workspace_files(root, threshold):

@@ -861,10 +861,8 @@ class HeartbeatService:
                     if isinstance(workspace_payload, dict)
                     else None
                 )
-                if (
-                    isinstance(workspace_data, dict)
-                    and isinstance(workspace_data.get("cwd"), str)
-                    and "cwd" not in runtime_config
+                if isinstance(workspace_data, dict) and isinstance(
+                    workspace_data.get("cwd"), str
                 ):
                     runtime_config["cwd"] = workspace_data["cwd"]
             runtime_config = await inject_runtime_provider_config(
