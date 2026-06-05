@@ -1217,8 +1217,8 @@ function workspaceIconClass(icon: string | undefined, fallback: "file" | "folder
 }
 
 function workspaceEntryLabel(entry: OrganizationWorkspaceFileEntry): string {
-  if (entry.displayLabel) return entry.displayLabel;
   const name = entry.name || entry.path.split("/").at(-1) || entry.path;
+  if (entry.displayLabel) return entry.displayLabel === name ? name : `${entry.displayLabel} ${name}`;
   const normalizedPath = entry.path.replace(/\\/g, "/");
   if (normalizedPath === "agents") return "智能体 agents";
   if (normalizedPath === "artifacts") return "产物 artifacts";

@@ -42,10 +42,10 @@ it("shows the organization workspace file tree and editor", async () => {
         directoryPath: "",
         rootExists: true,
         entries: [
-          { name: "skills", path: "skills", isDirectory: true },
+          { name: "agents", path: "agents", isDirectory: true, displayLabel: "智能体" },
+          { name: "artifacts", path: "artifacts", isDirectory: true, displayLabel: "产物" },
+          { name: "skills", path: "skills", isDirectory: true, displayLabel: "技能" },
           { name: "z-readme.md", path: "z-readme.md", isDirectory: false },
-          { name: "agents", path: "agents", isDirectory: true },
-          { name: "artifacts", path: "artifacts", isDirectory: true },
         ],
         message: null,
       });
