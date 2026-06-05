@@ -4,10 +4,13 @@ import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Awaitable, Callable
+import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 import uuid
 
+from alembic import command
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
@@ -16,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.migrations.runner import upgrade_to_head
+from packages.database.migrations.runner import _build_config, upgrade_to_head
 from packages.database.schema import AgentWakeupRequest, Base, Organization
 from server.app import create_app
 
@@ -203,6 +206,72 @@ async def test_upgrade_to_head_creates_agent_state_tables(tmp_path: Path) -> Non
         "agent_task_sessions",
         "agent_wakeup_requests",
     }
+
+
+def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -> None:
+    db_path = tmp_path / "agent-skill-backfill.db"
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    config = _build_config(database_url)
+    command.upgrade(config, "20260603_000016")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            insert into organizations (
+                id, url_key, name, status, issue_prefix, issue_counter,
+                budget_monthly_cents, spent_monthly_cents,
+                require_board_approval_for_new_agents,
+                default_chat_issue_creation_mode
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "org-1",
+                "skill-backfill",
+                "Skill Backfill",
+                "active",
+                "SB",
+                0,
+                0,
+                0,
+                False,
+                "manual_approval",
+            ),
+        )
+        connection.execute(
+            """
+            insert into agents (
+                id, org_id, name, workspace_key, role, status,
+                agent_runtime_type, agent_runtime_config, runtime_config,
+                budget_monthly_cents, spent_monthly_cents, permissions
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "agent-1",
+                "org-1",
+                "Existing Agent",
+                "agent-existing",
+                "general",
+                "idle",
+                "process",
+                json.dumps({}),
+                json.dumps({}),
+                0,
+                0,
+                json.dumps({}),
+            ),
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "select agent_id, skill_key from agent_enabled_skills"
+        ).fetchall()
+
+    assert rows == [("agent-1", "skills/control-plane")]
 
 
 def test_heartbeat_tables_match_step11c_boundary() -> None:

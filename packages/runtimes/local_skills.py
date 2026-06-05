@@ -84,11 +84,22 @@ def _string_list(value: Any) -> list[str]:
 
 def _clear_desired_targets(skills_home: Path, desired_skills: list[str]) -> None:
     for key in desired_skills:
-        target = skills_home / key.removeprefix("agent:")
+        target = skills_home / _desired_runtime_name(key)
         if target.is_symlink() or target.is_file():
             target.unlink(missing_ok=True)
         elif target.exists():
             shutil.rmtree(target, ignore_errors=True)
+
+
+def _desired_runtime_name(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("agent:"):
+        return _desired_runtime_name(normalized.removeprefix("agent:"))
+    if normalized.startswith("skills/"):
+        return normalized.removeprefix("skills/")
+    if normalized.startswith("organization/"):
+        return normalized.rsplit("/", 1)[-1]
+    return normalized
 
 
 def _default_home(runtime_type: str, context: RuntimeExecutionContext) -> Path:

@@ -1241,7 +1241,7 @@ function WorkspaceTreeNode({
     if (expandedParents.has(entry.path)) setExpanded(true);
   }, [entry.path, expandedParents]);
   const icon = entry.isDirectory ? "F" : undefined;
-  const label = "displayLabel" in entry && entry.displayLabel ? entry.displayLabel : (("name" in entry && entry.name) || entry.path.split("/").at(-1) || entry.path);
+  const label = ("name" in entry && entry.name) || entry.path.split("/").at(-1) || entry.path;
   if (entry.isDirectory) {
     const childEntries = children.data?.entries;
     return (
