@@ -80,9 +80,24 @@ Workspace 分为几类：
 ```text
 <OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/organizations/<orgId>/workspaces
 
-默认等价于：
+开发默认使用本地 SQLite 时通常等价于：
 .octopus/instances/default/organizations/<orgId>/workspaces
 ```
+
+`OCTOPUS_HOME` 的解析规则应与数据库同源：
+
+- 显式设置 `OCTOPUS_HOME` 时，以该值为准。
+- 未设置 `OCTOPUS_HOME` 且 `OCTOPUS_DATABASE_URL` 是本地 SQLite 文件时，默认 home 是数据库文件同级的 `.octopus/`。
+- 使用 PostgreSQL、`:memory:` 或无法推导本地 DB 文件时，才退回用户目录 `~/.octopus`。
+
+因此开发阶段可以使用：
+
+```text
+D:/coding/octopus/octopus.db
+D:/coding/octopus/.octopus
+```
+
+正式或桌面运行也可以使用用户目录，但 DB 和 home 应一起切换，避免同一个 DB 中持久化出不同 `instructionsRootPath` / workspace root。
 
 本地如果还存在下面这种路径，应视为 legacy layout 或迁移残留：
 
@@ -273,7 +288,7 @@ OpenCode 这类本地 runtime 需要 managed home 中的配置文件，但不应
 
 需要区分两类 home：
 
-- `agent workspace home`：Octopus server 管理的 agent 长期目录，保存 `instructions/` 和 agent-private `skills/`。例如 `instructionsRootPath` 通常指向这里的 `instructions/` 子目录。
+- `agent workspace home`：Octopus server 管理的 agent 长期目录，保存 `instructions/`、agent-private `skills/`、`life/` 和 `memory/`。例如 `instructionsRootPath` 通常指向这里的 `instructions/` 子目录。
 - `AGENT_HOME` / `runtime managed HOME`：runtime adapter 启动本地 CLI 时准备的隔离 HOME。local runtime 会将 `HOME`、`USERPROFILE` 和 `AGENT_HOME` 指向该目录。
 
 二者不是同一个概念：
@@ -286,9 +301,11 @@ OpenCode 这类本地 runtime 需要 managed home 中的配置文件，但不应
 
 | 概念 | 典型路径 | 谁管理 | 主要内容 | runtime 子进程如何使用 |
 | --- | --- | --- | --- | --- |
-| `agent workspace home` | `.octopus/instances/<instanceId>/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/` | Octopus server | `instructions/`、agent-private `skills/`、agent 长期资料 | 不一定直接作为子进程 `HOME`；server 会从这里读取/同步 instructions 和 agent-private skills |
+| `agent workspace home` | `.octopus/instances/<instanceId>/organizations/<orgId>/workspaces/agents/<agentWorkspaceKey>/` | Octopus server | `instructions/`、agent-private `skills/`、`life/`、`memory/`、agent 长期资料 | 不一定直接作为子进程 `HOME`；server 会从这里读取/同步 instructions 和 agent-private skills，并给长期记忆能力提供稳定落点 |
 | `instructionsRootPath` | `<agent workspace home>/instructions/` | Octopus server | `SOUL.md`、`HEARTBEAT.md`、`TOOLS.md`、`MEMORY.md` 等说明文件 | 通过 `instructionsFilePath` 选择入口文件供 runtime prompt 读取 |
 | `agent private skills root` | `<agent workspace home>/skills/` | Octopus server / agent skill API | agent 私有 skill package | agent 启用后可 materialize 到 runtime skill home |
+| `life` memory root | `<agent workspace home>/life/` | Octopus server / memory skill | PARA 风格长期结构化记忆 | runtime 通过说明或 skill 约定读写，适合项目、人物、组织、资源等长期实体 |
+| `daily memory root` | `<agent workspace home>/memory/` | Octopus server / memory skill | 每日或会话时间线记忆 | runtime 通过说明或 skill 约定读写，适合 `YYYY-MM-DD.md` 这类流水记录 |
 | `AGENT_HOME` / `runtime managed HOME` | `.octopus/runtime-homes/<runtimeType>/<orgId>/<agentId>/home/` | runtime adapter | CLI 配置、credential 链接或副本、materialized skills、runtime session 状态 | local runtime 启动时通常设置 `HOME`、`USERPROFILE`、`AGENT_HOME` 指向这里 |
 | `cwd` | project workspace cwd、execution workspace cwd，或 organization workspace fallback | workspace resolver / runtime config | 任务实际操作的源码或工作目录 | 子进程启动目录；相对路径读写默认发生在这里 |
 
@@ -296,7 +313,7 @@ OpenCode 这类本地 runtime 需要 managed home 中的配置文件，但不应
 
 ```text
 agent workspace home
-  -> 保存长期 agent instructions / private skills
+  -> 保存长期 agent instructions / private skills / life / memory
 
 AGENT_HOME / runtime managed HOME
   -> local runtime CLI 看到的 HOME / AGENT_HOME
@@ -336,6 +353,17 @@ agent private skills root:
   - incident-notes/SKILL.md
   - repo-maintainer/SKILL.md
 
+life memory root:
+  .octopus/instances/default/organizations/16793a83-0fdd-4e35-84d7-7204f7f23663/workspaces/agents/agent-65c54f76/life/
+  - projects/
+  - areas/
+  - resources/
+  - archives/
+
+daily memory root:
+  .octopus/instances/default/organizations/16793a83-0fdd-4e35-84d7-7204f7f23663/workspaces/agents/agent-65c54f76/memory/
+  - 2026-06-05.md
+
 AGENT_HOME / runtime managed HOME for codex_local:
   .octopus/runtime-homes/codex_local/16793a83-0fdd-4e35-84d7-7204f7f23663/65c54f76-aaaa-bbbb-cccc-123456789abc/home/
   runtime 启动后: AGENT_HOME = 这个目录
@@ -357,6 +385,12 @@ runtime task cwd, 如果没有可用 project workspace，也可能 fallback 到 
 
 在这个例子里，`instructionsRootPath` 和 agent private skills root 都挂在同一个 `agent workspace home` 下；同一个 agent 切换 `codex_local`、`opencode_local`、`claude_local` 时，长期目录不变，只会进入不同的 `runtime managed HOME`，并且该次 runtime 子进程里的 `AGENT_HOME` 指向对应的 runtime managed HOME；真正修改项目文件时使用的是 `runtime task cwd`。
 
+`instructions/MEMORY.md` 和 `<agent workspace home>/memory/` 不同：
+
+- `instructions/MEMORY.md` 属于 instructions bundle，用来保存会影响 prompt 的长期偏好、操作习惯和稳定经验。
+- `memory/` 是文件夹，通常用于每日或会话时间线记录。
+- `life/` 也是文件夹，通常用于 PARA 风格的长期实体记忆。
+
 `runtime managed HOME` 存在的目的不只是区分 `agent_runtime_type`：
 
 - 按 runtime 类型隔离 CLI 配置、skill 安装位置和 session 状态。
@@ -370,7 +404,7 @@ runtime task cwd, 如果没有可用 project workspace，也可能 fallback 到 
 ```text
 agent workspace home
   = agent 的长期档案库
-  = instructions + agent-private skills
+  = instructions + agent-private skills + life + memory
 
 AGENT_HOME / runtime managed HOME
   = runtime adapter 为某个 agent + runtime type 准备的隔离运行家目录

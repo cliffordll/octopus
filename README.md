@@ -256,7 +256,9 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 
 ## 8. 运行目录说明
 
-从仓库根目录启动时，数据库、storage、run log、runtime home 仍按各自默认配置解析；组织工作区按上游方式写入 Octopus instance home。
+从仓库根目录开发启动时，默认 SQLite 数据库和 Octopus home 应保持同源：
+如果数据库是 `./octopus.db`，Octopus home 默认解析为 `./.octopus`。
+正式或桌面运行可以把数据库和 Octopus home 都放到用户目录，但不要只移动其中一个。
 
 workspace、runtime home、skills 的区别见 `docs/guides/skills.md`；任务队列和 run 调度见 `docs/guides/task-queue.md`。
 
@@ -265,7 +267,7 @@ octopus.db
 .octopus/storage
 .octopus/run-logs
 .octopus/runtime-homes
-~/.octopus/instances/default/organizations
+.octopus/instances/default/organizations
 ```
 
 含义：
@@ -274,7 +276,27 @@ octopus.db
 - `.octopus/storage`：本地附件、任务产物和 asset 内容。
 - `.octopus/run-logs`：heartbeat/runtime run 日志。
 - `.octopus/runtime-homes`：Codex/OpenCode/Claude 等 runtime 的 managed home。
-- `~/.octopus/instances/<instance_id>/organizations/<org_id>/workspaces`：组织、项目、智能体相关工作区；可通过 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 调整。
+- `.octopus/instances/<instance_id>/organizations/<org_id>/workspaces`：组织、项目、智能体相关工作区；可通过 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 调整。
+
+路径规则：
+
+- 显式设置 `OCTOPUS_HOME` 时，以 `OCTOPUS_HOME` 为准。
+- 未设置 `OCTOPUS_HOME` 且使用本地 SQLite 时，Octopus home 默认放在 SQLite 数据库文件同级的 `.octopus/`。
+- 使用 PostgreSQL 或无法从数据库 URL 推导本地文件时，才退回用户目录 `~/.octopus`。
+
+例如开发阶段从仓库根目录启动：
+
+```text
+D:\coding\octopus\octopus.db
+D:\coding\octopus\.octopus
+```
+
+正式或桌面运行如果希望数据都在用户目录，应同时设置数据库和 home，例如：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/lianaipeng/.octopus/instances/default/data/octopus.db"
+$env:OCTOPUS_HOME = "C:/Users/lianaipeng/.octopus"
+```
 
 这些目录是本地运行产物，不应提交到 Git。
 
@@ -324,7 +346,7 @@ uv run server
 | `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///./octopus.db` | 数据库连接 |
 | `OCTOPUS_AUTO_MIGRATE` | `false` | 启动时是否自动执行 Alembic 迁移 |
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
-| `OCTOPUS_HOME` | `~/.octopus` | Octopus instance home 根目录 |
+| `OCTOPUS_HOME` | SQLite DB 同级 `.octopus`；非本地 SQLite 时为 `~/.octopus` | Octopus instance home 根目录 |
 | `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离组织工作区 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 heartbeat scheduler |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
