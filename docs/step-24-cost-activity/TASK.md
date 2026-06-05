@@ -1,4 +1,4 @@
-# Step 23: Cost Summary 与 Activity Query
+# Step 24: Cost Summary 与 Activity Query
 
 状态：待开发
 
@@ -8,13 +8,13 @@
 - Runtime adapter 已经能从部分本地 CLI 输出中归一化 `usage_json`、`costUsd`、provider、biller 等原始证据，但这些仍只停留在 run/result 或 adapter response 中。
 - `runtime_providers` / `runtime_models` 的 CRUD 与 activity 写入已在 Step 21 提前完成；这为后续 cost by provider/model 提供配置维度，但不等同于 cost event 归集。
 
-这些提前完成项只作为本步骤的输入基础，不代表 Step 23 已完成。
+这些提前完成项只作为本步骤的输入基础，不代表 Step 24 已完成。
 
 ## 目标
 
 先实现不阻塞主链路的成本摘要和 activity 查询能力，让用户能看见 agent/run/chat 做了什么、消耗了多少。
 
-本步骤只做 cost event 归集、summary/query 和 activity query；budget hard-stop、incident、quota、skills analytics 归 Step 24。
+本步骤只做 cost event 归集、summary/query 和 activity query；budget hard-stop、incident、quota、skills analytics 归 Step 25。
 
 ## 上游证据
 
@@ -58,9 +58,9 @@
 
 ## 边界
 
-- 不做 budget policy、budget incident、hard-stop、approval 副作用，归 Step 24。
-- 不做 provider quota 真实读取，归 Step 24。
-- 不做 skills analytics 真实归集，归 Step 24。
+- 不做 budget policy、budget incident、hard-stop、approval 副作用，归 Step 25。
+- 不做 provider quota 真实读取，归 Step 25。
+- 不做 skills analytics 真实归集，归 Step 25。
 - 不改变 runtime adapter 执行协议；adapter 继续只产出 usage/cost 原始证据。
 
 ## 验收

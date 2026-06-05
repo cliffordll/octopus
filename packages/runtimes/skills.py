@@ -140,7 +140,7 @@ def _skill_entries(
         entries.append(
             _skill_entry(
                 skill_dir,
-                desired=skill_dir.name in desired,
+                desired=_desired_selects_skill(skill_dir.name, desired),
                 skills_home=skills_home,
                 installed_target=installed.get(skill_dir.name)
                 if persistent_materialization
@@ -184,11 +184,14 @@ def _skill_entries(
             )
         )
     for desired_skill in desired:
+        desired_runtime_name = _desired_runtime_name(desired_skill)
         if (
             desired_skill in available_by_key
             or desired_skill in agent_home_by_key
             or desired_skill.startswith("agent:")
             and desired_skill.removeprefix("agent:") in agent_home_by_key
+            or desired_runtime_name in available_by_key
+            or desired_runtime_name in agent_home_by_key
         ):
             continue
         warnings.append(f'Desired skill "{desired_skill}" is not available.')
@@ -363,7 +366,7 @@ def _materialize_desired_skills(
 ) -> None:
     by_key = {skill_dir.name: skill_dir for skill_dir in available}
     for key in sorted(desired):
-        source = by_key.get(key.removeprefix("agent:"))
+        source = by_key.get(_desired_runtime_name(key))
         if source is None:
             continue
         target = skills_home / source.name
@@ -394,6 +397,21 @@ def _same_path(left: Path, right: Path) -> bool:
         resolved_left = Path(os.path.abspath(str(left)))
         resolved_right = Path(os.path.abspath(str(right)))
     return _normalized_path_text(resolved_left) == _normalized_path_text(resolved_right)
+
+
+def _desired_selects_skill(skill_name: str, desired: set[str]) -> bool:
+    return any(_desired_runtime_name(value) == skill_name for value in desired)
+
+
+def _desired_runtime_name(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("agent:"):
+        return _desired_runtime_name(normalized.removeprefix("agent:"))
+    if normalized.startswith("skills/"):
+        return normalized.removeprefix("skills/")
+    if normalized.startswith("organization/"):
+        return normalized.rsplit("/", 1)[-1]
+    return normalized
 
 
 def _normalized_path_text(path: Path) -> str:
