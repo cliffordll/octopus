@@ -13,6 +13,7 @@ from packages.shared.api_paths.organizations import (
     ORG_RESOURCE_LIST_PATH,
     ORG_WORKSPACE_FILE_CONTENT_PATH,
     ORG_WORKSPACE_FILE_PATH,
+    ORG_WORKSPACE_ARCHIVE_PATH,
     ORG_WORKSPACE_FILES_PATH,
 )
 from packages.shared.types.organization import OrganizationDetail, OrganizationSummary
@@ -250,6 +251,28 @@ async def read_org_workspace_file_content(
         content=workspace_file.content,
         media_type=workspace_file.content_type,
         headers=headers,
+    )
+
+
+@router.get(ORG_WORKSPACE_ARCHIVE_PATH)
+async def read_org_workspace_archive(
+    orgId: str,
+    path: str = "",
+    _: None = Depends(require_organization_access),
+    service: OrganizationWorkspaceBrowserService = Depends(
+        get_organization_workspace_browser_service
+    ),
+) -> Response:
+    archive_file = await service.read_archive_file(orgId, path)
+    filename = archive_file.original_filename.replace(chr(34), "")
+    return Response(
+        content=archive_file.content,
+        media_type=archive_file.content_type,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )
 
 

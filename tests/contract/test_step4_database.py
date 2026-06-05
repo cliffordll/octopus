@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool.impl import AsyncAdaptedQueuePool
 
 from packages.database.clients import (
     async_transaction,
@@ -153,6 +154,18 @@ async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
                 )
             )
             await conn.execute(text("insert into write_check(value) values ('ok')"))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_file_engine_uses_default_async_queue_pool(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "cancel-safe.db"
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        assert isinstance(engine.sync_engine.pool, AsyncAdaptedQueuePool)
     finally:
         await engine.dispose()
 
