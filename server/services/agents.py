@@ -137,13 +137,13 @@ def _workspace_key(agent_id: str, name: str) -> str:
 
 
 def _agent_home_root(row: AgentRow) -> Path:
-    workspace_key = _derive_url_key(row.workspace_key, row.id)
+    workspace_key = row.workspace_key or _derive_url_key(row.name, row.id)
     return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
-    workspace_key = _derive_url_key(
-        cast(str | None, values.get("workspace_key")), cast(str, values["id"])
+    workspace_key = cast(str | None, values.get("workspace_key")) or _derive_url_key(
+        cast(str | None, values.get("name")), cast(str, values["id"])
     )
     return agent_workspace_root(cast(str, values["org_id"]), workspace_key)
 

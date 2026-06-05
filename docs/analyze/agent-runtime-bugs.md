@@ -2,7 +2,7 @@
 
 ## Bug 列表
 
-当前记录：4 个。
+当前记录：6 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
@@ -10,6 +10,8 @@
 | 2 | 组织工作区 legacy layout 可能导致 UI 文件树为空 | 已修复 |
 | 3 | Agent workspace home 未初始化 `life/`、`memory/`、`skills/` | 已修复 |
 | 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
+| 5 | 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径 | 已修复 |
+| 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -277,3 +279,104 @@ $env:OCTOPUS_HOME = "C:/Users/<user>/.octopus"
 ```
 
 或者由启动器保证这两个值来自同一个 instance 数据根。
+
+## 5. 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径
+
+### 背景
+
+`agents.agent_runtime_config` 会持久化：
+
+```text
+instructionsBundleMode
+instructionsRootPath
+instructionsEntryFile
+instructionsFilePath
+```
+
+如果某个 agent 是在旧 `OCTOPUS_HOME` 下创建的，`instructionsRootPath` 可能是旧 home 的绝对路径。之后即使 server 默认 home 修正到当前 DB 同级 `.octopus/`，已有 agent 仍可能继续指向旧路径。
+
+### 症状
+
+- `GET /api/orgs/{orgId}/workspace/files?path=` 返回 `agents/`、`artifacts/`、`plans/`、`skills/`。
+- 但 `agents/` 目录下面是空的。
+- DB 中该 org 的 agent 存在，且 `instructionsRootPath` 指向另一套 home，例如：
+
+```text
+C:\Users\<user>\.octopus\instances\default\organizations\<orgId>\workspaces\agents\<agentWorkspaceKey>\instructions
+```
+
+- 当前 UI workspace root 指向：
+
+```text
+D:\coding\octopus\.octopus\instances\default\organizations\<orgId>\workspaces
+```
+
+### 根因
+
+默认 home 修正只能影响后续路径解析；已经持久化到 DB 的 managed instructions 绝对路径不会自动改写。于是 workspace browser 看当前 canonical root，而 agent instructions 仍留在旧 root。
+
+### 修复
+
+- 读取 managed instructions bundle 时，如果发现 `instructionsBundleMode=managed` 但 `instructionsRootPath` 不等于当前 agent workspace home 下的 `instructions/`，server 会：
+  - 先导出旧 root 中已有说明文件。
+  - 写入当前 managed root。
+  - 补齐默认 bundle 文件。
+  - 更新 DB 中的 `instructionsRootPath` 和 `instructionsFilePath`。
+
+### 验收
+
+- 访问 `GET /api/agents/{agentId}/instructions-bundle` 后，当前 workspace root 下出现：
+
+```text
+agents/<agentWorkspaceKey>/instructions/
+```
+
+- 旧 root 中的 `SOUL.md`、`MEMORY.md` 等内容被带到当前 managed root。
+- DB 中 `agents.agent_runtime_config.instructionsRootPath` 指向当前 `OCTOPUS_HOME` 对应的 canonical path。
+
+## 6. Agent workspace key 被二次 normalize 导致目录分裂
+
+### 背景
+
+`agents.workspace_key` 是持久化的 agent workspace 目录名，例如：
+
+```text
+ceo-1--623d0e91
+```
+
+这个值一旦写入 DB，后续所有 agent workspace home 解析都应直接使用它，不能再重新 slug/normalize。
+
+### 症状
+
+同一个 agent 在 workspace browser 中出现两个相似目录：
+
+```text
+agents/ceo-1--623d0e91/
+agents/ceo-1-623d0e91/
+```
+
+其中：
+
+- `ceo-1--623d0e91/instructions/` 有 `SOUL.md`、`MEMORY.md` 等说明文件。
+- `ceo-1-623d0e91/instructions/`、`life/`、`memory/`、`skills/` 只是空目录。
+
+### 根因
+
+不同服务使用了不同的 workspace key 计算方式：
+
+- instructions bundle 使用 DB 中的 `workspace_key`，保留 `--`。
+- runtime config / agent workspace layout 又对 `workspace_key` 做了一次 URL key normalize，把 `--` 压成 `-`。
+
+因此同一个 agent 的长期目录被分裂成两个磁盘路径。
+
+### 修复
+
+- 当 `agents.workspace_key` 存在时，agent workspace home 解析直接使用 DB 值。
+- 只有旧数据缺少 `workspace_key` 时，才从 agent name / id 推导 fallback。
+- instructions service 和 agent runtime preparation 使用同一规则。
+
+### 验收
+
+- `agentSkillsRootPath` 的父目录名等于 DB 中的 `workspace_key`。
+- managed instructions root 保留 `workspace_key` 中的双连字符。
+- 新触发 runtime config 或 instructions bundle 后，不再创建被二次 normalize 的空目录。

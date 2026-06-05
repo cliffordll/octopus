@@ -201,6 +201,7 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     ).resolve()
     assert agent_skills_root.parent.parent == expected_agents_root
     assert agent_skills_root.name == "skills"
+    assert agent_skills_root.parent.name == row.workspace_key
     agent_home = agent_skills_root.parent
     assert (agent_home / "instructions").is_dir()
     assert (agent_home / "skills").is_dir()
