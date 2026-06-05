@@ -138,16 +138,16 @@ run 正式调用 runtime adapter 前，server 应做 workspace preflight：
 - 解析 issue/project/agent。
 - 解析 project workspace 或 fallback 到 organization workspace。
 - 准备组织工作区目录。
-- 准备 run/issue artifacts 目录。
+- 准备 organization artifacts 目录。
 - 生成 workspace context 和 env。
 - 记录 workspace operation，说明 runtime 将在哪个 cwd 执行。
 
 这些步骤不只是“设置输出物目录”。它们同时确定两类路径：
 
 - runtime execution cwd：子进程启动目录，决定相对路径默认读写到哪里。
-- durable artifact directories：server 注入给 runtime 的稳定产物目录，决定报告、截图、CSV、handoff 文件等交付物应该放哪里。
+- durable artifact directory：server 注入给 runtime 的 organization artifacts 目录，决定报告、截图、CSV、handoff 文件等交付物应该放哪里。
 
-二者不能混用。`cwd` 是执行位置，不等于产物归档位置；artifacts 目录是交付物的优先落点，不等于源码工作目录。
+二者不能混用。`cwd` 是执行位置，不等于产物归档位置；artifacts 目录是交付物的优先落点，不等于源码工作目录。严格对齐上游时，默认只有 organization artifacts；issue/run 关联由 DB work products 元数据表达，不靠文件系统目录分层表达。
 
 如果 preflight 失败，adapter 不应继续执行，run/event/log 要记录可读失败原因。
 
@@ -452,27 +452,22 @@ runtime 产生 stdout/stderr 时，server 应实时写入：
 
 智能体产生文件时，推荐落点：
 
-- run 级 durable 产物：`organization workspace/artifacts/issues/<issue_id>/runs/<run_id>/`
-- issue 级共享 durable 产物：`organization workspace/artifacts/issues/<issue_id>/`
+- durable 产物：`organization workspace/artifacts/`
 - 项目源码修改：项目工作区 `cwd` 内，但需要明确登记为源码变更或 work product。
 
 runtime 会通过 env 获得产物目录：
 
 ```text
 RUDDER_ORG_ARTIFACTS_DIR
-RUDDER_ISSUE_ARTIFACTS_DIR
-RUDDER_RUN_ARTIFACTS_DIR
 ```
 
 本地 control-plane skill 也会提供同语义变量：
 
 ```text
 CONTROL_PLANE_ORG_ARTIFACTS_DIR
-CONTROL_PLANE_ISSUE_ARTIFACTS_DIR
-CONTROL_PLANE_RUN_ARTIFACTS_DIR
 ```
 
-如果 agent 只是写相对路径，例如 `report.md`，文件会落到 runtime `cwd`。这适合源码修改或临时工作文件，但不适合作为稳定交付物。报告、截图、CSV、mockup、日志摘要等 durable output 应优先写入 `RUDDER_RUN_ARTIFACTS_DIR`。
+如果 agent 只是写相对路径，例如 `report.md`，文件会落到 runtime `cwd`。这适合源码修改或临时工作文件，但不适合作为稳定交付物。报告、截图、CSV、mockup、日志摘要等 durable output 应优先写入 `RUDDER_ORG_ARTIFACTS_DIR`。
 
 server 成功 run 后应扫描受管 worktree 和组织 artifacts 中本次新增/修改文件，并登记为 issue work products。
 

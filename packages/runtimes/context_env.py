@@ -18,6 +18,13 @@ def apply_runtime_context_env(
     if not isinstance(workspace_context, dict):
         workspace_context = {}
 
+    for key in (
+        "RUDDER_CONVERSATION_ARTIFACTS_DIR",
+        "RUDDER_ISSUE_ARTIFACTS_DIR",
+        "RUDDER_RUN_ARTIFACTS_DIR",
+    ):
+        env.pop(key, None)
+
     env["RUDDER_AGENT_ID"] = context.agent_id
     env["RUDDER_ORG_ID"] = context.org_id
     env["RUDDER_RUN_ID"] = context.run_id
@@ -72,15 +79,6 @@ def apply_runtime_context_env(
     _set_env(env, "RUDDER_ORG_SKILLS_DIR", workspace_context.get("orgSkillsDir"))
     _set_env(env, "RUDDER_ORG_PLANS_DIR", workspace_context.get("orgPlansDir"))
     _set_env(env, "RUDDER_ORG_ARTIFACTS_DIR", workspace_context.get("orgArtifactsDir"))
-    _set_env(
-        env,
-        "RUDDER_CONVERSATION_ARTIFACTS_DIR",
-        workspace_context.get("conversationArtifactsDir"),
-    )
-    _set_env(
-        env, "RUDDER_ISSUE_ARTIFACTS_DIR", workspace_context.get("issueArtifactsDir")
-    )
-    _set_env(env, "RUDDER_RUN_ARTIFACTS_DIR", workspace_context.get("runArtifactsDir"))
 
     runtime_services = workspace.get("rudderRuntimeServices")
     if isinstance(runtime_services, list) and runtime_services:
