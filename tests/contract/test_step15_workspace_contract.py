@@ -376,6 +376,119 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
     ]
 
 
+async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    configured_cwd = tmp_path / "repo-root"
+    org_root = tmp_path / "org-workspace"
+    configured_cwd.mkdir()
+
+    class CwdWritingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            cwd = context.config.get("cwd")
+            assert isinstance(cwd, str)
+            Path(cwd, "runtime-output.md").write_text(
+                "# Runtime output\n", encoding="utf-8"
+            )
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"cwd": cwd},
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: CwdWritingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: CwdWritingAdapter(),
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-cwd-override",
+                name="Step 15 Cwd Override",
+                issue_prefix="CWD",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Cwd Override Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Do not write issue outputs to agent configured cwd",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Cwd Override Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {
+                        "command": sys.executable,
+                        "cwd": str(configured_cwd),
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert (org_root / "runtime-output.md").is_file()
+    assert not (configured_cwd / "runtime-output.md").exists()
+    assert (run["resultJson"] or {})["cwd"] == str(org_root)
+
+
 async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
