@@ -12,7 +12,7 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
-from packages.database.schema import ActivityLog, Base, Organization
+from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
 
 
 @pytest.fixture
@@ -101,6 +101,47 @@ async def test_agent_lifecycle_writes_activity_and_prevents_reporting_cycle(
         "agent.paused",
         "agent.resumed",
         "agent.terminated",
+    ]
+
+
+async def test_agent_creation_defaults_control_plane_skill_unless_explicit(
+    session: AsyncSession,
+) -> None:
+    from server.services.agents import AgentService
+
+    org = await _seed_org(session)
+    service = AgentService(session)
+
+    async with async_transaction(session):
+        default_agent = await service.create_agent(
+            org.id,
+            {"name": "Default Skills"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        explicit_empty_agent = await service.create_agent(
+            org.id,
+            {"name": "Explicit Empty", "desiredSkills": []},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert default_agent["desiredSkills"] == ["skills/control-plane"]
+    assert explicit_empty_agent["desiredSkills"] == []
+
+    rows = (
+        (
+            await session.execute(
+                select(AgentEnabledSkill).order_by(
+                    AgentEnabledSkill.agent_id, AgentEnabledSkill.skill_key
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(row.agent_id, row.skill_key) for row in rows] == [
+        (default_agent["id"], "skills/control-plane")
     ]
 
 

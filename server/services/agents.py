@@ -84,6 +84,7 @@ _SENSITIVE_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REDACTED = "***REDACTED***"
+_DEFAULT_ENABLED_SKILLS = ("skills/control-plane",)
 _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "name",
     "role",
@@ -467,7 +468,11 @@ class AgentService:
             )
             if updated is not None:
                 row = updated
-        desired_skills = list(payload.get("desiredSkills", []))
+        desired_skills = list(
+            payload["desiredSkills"]
+            if "desiredSkills" in payload
+            else _DEFAULT_ENABLED_SKILLS
+        )
         if desired_skills:
             desired_skills = await replace_enabled_skill_keys(
                 self._session,

@@ -6,7 +6,7 @@
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
-| 1 | Agent skill 未启用 | 待修复 |
+| 1 | Agent skill 未启用 | 已修复 |
 | 2 | 组织工作区 legacy layout 可能导致 UI 文件树为空 | 已修复 |
 
 ## 1. Agent skill 未启用
@@ -44,9 +44,16 @@ Octopus 中有两套容易混淆的 skill 概念：
 - 这不是 agent 本身不能运行；agent 仍可执行任务，只是没有加载可选 skill。
 - 组织 skill 入库不会自动启用到所有 agent。
 
-### 修复入口
+### 修复
 
-创建 agent 时传入 `desiredSkills`，可写入 `agent_enabled_skills`。
+服务端已补齐默认启用和迁移 backfill：
+
+- 新创建 agent 时，如果请求没有显式传 `desiredSkills`，默认写入 `skills/control-plane` 到 `agent_enabled_skills`。
+- 如果请求显式传 `desiredSkills: []`，尊重显式空列表，不自动补默认值。
+- 新增 migration `20260605_000017`，升级时给已有非 terminated agent backfill `skills/control-plane`。
+- runtime skill materialization 支持把 `skills/control-plane` 这种 organization/bundled key 映射到磁盘目录 `control-plane`，避免 DB 有记录但 runtime home 不装载。
+
+手动入口仍可继续使用。对已有 agent，可以追加启用：
 
 对已有 agent，可以追加启用：
 
@@ -70,6 +77,8 @@ body: { "desiredSkills": ["<skill-key-or-selection-ref>"] }
 - `GET /api/agents/{id}/skills` 返回的 `desiredSkills` 包含目标 skill。
 - 下一次 runtime 执行前，启用的 skill 被 materialized 到对应 runtime home。
 - heartbeat/chat run 的 runtime config 中 `desiredSkills` 不再是 `[]`。
+- 新建 agent 未显式传 `desiredSkills` 时，返回 `desiredSkills=["skills/control-plane"]`。
+- 旧库升级后，已有非 terminated agent 自动补 `skills/control-plane`。
 
 ## 2. 组织工作区 legacy layout 可能导致 UI 文件树为空
 
