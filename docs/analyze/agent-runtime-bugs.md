@@ -16,7 +16,7 @@
 | 8 | 缺少 instance-scoped server/app 文件日志目录 | 已修复 |
 | 9 | Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录 | 已修复 |
 | 10 | 无 project 的 issue run 没有 fallback 到 organization workspace | 已修复 |
-| 11 | Chat run 没有 conversation/run artifacts 目录，产物落到 cwd | 已修复 |
+| 11 | Chat run 没有 organization artifacts context，产物落到 cwd | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -459,9 +459,9 @@ D:\coding\octopus\.octopus\instances\default\data\run-logs
 Octopus runtime 有两类路径：
 
 - `cwd`：runtime 子进程实际启动目录。相对路径读写默认发生在这里。
-- artifacts dir：server 为 org/issue/run 准备的 durable output 目录，例如 `workspaces/artifacts/issues/<issueId>/runs/<runId>/`。
+- artifacts dir：server 为 organization workspace 准备的 durable output 目录，即 `workspaces/artifacts/`。严格对齐上游时，默认不按 issue/run/chat 在文件系统里细分 artifacts；issue/run 关联由 DB work product metadata 表达。
 
-`cwd` 不是产物归档目录。报告、截图、CSV、mockup、handoff 文件等 durable output 应优先写到 `RUDDER_RUN_ARTIFACTS_DIR` 或对应 control-plane artifacts env。
+`cwd` 不是产物归档目录。报告、截图、CSV、mockup、handoff 文件等 durable output 应优先写到 `RUDDER_ORG_ARTIFACTS_DIR` 或对应 control-plane organization artifacts env。
 
 ### 症状
 
@@ -485,7 +485,7 @@ agent_runtime_config.cwd wins over workspace cwd
 
 - issue/project run 只要 workspace preflight 解析出 `rudderWorkspace.cwd`，heartbeat 执行时就用该 cwd 覆盖 agent runtime config 中的旧 `cwd`。
 - 非 issue/project run 仍可继续使用 agent runtime config 中的显式 `cwd`。
-- 闭环验收测试中的 durable output 示例改为写 `RUDDER_RUN_ARTIFACTS_DIR`，不再示范把交付物写 cwd。
+- 闭环验收测试中的 durable output 示例改为写 `RUDDER_ORG_ARTIFACTS_DIR`，不再示范把交付物写 cwd。
 
 ### 验收
 
@@ -494,11 +494,11 @@ agent_runtime_config.cwd wins over workspace cwd
 - durable output 示例写入：
 
 ```text
-<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/issues/<issueId>/runs/<runId>/
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
 ```
 
 - `tests/contract/test_step15_workspace_contract.py` 覆盖 issue run workspace cwd 覆盖旧 agent runtime cwd。
-- `tests/contract/test_step22_closed_loop_acceptance.py` 覆盖闭环产物写入 run artifacts。
+- `tests/contract/test_step22_closed_loop_acceptance.py` 覆盖闭环产物写入 organization artifacts。
 
 ## 10. 无 project 的 issue run 没有 fallback 到 organization workspace
 
@@ -512,10 +512,10 @@ Issue run 不一定绑定 project。按运行时 workspace 语义：
 
 ### 症状
 
-- `ceo-1` 这类无 project issue run 中，agent 打印 `RUDDER_RUN_ARTIFACTS_DIR` 为空。
+- `ceo-1` 这类无 project issue run 中，agent 打印 `RUDDER_ORG_ARTIFACTS_DIR` 为空。
 - `heartbeat_runs.context_snapshot` 中有 `issueId`，但没有 `workspace`。
-- `contextSnapshot.workspace.env.RUDDER_RUN_ARTIFACTS_DIR` 不存在。
-- agent 只能看到 runtime 当前 cwd，例如 `D:\coding\octopus`，无法知道 run artifacts 目录。
+- `contextSnapshot.workspace.env.RUDDER_ORG_ARTIFACTS_DIR` 不存在。
+- agent 只能看到 runtime 当前 cwd，例如 `D:\coding\octopus`，无法知道 organization artifacts 目录。
 
 ### 根因
 
@@ -532,32 +532,36 @@ issue.project_id is None -> WorkspaceService.resolve_for_issue() returns None
 - `issue.project_id is None` 时构造 organization workspace fallback runtime context。
 - 该 fallback 不创建 `execution_workspaces` 数据库行，避免触碰当前 `execution_workspaces.project_id` 非空 schema。
 - workspace cwd 指向 canonical organization workspace root。
-- 注入 `RUDDER_ORG_ARTIFACTS_DIR`、`RUDDER_ISSUE_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR`。
-- generated artifacts 扫描允许 `executionWorkspaceId=None`，仍可登记 run artifacts 产物。
+- 注入 `RUDDER_ORG_ARTIFACTS_DIR`。
+- generated artifacts 扫描允许 `executionWorkspaceId=None`，仍可登记 organization artifacts 产物。
 
 ### 验收
 
 - 无 project issue 的 run 也会得到：
 
 ```text
-contextSnapshot.workspace.env.RUDDER_RUN_ARTIFACTS_DIR
+contextSnapshot.workspace.env.RUDDER_ORG_ARTIFACTS_DIR
 ```
 
 - 产物可以落到：
 
 ```text
-<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/issues/<issueId>/runs/<runId>/
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
 ```
 
 - `tests/contract/test_step15_workspace_contract.py` 覆盖 projectless issue fallback 到 organization workspace。
 
-## 11. Chat run 没有 conversation/run artifacts 目录，产物落到 cwd
+## 11. Chat run 没有 organization artifacts context，产物落到 cwd
 
 ### 背景
 
-上游 Rudder 的 chat 可以调用 runtime，但 durable execution 仍应有明确 workspace context。至少应给 runtime 注入 organization artifacts；Octopus 在 issue run 上进一步细化了 issue/run artifacts。
+上游 Rudder 的 chat 可以调用 runtime，但 durable execution 仍应有明确 workspace context。严格对齐上游时，runtime 默认只获得 organization artifacts：
 
-普通 chat 没有 issue 时，也需要一个稳定的 conversation 级产物目录，避免 agent 把文件写到 server cwd 或开发仓库根目录。
+```text
+RUDDER_ORG_ARTIFACTS_DIR
+```
+
+普通 chat 没有 issue 时，也需要 organization workspace cwd 和 organization artifacts env，避免 agent 把文件写到 server cwd 或开发仓库根目录。
 
 ### 症状
 
@@ -567,7 +571,7 @@ contextSnapshot.workspace.env.RUDDER_RUN_ARTIFACTS_DIR
 D:\coding\octopus\hello_world.md
 ```
 
-- `RUDDER_ORG_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR` 都不可见。
+- `RUDDER_ORG_ARTIFACTS_DIR` 不可见。
 - 文件没有进入 organization workspace，也不会被稳定展示为任务产物。
 
 ### 修复
@@ -577,23 +581,21 @@ D:\coding\octopus\hello_world.md
 
 ```text
 RUDDER_ORG_ARTIFACTS_DIR
-RUDDER_CONVERSATION_ARTIFACTS_DIR
-RUDDER_RUN_ARTIFACTS_DIR
 ```
 
-- conversation 级路径为：
+- organization artifacts 路径为：
 
 ```text
-<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/conversations/<conversationId>/runs/<chatRunId>/
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
 ```
 
 - chat runtime `cwd` 覆盖为 organization workspace root，避免默认落回 server cwd。
-- runtime env/guidance 支持 `RUDDER_CONVERSATION_ARTIFACTS_DIR`。
-- 如果 chat 绑定 primary issue，则优先复用 issue workspace context 和 issue/run artifacts。
+- runtime env/guidance 严格对齐上游，只暴露 organization artifacts，不默认暴露 conversation/run artifacts。
+- 如果 chat 绑定 primary issue，则优先复用 issue workspace context，但 artifacts 仍是 organization artifacts。
 
 ### 验收
 
-- 普通 chat run 的 adapter env 中存在 `RUDDER_CONVERSATION_ARTIFACTS_DIR`。
-- 普通 chat run 的 adapter env 中存在 `RUDDER_RUN_ARTIFACTS_DIR`。
+- 普通 chat run 的 adapter env 中存在 `RUDDER_ORG_ARTIFACTS_DIR`。
+- 普通 chat run 的 adapter env 中不存在 `RUDDER_CONVERSATION_ARTIFACTS_DIR`、`RUDDER_ISSUE_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR`。
 - 普通 chat run 的 cwd 是 organization workspace root，而不是 `D:\coding\octopus`。
-- `tests/contract/test_step11_chat_loop.py` 覆盖 chat runtime artifacts env。
+- `tests/contract/test_step11_chat_loop.py` 覆盖 chat runtime organization artifacts env。

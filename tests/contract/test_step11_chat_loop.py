@@ -225,14 +225,9 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     env = kwargs["env"]
     assert isinstance(env, dict)
     assert env["RUDDER_ORG_ARTIFACTS_DIR"] == str(org_root / "artifacts")
-    conversation_artifacts_dir = (
-        org_root / "artifacts" / "conversations" / conversation["id"]
-    )
-    assert env["RUDDER_CONVERSATION_ARTIFACTS_DIR"] == str(conversation_artifacts_dir)
-    assert env["RUDDER_RUN_ARTIFACTS_DIR"].startswith(
-        str(conversation_artifacts_dir / "runs")
-    )
+    assert "RUDDER_CONVERSATION_ARTIFACTS_DIR" not in env
     assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in env
+    assert "RUDDER_RUN_ARTIFACTS_DIR" not in env
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],
         "role": "user",

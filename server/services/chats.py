@@ -1275,7 +1275,11 @@ def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
 
 
 def _json_object(value: str) -> dict[str, Any] | None:
-    candidates = [value.strip(), *_fenced_json_candidates(value)]
+    candidates = [
+        value.strip(),
+        *_fenced_json_candidates(value),
+        *_embedded_json_object_candidates(value),
+    ]
     for candidate in candidates:
         try:
             parsed = json.loads(candidate)
@@ -1307,6 +1311,37 @@ def _fenced_json_candidates(value: str) -> list[str]:
             if candidate:
                 candidates.append(candidate)
         start = fence_end + len(marker)
+
+
+def _embedded_json_object_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    for index, char in enumerate(value):
+        if char != "{":
+            continue
+        depth = 0
+        in_string = False
+        escaped = False
+        for end in range(index, len(value)):
+            current = value[end]
+            if escaped:
+                escaped = False
+                continue
+            if current == "\\":
+                escaped = True
+                continue
+            if current == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(value[index : end + 1].strip())
+                    break
+    return candidates
 
 
 def _chat_transcript_from_payload(

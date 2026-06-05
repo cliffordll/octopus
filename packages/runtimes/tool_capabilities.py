@@ -59,17 +59,7 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         workspace_context.get("worktreePath") or workspace_context.get("cwd")
     )
     artifacts_dir = _string(workspace_context.get("orgArtifactsDir"))
-    conversation_artifacts_dir = _string(
-        workspace_context.get("conversationArtifactsDir")
-    )
-    issue_artifacts_dir = _string(workspace_context.get("issueArtifactsDir"))
-    run_artifacts_dir = _string(workspace_context.get("runArtifactsDir"))
-    if (
-        not worktree
-        and not artifacts_dir
-        and not conversation_artifacts_dir
-        and not issue_artifacts_dir
-    ):
+    if not worktree and not artifacts_dir:
         return ""
     lines = [
         "## Workspace Output Contract",
@@ -80,18 +70,10 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         lines.append(f"- Workspace worktree: `{worktree}`")
     if artifacts_dir:
         lines.append(f"- Organization artifacts directory: `{artifacts_dir}`")
-    if conversation_artifacts_dir:
-        lines.append(
-            f"- Conversation artifacts directory: `{conversation_artifacts_dir}`"
-        )
-    if issue_artifacts_dir:
-        lines.append(f"- Issue artifacts directory: `{issue_artifacts_dir}`")
-    if run_artifacts_dir:
-        lines.append(f"- Run artifacts directory: `{run_artifacts_dir}`")
     lines.extend(
         [
             "- Read external source paths when the task asks for analysis. Do not write generated deliverables into external source paths.",
-            "- Prefer the run artifacts directory for durable files produced by this run. Use the issue artifacts directory for issue-level shared outputs.",
+            "- Prefer the organization artifacts directory for durable files produced by this run.",
             "- Prefer relative paths under the workspace worktree for reports, plans, summaries, patches, and generated documents.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",
         ]
