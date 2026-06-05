@@ -42,9 +42,9 @@ it("shows the organization workspace file tree and editor", async () => {
         directoryPath: "",
         rootExists: true,
         entries: [
-          { name: "agents", path: "agents", isDirectory: true },
-          { name: "artifacts", path: "artifacts", isDirectory: true },
-          { name: "skills", path: "skills", isDirectory: true },
+          { name: "agents", path: "agents", isDirectory: true, displayLabel: "智能体" },
+          { name: "artifacts", path: "artifacts", isDirectory: true, displayLabel: "产物" },
+          { name: "skills", path: "skills", isDirectory: true, displayLabel: "技能" },
         ],
         message: null,
       });
@@ -91,6 +91,10 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(await screen.findByText("artifacts")).toBeInTheDocument();
   expect(screen.getByText("skills")).toBeInTheDocument();
   expect(screen.getByText("agents")).toBeInTheDocument();
+  const filesCard = within(screen.getByTestId("org-workspaces-files-card"));
+  expect(filesCard.queryByText("智能体")).not.toBeInTheDocument();
+  expect(filesCard.queryByText("产物")).not.toBeInTheDocument();
+  expect(filesCard.queryByText("技能")).not.toBeInTheDocument();
   const fileButtons = within(screen.getByTestId("org-workspaces-files-card"))
     .getAllByRole("button")
     .map((button) => button.textContent ?? "");
