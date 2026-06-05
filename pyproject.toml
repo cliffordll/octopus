@@ -65,4 +65,4 @@ reportUnknownArgumentType = "none"
 reportUnknownParameterType = "none"
 
 [tool.ruff]
-extend-exclude = ["server/skills"]
+extend-exclude = ["server/skills", ".tmp-pytest"]
