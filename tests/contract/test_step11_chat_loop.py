@@ -135,8 +135,14 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     app: FastAPI,
     session_factory: async_sessionmaker,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
 
     class FakeCodexProcess:
         returncode = 0
@@ -163,6 +169,7 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
         *args: str, **kwargs: Any
     ) -> FakeCodexProcess:
         captured["args"] = args
+        captured["kwargs"] = kwargs
         return FakeCodexProcess()
 
     monkeypatch.setattr(
@@ -212,6 +219,20 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     )[0]
     envelope = json.loads(envelope_payload.strip())
     assert envelope["conversation"]["id"] == conversation["id"]
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["cwd"] == str(org_root)
+    env = kwargs["env"]
+    assert isinstance(env, dict)
+    assert env["RUDDER_ORG_ARTIFACTS_DIR"] == str(org_root / "artifacts")
+    conversation_artifacts_dir = (
+        org_root / "artifacts" / "conversations" / conversation["id"]
+    )
+    assert env["RUDDER_CONVERSATION_ARTIFACTS_DIR"] == str(conversation_artifacts_dir)
+    assert env["RUDDER_RUN_ARTIFACTS_DIR"].startswith(
+        str(conversation_artifacts_dir / "runs")
+    )
+    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in env
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],
         "role": "user",
