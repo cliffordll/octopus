@@ -78,7 +78,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const create = useMutation({
     mutationFn: () =>
       agentsApi.hire(orgId, {
-        name: name.trim(),
+        ...(name.trim() ? { name: name.trim() } : {}),
         role: effectiveRole,
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
@@ -97,7 +97,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   });
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!name.trim()) return;
+    if (isFirstAgent && !name.trim()) return;
     try {
       setConfigurationError("");
       mergeModelConfig(readJsonObject(agentRuntimeConfig, "Agent runtime config"), runtime, runtimeModel);
@@ -112,10 +112,16 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
         {requiresApproval && <p className="info-notice">当前组织要求审批。创建后智能体将显示为待审批，审批通过后才可用。</p>}
         {!requiresApproval && !isFirstAgent && <p className="muted">当前组织不要求审批。创建成功后智能体可直接使用。</p>}
+        {!isFirstAgent && <p className="muted">名称可不填；server 会按角色自动生成，例如 engineer-1，并设置汇报关系。</p>}
         <label>
-          智能体名称
+          {isFirstAgent ? "智能体名称" : "智能体名称（可选）"}
           <div className="inline-input-action">
-            <input value={name} onChange={(event) => setName(event.target.value)} required />
+            <input
+              placeholder={isFirstAgent ? "" : "留空由 server 自动命名"}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required={isFirstAgent}
+            />
             <button
               className="secondary small-button"
               disabled={!nameSuggestion.data?.name}
