@@ -90,13 +90,17 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(screen.getByRole("heading", { name: "内容" })).toBeInTheDocument();
   expect(screen.queryByText("Project Workspaces")).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "项目工作区" })).not.toBeInTheDocument();
-  expect(await screen.findByText("产物 artifacts")).toBeInTheDocument();
-  expect(screen.getByText("技能 skills")).toBeInTheDocument();
-  expect(screen.getByText("智能体 agents")).toBeInTheDocument();
+  expect(await screen.findByText("artifacts")).toBeInTheDocument();
+  expect(screen.getByText("skills")).toBeInTheDocument();
+  expect(screen.getByText("agents")).toBeInTheDocument();
+  const filesCard = within(screen.getByTestId("org-workspaces-files-card"));
+  expect(filesCard.queryByText("智能体")).not.toBeInTheDocument();
+  expect(filesCard.queryByText("产物")).not.toBeInTheDocument();
+  expect(filesCard.queryByText("技能")).not.toBeInTheDocument();
   const fileButtons = within(screen.getByTestId("org-workspaces-files-card"))
     .getAllByRole("button")
     .map((button) => button.textContent ?? "");
-  const topLevelOrder = ["智能体 agents", "产物 artifacts", "技能 skills"]
+  const topLevelOrder = ["agents", "artifacts", "skills"]
     .map((label) => fileButtons.findIndex((text) => text.includes(label)));
   expect(topLevelOrder.every((index) => index >= 0)).toBe(true);
   expect([...topLevelOrder].sort((left, right) => left - right)).toEqual(topLevelOrder);
