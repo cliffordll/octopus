@@ -657,6 +657,11 @@ export function AgentPage() {
     setRuntimeConfig(JSON.stringify(agent.data.runtimeConfig ?? {}, null, 2));
     setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
+  useEffect(() => {
+    if (!skills.data) return;
+    if (!Array.isArray(skills.data.desiredSkills)) return;
+    setDesiredSkills(skills.data.desiredSkills.join(","));
+  }, [skills.data]);
   const action = useMutation({
     mutationFn: (operation: "pause" | "resume" | "terminate" | "archive") => agentsApi[operation](agentId),
     onSuccess: () => {
@@ -1389,6 +1394,55 @@ export function AgentPage() {
             {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
             {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
             {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
+            <section className="agent-skill-install-card agent-skill-selection-card">
+              <div className="agent-skill-source-heading">
+                <h3>启用选择</h3>
+                <Badge>{desiredSkillRows.length}</Badge>
+              </div>
+              <div className="agent-skill-form-grid">
+                <label>
+                  追加启用
+                  <input
+                    aria-label="追加启用"
+                    placeholder="skills/control-plane, org:organization/demo/review"
+                    value={skillsToEnable}
+                    onChange={(event) => setSkillsToEnable(event.target.value)}
+                  />
+                </label>
+                <label>
+                  完整列表
+                  <input
+                    aria-label="完整列表"
+                    placeholder="skills/control-plane, agent:incident-response"
+                    value={desiredSkills}
+                    onChange={(event) => setDesiredSkills(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="agent-skill-actions">
+                <button
+                  className="secondary"
+                  disabled={enableSkills.isPending || parseCsv(skillsToEnable).length === 0}
+                  onClick={() => enableSkills.mutate(parseCsv(skillsToEnable))}
+                  type="button"
+                >
+                  追加启用
+                </button>
+                <button
+                  className="secondary"
+                  disabled={syncSkills.isPending}
+                  onClick={() => syncSkills.mutate(parseCsv(desiredSkills))}
+                  type="button"
+                >
+                  替换列表
+                </button>
+              </div>
+              {desiredSkillRows.length > 0 && (
+                <div className="agent-skill-current-list" aria-label="当前启用技能">
+                  {desiredSkillRows.map((skill) => <code key={skill}>{skill}</code>)}
+                </div>
+              )}
+            </section>
             <div className="agent-skills-library">
               {skillsAnalytics.data && (
                 <section className="agent-skill-tags-card agent-skill-analytics-card">

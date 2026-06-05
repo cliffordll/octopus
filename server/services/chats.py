@@ -74,6 +74,7 @@ from packages.shared.types.chat import (
     UpdateChatConversationUserStatePayload,
 )
 from packages.shared.types.issue import CreateIssuePayload
+from .agents import prepare_agent_runtime_config
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
 
@@ -708,14 +709,17 @@ class ChatService:
         # can see prior history. The trailing user message is included via the
         # `addMessage` flush above, so it is part of the slice.
         prompt_payload = await self._build_assistant_prompt(conversation, user_message)
-        config = {**agent.agent_runtime_config, "promptTemplate": prompt_payload}
-        runtime_context = config.get("_octopus")
-        if not isinstance(runtime_context, dict):
-            runtime_context = {}
-        config["_octopus"] = {
-            **runtime_context,
-            "desiredSkills": await list_enabled_skill_keys(self._session, agent.id),
-        }
+        config = await prepare_agent_runtime_config(
+            self._session,
+            agent,
+            base_config={
+                **agent.agent_runtime_config,
+                "promptTemplate": prompt_payload,
+            },
+            extra_octopus={
+                "desiredSkills": await list_enabled_skill_keys(self._session, agent.id)
+            },
+        )
         config = await inject_runtime_provider_config(
             self._session,
             org_id=agent.org_id,
