@@ -491,7 +491,9 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
-        agent_home = _ensure_agent_workspace_layout(_agent_home_root_from_values(values))
+        agent_home = _ensure_agent_workspace_layout(
+            _agent_home_root_from_values(values)
+        )
         next_runtime_config = materialize_default_instructions_for_new_agent(
             row, agent_home
         )

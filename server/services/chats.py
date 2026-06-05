@@ -712,7 +712,10 @@ class ChatService:
         config = await prepare_agent_runtime_config(
             self._session,
             agent,
-            base_config={**agent.agent_runtime_config, "promptTemplate": prompt_payload},
+            base_config={
+                **agent.agent_runtime_config,
+                "promptTemplate": prompt_payload,
+            },
             extra_octopus={
                 "desiredSkills": await list_enabled_skill_keys(self._session, agent.id)
             },
