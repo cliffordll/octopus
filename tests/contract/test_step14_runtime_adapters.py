@@ -554,6 +554,38 @@ async def test_agent_skills_snapshot_and_sync_routes(
     assert skill_keys == ["review", "debug"]
 
 
+async def test_runtime_materializes_prefixed_control_plane_skill_key(
+    tmp_path: Path,
+) -> None:
+    from packages.runtimes.local_skills import materialize_runtime_skills
+
+    skills_root = tmp_path / "skills"
+    control_plane = skills_root / "control-plane"
+    control_plane.mkdir(parents=True)
+    control_plane.joinpath("SKILL.md").write_text(
+        "# Control Plane\n\nCoordinate work.", encoding="utf-8"
+    )
+    skills_home = tmp_path / "home" / "skills"
+
+    mounted = materialize_runtime_skills(
+        runtime_type="codex_local",
+        config={"skillsRootPath": str(skills_root)},
+        desired_skills=["skills/control-plane"],
+        skills_home=skills_home,
+        location_label="organization skills",
+    )
+
+    assert mounted == [
+        {
+            "key": "control-plane",
+            "runtimeName": "control-plane",
+            "name": "control-plane",
+            "description": "Coordinate work.",
+        }
+    ]
+    assert (skills_home / "control-plane" / "SKILL.md").is_file()
+
+
 async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_root(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
