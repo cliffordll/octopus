@@ -318,9 +318,9 @@ async def test_agent_instructions_bundle_rehomes_stale_managed_root(
     assert config["instructionsRootPath"] == str(expected_root)
     assert config["instructionsFilePath"] == str(expected_root / "SOUL.md")
     assert (expected_root / "SOUL.md").read_text(encoding="utf-8") == "# Stale Soul\n"
-    assert (
-        expected_root / "MEMORY.md"
-    ).read_text(encoding="utf-8") == "Carry this forward."
+    assert (expected_root / "MEMORY.md").read_text(
+        encoding="utf-8"
+    ) == "Carry this forward."
 
 
 async def test_agent_instructions_managed_root_preserves_workspace_key(

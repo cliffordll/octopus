@@ -126,4 +126,6 @@ def _remove_empty_parents(path: Path, *, stop_at: Path) -> None:
 
 
 def agent_workspace_root(org_id: str, workspace_key: str) -> Path:
-    return (ensure_organization_workspace_root(org_id) / "agents" / workspace_key).resolve()
+    return (
+        ensure_organization_workspace_root(org_id) / "agents" / workspace_key
+    ).resolve()

@@ -177,16 +177,19 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     skills_root = Path(config["skillsRootPath"])
 
     assert skills_root.is_dir()
-    assert skills_root == (
-        tmp_path
-        / "octopus-home"
-        / "instances"
-        / "test"
-        / "organizations"
-        / org.id
-        / "workspaces"
-        / "skills"
-    ).resolve()
+    assert (
+        skills_root
+        == (
+            tmp_path
+            / "octopus-home"
+            / "instances"
+            / "test"
+            / "organizations"
+            / org.id
+            / "workspaces"
+            / "skills"
+        ).resolve()
+    )
     assert config["_octopus"]["organizationSkillsRootPath"] == str(skills_root)
     agent_skills_root = Path(config["_octopus"]["agentSkillsRootPath"])
     expected_agents_root = (

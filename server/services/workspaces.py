@@ -1062,7 +1062,10 @@ class WorkspaceService:
         return workspace
 
     def _org_workspace_root(self, org_id: str) -> Path:
-        if organization_workspace_root is not workspace_paths_module.organization_workspace_root:
+        if (
+            organization_workspace_root
+            is not workspace_paths_module.organization_workspace_root
+        ):
             return organization_workspace_root(org_id)
         return ensure_organization_workspace_root(org_id)
 
