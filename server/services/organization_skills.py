@@ -39,7 +39,7 @@ from packages.shared.types.organization_skill import (
     OrganizationSkillScanLocalResult,
     OrganizationSkillUpdateStatus,
 )
-from .workspace_paths import organization_workspace_root
+from .workspace_paths import ensure_organization_workspace_root
 
 _DEFAULT_MARKDOWN = "Use this skill when it is relevant to the current task."
 _SKILL_FILE = "SKILL.md"
@@ -591,7 +591,9 @@ class OrganizationSkillConflictError(ValueError):
 
 
 def organization_skills_root(org_id: str) -> Path:
-    return (organization_workspace_root(org_id) / "skills").resolve()
+    root = (ensure_organization_workspace_root(org_id) / "skills").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _org_skill_dir(org_id: str, slug: str) -> Path:
