@@ -74,6 +74,7 @@ from packages.shared.types.chat import (
     UpdateChatConversationUserStatePayload,
 )
 from packages.shared.types.issue import CreateIssuePayload
+from ._time import ensure_aware
 from .agents import prepare_agent_runtime_config
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
@@ -1426,7 +1427,7 @@ def _is_unread(
 ) -> bool:
     if user_state is None or row.last_message_at is None:
         return False
-    return row.last_message_at > user_state.last_read_at
+    return ensure_aware(row.last_message_at) > ensure_aware(user_state.last_read_at)
 
 
 def _context_link_summary(link: ChatContextLink) -> dict[str, Any]:

@@ -228,6 +228,25 @@ async def test_list_organizations_returns_seeded(session: AsyncSession) -> None:
     assert rows[0].url_key == "acme"
 
 
+async def test_list_organizations_orders_newest_first(session: AsyncSession) -> None:
+    older = Organization(
+        url_key="older",
+        name="Older",
+        issue_prefix="OLD",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    newer = Organization(
+        url_key="newer",
+        name="Newer",
+        issue_prefix="NEW",
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    async with async_transaction(session):
+        session.add_all([older, newer])
+    rows = await list_organizations(session)
+    assert [row.url_key for row in rows] == ["newer", "older"]
+
+
 async def test_list_org_issues_filters_by_org(session: AsyncSession) -> None:
     org_a = Organization(url_key="a", name="A", issue_prefix="AAA")
     org_b = Organization(url_key="b", name="B", issue_prefix="BBB")

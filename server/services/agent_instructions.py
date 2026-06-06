@@ -119,6 +119,26 @@ class AgentInstructionsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _persist_config(
+        self,
+        agent_id: str,
+        config: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+        source: str,
+    ) -> Agent | None:
+        # Deferred import: agents.py imports from this module at load time.
+        from .agents import AgentService
+
+        return await AgentService(self._session).apply_runtime_config(
+            agent_id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source=source,
+        )
+
     async def update_path(
         self,
         agent_id: str,
@@ -142,8 +162,12 @@ class AgentInstructionsService:
             resolved_path = str(_resolve_instructions_file_path(str(path), config))
             config[str(key)] = resolved_path
             config = _sync_bundle_config_from_file_path(row, config)
-        updated = await update_agent(
-            self._session, row.id, {"agent_runtime_config": config}
+        updated = await self._persist_config(
+            row.id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source="instructions_path_patch",
         )
         if updated is None:
             return None
@@ -225,8 +249,12 @@ class AgentInstructionsService:
             entry_file=entry_file,
             clear_legacy_prompt_template=bool(payload.get("clearLegacyPromptTemplate")),
         )
-        updated = await update_agent(
-            self._session, row.id, {"agent_runtime_config": config}
+        updated = await self._persist_config(
+            row.id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source="instructions_bundle_patch",
         )
         if updated is None:
             return None
@@ -270,8 +298,12 @@ class AgentInstructionsService:
         if row is None:
             return None
         config = await self._ensure_writable_bundle(row, payload)
-        updated = await update_agent(
-            self._session, row.id, {"agent_runtime_config": config}
+        updated = await self._persist_config(
+            row.id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source="instructions_bundle_file_put",
         )
         if updated is None:
             return None
@@ -319,8 +351,12 @@ class AgentInstructionsService:
             else:
                 target.unlink()
         config = _sync_bundle_config_from_file_path(row, dict(row.agent_runtime_config))
-        updated = await update_agent(
-            self._session, row.id, {"agent_runtime_config": config}
+        updated = await self._persist_config(
+            row.id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source="instructions_bundle_file_delete",
         )
         effective = updated or row
         await insert_activity_log(
