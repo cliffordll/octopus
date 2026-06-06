@@ -30,6 +30,7 @@ from packages.shared.types.messenger import (
     MessengerThreadSummary,
 )
 
+from ._time import ensure_aware
 from .chats import ChatService
 
 
@@ -288,8 +289,10 @@ def _summary_from_items(
         1
         for item in items
         if last_read_at is None
-        or (_parse_iso(str(item["latestActivityAt"])) or datetime.fromtimestamp(0, UTC))
-        > last_read_at
+        or ensure_aware(
+            _parse_iso(str(item["latestActivityAt"])) or datetime.fromtimestamp(0, UTC)
+        )
+        > ensure_aware(last_read_at)
     )
     return {
         "threadKey": thread_key,

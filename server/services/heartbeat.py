@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -69,11 +68,12 @@ from .logs import (
     read_local_file_log,
 )
 from .runtime_providers import inject_runtime_provider_config
+from .workspace_paths import resolve_octopus_run_log_dir
 from .workspaces import WorkspaceService
 
 
 def _run_log_dir() -> Path:
-    return Path(os.getenv("OCTOPUS_RUN_LOG_DIR", ".octopus/run-logs"))
+    return resolve_octopus_run_log_dir()
 
 
 def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
@@ -626,6 +626,13 @@ class HeartbeatService:
                 "payload": wakeup.payload,
             }
             await update_wakeup_request(self._session, wakeup.id, {"status": "queued"})
+            context_snapshot = {
+                "resumedFromPaused": True,
+                **self._payload_context(wakeup.payload),
+            }
+            context_snapshot = await self._enrich_issue_context_snapshot(
+                context_snapshot
+            )
             run = await create_run(
                 self._session,
                 {
@@ -635,7 +642,7 @@ class HeartbeatService:
                     "trigger_detail": payload["triggerDetail"],
                     "status": "queued",
                     "wakeup_request_id": wakeup.id,
-                    "context_snapshot": {"resumedFromPaused": True},
+                    "context_snapshot": context_snapshot,
                 },
             )
             run = await self._initialize_run_log(run)
@@ -861,10 +868,8 @@ class HeartbeatService:
                     if isinstance(workspace_payload, dict)
                     else None
                 )
-                if (
-                    isinstance(workspace_data, dict)
-                    and isinstance(workspace_data.get("cwd"), str)
-                    and "cwd" not in runtime_config
+                if isinstance(workspace_data, dict) and isinstance(
+                    workspace_data.get("cwd"), str
                 ):
                     runtime_config["cwd"] = workspace_data["cwd"]
             runtime_config = await inject_runtime_provider_config(

@@ -661,6 +661,57 @@ class AgentService:
             else await list_enabled_skill_keys(self._session, row.id),
         )
 
+    async def apply_runtime_config(
+        self,
+        agent_id: str,
+        config: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+        source: str,
+    ) -> AgentRow | None:
+        """Replace ``agent_runtime_config`` and record a config revision when
+        revision-tracked fields change.
+
+        Instruction edits compute a full replacement config and used to persist
+        it through the database-layer ``update_agent`` directly, bypassing the
+        revision recording. Routing those edits here keeps the config revision
+        history populated, matching upstream where instruction mutations call the
+        agent update with ``recordRevision``.
+        """
+
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        before_config = self._config_snapshot(existing)
+        row = await update_agent(
+            self._session, agent_id, {"agent_runtime_config": config}
+        )
+        if row is None:
+            return None
+        after_config = self._config_snapshot(row)
+        changed_keys = [
+            key
+            for key in _CONFIG_REVISION_FIELDS
+            if before_config[key] != after_config[key]
+        ]
+        if changed_keys:
+            await create_config_revision(
+                self._session,
+                {
+                    "org_id": row.org_id,
+                    "agent_id": row.id,
+                    "created_by_agent_id": actor_id if actor_type == "agent" else None,
+                    "created_by_user_id": actor_id if actor_type != "agent" else None,
+                    "source": source,
+                    "rolled_back_from_revision_id": None,
+                    "changed_keys": changed_keys,
+                    "before_config": _sanitize_value(before_config),
+                    "after_config": _sanitize_value(after_config),
+                },
+            )
+        return row
+
     async def get_skill_snapshot(self, agent_id: str) -> AgentSkillSnapshot | None:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:

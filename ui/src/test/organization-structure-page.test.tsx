@@ -45,6 +45,7 @@ it("shows the organization workspace file tree and editor", async () => {
           { name: "agents", path: "agents", isDirectory: true, displayLabel: "智能体" },
           { name: "artifacts", path: "artifacts", isDirectory: true, displayLabel: "产物" },
           { name: "skills", path: "skills", isDirectory: true, displayLabel: "技能" },
+          { name: "z-readme.md", path: "z-readme.md", isDirectory: false },
         ],
         message: null,
       });
@@ -84,8 +85,9 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(await screen.findByRole("heading", { name: "工作区" })).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-files-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-editor-card")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Editor" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
+  expect(screen.getByText("组织工作区根目录")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "内容" })).toBeInTheDocument();
   expect(screen.queryByText("Project Workspaces")).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "项目工作区" })).not.toBeInTheDocument();
   expect(await screen.findByText("artifacts")).toBeInTheDocument();

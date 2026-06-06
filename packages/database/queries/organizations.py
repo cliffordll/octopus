@@ -12,7 +12,9 @@ from ..schema import Organization
 
 async def list_organizations(session: AsyncSession) -> Sequence[Organization]:
     result = await session.execute(
-        select(Organization).order_by(Organization.created_at)
+        select(Organization).order_by(
+            Organization.created_at.desc(), Organization.id.desc()
+        )
     )
     return result.scalars().all()
 

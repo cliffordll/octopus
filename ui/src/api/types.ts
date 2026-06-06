@@ -773,7 +773,7 @@ export interface AgentConfigRevision {
 }
 
 export interface CreateAgentPayload {
-  name: string;
+  name?: string;
   role: AgentRole;
   title?: string | null;
   icon?: string | null;
