@@ -23,9 +23,9 @@ class ClosedLoopAdapter:
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         await context.on_log("stdout", "closed-loop-start\n")
-        cwd = context.config.get("cwd")
-        assert isinstance(cwd, str)
-        output_path = Path(cwd) / "ACCEPTANCE.md"
+        artifacts_dir = (context.env or {}).get("RUDDER_ORG_ARTIFACTS_DIR")
+        assert isinstance(artifacts_dir, str)
+        output_path = Path(artifacts_dir) / "ACCEPTANCE.md"
         output_path.write_text(
             "# Acceptance\n\nClosed loop output.\n", encoding="utf-8"
         )

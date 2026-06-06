@@ -2,7 +2,7 @@
 
 ## Bug 列表
 
-当前记录：6 个。
+当前记录：11 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
@@ -12,6 +12,11 @@
 | 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
 | 5 | 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径 | 已修复 |
 | 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
+| 7 | Run logs 默认不在 instance `data/run-logs` 下 | 已修复 |
+| 8 | 缺少 instance-scoped server/app 文件日志目录 | 已修复 |
+| 9 | Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录 | 已修复 |
+| 10 | 无 project 的 issue run 没有 fallback 到 organization workspace | 已修复 |
+| 11 | Chat run 没有 organization artifacts context，产物落到 cwd | 已修复 |
 
 ## 1. Agent skill 未启用
 
@@ -380,3 +385,217 @@ agents/ceo-1-623d0e91/
 - `agentSkillsRootPath` 的父目录名等于 DB 中的 `workspace_key`。
 - managed instructions root 保留 `workspace_key` 中的双连字符。
 - 新触发 runtime config 或 instructions bundle 后，不再创建被二次 normalize 的空目录。
+
+## 7. Run logs 默认不在 instance `data/run-logs` 下
+
+### 背景
+
+上游 Rudder 的 run log store 默认挂在 instance root 下：
+
+```text
+<RUDDER_HOME>/instances/<RUDDER_INSTANCE_ID>/data/run-logs
+```
+
+Octopus 之前默认写到：
+
+```text
+<OCTOPUS_HOME>/run-logs
+```
+
+这会绕开 `OCTOPUS_INSTANCE_ID`，导致不同本地 instance 的 heartbeat/runtime run 日志可能混在同一个目录，也不利于按 instance 清理、备份或迁移。
+
+### 修复
+
+- `OCTOPUS_RUN_LOG_DIR` 显式设置时继续优先生效。
+- 未设置时，默认改为：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/data/run-logs
+```
+
+### 验收
+
+- 默认开发路径变为：
+
+```text
+D:\coding\octopus\.octopus\instances\default\data\run-logs
+```
+
+- `tests/contract/test_step20_observability.py` 覆盖默认路径和 env override。
+
+## 8. 缺少 instance-scoped server/app 文件日志目录
+
+### 背景
+
+上游 Rudder 有两类日志目录：
+
+```text
+<RUDDER_HOME>/instances/<instance>/logs
+<RUDDER_HOME>/instances/<instance>/data/run-logs
+```
+
+其中 `logs/` 是 server/app 自身日志，`data/run-logs/` 是 agent run 的执行日志。Octopus 之前只有 run log store，没有初始化 instance-scoped server/app file log 目录。
+
+### 修复
+
+- server 启动时创建并配置：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/logs/octopus.log
+```
+
+- `OCTOPUS_LOG_DIR` 显式设置时可覆盖该目录。
+- `OCTOPUS_LOG_LEVEL` 同时用于控制文件 handler 的日志等级。
+
+### 验收
+
+- `uv run server` 启动时会创建 instance `logs/` 目录和 `octopus.log` 文件。
+- `tests/contract/test_step2_server_skeleton.py` 覆盖 server main 的日志目录初始化。
+
+## 9. Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录
+
+### 背景
+
+Octopus runtime 有两类路径：
+
+- `cwd`：runtime 子进程实际启动目录。相对路径读写默认发生在这里。
+- artifacts dir：server 为 organization workspace 准备的 durable output 目录，即 `workspaces/artifacts/`。严格对齐上游时，默认不按 issue/run/chat 在文件系统里细分 artifacts；issue/run 关联由 DB work product metadata 表达。
+
+`cwd` 不是产物归档目录。报告、截图、CSV、mockup、handoff 文件等 durable output 应优先写到 `RUDDER_ORG_ARTIFACTS_DIR` 或对应 control-plane organization artifacts env。
+
+### 症状
+
+- agent run 后，仓库根目录 `D:\coding\octopus` 下出现 `hello.py`、`ACCEPTANCE.md`、报告文件等任务产物。
+- 同一 run 的 organization workspace artifacts 目录存在，但目标产物没有写进去。
+- issue/project 已经绑定到 workspace，但 runtime 仍在旧 cwd 下执行。
+
+### 根因
+
+旧逻辑中，heartbeat 执行前会先读取 agent 的 `agent_runtime_config`。如果里面已经有 `cwd`，workspace preflight 解析出的 `rudderWorkspace.cwd` 不会覆盖它：
+
+```text
+agent_runtime_config.cwd wins over workspace cwd
+```
+
+这会导致历史 agent 配置、开发期手动配置或 server 启动目录相关配置把 issue run 带回 repo 根目录。runtime 再写相对路径时，产物就会落到 `D:\coding\octopus`。
+
+同时，部分测试 adapter 也把交付物写到 `context.config["cwd"]`，等于把“执行目录”误当成“产物目录”，容易把错误语义固化。
+
+### 修复
+
+- issue/project run 只要 workspace preflight 解析出 `rudderWorkspace.cwd`，heartbeat 执行时就用该 cwd 覆盖 agent runtime config 中的旧 `cwd`。
+- 非 issue/project run 仍可继续使用 agent runtime config 中的显式 `cwd`。
+- 闭环验收测试中的 durable output 示例改为写 `RUDDER_ORG_ARTIFACTS_DIR`，不再示范把交付物写 cwd。
+
+### 验收
+
+- agent runtime config 即使保存了 `cwd=D:\coding\octopus`，issue run 仍会在 workspace resolver 解析出的 cwd 下执行。
+- 相对路径写入不会再因为旧 agent cwd 配置落到 repo 根目录。
+- durable output 示例写入：
+
+```text
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
+```
+
+- `tests/contract/test_step15_workspace_contract.py` 覆盖 issue run workspace cwd 覆盖旧 agent runtime cwd。
+- `tests/contract/test_step22_closed_loop_acceptance.py` 覆盖闭环产物写入 organization artifacts。
+
+## 10. 无 project 的 issue run 没有 fallback 到 organization workspace
+
+### 背景
+
+Issue run 不一定绑定 project。按运行时 workspace 语义：
+
+- 有 project workspace 时，优先使用 project/execution workspace。
+- 没有 project workspace 时，fallback 到 organization workspace。
+- 没有 `project_id` 的 issue 也应该 fallback 到 organization workspace，而不是跳过 workspace preflight。
+
+### 症状
+
+- `ceo-1` 这类无 project issue run 中，agent 打印 `RUDDER_ORG_ARTIFACTS_DIR` 为空。
+- `heartbeat_runs.context_snapshot` 中有 `issueId`，但没有 `workspace`。
+- `contextSnapshot.workspace.env.RUDDER_ORG_ARTIFACTS_DIR` 不存在。
+- agent 只能看到 runtime 当前 cwd，例如 `D:\coding\octopus`，无法知道 organization artifacts 目录。
+
+### 根因
+
+旧逻辑中：
+
+```text
+issue.project_id is None -> WorkspaceService.resolve_for_issue() returns None
+```
+
+因此 `prepare_runtime_context_for_run()` 直接返回 `None`，heartbeat 执行时不会注入 workspace context/env。
+
+### 修复
+
+- `issue.project_id is None` 时构造 organization workspace fallback runtime context。
+- 该 fallback 不创建 `execution_workspaces` 数据库行，避免触碰当前 `execution_workspaces.project_id` 非空 schema。
+- workspace cwd 指向 canonical organization workspace root。
+- 注入 `RUDDER_ORG_ARTIFACTS_DIR`。
+- generated artifacts 扫描允许 `executionWorkspaceId=None`，仍可登记 organization artifacts 产物。
+
+### 验收
+
+- 无 project issue 的 run 也会得到：
+
+```text
+contextSnapshot.workspace.env.RUDDER_ORG_ARTIFACTS_DIR
+```
+
+- 产物可以落到：
+
+```text
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
+```
+
+- `tests/contract/test_step15_workspace_contract.py` 覆盖 projectless issue fallback 到 organization workspace。
+
+## 11. Chat run 没有 organization artifacts context，产物落到 cwd
+
+### 背景
+
+上游 Rudder 的 chat 可以调用 runtime，但 durable execution 仍应有明确 workspace context。严格对齐上游时，runtime 默认只获得 organization artifacts：
+
+```text
+RUDDER_ORG_ARTIFACTS_DIR
+```
+
+普通 chat 没有 issue 时，也需要 organization workspace cwd 和 organization artifacts env，避免 agent 把文件写到 server cwd 或开发仓库根目录。
+
+### 症状
+
+- 在 chat 中让 agent 创建文件，agent 回复“环境变量未设置”，然后写到：
+
+```text
+D:\coding\octopus\hello_world.md
+```
+
+- `RUDDER_ORG_ARTIFACTS_DIR` 不可见。
+- 文件没有进入 organization workspace，也不会被稳定展示为任务产物。
+
+### 修复
+
+- Chat runtime 调用前也准备 workspace context/env。
+- 没有 primary issue 的 chat 注入：
+
+```text
+RUDDER_ORG_ARTIFACTS_DIR
+```
+
+- organization artifacts 路径为：
+
+```text
+<OCTOPUS_HOME>/instances/<instanceId>/organizations/<orgId>/workspaces/artifacts/
+```
+
+- chat runtime `cwd` 覆盖为 organization workspace root，避免默认落回 server cwd。
+- runtime env/guidance 严格对齐上游，只暴露 organization artifacts，不默认暴露 conversation/run artifacts。
+- 如果 chat 绑定 primary issue，则优先复用 issue workspace context，但 artifacts 仍是 organization artifacts。
+
+### 验收
+
+- 普通 chat run 的 adapter env 中存在 `RUDDER_ORG_ARTIFACTS_DIR`。
+- 普通 chat run 的 adapter env 中不存在 `RUDDER_CONVERSATION_ARTIFACTS_DIR`、`RUDDER_ISSUE_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR`。
+- 普通 chat run 的 cwd 是 organization workspace root，而不是 `D:\coding\octopus`。
+- `tests/contract/test_step11_chat_loop.py` 覆盖 chat runtime organization artifacts env。

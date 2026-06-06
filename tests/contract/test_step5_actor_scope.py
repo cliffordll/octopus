@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from packages.database.clients import async_transaction
 from packages.database.schema import ActivityLog, Approval, Base, Issue, Organization
 from server.app import create_app
+from server.middleware import ActorContextMiddleware
 
 
 @pytest.fixture
@@ -104,6 +106,17 @@ async def _seed_org(session: AsyncSession, name: str) -> str:
             )
         )
     return org_id
+
+
+def test_default_actor_context_middleware_avoids_base_http_middleware(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    application = create_app()
+
+    middleware_classes = [middleware.cls for middleware in application.user_middleware]
+    assert ActorContextMiddleware in middleware_classes
+    assert BaseHTTPMiddleware not in middleware_classes
 
 
 async def test_local_trusted_actor_enables_org_creation(

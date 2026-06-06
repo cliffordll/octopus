@@ -283,18 +283,74 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
-    assert context["workspace"]["env"]["RUDDER_ISSUE_ARTIFACTS_DIR"] == str(
-        org_root / "artifacts" / "issues" / issue.id
+    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "RUDDER_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "issueArtifactsDir" not in workspace
+    assert "runArtifactsDir" not in workspace
+
+
+async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
     )
-    assert context["workspace"]["env"]["RUDDER_RUN_ARTIFACTS_DIR"] == str(
-        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-projectless-issue",
+                name="Step 15 Projectless Issue",
+                issue_prefix="PLI",
+            )
+            session.add(org)
+            await session.flush()
+            issue = Issue(
+                org_id=org.id,
+                title="Use organization workspace without project",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-projectless-issue",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert context["projectId"] is None
+    assert context["executionWorkspaceId"] is None
+    assert workspace["id"] is None
+    assert workspace["cwd"] == str(org_root)
+    assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["fallback"] == "organization_workspace"
+    assert workspace["metadata"]["warnings"] == [
+        f'Issue has no project configured. Run will start in shared organization workspace "{org_root}".'
+    ]
+    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
+        org_root / "artifacts"
     )
-    assert workspace["issueArtifactsDir"] == str(
-        org_root / "artifacts" / "issues" / issue.id
-    )
-    assert workspace["runArtifactsDir"] == str(
-        org_root / "artifacts" / "issues" / issue.id / "runs" / run.id
-    )
+    assert "RUDDER_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "runArtifactsDir" not in workspace
 
 
 async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
@@ -374,6 +430,119 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
         "Project workspace has no local cwd configured. Run will start "
         f'in shared organization workspace "{org_root}".'
     ]
+
+
+async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    configured_cwd = tmp_path / "repo-root"
+    org_root = tmp_path / "org-workspace"
+    configured_cwd.mkdir()
+
+    class CwdWritingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            cwd = context.config.get("cwd")
+            assert isinstance(cwd, str)
+            Path(cwd, "runtime-output.md").write_text(
+                "# Runtime output\n", encoding="utf-8"
+            )
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"cwd": cwd},
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: CwdWritingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: CwdWritingAdapter(),
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-cwd-override",
+                name="Step 15 Cwd Override",
+                issue_prefix="CWD",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Cwd Override Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Do not write issue outputs to agent configured cwd",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Cwd Override Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {
+                        "command": sys.executable,
+                        "cwd": str(configured_cwd),
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert (org_root / "runtime-output.md").is_file()
+    assert not (configured_cwd / "runtime-output.md").exists()
+    assert (run["resultJson"] or {})["cwd"] == str(org_root)
 
 
 async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
@@ -625,12 +794,10 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             assert isinstance(artifacts_dir, str)
             artifact = Path(artifacts_dir) / "analysis-plan.md"
             artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
-            run_artifacts_dir = (context.env or {}).get("RUDDER_RUN_ARTIFACTS_DIR")
-            assert isinstance(run_artifacts_dir, str)
-            run_artifact = Path(run_artifacts_dir) / "python-demo" / "README.md"
-            run_artifact.parent.mkdir(parents=True, exist_ok=True)
-            run_artifact.write_text(
-                "# Python Demo\n\nGenerated run artifact.\n", encoding="utf-8"
+            nested_artifact = Path(artifacts_dir) / "python-demo" / "README.md"
+            nested_artifact.parent.mkdir(parents=True, exist_ok=True)
+            nested_artifact.write_text(
+                "# Python Demo\n\nGenerated artifact.\n", encoding="utf-8"
             )
             return RuntimeExecutionResult(
                 exit_code=0, result_json={"summary": "generated markdown files"}
@@ -752,11 +919,10 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert metadata_by_title["analysis-plan.md"]["source"] == (
         "organization_artifacts_scan"
     )
-    run_metadata = metadata_by_title["python-demo/README.md"]
-    assert isinstance(run_metadata, dict)
-    assert run_metadata["source"] == "organization_run_artifacts_scan"
-    assert run_metadata["workspaceBrowserPath"].endswith("/python-demo/README.md")
-    assert "/runs/" in run_metadata["workspaceBrowserPath"]
+    nested_metadata = metadata_by_title["python-demo/README.md"]
+    assert isinstance(nested_metadata, dict)
+    assert nested_metadata["source"] == "organization_artifacts_scan"
+    assert nested_metadata["workspaceBrowserPath"] == "artifacts/python-demo/README.md"
 
 
 async def test_run_preflight_and_adapter_execution_record_workspace_operations(

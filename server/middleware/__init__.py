@@ -1,3 +1,3 @@
-from .actor import actor_context_middleware
+from .actor import ActorContextMiddleware, actor_context_middleware
 
-__all__ = ["actor_context_middleware"]
+__all__ = ["ActorContextMiddleware", "actor_context_middleware"]
