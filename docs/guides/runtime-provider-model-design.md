@@ -184,7 +184,7 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 3. adapter 准备 managed runtime home。
 
 4. 对 `opencode_local`，adapter 执行前生成：
-   .octopus/runtime-homes/opencode_local/<org_id>/<agent_id>/home/.config/opencode/opencode.json
+   .octopus/instances/default/organizations/<org_id>/opencode-home/home/.config/opencode/opencode.json
 
 5. 启动本地 CLI。
 ```

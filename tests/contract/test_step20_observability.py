@@ -23,6 +23,7 @@ from packages.database.schema import (
     WorkspaceOperation,
 )
 from server.app import create_app
+from server.services.heartbeat import _run_log_dir
 
 
 @pytest.fixture
@@ -49,6 +50,37 @@ async def app(
     finally:
         await engine.dispose()
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_default_run_log_dir_is_instance_scoped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("OCTOPUS_RUN_LOG_DIR", raising=False)
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test-instance")
+
+    assert (
+        _run_log_dir()
+        == (
+            tmp_path
+            / "octopus-home"
+            / "instances"
+            / "test-instance"
+            / "data"
+            / "run-logs"
+        ).resolve()
+    )
+
+
+def test_run_log_dir_env_override_is_preserved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    override = tmp_path / "custom-run-logs"
+    monkeypatch.setenv("OCTOPUS_RUN_LOG_DIR", str(override))
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test-instance")
+
+    assert _run_log_dir() == override.resolve()
 
 
 async def _request(

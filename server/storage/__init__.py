@@ -14,10 +14,11 @@ from .types import (
     StorageService,
     StoredObject,
 )
+from server.services.workspace_paths import ensure_octopus_storage_dir
 
 
 def default_storage_dir() -> Path:
-    return Path(os.environ.get("OCTOPUS_STORAGE_DIR", ".octopus/storage")).resolve()
+    return ensure_octopus_storage_dir()
 
 
 def create_local_storage_service(base_dir: PathLike) -> DefaultStorageService:

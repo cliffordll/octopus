@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Mapping
@@ -62,6 +62,7 @@ from .logs import (
 from . import workspace_paths as workspace_paths_module
 from .workspace_paths import (
     ensure_organization_workspace_root,
+    ensure_octopus_workspace_operation_log_dir,
     organization_workspace_root,
 )
 
@@ -75,12 +76,7 @@ def _as_record(value: Any) -> dict[str, Any]:
 
 
 def _operation_log_dir() -> Path:
-    return Path(
-        os.getenv(
-            "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
-            ".octopus/workspace-operation-logs",
-        )
-    )
+    return ensure_octopus_workspace_operation_log_dir()
 
 
 def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +134,12 @@ _GENERATED_FILE_EXCLUDED_PARTS = {
 }
 _GENERATED_FILE_MAX_BYTES = 1_000_000
 _GENERATED_FILE_MAX_COUNT = 20
+
+
+@dataclass(frozen=True)
+class _IssueWorkspaceFallback:
+    org_id: str
+    id: str
 
 
 def _aware_utc(value: datetime) -> datetime:
@@ -310,8 +312,6 @@ class WorkspaceService:
         return self._to_execution_workspace(row) if row is not None else None
 
     async def resolve_for_issue(self, issue: Issue) -> ExecutionWorkspaceData | None:
-        if issue.project_id is None:
-            return None
         if issue.execution_workspace_id:
             existing = await get_execution_workspace_by_id(
                 self._session, issue.execution_workspace_id
@@ -323,6 +323,16 @@ class WorkspaceService:
                     {"last_used_at": datetime.now(UTC)},
                 )
                 return self._to_execution_workspace(touched or existing)
+        if issue.project_id is None:
+            org_root = self._org_workspace_root(issue.org_id)
+            return self._organization_workspace_fallback(
+                issue,
+                cwd=str(org_root),
+                warning=(
+                    "Issue has no project configured. Run will start in "
+                    f'shared organization workspace "{org_root}".'
+                ),
+            )
 
         project = await get_project_by_id(self._session, issue.project_id)
         if project is None or project.org_id != issue.org_id:
@@ -432,16 +442,12 @@ class WorkspaceService:
         skills_dir = org_root / "skills"
         plans_dir = org_root / "plans"
         artifacts_dir = org_root / "artifacts"
-        issue_artifacts_dir = artifacts_dir / "issues" / issue.id
-        run_artifacts_dir = issue_artifacts_dir / "runs" / run_id
         for path in (
             org_root,
             agents_dir,
             skills_dir,
             plans_dir,
             artifacts_dir,
-            issue_artifacts_dir,
-            run_artifacts_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
         workspace = self._with_organization_workspace_paths(
@@ -451,8 +457,6 @@ class WorkspaceService:
             skills_dir=skills_dir,
             plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
-            issue_artifacts_dir=issue_artifacts_dir,
-            run_artifacts_dir=run_artifacts_dir,
         )
         workspace_env = self._workspace_env(
             workspace=workspace,
@@ -461,8 +465,6 @@ class WorkspaceService:
             skills_dir=skills_dir,
             plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
-            issue_artifacts_dir=issue_artifacts_dir,
-            run_artifacts_dir=run_artifacts_dir,
         )
         runtime_context = {
             "rudderWorkspace": workspace,
@@ -477,6 +479,83 @@ class WorkspaceService:
             "projectId": issue.project_id,
             "projectWorkspaceId": workspace["projectWorkspaceId"],
             "executionWorkspaceId": workspace["id"],
+            "workspace": runtime_context,
+        }
+
+    async def prepare_runtime_context_for_chat(
+        self,
+        *,
+        run_id: str,
+        org_id: str,
+        conversation_id: str,
+        primary_issue_id: str | None = None,
+    ) -> dict[str, Any]:
+        if primary_issue_id:
+            issue_context = await self.prepare_runtime_context_for_run(
+                run_id, {"issueId": primary_issue_id}
+            )
+            if issue_context is not None:
+                issue_context["conversationId"] = conversation_id
+                return issue_context
+
+        org_root = self._org_workspace_root(org_id)
+        agents_dir = org_root / "agents"
+        skills_dir = org_root / "skills"
+        plans_dir = org_root / "plans"
+        artifacts_dir = org_root / "artifacts"
+        for path in (
+            org_root,
+            agents_dir,
+            skills_dir,
+            plans_dir,
+            artifacts_dir,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+        fallback_workspace = self._organization_workspace_fallback(
+            _IssueWorkspaceFallback(
+                org_id=org_id,
+                id=conversation_id,
+            ),
+            cwd=str(org_root),
+            warning=(
+                "Chat has no primary issue workspace. Run will start in "
+                f'shared organization workspace "{org_root}".'
+            ),
+        )
+        workspace = dict(
+            self._with_organization_workspace_paths(
+                workspace=fallback_workspace,
+                org_root=org_root,
+                agents_dir=agents_dir,
+                skills_dir=skills_dir,
+                plans_dir=plans_dir,
+                artifacts_dir=artifacts_dir,
+            )
+        )
+
+        workspace_env = self._workspace_env(
+            workspace=cast(ExecutionWorkspaceData, workspace),
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
+        runtime_context = {
+            "rudderWorkspace": workspace,
+            "rudderWorkspaces": [workspace],
+            "rudderRuntimeServiceIntents": [],
+            "rudderRuntimeServices": [],
+            "env": workspace_env,
+        }
+        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = "[]"
+        return {
+            "conversationId": conversation_id,
+            "issueId": None,
+            "projectId": None,
+            "projectWorkspaceId": None,
+            "executionWorkspaceId": None,
             "workspace": runtime_context,
         }
 
@@ -737,16 +816,15 @@ class WorkspaceService:
             return []
         workspace_id = _string(workspace.get("id"))
         cwd = _string(workspace.get("cwd"))
-        if workspace_id is None or cwd is None:
+        if cwd is None:
             return []
+        workspace_ref = workspace_id or f"organization_workspace:{issue.org_id}"
         worktree_root = Path(cwd).resolve()
         if not worktree_root.is_dir():
             return []
         threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
         products: list[dict[str, Any]] = []
-        scan_roots = [
-            ("execution_workspace_scan", worktree_root),
-        ]
+        scan_roots: list[tuple[str, Path]] = []
         workspace_env = (
             workspace_context.get("env")
             if isinstance(workspace_context, dict)
@@ -756,19 +834,11 @@ class WorkspaceService:
         if not artifacts_dir and isinstance(workspace_env, dict):
             artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
         artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
-        run_artifacts_dir = _string(workspace.get("runArtifactsDir"))
-        if not run_artifacts_dir and isinstance(workspace_env, dict):
-            run_artifacts_dir = _string(workspace_env.get("RUDDER_RUN_ARTIFACTS_DIR"))
-        if run_artifacts_dir:
-            run_artifacts_root = Path(run_artifacts_dir).resolve()
-            if run_artifacts_root.is_dir() and run_artifacts_root != worktree_root:
-                scan_roots.append(
-                    ("organization_run_artifacts_scan", run_artifacts_root)
-                )
         if artifacts_dir:
             assert artifacts_root is not None
             if artifacts_root.is_dir() and artifacts_root != worktree_root:
                 scan_roots.append(("organization_artifacts_scan", artifacts_root))
+        scan_roots.append(("execution_workspace_scan", worktree_root))
         seen_paths: set[Path] = set()
         for source, root in scan_roots:
             for path in _iter_generated_workspace_files(root, threshold):
@@ -792,7 +862,7 @@ class WorkspaceService:
                         if path.suffix.lower() in {".md", ".txt"}
                         else "artifact",
                         "provider": "rudder",
-                        "externalId": f"{source}:{workspace_id}:{rel_path}",
+                        "externalId": f"{source}:{workspace_ref}:{rel_path}",
                         "status": "active",
                         "reviewState": "none",
                         "isPrimary": len(products) == 0,
@@ -987,12 +1057,7 @@ class WorkspaceService:
             log: LogReadResult = {"content": "", "endOffset": 0, "eof": True}
         else:
             log = read_local_file_log(
-                Path(
-                    os.getenv(
-                        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
-                        ".octopus/workspace-operation-logs",
-                    )
-                ),
+                ensure_octopus_workspace_operation_log_dir(),
                 row.log_ref,
                 offset=offset,
                 limit_bytes=limit_bytes,
@@ -1078,8 +1143,6 @@ class WorkspaceService:
         skills_dir: Path,
         plans_dir: Path,
         artifacts_dir: Path,
-        issue_artifacts_dir: Path,
-        run_artifacts_dir: Path,
     ) -> ExecutionWorkspaceData:
         enriched = dict(workspace)
         enriched.update(
@@ -1092,8 +1155,6 @@ class WorkspaceService:
                 "orgSkillsDir": str(skills_dir),
                 "orgPlansDir": str(plans_dir),
                 "orgArtifactsDir": str(artifacts_dir),
-                "issueArtifactsDir": str(issue_artifacts_dir),
-                "runArtifactsDir": str(run_artifacts_dir),
             }
         )
         return cast(ExecutionWorkspaceData, enriched)
@@ -1107,8 +1168,6 @@ class WorkspaceService:
         skills_dir: Path,
         plans_dir: Path,
         artifacts_dir: Path,
-        issue_artifacts_dir: Path,
-        run_artifacts_dir: Path,
     ) -> dict[str, str]:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
@@ -1116,7 +1175,7 @@ class WorkspaceService:
             "RUDDER_WORKSPACE_CWD": workspace["cwd"] or "",
             "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
             "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
-            "RUDDER_WORKSPACE_ID": workspace["id"],
+            "RUDDER_WORKSPACE_ID": workspace["id"] or "",
             "RUDDER_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
             "RUDDER_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
             "RUDDER_WORKSPACE_BRANCH": workspace["branchName"] or "",
@@ -1129,8 +1188,6 @@ class WorkspaceService:
             "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
             "RUDDER_ORG_PLANS_DIR": str(plans_dir),
             "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
-            "RUDDER_ISSUE_ARTIFACTS_DIR": str(issue_artifacts_dir),
-            "RUDDER_RUN_ARTIFACTS_DIR": str(run_artifacts_dir),
         }
 
     async def _find_reusable_execution_workspace(
@@ -1184,6 +1241,45 @@ class WorkspaceService:
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }
+
+    def _organization_workspace_fallback(
+        self, issue: Issue | _IssueWorkspaceFallback, *, cwd: str, warning: str
+    ) -> ExecutionWorkspaceData:
+        now = datetime.now(UTC).isoformat()
+        return cast(
+            ExecutionWorkspaceData,
+            {
+                "id": None,
+                "orgId": issue.org_id,
+                "projectId": None,
+                "projectWorkspaceId": None,
+                "sourceIssueId": issue.id,
+                "mode": "shared_workspace",
+                "strategyType": "organization_workspace",
+                "name": "Organization workspace",
+                "status": "active",
+                "cwd": cwd,
+                "repoUrl": None,
+                "baseRef": None,
+                "branchName": None,
+                "providerType": "local_fs",
+                "providerRef": None,
+                "derivedFromExecutionWorkspaceId": None,
+                "lastUsedAt": now,
+                "openedAt": now,
+                "closedAt": None,
+                "cleanupEligibleAt": None,
+                "cleanupReason": None,
+                "metadata": {
+                    "resolvedForIssueId": issue.id,
+                    "resolvedMode": "shared_workspace",
+                    "fallback": "organization_workspace",
+                    "warnings": [warning],
+                },
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        )
 
     def _to_runtime_service(self, row: WorkspaceRuntimeService) -> RuntimeServiceData:
         return {

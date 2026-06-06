@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from .config import load_settings
 from .lifespan import lifespan
-from .middleware import actor_context_middleware
+from .middleware import ActorContextMiddleware
 from .routes import register_routes
 
 
@@ -12,7 +12,7 @@ def create_app() -> FastAPI:
     settings = load_settings()
     app = FastAPI(lifespan=lifespan)
     app.state.settings = settings
-    app.middleware("http")(actor_context_middleware)
+    app.add_middleware(ActorContextMiddleware)
     register_routes(app)
     return app
 

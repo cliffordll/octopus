@@ -74,9 +74,11 @@ from packages.shared.types.chat import (
     UpdateChatConversationUserStatePayload,
 )
 from packages.shared.types.issue import CreateIssuePayload
+from ._time import ensure_aware
 from .agents import prepare_agent_runtime_config
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
+from .workspaces import WorkspaceService
 
 
 class ChatAvailabilityError(ValueError):
@@ -726,6 +728,30 @@ class ChatService:
             runtime_type=agent.agent_runtime_type,
             config=config,
         )
+        run_id = f"chat-{conversation.id}-{uuid.uuid4()}"
+        workspace_context = await WorkspaceService(
+            self._session
+        ).prepare_runtime_context_for_chat(
+            run_id=run_id,
+            org_id=conversation.org_id,
+            conversation_id=conversation.id,
+            primary_issue_id=conversation.primary_issue_id,
+        )
+        workspace_payload = workspace_context.get("workspace")
+        workspace_env = None
+        workspace_data = None
+        if isinstance(workspace_payload, dict):
+            env_payload = workspace_payload.get("env")
+            workspace_env = (
+                cast(dict[str, str], env_payload)
+                if isinstance(env_payload, dict)
+                else None
+            )
+            workspace_data = workspace_payload.get("rudderWorkspace")
+        if isinstance(workspace_data, dict) and isinstance(
+            workspace_data.get("cwd"), str
+        ):
+            config["cwd"] = workspace_data["cwd"]
         transcript: list[ChatStreamTranscriptEntry] = []
 
         async def capture_stream_event(event: dict[str, Any]) -> None:
@@ -738,12 +764,18 @@ class ChatService:
 
         result = await adapter.execute(
             RuntimeExecutionContext(
-                run_id=f"chat-{conversation.id}-{uuid.uuid4()}",
+                run_id=run_id,
                 agent_id=agent.id,
                 org_id=agent.org_id,
                 agent_name=agent.name,
                 config=config,
                 on_log=_ignore_log,
+                env=workspace_env,
+                workspace=(
+                    cast(dict[str, Any], workspace_payload)
+                    if isinstance(workspace_payload, dict)
+                    else None
+                ),
                 cancel_event=cancel_event,
                 on_stream_event=(
                     capture_stream_event if on_stream_event is not None else None
@@ -1244,7 +1276,11 @@ def _normalized_assistant_result(result_json: dict[str, Any]) -> dict[str, Any]:
 
 
 def _json_object(value: str) -> dict[str, Any] | None:
-    candidates = [value.strip(), *_fenced_json_candidates(value)]
+    candidates = [
+        value.strip(),
+        *_fenced_json_candidates(value),
+        *_embedded_json_object_candidates(value),
+    ]
     for candidate in candidates:
         try:
             parsed = json.loads(candidate)
@@ -1276,6 +1312,37 @@ def _fenced_json_candidates(value: str) -> list[str]:
             if candidate:
                 candidates.append(candidate)
         start = fence_end + len(marker)
+
+
+def _embedded_json_object_candidates(value: str) -> list[str]:
+    candidates: list[str] = []
+    for index, char in enumerate(value):
+        if char != "{":
+            continue
+        depth = 0
+        in_string = False
+        escaped = False
+        for end in range(index, len(value)):
+            current = value[end]
+            if escaped:
+                escaped = False
+                continue
+            if current == "\\":
+                escaped = True
+                continue
+            if current == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(value[index : end + 1].strip())
+                    break
+    return candidates
 
 
 def _chat_transcript_from_payload(
@@ -1360,7 +1427,7 @@ def _is_unread(
 ) -> bool:
     if user_state is None or row.last_message_at is None:
         return False
-    return row.last_message_at > user_state.last_read_at
+    return ensure_aware(row.last_message_at) > ensure_aware(user_state.last_read_at)
 
 
 def _context_link_summary(link: ChatContextLink) -> dict[str, Any]:

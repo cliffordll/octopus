@@ -18,7 +18,7 @@ Local disk is the default provider.
 
 ```powershell
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-$env:OCTOPUS_STORAGE_DIR = ".octopus/storage"
+$env:OCTOPUS_STORAGE_DIR = ".octopus/instances/default/data/storage"
 ```
 
 If `OCTOPUS_STORAGE_PROVIDER` is unset, Octopus uses `local_disk`.
@@ -26,7 +26,7 @@ If `OCTOPUS_STORAGE_PROVIDER` is unset, Octopus uses `local_disk`.
 Objects are written under:
 
 ```text
-.octopus/storage/<orgId>/<namespace>/<yyyy>/<mm>/<dd>/<uuid>-<filename>
+.octopus/instances/default/data/storage/<orgId>/<namespace>/<yyyy>/<mm>/<dd>/<uuid>-<filename>
 ```
 
 ### MinIO
