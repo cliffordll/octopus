@@ -626,6 +626,13 @@ class HeartbeatService:
                 "payload": wakeup.payload,
             }
             await update_wakeup_request(self._session, wakeup.id, {"status": "queued"})
+            context_snapshot = {
+                "resumedFromPaused": True,
+                **self._payload_context(wakeup.payload),
+            }
+            context_snapshot = await self._enrich_issue_context_snapshot(
+                context_snapshot
+            )
             run = await create_run(
                 self._session,
                 {
@@ -635,7 +642,7 @@ class HeartbeatService:
                     "trigger_detail": payload["triggerDetail"],
                     "status": "queued",
                     "wakeup_request_id": wakeup.id,
-                    "context_snapshot": {"resumedFromPaused": True},
+                    "context_snapshot": context_snapshot,
                 },
             )
             run = await self._initialize_run_log(run)

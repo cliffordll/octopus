@@ -208,6 +208,43 @@ async def test_agent_instructions_bundle_read_write_delete_and_activity(
     ]
 
 
+async def test_agent_instructions_bundle_edit_records_config_revision(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    """Editing the instructions bundle config must record an agent config
+    revision.
+
+    Regression: instruction edits persisted ``agent_runtime_config`` through the
+    database-layer ``update_agent`` directly, bypassing the service-layer
+    revision recording, so the config version history stayed empty.
+    """
+
+    application, factory, root_path = app
+    org_id, agent_id = await _seed_agent(factory, root_path)
+
+    before_code, before = await _request(
+        application, "GET", f"/api/agents/{agent_id}/config-revisions"
+    )
+    assert before_code == 200
+    assert before == []
+
+    patch_code, _bundle = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent_id}/instructions-bundle",
+        json_body={"entryFile": "MEMORY.md"},
+    )
+    assert patch_code == 200
+
+    after_code, revisions = await _request(
+        application, "GET", f"/api/agents/{agent_id}/config-revisions"
+    )
+    assert after_code == 200
+    assert len(revisions) == 1
+    assert revisions[0]["source"] == "instructions_bundle_patch"
+    assert "agentRuntimeConfig" in revisions[0]["changedKeys"]
+
+
 async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
