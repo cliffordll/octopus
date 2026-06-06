@@ -74,9 +74,9 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.click(primaryNavigation.getByRole("button", { name: "快速创建" }));
   await userEvent.click(screen.getByRole("button", { name: "创建智能体" }));
   await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
-  expect(screen.getByLabelText("智能体名称")).toHaveValue("Suggested Agent");
-  await userEvent.clear(screen.getByLabelText("智能体名称"));
-  await userEvent.type(await screen.findByLabelText("智能体名称"), "Reviewer");
+  expect(screen.getByLabelText(/智能体名称/)).toHaveValue("Suggested Agent");
+  await userEvent.clear(screen.getByLabelText(/智能体名称/));
+  await userEvent.type(await screen.findByLabelText(/智能体名称/), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
@@ -145,6 +145,39 @@ it("creates the first agent as the organization CEO", async () => {
   );
 }, 10000);
 
+it("lets the server name a hired agent when the name is blank", async () => {
+  const existingAgent = { id: "agent-ceo", orgId: "org-1", name: "CEO", role: "ceo", status: "idle" };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1" && init?.method === "GET") {
+      return respond({ id: "org-1", urlKey: "core", name: "核心团队", status: "active", requireBoardApprovalForNewAgents: false });
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([existingAgent]);
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") return respond({ name: "engineer-1" });
+    if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
+      return respond({ agent: { id: "agent-2", name: "qa-1", role: "qa", status: "idle" }, approval: null }, 201);
+    }
+    return respond({ id: "agent-2", name: "qa-1", role: "qa", status: "idle" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  expect(await screen.findByText("名称可不填；server 会按角色自动生成，例如 engineer-1，并设置汇报关系。")).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/agent-hires",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        role: "qa",
+        agentRuntimeType: "process",
+        agentRuntimeConfig: {},
+      }),
+    }),
+  );
+}, 10000);
+
 it("requires provider/model when creating a model-provider runtime agent", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
@@ -167,7 +200,7 @@ it("requires provider/model when creating a model-provider runtime agent", async
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/new");
-  await userEvent.type(await screen.findByLabelText("智能体名称"), "OpenCode Agent");
+  await userEvent.type(await screen.findByLabelText(/智能体名称/), "OpenCode Agent");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "opencode_local");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
   expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
@@ -222,7 +255,7 @@ it("hires agents as the CEO actor and opens the pending approval agent", async (
 
   renderApp("/orgs/org-1/agents/new");
   expect(await screen.findByText("当前组织要求审批。创建后智能体将显示为待审批，审批通过后才可用。")).toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText("智能体名称"), "Reviewer");
+  await userEvent.type(screen.getByLabelText(/智能体名称/), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
@@ -255,7 +288,7 @@ it("shows a permission error when the actor cannot hire agents", async () => {
 
   renderApp("/orgs/org-1/agents/new");
   expect(await screen.findByText("当前组织不要求审批。创建成功后智能体可直接使用。")).toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText("智能体名称"), "Reviewer");
+  await userEvent.type(screen.getByLabelText(/智能体名称/), "Reviewer");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(await screen.findByText("无创建智能体权限")).toBeInTheDocument();

@@ -52,7 +52,7 @@
 - 新增 `server/storage/types.py`：定义 `StoredObject`、`PutFileResult`、`StorageProvider`、`StorageService`。
 - 新增 `server/storage/local_disk.py`：实现本地磁盘对象写入/读取/head/delete，拒绝绝对路径、空 key、`.`、`..`。
 - 新增 `server/storage/service.py`：实现 object key 生成、sha256、org prefix 校验、provider 包装。
-- 新增 `server/storage/__init__.py`：暴露 `get_storage_service()`，默认 base dir 为 `.octopus/storage`，可通过 `OCTOPUS_STORAGE_DIR` 覆盖。
+- 新增 `server/storage/__init__.py`：暴露 `get_storage_service()`，默认 base dir 为 `.octopus/instances/<instanceId>/data/storage`，可通过 `OCTOPUS_STORAGE_DIR` 覆盖。
 - 新增 `packages/database/queries/assets.py`：提供 asset create/get/delete 基础查询。
 - 新增/补齐 `packages/shared/types/asset.py` 与 `packages/shared/api_paths/assets.py`。
 - 新增 `server/routes/assets.py`：实现 `GET /api/assets/{assetId}/content`，按 asset org scope 校验后返回内容。

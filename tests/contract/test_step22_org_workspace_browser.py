@@ -141,6 +141,29 @@ async def test_org_workspace_browser_lists_and_reads_artifacts(
 
 
 @pytest.mark.anyio
+async def test_org_workspace_browser_hides_windows_profile_cache(
+    app: FastAPI, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    org_id = await _seed_org(session_factory)
+    root = organization_workspace_root(org_id)
+    cache = root / "Microsoft" / "Windows" / "PowerShell" / "ModuleAnalysisCache"
+    cache.parent.mkdir(parents=True)
+    cache.write_bytes(b"cache")
+
+    list_code, listed = await _request(
+        app, "GET", f"/api/orgs/{org_id}/workspace/files?path=", org_id=org_id
+    )
+
+    assert list_code == 200
+    assert {entry["name"] for entry in listed["entries"]} == {
+        "agents",
+        "artifacts",
+        "plans",
+        "skills",
+    }
+
+
+@pytest.mark.anyio
 async def test_org_workspace_browser_supports_image_content(
     app: FastAPI, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

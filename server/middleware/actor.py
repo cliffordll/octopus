@@ -3,13 +3,25 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from fastapi import Request
-from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
-async def actor_context_middleware(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    settings = request.app.state.settings
+class ActorContextMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
+        settings = request.app.state.settings
+        _set_actor_context(request, settings)
+        await self.app(scope, receive, send)
+
+
+def _set_actor_context(request: Request, settings: object) -> None:
     if not hasattr(request.state, "actor") and getattr(
         settings, "local_trusted", False
     ):
@@ -38,4 +50,11 @@ async def actor_context_middleware(
             "userId": "local-board",
             "source": "local_implicit",
         }
+
+
+async def actor_context_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[object]]
+) -> object:
+    settings = request.app.state.settings
+    _set_actor_context(request, settings)
     return await call_next(request)

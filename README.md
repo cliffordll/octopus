@@ -151,20 +151,20 @@ server 通过 storage provider 保存附件、任务产物和运行时输出引�
 
 ```powershell
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-$env:OCTOPUS_STORAGE_DIR = ".octopus/storage"
+$env:OCTOPUS_STORAGE_DIR = ".octopus/instances/default/data/storage"
 ```
 
 如果不设置，默认等价于：
 
 ```text
 OCTOPUS_STORAGE_PROVIDER=local_disk
-OCTOPUS_STORAGE_DIR=.octopus/storage
+OCTOPUS_STORAGE_DIR=<OCTOPUS_HOME>/instances/<instance_id>/data/storage
 ```
 
 本地对象路径形态：
 
 ```text
-.octopus/storage/<orgId>/<namespace>/<yyyy>/<mm>/<dd>/<uuid>-<filename>
+.octopus/instances/default/data/storage/<orgId>/<namespace>/<yyyy>/<mm>/<dd>/<uuid>-<filename>
 ```
 
 ### MinIO / S3-Compatible
@@ -204,7 +204,6 @@ $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-$env:OCTOPUS_STORAGE_DIR = ".octopus/storage"
 uv run server
 ```
 
@@ -264,23 +263,26 @@ workspace、runtime home、skills 的区别见 `docs/guides/skills.md`；任务�
 
 ```text
 octopus.db
-.octopus/storage
-.octopus/run-logs
-.octopus/runtime-homes
+.octopus/instances/default/data/storage
+.octopus/instances/default/data/run-logs
+.octopus/instances/default/logs
 .octopus/instances/default/organizations
 ```
 
 含义：
 
 - `octopus.db`：默认 SQLite 数据库文件。
-- `.octopus/storage`：本地附件、任务产物和 asset 内容。
-- `.octopus/run-logs`：heartbeat/runtime run 日志。
-- `.octopus/runtime-homes`：Codex/OpenCode/Claude 等 runtime 的 managed home。
+- `.octopus/instances/<instance_id>/data/storage`：本地附件、任务产物和 asset 内容；可通过 `OCTOPUS_STORAGE_DIR` 覆盖。
+- `.octopus/instances/<instance_id>/data/run-logs`：heartbeat/runtime run 原始执行日志；可通过 `OCTOPUS_RUN_LOG_DIR` 覆盖。
+- `.octopus/instances/<instance_id>/logs`：server/app 文件日志；可通过 `OCTOPUS_LOG_DIR` 覆盖。
 - `.octopus/instances/<instance_id>/organizations/<org_id>/workspaces`：组织、项目、智能体相关工作区；可通过 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 调整。
+- `.octopus/instances/<instance_id>/organizations/<org_id>/codex-home/agents/<agent_id>`：Codex managed `CODEX_HOME`。
+- `.octopus/instances/<instance_id>/organizations/<org_id>/<runtime>-home`：OpenCode/Claude 等 runtime 的 managed home。
 
 路径规则：
 
 - 显式设置 `OCTOPUS_HOME` 时，以 `OCTOPUS_HOME` 为准。
+- `OCTOPUS_INSTANCE_ID` 是本地实例 ID，默认值为 `default`，会参与解析 `<OCTOPUS_HOME>/instances/<instance_id>` 下的文件目录。
 - 未设置 `OCTOPUS_HOME` 且使用本地 SQLite 时，Octopus home 默认放在 SQLite 数据库文件同级的 `.octopus/`。
 - 使用 PostgreSQL 或无法从数据库 URL 推导本地文件时，才退回用户目录 `~/.octopus`。
 
@@ -296,6 +298,28 @@ D:\coding\octopus\.octopus
 ```powershell
 $env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/cliffordll/.octopus/instances/default/data/octopus.db"
 $env:OCTOPUS_HOME = "C:/Users/cliffordll/.octopus"
+```
+
+如果要在同一台机器上隔离多个本地实例，需要同时隔离数据库和文件目录。`OCTOPUS_INSTANCE_ID` 只会改变 storage、logs、workspace、runtime home 等文件侧路径；数据库连接仍由 `OCTOPUS_DATABASE_URL` 决定。
+
+例如启动一个 `dev` 实例：
+
+```powershell
+$env:OCTOPUS_INSTANCE_ID = "dev"
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./.octopus/instances/dev/data/octopus.db"
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+uv run server
+```
+
+此时本地文件会写入：
+
+```text
+.octopus/instances/dev/data/storage
+.octopus/instances/dev/data/run-logs
+.octopus/instances/dev/logs
+.octopus/instances/dev/organizations
 ```
 
 这些目录是本地运行产物，不应提交到 Git。
@@ -343,15 +367,17 @@ uv run server
 | `OCTOPUS_HOST` | `127.0.0.1` | server 绑定地址 |
 | `OCTOPUS_PORT` | `8000` | server 端口 |
 | `OCTOPUS_LOG_LEVEL` | `info` | uvicorn 日志等级 |
+| `OCTOPUS_LOG_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/logs` | server/app 文件日志目录 |
 | `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///./octopus.db` | 数据库连接 |
 | `OCTOPUS_AUTO_MIGRATE` | `false` | 启动时是否自动执行 Alembic 迁移 |
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
 | `OCTOPUS_HOME` | SQLite DB 同级 `.octopus`；非本地 SQLite 时为 `~/.octopus` | Octopus instance home 根目录 |
-| `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离组织工作区 |
+| `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离文件侧数据目录；完整隔离需同步设置 `OCTOPUS_DATABASE_URL` |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 heartbeat scheduler |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
 | `OCTOPUS_STORAGE_PROVIDER` | `local_disk` | 文件存储 provider，可选 `local_disk`、`minio`、`s3` |
-| `OCTOPUS_STORAGE_DIR` | `.octopus/storage` | local disk 存储目录 |
+| `OCTOPUS_STORAGE_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/data/storage` | local disk 存储目录 |
+| `OCTOPUS_RUN_LOG_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/data/run-logs` | heartbeat/runtime run 日志目录 |
 | `OCTOPUS_STORAGE_ENDPOINT` | 空 | MinIO/S3-compatible endpoint |
 | `OCTOPUS_STORAGE_BUCKET` | 空 | MinIO/S3 bucket |
 | `OCTOPUS_STORAGE_ACCESS_KEY` | 空 | MinIO/S3 access key |

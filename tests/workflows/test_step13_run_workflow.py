@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import asyncio
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,7 @@ from packages.database.schema import (
     AgentWakeupRequest,
     Base,
     HeartbeatRun,
+    Issue,
     Organization,
 )
 from packages.shared.types.agent import Agent
@@ -153,6 +155,63 @@ async def test_paused_wakeup_coalesces_and_replays_on_resume(
     wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
     assert wakeup.coalesced_count == 1
     assert resumed[0]["status"] == "succeeded"
+
+
+async def test_resumed_paused_wakeup_preserves_issue_link(
+    session: AsyncSession,
+) -> None:
+    """A wakeup deferred while the agent is paused must keep its issue context
+    when resumed, so the resulting run stays reverse-lookupable by issue.
+
+    Regression: the resume path hard-coded ``context_snapshot`` to
+    ``{"resumedFromPaused": True}`` and dropped the ``issueId``, so resumed runs
+    showed in the org run list but never under the issue.
+    """
+
+    agent = await _seed_agent(session, name="ResumedIssue")
+    org_id = agent["orgId"]
+    issue_id = str(uuid.uuid4())
+    agents = AgentService(session)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Tracked work",
+                status="todo",
+                priority="high",
+                identifier="RUN-1",
+            )
+        )
+        await session.flush()
+        await agents.pause_agent(
+            agent["id"], actor_type="board", actor_id="local-board"
+        )
+        assert (
+            await heartbeat.wakeup(
+                agent["id"],
+                {"idempotencyKey": "issue-1", "payload": {"issueId": issue_id}},
+                actor_type="board",
+                actor_id="local-board",
+            )
+            is None
+        )
+        await agents.resume_agent(
+            agent["id"], actor_type="board", actor_id="local-board"
+        )
+        resumed = await heartbeat.resume_deferred_wakeups(
+            agent["id"], execute_immediately=False
+        )
+
+    assert len(resumed) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot.get("issueId") == issue_id
+
+    runs_for_issue = await heartbeat.list_for_issue(issue_id)
+    assert runs_for_issue is not None
+    assert any(item["runId"] == run.id for item in runs_for_issue)
 
 
 async def test_cancel_retry_and_timer_preserve_recovery_context(
