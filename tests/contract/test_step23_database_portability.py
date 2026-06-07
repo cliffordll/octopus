@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.migrations.runner import _build_config
 from packages.database.queries import _compat
 from packages.database.queries.agents import update_agent
 from packages.database.queries.organization_skills import (
@@ -30,6 +31,14 @@ async def test_engine_factory_creates_sqlite_parent_directory(tmp_path: Path) ->
         assert db_path.parent.is_dir()
     finally:
         await engine.dispose()
+
+
+def test_migration_runner_creates_sqlite_parent_directory(tmp_path: Path) -> None:
+    db_path = tmp_path / "home" / "instances" / "dev" / "db" / "octopus.db"
+
+    _build_config(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+
+    assert db_path.parent.is_dir()
 
 
 def test_settings_default_database_url_uses_instance_sqlite_path(
