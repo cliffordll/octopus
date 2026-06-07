@@ -98,10 +98,10 @@ C:/Users/<user>/.octopus/instances/default/db/octopus.db
 C:/Users/<user>/.octopus/instances/default/organizations/<orgId>/workspaces
 ```
 
-如果开发阶段希望把数据放在仓库内，应显式设置 `OCTOPUS_HOME=D:/coding/octopus/.octopus`，此时 SQLite 文件应位于：
+如果开发阶段希望把数据放在当前仓库内，应显式设置 `OCTOPUS_HOME=.octopus`，此时 SQLite 文件应位于：
 
 ```text
-D:/coding/octopus/.octopus/instances/default/db/octopus.db
+<当前目录>/.octopus/instances/default/db/octopus.db
 ```
 
 DB 和 home 应一起切换，避免同一个 DB 中持久化出不同 `instructionsRootPath` / workspace root。

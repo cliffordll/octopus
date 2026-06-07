@@ -10,8 +10,11 @@ from server.services.workspace_paths import (
     ensure_octopus_workspace_operation_log_dir,
     organization_workspace_relative_path,
     organization_workspace_root,
+    resolve_default_sqlite_database_url,
+    resolve_octopus_database_dir,
     resolve_octopus_home_dir,
     resolve_octopus_instance_root,
+    resolve_octopus_sqlite_database_path,
     resolve_octopus_storage_dir,
     resolve_octopus_workspace_operation_log_dir,
 )
@@ -45,9 +48,10 @@ def test_organization_workspace_uses_octopus_instance_home(
     )
 
 
-def test_octopus_home_defaults_next_to_sqlite_database(
+def test_octopus_home_defaults_to_user_octopus_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OCTOPUS_HOME", raising=False)
     monkeypatch.delenv("OCTOPUS_DATABASE_URL", raising=False)
@@ -60,14 +64,30 @@ def test_octopus_home_defaults_next_to_sqlite_database(
     )
 
 
-def test_octopus_home_defaults_next_to_configured_sqlite_database(
+def test_sqlite_database_defaults_to_instance_db_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+
+    expected_dir = (tmp_path / "home" / "instances" / "dev" / "db").resolve()
+    expected_db = expected_dir / "octopus.db"
+    assert resolve_octopus_database_dir() == expected_dir
+    assert resolve_octopus_sqlite_database_path() == expected_db
+    assert resolve_default_sqlite_database_url() == (
+        f"sqlite+aiosqlite:///{expected_db.as_posix()}"
+    )
+
+
+def test_octopus_home_ignores_configured_database_url_without_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_path = tmp_path / "data" / "octopus.db"
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "user-home")
     monkeypatch.delenv("OCTOPUS_HOME", raising=False)
     monkeypatch.setenv("OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
 
-    assert resolve_octopus_home_dir() == (db_path.parent / ".octopus").resolve()
+    assert resolve_octopus_home_dir() == (tmp_path / "user-home" / ".octopus").resolve()
 
 
 def test_octopus_home_expands_user_home(

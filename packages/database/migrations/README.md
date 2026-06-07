@@ -20,14 +20,8 @@ uv run alembic revision -m "describe change"
 数据库连接：
 
 - `OCTOPUS_DATABASE_URL` 控制当前进程连接的数据库。
-- 默认值是本地 SQLite：`sqlite+aiosqlite:///./octopus.db`。
-- 外部数据库当前推荐 PostgreSQL。MySQL 尚未作为支持目标验证，现有 query 和 migration 里存在 MySQL 不兼容点，不要直接用于生产或共享数据。
-
-PostgreSQL 连接前需要确保 Python 环境有 async driver：
-
-```powershell
-uv add asyncpg
-```
+- 默认值是 instance-scoped 本地 SQLite：`sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
+- 外部数据库推荐 PostgreSQL；MySQL 是兼容生产路径。两者都需要部署配置显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`，避免数据库和 workspace/runtime/storage/logs 分属不同 instance。
 
 PowerShell PostgreSQL 示例：
 
@@ -45,6 +39,22 @@ export OCTOPUS_AUTO_MIGRATE=1
 uv run server
 ```
 
+PowerShell MySQL 示例：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+uv run server
+```
+
+macOS / Linux shell MySQL 示例：
+
+```bash
+export OCTOPUS_DATABASE_URL="mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+export OCTOPUS_AUTO_MIGRATE=1
+uv run server
+```
+
 生产或共享数据库建议先手动迁移，再启动服务：
 
 ```powershell
@@ -56,6 +66,8 @@ uv run server
 注意：
 
 - 先在 PostgreSQL 中创建空库，并确保连接账号拥有建表、建索引和写入权限。
+- MySQL 也需要提前创建空库，字符集建议 `utf8mb4`。
+- MySQL 不支持 PostgreSQL/SQLite 的 partial unique index；`issues_open_automation_execution_uq` 在 MySQL migration 中降级为普通非唯一索引，完整等价约束需要后续用 MySQL 专用 generated column 或应用层锁补强。
 - 密码中如果包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后放入连接串。
 - `OCTOPUS_AUTO_MIGRATE=1` 只影响当前启动进程；生产或共享环境更推荐显式执行 `uv run alembic upgrade head`。
 
@@ -75,7 +87,7 @@ PowerShell 示例：
 
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "1"
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
+$env:OCTOPUS_HOME = ".octopus"
 uv run server
 ```
 
@@ -83,7 +95,7 @@ macOS / Linux shell 示例：
 
 ```bash
 export OCTOPUS_AUTO_MIGRATE=1
-export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///./octopus.db"
+export OCTOPUS_HOME="$PWD/.octopus"
 uv run server
 ```
 
