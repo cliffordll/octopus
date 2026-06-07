@@ -1,16 +1,41 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import event
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 
 def create_database_engine(url: str, *, echo: bool = False) -> AsyncEngine:
-    engine = create_async_engine(url, echo=echo, future=True)
-    if engine.url.get_backend_name() == "sqlite":
+    parsed_url = make_url(url)
+    backend = parsed_url.get_backend_name()
+    engine_kwargs: dict[str, Any] = {"echo": echo, "future": True}
+
+    if backend == "sqlite":
+        _ensure_sqlite_parent_directory(parsed_url.database)
+    elif backend == "postgresql":
+        engine_kwargs["pool_pre_ping"] = True
+    elif backend == "mysql":
+        engine_kwargs.update(
+            {
+                "pool_pre_ping": True,
+                "pool_recycle": 1800,
+                "connect_args": {"charset": "utf8mb4"},
+            }
+        )
+
+    engine = create_async_engine(url, **engine_kwargs)
+    if backend == "sqlite":
         _configure_sqlite_engine(engine)
     return engine
+
+
+def _ensure_sqlite_parent_directory(database: str | None) -> None:
+    if not database or database == ":memory:":
+        return
+    Path(database).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
 
 def _configure_sqlite_engine(engine: AsyncEngine) -> None:

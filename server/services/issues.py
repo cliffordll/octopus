@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -24,6 +24,7 @@ from packages.database.queries.issues import (
     update_issue,
 )
 from packages.database.queries.organizations import increment_issue_counter
+from packages.database.queries._compat import update_returning_one
 from packages.database.schema import Asset, Issue, IssueAttachment, IssueComment
 from packages.shared.constants.issue import (
     IssueOriginKind,
@@ -482,26 +483,23 @@ class IssueService:
                     Issue.execution_run_id == checkout_run_id,
                 ),
             )
-        result = await self._session.execute(
-            update(Issue)
-            .where(
-                Issue.id == issue_id,
-                Issue.status.in_(expected_statuses),
-                assignee_matches,
-                run_lock_matches,
-            )
-            .values(
-                assignee_agent_id=agent_id,
-                assignee_user_id=None,
-                checkout_run_id=checkout_run_id,
-                execution_run_id=checkout_run_id,
-                status="in_progress",
-                started_at=now,
-                updated_at=now,
-            )
-            .returning(Issue)
+        row = await update_returning_one(
+            self._session,
+            Issue,
+            (Issue.id == issue_id)
+            & Issue.status.in_(expected_statuses)
+            & assignee_matches
+            & run_lock_matches,
+            {
+                "assignee_agent_id": agent_id,
+                "assignee_user_id": None,
+                "checkout_run_id": checkout_run_id,
+                "execution_run_id": checkout_run_id,
+                "status": "in_progress",
+                "started_at": now,
+                "updated_at": now,
+            },
         )
-        row = result.scalar_one_or_none()
         if row is None:
             raise IssueCheckoutConflictError("Issue checkout conflict")
 

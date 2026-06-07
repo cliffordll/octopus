@@ -166,14 +166,22 @@ def upgrade() -> None:
         ["org_id", "execution_workspace_id"],
     )
     op.create_index("issues_identifier_idx", "issues", ["identifier"], unique=True)
-    op.create_index(
-        "issues_open_automation_execution_uq",
-        "issues",
-        ["org_id", "origin_kind", "origin_id"],
-        unique=True,
-        sqlite_where=_OPEN_AUTOMATION_EXECUTION_WHERE,
-        postgresql_where=_OPEN_AUTOMATION_EXECUTION_WHERE,
-    )
+    if op.get_bind().dialect.name == "mysql":
+        op.create_index(
+            "issues_open_automation_execution_uq",
+            "issues",
+            ["org_id", "origin_kind", "origin_id"],
+            unique=False,
+        )
+    else:
+        op.create_index(
+            "issues_open_automation_execution_uq",
+            "issues",
+            ["org_id", "origin_kind", "origin_id"],
+            unique=True,
+            sqlite_where=_OPEN_AUTOMATION_EXECUTION_WHERE,
+            postgresql_where=_OPEN_AUTOMATION_EXECUTION_WHERE,
+        )
 
     op.create_table(
         "approvals",
