@@ -1,6 +1,6 @@
 # Step 23: Database Portability / Persistence Hardening
 
-状态：待开发
+状态：开发中
 
 ## 背景
 
@@ -34,7 +34,7 @@ routes
   - 显式设置 `OCTOPUS_HOME` 时，以显式配置为准。
   - 未设置 `OCTOPUS_HOME` 时，默认 home 仍是用户目录下的 `.octopus`，与上游默认 `~/.rudder` 语义对齐。
   - SQLite 默认 URL 不再是 `sqlite+aiosqlite:///./octopus.db`；应解析为 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
-  - 本地开发若显式设置 `OCTOPUS_HOME=D:\coding\octopus\.octopus`，SQLite 默认文件应为 `D:\coding\octopus\.octopus\instances\default\db\octopus.db`。
+  - 本地开发若显式设置 `OCTOPUS_HOME=.octopus`，SQLite 默认文件应为 `<当前目录>/.octopus/instances/default/db/octopus.db`。
   - 使用 PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
   - 文档需要说明数据库连接和文件侧 instance root 的关系，避免 DB 在一个位置、workspace/runtime home 在另一个位置。
 - 检查已有绝对路径迁移风险：
@@ -78,3 +78,20 @@ routes
 - SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，外部 PostgreSQL/MySQL 与显式 `OCTOPUS_HOME`、`OCTOPUS_INSTANCE_ID` 的关系有明确文档和测试覆盖。
 - 切换 home 或数据库位置后，已有 managed instructions 绝对路径不会导致 workspace browser、agent workspace home 和 runtime 读取目录分裂。
 - 文档说明 `OCTOPUS_DATABASE_URL` 三类连接串、推荐生产路径和已知限制。
+
+## 当前交付记录
+
+- 默认 SQLite URL 已改为 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，`OCTOPUS_HOME` 默认回到用户目录 `.octopus`，不再从数据库 URL 反推。
+- engine factory 已按 dialect 配置 SQLite/PostgreSQL/MySQL：SQLite 自动创建父目录并保留 pragma，PostgreSQL/MySQL 启用连接健康检查，MySQL 使用 `utf8mb4` 和连接 recycle。
+- 已加入 MySQL async driver：`asyncmy`。
+- 已新增 `packages/database/queries/_compat.py`，用于 query 层收口跨数据库 `RETURNING` 差异。
+- 已改造当前阻塞面核心写路径：agents、chats、issues、organization skills，以及 issue counter / checkout issue。
+- MySQL migration 已处理 baseline partial unique index 的直接兼容问题：MySQL 路径降级为普通非唯一索引，并在 migration README 记录等价约束待补。
+- README、UI README、CLI README、migration README 和相关历史分析文档已同步默认 SQLite layout、PostgreSQL/MySQL 连接串和外部数据库与 instance root 的关系。
+- 新增 `tests/contract/test_step23_database_portability.py` 覆盖默认数据库 URL、SQLite 父目录创建、核心 write returning fallback；更新 workspace path 测试覆盖新 instance db layout。
+
+## 剩余风险 / 后续项
+
+- 尚未对真实 PostgreSQL/MySQL 服务执行 live migration smoke；当前验证仍以 SQLite 和 fallback 单元路径为主。
+- `packages/database/queries/` 中仍有 workspace、runtime provider、resources、goals、heartbeat、approvals 等非本轮阻塞面的 `.returning(...)` 调用，若要宣称完整 MySQL 支持，需要继续迁到 dialect helper。
+- MySQL 下 `issues_open_automation_execution_uq` 目前不是 partial unique 的语义等价实现；需要后续用 MySQL generated column、函数索引或应用层锁补齐。
