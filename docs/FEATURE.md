@@ -285,6 +285,14 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：database dialect helpers、MySQL async driver 和连接配置、跨方言 `RETURNING` 替代实现、migration 兼容、SQLite/PostgreSQL/MySQL 测试矩阵，以及上游式 instance-scoped database layout。
 - 验收：agents/chats/issues/skills 等核心写入接口在三类数据库上复用同一 service/query API；SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<instance>/db/octopus.db`；文档说明三类连接串、推荐生产路径和限制。
 
+### Step 23B: Runtime Provider Scope & Defaults
+
+目录：`docs/step-23-database-portability/`
+
+- 目标：把 runtime provider/model 从单一 organization scope 升级为 global + organization 两层可见性，避免切换 organization 后重复录入 provider/model。
+- 交付：`runtime_providers` / `runtime_models` 显式改名为 organization scope，新增 global provider/model catalog 和默认模型选择表，统一 provider/model resolver。
+- 验收：global provider/model 对所有 organization 可见，organization-only 配置只在本组织可见；默认解析遵循 agent override > organization default > global default；runtime 执行继续正确注入 provider apiKey/baseURL/model 并保持脱敏。
+
 ### Step 24: Agent Memory
 
 目录：`docs/step-24-agent-memory/`
