@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, Agent, Base, Organization
 from server.app import create_app
+from server.services.workspace_paths import resolve_octopus_instance_root
 
 
 DEFAULT_INSTRUCTIONS_FILES = [
@@ -339,10 +340,7 @@ async def test_agent_instructions_bundle_rehomes_stale_managed_root(
         config = row.agent_runtime_config
 
     expected_root = (
-        root_path
-        / ".octopus"
-        / "instances"
-        / "default"
+        resolve_octopus_instance_root()
         / "organizations"
         / org_id
         / "workspaces"
