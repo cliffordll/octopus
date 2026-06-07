@@ -7,10 +7,13 @@
 先在仓库根目录启动现有服务端：
 
 ```powershell
+$env:OCTOPUS_HOME = ".octopus"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
+
+未显式设置 `OCTOPUS_DATABASE_URL` 时，SQLite 数据库位于 `<OCTOPUS_HOME>/instances/default/db/octopus.db`。未显式设置 `OCTOPUS_HOME` 时，服务端默认使用 `~/.octopus`。PostgreSQL/MySQL 配置见根目录 `README.md`。
 
 服务端默认监听 `http://127.0.0.1:8000`。然后启动 UI：
 

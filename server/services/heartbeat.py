@@ -68,12 +68,12 @@ from .logs import (
     read_local_file_log,
 )
 from .runtime_providers import inject_runtime_provider_config
-from .workspace_paths import resolve_octopus_run_log_dir
+from .workspace_paths import ensure_octopus_run_log_dir
 from .workspaces import WorkspaceService
 
 
 def _run_log_dir() -> Path:
-    return resolve_octopus_run_log_dir()
+    return ensure_octopus_run_log_dir()
 
 
 def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:

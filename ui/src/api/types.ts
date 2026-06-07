@@ -816,6 +816,7 @@ export interface UpdateAgentPayload {
 }
 
 export interface RuntimeProvider {
+  scope?: RuntimeProviderScope;
   orgId?: string;
   runtimeType: AgentRuntimeType;
   providerId: string;
@@ -832,6 +833,7 @@ export interface RuntimeProvider {
 }
 
 export interface RuntimeModel {
+  scope?: RuntimeProviderScope;
   orgId?: string;
   runtimeType: AgentRuntimeType;
   providerId: string;
@@ -843,7 +845,10 @@ export interface RuntimeModel {
   updatedAt?: string;
 }
 
+export type RuntimeProviderScope = "global" | "organization";
+
 export interface CreateRuntimeProviderPayload {
+  scope?: RuntimeProviderScope;
   runtimeType: AgentRuntimeType;
   providerId: string;
   name?: string | null;
@@ -858,6 +863,7 @@ export interface CreateRuntimeProviderPayload {
 export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "runtimeType" | "providerId">>;
 
 export interface CreateRuntimeModelPayload {
+  scope?: RuntimeProviderScope;
   modelId: string;
   displayName?: string | null;
   metadata?: Record<string, unknown>;

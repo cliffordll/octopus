@@ -81,15 +81,15 @@ async def _request(
     return response.status_code, None
 
 
-async def _seed_org(factory: async_sessionmaker) -> str:
+async def _seed_org(factory: async_sessionmaker, *, key: str = "runtime-models") -> str:
     org_id = str(uuid.uuid4())
     async with factory() as session:
         session.add(
             Organization(
                 id=org_id,
-                url_key="runtime-models",
-                name="Runtime Models",
-                issue_prefix="RTM",
+                url_key=key,
+                name=f"Runtime Models {key}",
+                issue_prefix=org_id[:6].upper(),
             )
         )
         await session.commit()
@@ -238,6 +238,202 @@ async def test_model_crud_is_database_only(
 
     assert delete_code == 200
     assert deleted["modelId"] == "kimik/kimi-k2.5"
+
+
+async def test_global_provider_and_model_are_visible_across_organizations(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    source_org_id = await _seed_org(factory, key="source-runtime-models")
+    target_org_id = await _seed_org(factory, key="target-runtime-models")
+
+    create_code, created = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers",
+        json_body={
+            "runtimeType": "opencode_local",
+            "providerId": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "openai_chat_completions",
+            "baseUrl": "https://deepseek.example/v1",
+            "apiKey": "sk-global",
+        },
+    )
+    assert create_code == 201
+    assert created["scope"] == "global"
+    assert created["orgId"] is None
+
+    model_code, model = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers/deepseek/models",
+        params={"runtimeType": "opencode_local"},
+        json_body={
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+        },
+    )
+    assert model_code == 201
+    assert model["scope"] == "global"
+
+    providers_code, providers = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{target_org_id}/runtime-providers",
+        params={"runtimeType": "opencode_local"},
+    )
+    assert providers_code == 200
+    assert [(provider["scope"], provider["providerId"]) for provider in providers] == [
+        ("global", "deepseek")
+    ]
+
+    models_code, models = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{target_org_id}/runtime-providers/deepseek/models",
+        params={"runtimeType": "opencode_local"},
+    )
+    assert models_code == 200
+    assert [(item["scope"], item["modelId"]) for item in models] == [
+        ("global", "deepseek-v4-flash")
+    ]
+
+
+async def test_organization_provider_and_model_stay_private_to_organization(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    source_org_id = await _seed_org(factory, key="private-source-runtime-models")
+    target_org_id = await _seed_org(factory, key="private-target-runtime-models")
+
+    create_code, created = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers",
+        json_body={
+            "scope": "organization",
+            "runtimeType": "opencode_local",
+            "providerId": "private",
+            "name": "Private",
+            "protocol": "openai_chat_completions",
+        },
+    )
+    assert create_code == 201
+    assert created["scope"] == "organization"
+    assert created["orgId"] == source_org_id
+
+    model_code, model = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers/private/models",
+        params={"runtimeType": "opencode_local"},
+        json_body={
+            "scope": "organization",
+            "modelId": "private-model",
+            "displayName": "Private Model",
+        },
+    )
+    assert model_code == 201
+    assert model["scope"] == "organization"
+
+    providers_code, providers = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{target_org_id}/runtime-providers",
+        params={"runtimeType": "opencode_local"},
+    )
+    assert providers_code == 200
+    assert providers == []
+
+    models_code, missing = await _request(
+        application,
+        "GET",
+        f"/api/orgs/{target_org_id}/runtime-providers/private/models",
+        params={"runtimeType": "opencode_local"},
+    )
+    assert models_code == 404
+    assert missing["detail"] == "Runtime provider not found"
+
+
+async def test_chat_runtime_config_uses_global_default_model_across_organizations(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    source_org_id = await _seed_org(factory, key="default-source-runtime-models")
+    target_org_id = await _seed_org(factory, key="default-target-runtime-models")
+    agent_id = str(uuid.uuid4())
+    captured: dict[str, Any] = {}
+
+    await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers",
+        json_body={
+            "runtimeType": "codex_local",
+            "providerId": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "openai_chat_completions",
+            "baseUrl": "https://deepseek.example/v1",
+            "apiKey": "sk-global-default",
+        },
+    )
+    model_code, _ = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{source_org_id}/runtime-providers/deepseek/models",
+        params={"runtimeType": "codex_local"},
+        json_body={
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+        },
+    )
+    assert model_code == 201
+
+    class CapturingAdapter:
+        type = "codex_local"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            captured["config"] = context.config
+            return RuntimeExecutionResult(exit_code=0, result_json={"summary": "reply"})
+
+    async with factory() as session:
+        async with session.begin():
+            session.add(
+                Agent(
+                    id=agent_id,
+                    org_id=target_org_id,
+                    name="Default Model Agent",
+                    role="engineer",
+                    status="idle",
+                    agent_runtime_type="codex_local",
+                    agent_runtime_config={},
+                    runtime_config={},
+                )
+            )
+
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: CapturingAdapter()
+    )
+
+    chat = await _create_chat(application, target_org_id, agent_id)
+    code, _ = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json_body={"body": "use default"},
+    )
+
+    assert code == 201
+    runtime_provider = captured["config"]["_octopus"]["runtimeProvider"]
+    assert runtime_provider["providerId"] == "deepseek"
+    assert runtime_provider["apiKey"] == "sk-global-default"
+    assert runtime_provider["model"]["modelId"] == "deepseek-v4-flash"
 
 
 @pytest.mark.parametrize(

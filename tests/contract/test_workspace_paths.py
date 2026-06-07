@@ -6,12 +6,17 @@ import pytest
 
 from server.services.workspace_paths import (
     ensure_organization_workspace_root,
+    ensure_octopus_run_log_dir,
     ensure_octopus_storage_dir,
     ensure_octopus_workspace_operation_log_dir,
     organization_workspace_relative_path,
     organization_workspace_root,
+    resolve_default_sqlite_database_url,
+    resolve_octopus_database_dir,
     resolve_octopus_home_dir,
     resolve_octopus_instance_root,
+    resolve_octopus_run_log_dir,
+    resolve_octopus_sqlite_database_path,
     resolve_octopus_storage_dir,
     resolve_octopus_workspace_operation_log_dir,
 )
@@ -45,9 +50,10 @@ def test_organization_workspace_uses_octopus_instance_home(
     )
 
 
-def test_octopus_home_defaults_next_to_sqlite_database(
+def test_octopus_home_defaults_to_user_octopus_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OCTOPUS_HOME", raising=False)
     monkeypatch.delenv("OCTOPUS_DATABASE_URL", raising=False)
@@ -60,14 +66,30 @@ def test_octopus_home_defaults_next_to_sqlite_database(
     )
 
 
-def test_octopus_home_defaults_next_to_configured_sqlite_database(
+def test_sqlite_database_defaults_to_instance_db_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+
+    expected_dir = (tmp_path / "home" / "instances" / "dev" / "db").resolve()
+    expected_db = expected_dir / "octopus.db"
+    assert resolve_octopus_database_dir() == expected_dir
+    assert resolve_octopus_sqlite_database_path() == expected_db
+    assert resolve_default_sqlite_database_url() == (
+        f"sqlite+aiosqlite:///{expected_db.as_posix()}"
+    )
+
+
+def test_octopus_home_ignores_configured_database_url_without_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_path = tmp_path / "data" / "octopus.db"
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "user-home")
     monkeypatch.delenv("OCTOPUS_HOME", raising=False)
     monkeypatch.setenv("OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
 
-    assert resolve_octopus_home_dir() == (db_path.parent / ".octopus").resolve()
+    assert resolve_octopus_home_dir() == (tmp_path / "user-home" / ".octopus").resolve()
 
 
 def test_octopus_home_expands_user_home(
@@ -166,6 +188,24 @@ def test_storage_and_workspace_operation_logs_migrate_legacy_layout(
     assert not legacy_log_file.exists()
 
 
+def test_run_logs_migrate_legacy_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+    monkeypatch.delenv("OCTOPUS_RUN_LOG_DIR", raising=False)
+
+    legacy_log = tmp_path / "home" / "run-logs" / "org-1" / "run.log"
+    legacy_log.parent.mkdir(parents=True)
+    legacy_log.write_text("run\n", encoding="utf-8")
+
+    run_log_dir = ensure_octopus_run_log_dir()
+
+    assert run_log_dir == resolve_octopus_run_log_dir()
+    assert (run_log_dir / "org-1" / "run.log").read_text(encoding="utf-8") == "run\n"
+    assert not legacy_log.exists()
+
+
 def test_octopus_instance_id_rejects_path_segments(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -194,3 +234,49 @@ def test_ensure_organization_workspace_migrates_legacy_layout(
         canonical_root / "agents" / "agent-1" / "instructions" / "SOUL.md"
     ).read_text(encoding="utf-8") == "# Soul\n"
     assert not legacy_agent.exists()
+
+
+def test_ensure_organization_workspace_migrates_instance_workspaces_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+
+    legacy_root = tmp_path / "home" / "instances" / "dev" / "workspaces"
+    legacy_artifact = legacy_root / "artifacts" / "report.md"
+    legacy_artifact.parent.mkdir(parents=True)
+    legacy_artifact.write_text("# Report\n", encoding="utf-8")
+
+    canonical_root = ensure_organization_workspace_root("org-1")
+
+    assert canonical_root == organization_workspace_root("org-1")
+    assert (canonical_root / "artifacts" / "report.md").read_text(
+        encoding="utf-8"
+    ) == "# Report\n"
+    assert not legacy_artifact.exists()
+
+
+def test_ensure_organization_workspace_does_not_merge_instance_org_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+
+    legacy_other_org = (
+        tmp_path
+        / "home"
+        / "instances"
+        / "dev"
+        / "workspaces"
+        / "other-org"
+        / "artifacts"
+        / "report.md"
+    )
+    legacy_other_org.parent.mkdir(parents=True)
+    legacy_other_org.write_text("# Other\n", encoding="utf-8")
+
+    canonical_root = ensure_organization_workspace_root("org-1")
+
+    assert canonical_root == organization_workspace_root("org-1")
+    assert not (canonical_root / "other-org" / "artifacts" / "report.md").exists()
+    assert legacy_other_org.read_text(encoding="utf-8") == "# Other\n"

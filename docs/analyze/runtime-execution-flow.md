@@ -84,20 +84,27 @@ Workspace 分为几类：
 .octopus/instances/default/organizations/<orgId>/workspaces
 ```
 
-`OCTOPUS_HOME` 的解析规则应与数据库同源：
+Step 23 将把数据库位置对齐到上游 instance layout。目标规则是：
 
 - 显式设置 `OCTOPUS_HOME` 时，以该值为准。
-- 未设置 `OCTOPUS_HOME` 且 `OCTOPUS_DATABASE_URL` 是本地 SQLite 文件时，默认 home 是数据库文件同级的 `.octopus/`。
-- 使用 PostgreSQL、`:memory:` 或无法推导本地 DB 文件时，才退回用户目录 `~/.octopus`。
+- 未设置 `OCTOPUS_HOME` 时，默认 home 是用户目录下的 `.octopus`。
+- SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，保持和上游 `<RUDDER_HOME>/instances/<RUDDER_INSTANCE_ID>/db` 同样的 instance-scoped 语义。
+- 使用 PostgreSQL/MySQL 外部连接时，数据库连接本身不携带文件侧 instance root，部署配置或启动器必须同时绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
 
-因此开发阶段可以使用：
+因此默认本地位置应是：
 
 ```text
-D:/coding/octopus/octopus.db
-D:/coding/octopus/.octopus
+C:/Users/<user>/.octopus/instances/default/db/octopus.db
+C:/Users/<user>/.octopus/instances/default/organizations/<orgId>/workspaces
 ```
 
-正式或桌面运行也可以使用用户目录，但 DB 和 home 应一起切换，避免同一个 DB 中持久化出不同 `instructionsRootPath` / workspace root。
+如果开发阶段希望把数据放在当前仓库内，应显式设置 `OCTOPUS_HOME=.octopus`，此时 SQLite 文件应位于：
+
+```text
+<当前目录>/.octopus/instances/default/db/octopus.db
+```
+
+DB 和 home 应一起切换，避免同一个 DB 中持久化出不同 `instructionsRootPath` / workspace root。
 
 本地如果还存在下面这种路径，应视为 legacy layout 或迁移残留：
 
