@@ -469,6 +469,51 @@ async def test_agent_instructions_bundle_reconciles_empty_default_files(
     assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
 
+async def test_agent_instructions_bundle_materializes_for_process_agent_on_first_read(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _root_path = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="process-instructions-org",
+                name="Process Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="CEO",
+                workspace_key="ceo",
+                role="ceo",
+                agent_runtime_type="process",
+                agent_runtime_config={},
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+    soul_code, soul_detail = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent_id}/instructions-bundle/file",
+        params={"path": "SOUL.md"},
+    )
+
+    assert bundle_code == 200
+    assert bundle["mode"] == "managed"
+    assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
+    assert soul_code == 200
+    assert "# SOUL.md -- CEO Persona" in soul_detail["content"]
+
+
 async def test_agent_instructions_path_update_and_path_guard(
     app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
