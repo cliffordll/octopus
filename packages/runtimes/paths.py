@@ -12,7 +12,7 @@ def resolve_octopus_home_dir() -> Path:
     return (
         _expand_home_prefix(raw_home).resolve()
         if raw_home
-        else (Path.cwd() / ".octopus").resolve()
+        else (Path.home() / ".octopus").resolve()
     )
 
 
@@ -41,8 +41,10 @@ def ensure_managed_runtime_home(
     canonical = resolve_managed_runtime_home(
         runtime_type, org_id=org_id, agent_id=agent_id
     )
-    legacy = legacy_managed_runtime_home(runtime_type, org_id=org_id, agent_id=agent_id)
-    return _ensure_canonical_path(canonical, legacy)
+    return _ensure_canonical_paths(
+        canonical,
+        legacy_managed_runtime_homes(runtime_type, org_id=org_id, agent_id=agent_id),
+    )
 
 
 def legacy_managed_runtime_home(
@@ -51,6 +53,21 @@ def legacy_managed_runtime_home(
     return (
         resolve_octopus_home_dir() / "runtime-homes" / runtime_type / org_id / agent_id
     ).resolve()
+
+
+def legacy_managed_runtime_homes(
+    runtime_type: str, *, org_id: str, agent_id: str
+) -> list[Path]:
+    return [
+        legacy_managed_runtime_home(runtime_type, org_id=org_id, agent_id=agent_id),
+        (
+            resolve_octopus_instance_root()
+            / "runtime-homes"
+            / runtime_type
+            / org_id
+            / agent_id
+        ).resolve(),
+    ]
 
 
 def _runtime_home_dir_name(runtime_type: str) -> str:
@@ -66,10 +83,17 @@ def _expand_home_prefix(value: str) -> Path:
     return Path(value)
 
 
-def _ensure_canonical_path(canonical: Path, legacy: Path) -> Path:
+def _ensure_canonical_paths(canonical: Path, legacy_paths: list[Path]) -> Path:
+    for legacy in legacy_paths:
+        _merge_legacy_path(canonical, legacy)
+    canonical.mkdir(parents=True, exist_ok=True)
+    return canonical
+
+
+def _merge_legacy_path(canonical: Path, legacy: Path) -> None:
     if legacy == canonical:
         canonical.mkdir(parents=True, exist_ok=True)
-        return canonical
+        return
     if legacy.exists():
         canonical.parent.mkdir(parents=True, exist_ok=True)
         if not canonical.exists():
@@ -77,8 +101,6 @@ def _ensure_canonical_path(canonical: Path, legacy: Path) -> Path:
         else:
             _merge_directory_contents(legacy, canonical)
             _remove_empty_parents(legacy, stop_at=resolve_octopus_home_dir())
-    canonical.mkdir(parents=True, exist_ok=True)
-    return canonical
 
 
 def _merge_directory_contents(source: Path, target: Path) -> None:

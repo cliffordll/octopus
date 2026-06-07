@@ -2,7 +2,7 @@
 
 ## Bug 列表
 
-当前记录：11 个。
+当前记录：12 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
@@ -17,6 +17,7 @@
 | 9 | Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录 | 已修复 |
 | 10 | 无 project 的 issue run 没有 fallback 到 organization workspace | 已修复 |
 | 11 | Chat run 没有 organization artifacts context，产物落到 cwd | 已修复 |
+| 12 | runtime home、workspace、DB 路径仍存在非上游式 legacy/error layout | 已修复，Step 23C |
 
 ## 1. Agent skill 未启用
 
@@ -599,3 +600,91 @@ RUDDER_ORG_ARTIFACTS_DIR
 - 普通 chat run 的 adapter env 中不存在 `RUDDER_CONVERSATION_ARTIFACTS_DIR`、`RUDDER_ISSUE_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR`。
 - 普通 chat run 的 cwd 是 organization workspace root，而不是 `D:\coding\octopus`。
 - `tests/contract/test_step11_chat_loop.py` 覆盖 chat runtime organization artifacts env。
+
+## 12. runtime home、workspace、DB 路径仍存在非上游式 legacy/error layout
+
+### 背景
+
+Step 23 已把默认 SQLite 路径对齐到 instance db layout：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db
+```
+
+但文件侧 layout 仍需要继续收口。上游 Rudder 的 runtime home 和 workspace 不是全局目录，而是挂在 instance 和 organization 下。Octopus 中历史上出现过这些非 canonical 路径：
+
+```text
+<OCTOPUS_HOME>/runtime-homes
+<OCTOPUS_HOME>/instances/<instance>/runtime-homes
+<OCTOPUS_HOME>/instances/<instance>/workspaces
+<OCTOPUS_HOME>/test-tmp
+```
+
+详细路径规则归 Step 23C 收口。
+
+canonical instance root：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>
+```
+
+核心目录应统一属于同一个 instance root：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/db/octopus.db
+<OCTOPUS_HOME>/instances/<instance>/data/storage
+<OCTOPUS_HOME>/instances/<instance>/data/run-logs
+<OCTOPUS_HOME>/instances/<instance>/logs
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/workspaces
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/codex-home/agents/<agentId>
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/opencode-home
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/claude-home
+```
+
+### 症状
+
+- `.octopus/runtime-homes` 或 `.octopus/instances/default/runtime-homes` 下仍有 runtime 数据。
+- `.octopus/instances/default/workspaces` 下出现 workspace 数据，但 UI 和 runtime 使用的是 `organizations/<orgId>/workspaces`。
+- 测试在 `.octopus/test-tmp` 留下临时数据，污染产品 home。
+- 数据库、workspace、runtime home、storage、logs 看起来都在 `.octopus` 下，但不属于同一个 canonical instance root。
+
+### 预期行为
+
+runtime home 应使用 organization-scoped 路径：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/codex-home/agents/<agentId>
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/opencode-home
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/claude-home
+```
+
+organization workspace 应使用：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/workspaces
+```
+
+测试临时数据不应写入产品 home。
+
+### 修复
+
+Step 23C 已修复：
+
+- 新写入不得再创建 `runtime-homes` 或 instance-level `workspaces`。
+- 对 legacy runtime home 和 legacy workspace 做 lazy migration。
+- storage、run logs、server logs 默认路径应保持 instance-scoped。
+- 冲突数据不覆盖，保留在 legacy path 供人工处理。
+- 测试临时目录改为 pytest `tmp_path` 或 repo-local `.tmp-pytest`。
+
+### 验收
+
+- 上游对齐路径下能看到 organization workspace、agent workspace home、runtime managed home、storage、run logs 和 server logs。
+- `.octopus/runtime-homes/...` 和 `.octopus/instances/<instance>/runtime-homes/...` 不再作为目标目录。
+- `.octopus/instances/<instance>/workspaces` 不再作为目标目录。
+- `.octopus/test-tmp` 不再由测试创建。
+
+### 验证
+
+- `tests/contract/test_workspace_paths.py` 覆盖 storage、run logs、workspace operation logs、legacy organization workspace 和 instance-level workspaces 迁移。
+- `tests/contract/test_step23_database_portability.py` 覆盖 legacy runtime-homes 和 instance-level runtime-homes 迁移。
+- `tests/contract/test_step17_agent_instructions.py` 不再写入 `.octopus/test-tmp`。
