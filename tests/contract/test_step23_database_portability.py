@@ -15,6 +15,10 @@ from packages.database.queries.organization_skills import (
 )
 from packages.database.queries.organizations import increment_issue_counter
 from packages.database.schema import Agent, Base, Organization, OrganizationSkill
+from packages.runtimes.paths import (
+    ensure_managed_runtime_home,
+    resolve_octopus_home_dir as resolve_runtime_octopus_home_dir,
+)
 from server.config import Settings
 
 
@@ -39,6 +43,99 @@ def test_settings_default_database_url_uses_instance_sqlite_path(
 
     expected = tmp_path / "home" / "instances" / "dev" / "db" / "octopus.db"
     assert settings.database_url == f"sqlite+aiosqlite:///{expected.as_posix()}"
+
+
+def test_runtime_paths_default_to_user_octopus_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "user-home")
+    monkeypatch.delenv("OCTOPUS_HOME", raising=False)
+    monkeypatch.delenv("OCTOPUS_INSTANCE_ID", raising=False)
+
+    assert (
+        resolve_runtime_octopus_home_dir()
+        == (tmp_path / "user-home" / ".octopus").resolve()
+    )
+
+
+def test_runtime_home_migrates_legacy_runtime_homes_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+    legacy_config = (
+        tmp_path
+        / "home"
+        / "runtime-homes"
+        / "opencode_local"
+        / "org-1"
+        / "agent-1"
+        / "home"
+        / ".config"
+        / "opencode"
+        / "opencode.json"
+    )
+    legacy_config.parent.mkdir(parents=True)
+    legacy_config.write_text('{"provider":{}}\n', encoding="utf-8")
+
+    runtime_home = ensure_managed_runtime_home(
+        "opencode_local", org_id="org-1", agent_id="agent-1"
+    )
+
+    expected_home = (
+        tmp_path
+        / "home"
+        / "instances"
+        / "dev"
+        / "organizations"
+        / "org-1"
+        / "opencode-home"
+    ).resolve()
+    expected_config = expected_home / "home" / ".config" / "opencode" / "opencode.json"
+    assert runtime_home == expected_home
+    assert expected_config.read_text(encoding="utf-8") == '{"provider":{}}\n'
+    assert not legacy_config.exists()
+
+
+def test_runtime_home_migrates_instance_runtime_homes_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+    legacy_config = (
+        tmp_path
+        / "home"
+        / "instances"
+        / "dev"
+        / "runtime-homes"
+        / "codex_local"
+        / "org-1"
+        / "agent-1"
+        / "config.json"
+    )
+    legacy_config.parent.mkdir(parents=True)
+    legacy_config.write_text('{"model":"test"}\n', encoding="utf-8")
+
+    runtime_home = ensure_managed_runtime_home(
+        "codex_local", org_id="org-1", agent_id="agent-1"
+    )
+
+    expected_home = (
+        tmp_path
+        / "home"
+        / "instances"
+        / "dev"
+        / "organizations"
+        / "org-1"
+        / "codex-home"
+        / "agents"
+        / "agent-1"
+    ).resolve()
+    assert runtime_home == expected_home
+    assert (expected_home / "config.json").read_text(encoding="utf-8") == (
+        '{"model":"test"}\n'
+    )
+    assert not legacy_config.exists()
 
 
 @pytest.fixture
