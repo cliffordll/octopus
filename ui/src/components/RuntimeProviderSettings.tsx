@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
-import type { AgentRuntimeType, RuntimeModel, RuntimeProvider } from "../api/types";
+import type { AgentRuntimeType, RuntimeModel, RuntimeProvider, RuntimeProviderScope } from "../api/types";
 import { isEnglishLocale } from "../utils/locale";
 import { MODEL_PROVIDER_RUNTIMES } from "../utils/runtimeModels";
 import { Badge } from "./Badge";
@@ -18,6 +18,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [protocol, setProtocol] = useState(DEFAULT_PROTOCOL);
+  const [providerScope, setProviderScope] = useState<RuntimeProviderScope>("global");
   const [modelId, setModelId] = useState("");
   const [modelName, setModelName] = useState("");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
@@ -35,6 +36,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const createProvider = useMutation({
     mutationFn: () =>
       runtimeProvidersApi.createProvider(orgId, {
+        scope: providerScope,
         runtimeType,
         providerId: providerId.trim(),
         name: providerName.trim() || providerId.trim(),
@@ -49,6 +51,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       setBaseUrl("");
       setApiKey("");
       setProtocol(DEFAULT_PROTOCOL);
+      setProviderScope("global");
       setProviderDialogOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
       void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
@@ -85,6 +88,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const createModel = useMutation({
     mutationFn: () =>
       runtimeProvidersApi.createModel(orgId, runtimeType, modelDialogProviderId, {
+        scope: providerRows.find((provider) => provider.providerId === modelDialogProviderId)?.scope ?? "global",
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
         enabled: true,
@@ -148,6 +152,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     setBaseUrl("");
     setApiKey("");
     setProtocol(DEFAULT_PROTOCOL);
+    setProviderScope("global");
     setProviderDialogOpen(false);
     setEditingProvider(null);
   }
@@ -167,6 +172,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     setBaseUrl(provider.baseUrl ?? "");
     setApiKey("");
     setProtocol(provider.protocol ?? DEFAULT_PROTOCOL);
+    setProviderScope(provider.scope ?? "organization");
   }
 
   function openModelCreate(providerId: string) {
@@ -185,7 +191,15 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
 
   function confirmDeleteProvider(provider: RuntimeProvider) {
     const providerName = provider.name || provider.providerId;
-    if (!window.confirm(english ? `Delete provider: ${providerName}?` : `确认删除 Provider：${providerName}？`)) return;
+    const message =
+      provider.scope === "global"
+        ? english
+          ? `Delete global provider: ${providerName}? It may be used by multiple organizations.`
+          : `确认删除全局 Provider：${providerName}？它可能被多个组织使用。`
+        : english
+          ? `Delete organization provider: ${providerName}?`
+          : `确认删除组织 Provider：${providerName}？`;
+    if (!window.confirm(message)) return;
     deleteProvider.mutate(provider);
   }
 
@@ -298,6 +312,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
               <label>
+                {english ? "Scope" : "作用域"}
+                <select value={providerScope} onChange={(event) => setProviderScope(event.target.value as RuntimeProviderScope)}>
+                  <option value="global">{english ? "Global" : "全局"}</option>
+                  <option value="organization">{english ? "Organization only" : "仅当前组织"}</option>
+                </select>
+              </label>
+              <label>
                 Provider ID
                 <input value={providerId} onChange={(event) => setProviderId(event.target.value)} required />
               </label>
@@ -340,12 +361,17 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <p className="eyebrow">Runtime Provider</p>
                 <h2>{english ? "Edit Provider" : "编辑 Provider"}</h2>
                 <p className="muted">{editingProvider.providerId}</p>
+                <Badge>{scopeLabel(editingProvider.scope, english)}</Badge>
               </div>
               <button className="secondary small-button" onClick={clearProviderForm} type="button">
                 {english ? "Close" : "关闭"}
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
+              <label>
+                {english ? "Scope" : "作用域"}
+                <input disabled value={scopeLabel(providerScope, english)} />
+              </label>
               <label>
                 Provider ID
                 <input disabled value={providerId} />
@@ -389,6 +415,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <p className="eyebrow">Runtime Model</p>
                 <h2>{english ? "New Model" : "新建 Model"}</h2>
                 <p className="muted">Provider: {modelDialogProviderId}</p>
+                <Badge>{scopeLabel(providerRows.find((provider) => provider.providerId === modelDialogProviderId)?.scope, english)}</Badge>
               </div>
               <button className="secondary small-button" onClick={() => setModelDialogProviderId("")} type="button">
                 {english ? "Close" : "关闭"}
@@ -426,6 +453,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <p className="eyebrow">Runtime Model</p>
                 <h2>{english ? "Edit Model" : "编辑 Model"}</h2>
                 <p className="muted">Provider: {editingModel.providerId}</p>
+                <Badge>{scopeLabel(editingModel.model.scope, english)}</Badge>
               </div>
               <button className="secondary small-button" onClick={clearModelForm} type="button">
                 {english ? "Close" : "关闭"}
@@ -492,6 +520,7 @@ function ProviderModelGroup({
       <div className="runtime-provider-group-header">
         <div>
           <strong>{providerName}</strong>
+          <Badge>{scopeLabel(provider.scope, english)}</Badge>
           <span>{provider.providerId}</span>
           <small>{provider.baseUrl ?? (english ? "No Base URL" : "未设置 Base URL")}</small>
           <em>{provider.hasApiKey ? (english ? "API key configured" : "已配置 API Key") : (english ? "API key missing" : "未配置 API Key")}</em>
@@ -568,6 +597,7 @@ function ProviderModelGroup({
                 <div className="runtime-model-title-line">
                   <strong>{model.displayName || model.modelId}</strong>
                   <Badge>{model.enabled === false ? (english ? "disabled" : "已禁用") : (english ? "enabled" : "已启用")}</Badge>
+                  <Badge>{scopeLabel(model.scope ?? provider.scope, english)}</Badge>
                 </div>
                 <div className="runtime-model-actions">
                   <button
@@ -607,4 +637,9 @@ function ProviderModelGroup({
       {models.error && <ErrorNotice error={models.error} />}
     </article>
   );
+}
+
+function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) {
+  if (scope === "global") return "Global";
+  return "Organization";
 }
