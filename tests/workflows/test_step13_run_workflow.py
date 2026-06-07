@@ -207,6 +207,7 @@ async def test_resumed_paused_wakeup_preserves_issue_link(
 
     assert len(resumed) == 1
     run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot is not None
     assert run.context_snapshot.get("issueId") == issue_id
 
     runs_for_issue = await heartbeat.list_for_issue(issue_id)
