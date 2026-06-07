@@ -15,6 +15,7 @@ from ..schema import (
     ChatConversationUserState,
     ChatMessage,
 )
+from ._compat import update_returning_one
 
 
 async def create_conversation(
@@ -125,13 +126,12 @@ async def update_conversation(
         return await get_conversation(session, conversation_id)
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(ChatConversation)
-        .where(ChatConversation.id == conversation_id)
-        .values(**values)
-        .returning(ChatConversation)
+    return await update_returning_one(
+        session,
+        ChatConversation,
+        ChatConversation.id == conversation_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def get_conversation_user_state(
@@ -291,16 +291,13 @@ async def update_message(
         )
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(ChatMessage)
-        .where(
-            ChatMessage.conversation_id == conversation_id,
-            ChatMessage.id == message_id,
-        )
-        .values(**values)
-        .returning(ChatMessage)
+    return await update_returning_one(
+        session,
+        ChatMessage,
+        (ChatMessage.conversation_id == conversation_id)
+        & (ChatMessage.id == message_id),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def supersede_turn_messages(
@@ -324,10 +321,9 @@ async def supersede_turn_messages(
 async def touch_conversation(
     session: AsyncSession, conversation_id: str, at: datetime
 ) -> ChatConversation | None:
-    result = await session.execute(
-        update(ChatConversation)
-        .where(ChatConversation.id == conversation_id)
-        .values(last_message_at=at, updated_at=datetime.now(UTC))
-        .returning(ChatConversation)
+    return await update_returning_one(
+        session,
+        ChatConversation,
+        ChatConversation.id == conversation_id,
+        {"last_message_at": at, "updated_at": datetime.now(UTC)},
     )
-    return result.scalar_one_or_none()
