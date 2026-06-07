@@ -68,16 +68,18 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 20 | Basic Observability / Debug Visibility | `docs/step-20-observability/` |
 | 21 | Closed-loop QA / Bug Triage | `docs/step-21-qa-bugs/` |
 | 22 | Runtime & Closed-loop Alignment Fix | `docs/step-22-runtime-fix/` |
-| 23 | Agent Memory | `docs/step-23-agent-memory/` |
-| 24 | Cost Summary 与 Activity Query | `docs/step-24-cost-activity/` |
-| 25 | Budget / Governance | `docs/step-25-governance/` |
-| 26 | Auth / Actor / Access | `docs/step-26-access/` |
-| 27 | Recovery / Observability / Compatibility | `docs/step-27-hardening/` |
-| 28 | Plugin Framework | `docs/step-28-plugins/` |
+| 23 | Database Portability / Persistence Hardening | `docs/step-23-database-portability/` |
+| 24 | Agent Memory | `docs/step-24-agent-memory/` |
+| 25 | Activity Query | `docs/step-25-activity-query/` |
+| 26 | Recovery / Observability / Compatibility | `docs/step-26-hardening/` |
+| 27 | Cost Events / Cost Summary | `docs/step-27-cost-summary/` |
+| 28 | Budget / Governance | `docs/step-28-governance/` |
+| 29 | Auth / Actor / Access | `docs/step-29-access/` |
+| 30 | Plugin Framework | `docs/step-30-plugins/` |
 
 主依赖链为：
 
-`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> chat-expansion -> org-resources-skills -> chat-refs -> storage -> debug-visibility -> closed-loop-qa -> runtime-bug-fix -> agent-memory -> cost-activity -> governance -> access -> hardening -> plugins`
+`base -> server -> contract -> db -> scope -> orgs -> issues -> review -> approvals -> projects -> agent-execution-and-conversation -> goals -> run-hardening -> runtime-expansion -> workspace -> chat-expansion -> org-resources-skills -> chat-refs -> storage -> debug-visibility -> closed-loop-qa -> runtime-bug-fix -> database-portability -> agent-memory -> activity-query -> hardening -> cost-summary -> governance -> access -> plugins`
 
 ## 5. Step 计划
 
@@ -198,12 +200,14 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 后置边界：
 
-- Claude/OpenCode session resume、HTTP/CLI live hello probe、完整 runtime compatibility hardening 归 Step 27。
+- Claude/OpenCode session resume、HTTP/CLI live hello probe、完整 runtime compatibility hardening 归 Step 26。
 - Runtime tool capability/schema 与实时 stdout/stderr event ingestion 首轮 bug fix 归 Step 22。
-- Agent memory、`MEMORY.md`、`memory/`、`life/` 和 memory 文件写入策略归 Step 23。
-- provider/biller/cost 基础归集和 activity query 归 Step 24。
-- 真实 quota window 读取、budget 治理联动和 skills analytics 真实归集归 Step 25。
-- local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 26。
+- 数据库方言兼容、MySQL 支持和持久化层写入稳定性归 Step 23。
+- Agent memory、`MEMORY.md`、`memory/`、`life/` 和 memory 文件写入策略归 Step 24。
+- activity query 归 Step 25。
+- provider/biller/cost 基础归集和 cost summary 归 Step 27。
+- 真实 quota window 读取、budget 治理联动和 skills analytics 真实归集归 Step 28。
+- local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 29。
 
 ### Step 15: Workspace 与执行产物
 
@@ -255,7 +259,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 - 目标：在真实 Auth 接入前，优先补齐 chat、run、runtime、workspace 的基础调试可见性。
 - 交付：run events、runtime stdout/stderr 摘要、错误摘要、workspace operation/work product 关联查询、chat execution error 可读响应。
-- 验收：开发和 UI/CLI 联调能定位 agent 对话、run 执行和 workspace 操作问题；完整生产级 hardening 仍归 Step 27。
+- 验收：开发和 UI/CLI 联调能定位 agent 对话、run 执行和 workspace 操作问题；完整生产级 hardening 仍归 Step 26。
 
 ### Step 21: Closed-loop QA / Bug Triage
 
@@ -273,53 +277,70 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 交付：runtime tool capability/schema guidance、stdout/stderr/json event 实时 ingestion、取消/超时/失败实时事件一致性、OpenCode tool error 归一化、workspace runtime/preflight/operation log 补强、issue execute/closeout/followup/work product 补强、chat stream/generation lock/proposal 行为补强、端到端闭环验收脚本。
 - 验收：本地 runtime 能获得明确工具能力与参数约束；输出、取消、超时和失败实时进入 run events/log；workspace operation 和产物可追踪；issue 执行闭环和 chat proposal/stream 行为稳定可复现。
 
-### Step 23: Agent Memory
+### Step 23: Database Portability / Persistence Hardening
 
-目录：`docs/step-23-agent-memory/`
+目录：`docs/step-23-database-portability/`
+
+- 目标：在保持 routes/services 调用方式稳定的前提下，支持通过 `OCTOPUS_DATABASE_URL` 选择 SQLite、PostgreSQL 或 MySQL，并收口持久化层写入稳定性。
+- 交付：database dialect helpers、MySQL async driver 和连接配置、跨方言 `RETURNING` 替代实现、migration 兼容、SQLite/PostgreSQL/MySQL 测试矩阵，以及上游式 instance-scoped database layout。
+- 验收：agents/chats/issues/skills 等核心写入接口在三类数据库上复用同一 service/query API；SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<instance>/db/octopus.db`；文档说明三类连接串、推荐生产路径和限制。
+
+### Step 24: Agent Memory
+
+目录：`docs/step-24-agent-memory/`
 
 - 目标：补齐 agent 个人记忆能力，使 `AGENT_HOME` 中的 `instructions/MEMORY.md`、`memory/` 和 `life/` 可以作为长期记忆来源被 runtime 正确读取、写入和保留。
 - 交付：memory/life 目录契约、初始化策略、路径安全、runtime prompt/tool guidance、`para-memory-files` 对齐、workspace/file browser 可见性和跨 agent 隔离测试。
 - 验收：同一个 agent 的多次 run 能复用同一份长期 memory，不同 runtime type 的 managed HOME 不会分裂长期记忆；不同 agent 的 memory 互相隔离，非法路径被拒绝。
 
-### Step 24: Cost Summary 与 Activity Query
+### Step 25: Activity Query
 
-目录：`docs/step-24-cost-activity/`
+目录：`docs/step-25-activity-query/`
 
-- 目标：实现不阻塞主链路的成本摘要和 activity 查询，让用户能看见 agent/run/chat 做了什么、消耗了多少。
-- 已提前完成：`activity_log` 写入基础、部分 runtime usage/cost 原始证据、runtime provider/model CRUD 与 activity 写入已在前置步骤落地。
-- 交付：cost event、cost summary/query、provider/biller 基础归一化、organization/issue/run activity 查询。
-- 验收：run 消耗可归集，activity 可查询，成本和活动可解释；budget hard-stop、quota 和 skills analytics 归 Step 25。
+- 目标：实现不阻塞主链路的 activity 查询，让用户和后端能看见 organization、issue、run、agent、chat 等对象发生了什么。
+- 已提前完成：`activity_log` 写入基础和基础 run/workspace observability 已在前置步骤落地。
+- 交付：organization/issue/run activity 查询、filter、details 脱敏、issue runs 和 run issues 聚合查询。
+- 验收：activity 可按 organization scope 查询，敏感 details 不泄漏，issue/run 聚合关系可验证。
 
-### Step 25: Budget / Governance
+### Step 26: Recovery / Observability / Compatibility
 
-目录：`docs/step-25-governance/`
+目录：`docs/step-26-hardening/`
 
-- 目标：在 Step 24 成本和活动记录基础上，实现预算限制、quota window 和 skills analytics 等治理闭环。
+- 目标：补齐 runtime/server 失败恢复、生产级可观测性与全链路兼容验收。
+- 已提前完成：run-intelligence、run log/stream、workspace operation log、Codex managed home、unknown session retry 和部分 runtime 环境检查已在前置步骤落地。
+- 交付：恢复策略、Claude/OpenCode session resume 与 cwd mismatch 处理、HTTP/CLI live hello probe、日志/指标边界、完整 contract/workflow 回归。
+- 验收：主要 server 场景可恢复、可定位，并通过兼容测试集。
+
+### Step 27: Cost Events / Cost Summary
+
+目录：`docs/step-27-cost-summary/`
+
+- 目标：实现不阻塞主链路的 cost event 归集和成本摘要查询，让用户能看见 agent/run/chat 消耗了多少。
+- 已提前完成：部分 runtime usage/cost 原始证据、runtime provider/model CRUD 与 activity 写入已在前置步骤落地。
+- 交付：cost event、cost summary/query、provider/biller 基础归一化、monthly spend 回写和 `cost.reported` activity。
+- 验收：run 消耗可归集，成本可按 agent/provider/biller/project 等维度查询；budget hard-stop、quota 和 skills analytics 归 Step 28。
+
+### Step 28: Budget / Governance
+
+目录：`docs/step-28-governance/`
+
+- 目标：在 Step 27 成本记录基础上，实现预算限制、quota window 和 skills analytics 等治理闭环。
 - 已提前完成：adapter quota window probe 兼容入口、organization/agent 预算字段和 `budget-alerts` system thread 基础入口已存在。
 - 交付：budget policy、budget incident、hard-stop、budget approval 副作用、provider quota windows 聚合、skills analytics 真实归集。
 - 验收：预算和 quota 限制可解释；hard-stop 能暂停并阻止新 work；skills analytics 基于持久化 evidence。
 
-### Step 26: Auth / Actor / Access
+### Step 29: Auth / Actor / Access
 
-目录：`docs/step-26-access/`
+目录：`docs/step-29-access/`
 
 - 目标：按上游证据接入真实认证、actor、授权行为和运行时 secret/env 解析边界，替代开发 actor 数据源。
 - 已提前完成：开发 actor/scope、runtime provider/model 配置、provider API key 响应脱敏和 provider env 注入已在前置步骤落地。
 - 交付：身份上下文、访问检查、local agent JWT/API key 兼容入口、secret/env binding 解析和迁移策略。
 - 验收：真实 actor 与开发 actor 复用同一结构边界；runtime env/secret 不泄漏、不改变业务 API。
 
-### Step 27: Recovery / Observability / Compatibility
+### Step 30: Plugin Framework
 
-目录：`docs/step-27-hardening/`
-
-- 目标：补齐失败恢复、生产级可观测性与全链路兼容验收。
-- 已提前完成：run-intelligence、run log/stream、workspace operation log、Codex managed home、unknown session retry 和部分 runtime 环境检查已在前置步骤落地。
-- 交付：恢复策略、Claude/OpenCode session resume 与 cwd mismatch 处理、HTTP/CLI live hello probe、日志/指标边界、完整 contract/workflow 回归。
-- 验收：主要 server 场景可恢复、可定位，并通过兼容测试集。
-
-### Step 28: Plugin Framework
-
-目录：`docs/step-28-plugins/`
+目录：`docs/step-30-plugins/`
 
 - 目标：按上游 server 的 plugin framework 实现 Python 兼容子系统，覆盖插件注册、生命周期、配置、状态、工具、webhook、job、UI bridge 和运行时 worker 边界。
 - 已提前完成：仅有内置 `create-plugin` skill 和 skills 管理基础；plugin framework 本身尚未实现。
@@ -331,16 +352,16 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。organization resources 与 organization skills 已作为服务端独立能力提前纳入 Step 17。
 
-Plugins 已确认属于上游 server 的独立子系统，纳入 Step 28，不再作为可选扩展悬置。其范围以 `D:\coding\rudder\doc\plugins\PLUGIN_SPEC.md`、`server/src/routes/plugins.ts`、`server/src/bootstrap/plugin-host-runtime.ts`、`server/src/services/plugin-*`、`packages/db/src/schema/plugin_*.ts` 和 `packages/plugins/*` 为证据来源。
+Plugins 已确认属于上游 server 的独立子系统，纳入 Step 30，不再作为可选扩展悬置。其范围以 `D:\coding\rudder\doc\plugins\PLUGIN_SPEC.md`、`server/src/routes/plugins.ts`、`server/src/bootstrap/plugin-host-runtime.ts`、`server/src/services/plugin-*`、`packages/db/src/schema/plugin_*.ts` 和 `packages/plugins/*` 为证据来源。
 
 ### Skills 后续拆分边界
 
 - Runtime skills 消费能力继续归 Step 14：本地 runtime adapter 如何发现、选择、materialize 或 mount skills。
 - Runtime tool capability/schema、实时 stdout/stderr event ingestion、workspace runtime 执行可见性、issue 执行闭环和 chat/messenger 执行可见性补强归 Step 22。
-- Agent memory 归 Step 23：`AGENT_HOME/instructions/MEMORY.md`、`memory/`、`life/`、memory 写入 guidance 和 `para-memory-files` 对齐都在该步骤处理。
-- Skills 使用统计真实归集归 Step 25：基于 run/event/activity 记录计算 loaded/requested/used 统计，不在 Step 14 伪造数据。
+- Agent memory 归 Step 24：`AGENT_HOME/instructions/MEMORY.md`、`memory/`、`life/`、memory 写入 guidance 和 `para-memory-files` 对齐都在该步骤处理。
+- Skills 使用统计真实归集归 Step 28：基于 run/event/activity 记录计算 loaded/requested/used 统计，不在 Step 14 伪造数据。
 - Organization skills 管理提前纳入 Step 17，不塞进 Step 16 Chat。范围包括 organization skill 的数据库/文件来源、创建/更新/删除 API、权限与审计、与 `agentRuntimeConfig.skillsRootPath` 的迁移关系，以及 agent skills snapshot 返回描述与来源元数据的服务端兼容修正。
-- Agent-private skill 管理 UI 归 Step 17 follow-up：单个 agent 的私有 skill 创建、编辑、启用、停用和描述展示，应复用 Step 14/17 的服务端契约，不作为 Step 23 memory 或 Step 28 plugin framework 的一部分。
+- Agent-private skill 管理 UI 归 Step 17 follow-up：单个 agent 的私有 skill 创建、编辑、启用、停用和描述展示，应复用 Step 14/17 的服务端契约，不作为 Step 24 memory 或 Step 30 plugin framework 的一部分。
 - Agent instructions 管理缺口纳入 Step 17：Step 14 只负责默认 instructions 初始化、路径配置和 runtime 读取；Step 17 负责按上游证据确认是否存在独立说明文件管理 API，并在存在时补齐读取、更新、路径安全、scope/access 和 activity 审计。
 - External skills 当前仅作为 runtime home 中的外部安装项检测；如后续要支持“导入/接管外部 skill”，应归独立 skills 管理步骤，并先确认上游是否存在对应服务端契约。
 
