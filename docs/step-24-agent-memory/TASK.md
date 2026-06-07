@@ -1,6 +1,6 @@
-# Step 23: Agent Memory
+# Step 24: Agent Memory
 
-状态：待开发；等用户确认后再切换 `step-23-agent-memory` 分支。
+状态：待开发；等用户确认后再切换 `step-24-agent-memory` 分支。
 
 ## 背景
 
