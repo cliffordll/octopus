@@ -8,24 +8,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.runtime_providers import (
+    create_global_runtime_model,
+    create_global_runtime_provider,
     create_runtime_model,
+    create_runtime_model_default,
     create_runtime_provider,
+    delete_global_runtime_model,
+    delete_global_runtime_models_for_provider,
+    delete_global_runtime_provider,
     delete_runtime_model,
     delete_runtime_models_for_provider,
     delete_runtime_provider,
+    get_global_runtime_model,
+    get_global_runtime_provider,
     get_runtime_model,
+    get_runtime_model_default,
     get_runtime_provider,
+    list_global_runtime_models,
+    list_global_runtime_providers,
     list_runtime_models,
     list_runtime_providers,
+    update_global_runtime_model,
+    update_global_runtime_provider,
     update_runtime_model,
     update_runtime_provider,
 )
+from packages.database.schema import RuntimeGlobalModel, RuntimeGlobalProvider
 from packages.database.schema import RuntimeModel, RuntimeProvider
 
 REDACTED_API_KEY = "***REDACTED***"
+GLOBAL_SCOPE = "global"
+ORGANIZATION_SCOPE = "organization"
+AGENT_SCOPE = "agent"
 MANAGED_RUNTIME_PROVIDER_TYPES = frozenset(
     {"opencode_local", "codex_local", "claude_local"}
 )
+ProviderRow = RuntimeProvider | RuntimeGlobalProvider
+ModelRow = RuntimeModel | RuntimeGlobalModel
 
 
 class RuntimeProviderService:
@@ -35,10 +54,20 @@ class RuntimeProviderService:
     async def list_providers(
         self, org_id: str, runtime_type: str
     ) -> list[dict[str, Any]]:
-        rows = await list_runtime_providers(
-            self._session, org_id, _required_text(runtime_type, "runtimeType")
+        runtime_type = _required_text(runtime_type, "runtimeType")
+        global_rows = await list_global_runtime_providers(self._session, runtime_type)
+        organization_rows = await list_runtime_providers(
+            self._session, org_id, runtime_type
         )
-        return [_to_provider(row) for row in rows]
+        organization_ids = {row.provider_id for row in organization_rows}
+        return [
+            *[
+                _to_provider(row, scope=GLOBAL_SCOPE)
+                for row in global_rows
+                if row.provider_id not in organization_ids
+            ],
+            *[_to_provider(row, scope=ORGANIZATION_SCOPE) for row in organization_rows],
+        ]
 
     async def create_provider(
         self,
@@ -48,15 +77,27 @@ class RuntimeProviderService:
         actor_type: str,
         actor_id: str,
     ) -> dict[str, Any]:
-        fields = _provider_create_fields(org_id, payload)
-        if await get_runtime_provider(
-            self._session,
-            org_id,
-            fields["runtime_type"],
-            fields["provider_id"],
-        ):
+        scope = _scope(payload.get("scope"))
+        fields = _provider_create_fields(org_id, payload, scope=scope)
+        existing = (
+            await get_global_runtime_provider(
+                self._session, fields["runtime_type"], fields["provider_id"]
+            )
+            if scope == GLOBAL_SCOPE
+            else await get_runtime_provider(
+                self._session,
+                org_id,
+                fields["runtime_type"],
+                fields["provider_id"],
+            )
+        )
+        if existing:
             raise ValueError("Runtime provider already exists")
-        row = await create_runtime_provider(self._session, fields)
+        row = (
+            await create_global_runtime_provider(self._session, fields)
+            if scope == GLOBAL_SCOPE
+            else await create_runtime_provider(self._session, fields)
+        )
         await insert_activity_log(
             self._session,
             org_id=org_id,
@@ -66,11 +107,12 @@ class RuntimeProviderService:
             entity_type="runtime_provider",
             entity_id=row.id,
             details={
+                "scope": scope,
                 "runtimeType": row.runtime_type,
                 "providerId": row.provider_id,
             },
         )
-        return _to_provider(row)
+        return _to_provider(row, scope=scope)
 
     async def update_provider(
         self,
@@ -83,19 +125,20 @@ class RuntimeProviderService:
         actor_id: str,
     ) -> dict[str, Any] | None:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        existing = await get_runtime_provider(
-            self._session, org_id, runtime_type, provider_id
-        )
+        existing, scope = await self._find_provider(org_id, runtime_type, provider_id)
         if existing is None:
             return None
         values = _provider_update_fields(payload)
-        row = (
-            await update_runtime_provider(
+        if values and scope == GLOBAL_SCOPE:
+            row = await update_global_runtime_provider(
+                self._session, runtime_type, provider_id, values
+            )
+        elif values:
+            row = await update_runtime_provider(
                 self._session, org_id, runtime_type, provider_id, values
             )
-            if values
-            else existing
-        )
+        else:
+            row = existing
         if row is None:
             return None
         await insert_activity_log(
@@ -106,9 +149,13 @@ class RuntimeProviderService:
             action="runtime_provider.updated",
             entity_type="runtime_provider",
             entity_id=row.id,
-            details={"runtimeType": runtime_type, "providerId": provider_id},
+            details={
+                "scope": scope,
+                "runtimeType": runtime_type,
+                "providerId": provider_id,
+            },
         )
-        return _to_provider(row)
+        return _to_provider(row, scope=scope)
 
     async def delete_provider(
         self,
@@ -120,18 +167,24 @@ class RuntimeProviderService:
         actor_id: str,
     ) -> dict[str, Any] | None:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        existing = await get_runtime_provider(
-            self._session, org_id, runtime_type, provider_id
-        )
+        existing, scope = await self._find_provider(org_id, runtime_type, provider_id)
         if existing is None:
             return None
-        detail = _to_provider(existing)
-        await delete_runtime_models_for_provider(
-            self._session, org_id, runtime_type, provider_id
-        )
-        row = await delete_runtime_provider(
-            self._session, org_id, runtime_type, provider_id
-        )
+        detail = _to_provider(existing, scope=scope)
+        if scope == GLOBAL_SCOPE:
+            await delete_global_runtime_models_for_provider(
+                self._session, runtime_type, provider_id
+            )
+            row = await delete_global_runtime_provider(
+                self._session, runtime_type, provider_id
+            )
+        else:
+            await delete_runtime_models_for_provider(
+                self._session, org_id, runtime_type, provider_id
+            )
+            row = await delete_runtime_provider(
+                self._session, org_id, runtime_type, provider_id
+            )
         if row is None:
             return None
         await insert_activity_log(
@@ -142,7 +195,11 @@ class RuntimeProviderService:
             action="runtime_provider.deleted",
             entity_type="runtime_provider",
             entity_id=row.id,
-            details={"runtimeType": runtime_type, "providerId": provider_id},
+            details={
+                "scope": scope,
+                "runtimeType": runtime_type,
+                "providerId": provider_id,
+            },
         )
         return detail
 
@@ -150,11 +207,15 @@ class RuntimeProviderService:
         self, org_id: str, runtime_type: str, provider_id: str
     ) -> list[dict[str, Any]]:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        await self._require_provider(org_id, runtime_type, provider_id)
-        rows = await list_runtime_models(
-            self._session, org_id, runtime_type, provider_id
+        _, scope = await self._require_provider(org_id, runtime_type, provider_id)
+        rows = (
+            await list_global_runtime_models(self._session, runtime_type, provider_id)
+            if scope == GLOBAL_SCOPE
+            else await list_runtime_models(
+                self._session, org_id, runtime_type, provider_id
+            )
         )
-        return [_to_model(row) for row in rows]
+        return [_to_model(row, scope=scope) for row in rows]
 
     async def create_model(
         self,
@@ -167,17 +228,36 @@ class RuntimeProviderService:
         actor_id: str,
     ) -> dict[str, Any]:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        await self._require_provider(org_id, runtime_type, provider_id)
-        fields = _model_create_fields(org_id, runtime_type, provider_id, payload)
-        if await get_runtime_model(
-            self._session,
-            org_id,
-            runtime_type,
-            provider_id,
-            fields["model_id"],
-        ):
+        _, provider_scope = await self._require_provider(
+            org_id, runtime_type, provider_id
+        )
+        scope = _scope(payload.get("scope") or provider_scope)
+        if scope != provider_scope:
+            raise ValueError("Runtime model scope must match provider scope")
+        fields = _model_create_fields(org_id, runtime_type, provider_id, payload, scope)
+        existing = (
+            await get_global_runtime_model(
+                self._session,
+                runtime_type,
+                provider_id,
+                fields["model_id"],
+            )
+            if scope == GLOBAL_SCOPE
+            else await get_runtime_model(
+                self._session,
+                org_id,
+                runtime_type,
+                provider_id,
+                fields["model_id"],
+            )
+        )
+        if existing:
             raise ValueError("Runtime model already exists")
-        row = await create_runtime_model(self._session, fields)
+        row = (
+            await create_global_runtime_model(self._session, fields)
+            if scope == GLOBAL_SCOPE
+            else await create_runtime_model(self._session, fields)
+        )
         await insert_activity_log(
             self._session,
             org_id=org_id,
@@ -187,12 +267,20 @@ class RuntimeProviderService:
             entity_type="runtime_model",
             entity_id=row.id,
             details={
+                "scope": scope,
                 "runtimeType": runtime_type,
                 "providerId": provider_id,
                 "modelId": row.model_id,
             },
         )
-        return _to_model(row)
+        await self._ensure_default_model(
+            org_id=org_id,
+            runtime_type=runtime_type,
+            provider_scope=scope,
+            provider_id=provider_id,
+            model_id=row.model_id,
+        )
+        return _to_model(row, scope=scope)
 
     async def update_model(
         self,
@@ -206,19 +294,22 @@ class RuntimeProviderService:
         actor_id: str,
     ) -> dict[str, Any] | None:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        existing = await get_runtime_model(
-            self._session, org_id, runtime_type, provider_id, model_id
+        existing, scope = await self._find_model(
+            org_id, runtime_type, provider_id, model_id
         )
         if existing is None:
             return None
         values = _model_update_fields(payload)
-        row = (
-            await update_runtime_model(
+        if values and scope == GLOBAL_SCOPE:
+            row = await update_global_runtime_model(
+                self._session, runtime_type, provider_id, model_id, values
+            )
+        elif values:
+            row = await update_runtime_model(
                 self._session, org_id, runtime_type, provider_id, model_id, values
             )
-            if values
-            else existing
-        )
+        else:
+            row = existing
         if row is None:
             return None
         await insert_activity_log(
@@ -230,12 +321,13 @@ class RuntimeProviderService:
             entity_type="runtime_model",
             entity_id=row.id,
             details={
+                "scope": scope,
                 "runtimeType": runtime_type,
                 "providerId": provider_id,
                 "modelId": model_id,
             },
         )
-        return _to_model(row)
+        return _to_model(row, scope=scope)
 
     async def delete_model(
         self,
@@ -248,14 +340,20 @@ class RuntimeProviderService:
         actor_id: str,
     ) -> dict[str, Any] | None:
         runtime_type = _required_text(runtime_type, "runtimeType")
-        existing = await get_runtime_model(
-            self._session, org_id, runtime_type, provider_id, model_id
+        existing, scope = await self._find_model(
+            org_id, runtime_type, provider_id, model_id
         )
         if existing is None:
             return None
-        detail = _to_model(existing)
-        row = await delete_runtime_model(
-            self._session, org_id, runtime_type, provider_id, model_id
+        detail = _to_model(existing, scope=scope)
+        row = (
+            await delete_global_runtime_model(
+                self._session, runtime_type, provider_id, model_id
+            )
+            if scope == GLOBAL_SCOPE
+            else await delete_runtime_model(
+                self._session, org_id, runtime_type, provider_id, model_id
+            )
         )
         if row is None:
             return None
@@ -268,6 +366,7 @@ class RuntimeProviderService:
             entity_type="runtime_model",
             entity_id=row.id,
             details={
+                "scope": scope,
                 "runtimeType": runtime_type,
                 "providerId": provider_id,
                 "modelId": model_id,
@@ -277,13 +376,79 @@ class RuntimeProviderService:
 
     async def _require_provider(
         self, org_id: str, runtime_type: str, provider_id: str
-    ) -> RuntimeProvider:
+    ) -> tuple[ProviderRow, str]:
+        row, scope = await self._find_provider(org_id, runtime_type, provider_id)
+        if row is None:
+            raise LookupError("Runtime provider not found")
+        return row, scope
+
+    async def _find_provider(
+        self, org_id: str, runtime_type: str, provider_id: str
+    ) -> tuple[ProviderRow | None, str]:
         row = await get_runtime_provider(
             self._session, org_id, runtime_type, provider_id
         )
-        if row is None:
-            raise LookupError("Runtime provider not found")
-        return row
+        if row is not None:
+            return row, ORGANIZATION_SCOPE
+        global_row = await get_global_runtime_provider(
+            self._session, runtime_type, provider_id
+        )
+        if global_row is not None:
+            return global_row, GLOBAL_SCOPE
+        return None, ORGANIZATION_SCOPE
+
+    async def _find_model(
+        self, org_id: str, runtime_type: str, provider_id: str, model_id: str
+    ) -> tuple[ModelRow | None, str]:
+        provider, provider_scope = await self._find_provider(
+            org_id, runtime_type, provider_id
+        )
+        if provider is None:
+            return None, provider_scope
+        if provider_scope == GLOBAL_SCOPE:
+            return (
+                await get_global_runtime_model(
+                    self._session, runtime_type, provider_id, model_id
+                ),
+                GLOBAL_SCOPE,
+            )
+        return (
+            await get_runtime_model(
+                self._session, org_id, runtime_type, provider_id, model_id
+            ),
+            ORGANIZATION_SCOPE,
+        )
+
+    async def _ensure_default_model(
+        self,
+        *,
+        org_id: str,
+        runtime_type: str,
+        provider_scope: str,
+        provider_id: str,
+        model_id: str,
+    ) -> None:
+        scope_type = (
+            GLOBAL_SCOPE if provider_scope == GLOBAL_SCOPE else ORGANIZATION_SCOPE
+        )
+        scope_id = "" if scope_type == GLOBAL_SCOPE else org_id
+        existing = await get_runtime_model_default(
+            self._session, scope_type, scope_id, runtime_type
+        )
+        if existing is not None:
+            return
+        await create_runtime_model_default(
+            self._session,
+            {
+                "id": str(uuid.uuid4()),
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "runtime_type": runtime_type,
+                "provider_scope_type": provider_scope,
+                "provider_id": provider_id,
+                "model_id": model_id,
+            },
+        )
 
 
 async def inject_runtime_provider_config(
@@ -296,21 +461,57 @@ async def inject_runtime_provider_config(
     if runtime_type not in MANAGED_RUNTIME_PROVIDER_TYPES:
         return config
     model_ref = config.get("model")
+    provider_scope: str | None = None
     if not isinstance(model_ref, str) or "/" not in model_ref:
+        default = await get_runtime_model_default(
+            session, ORGANIZATION_SCOPE, org_id, runtime_type
+        )
+        if default is None:
+            default = await get_runtime_model_default(
+                session, GLOBAL_SCOPE, None, runtime_type
+            )
+        if default is None:
+            return config
+        provider_id = default.provider_id
+        model_id = default.model_id
+        provider_scope = default.provider_scope_type
+    else:
+        provider_id, model_id = model_ref.split("/", 1)
+        provider_id = provider_id.strip()
+        model_id = model_id.strip()
+    if provider_scope not in {GLOBAL_SCOPE, ORGANIZATION_SCOPE, None}:
         return config
-    provider_id, model_id = model_ref.split("/", 1)
-    provider_id = provider_id.strip()
-    model_id = model_id.strip()
     if not provider_id or not model_id:
         return config
-    provider = await get_runtime_provider(session, org_id, runtime_type, provider_id)
+    if provider_scope == GLOBAL_SCOPE:
+        provider: ProviderRow | None = await get_global_runtime_provider(
+            session, runtime_type, provider_id
+        )
+    elif provider_scope == ORGANIZATION_SCOPE:
+        provider = await get_runtime_provider(
+            session, org_id, runtime_type, provider_id
+        )
+    else:
+        provider = await get_runtime_provider(
+            session, org_id, runtime_type, provider_id
+        )
+        if provider is None:
+            provider = await get_global_runtime_provider(
+                session, runtime_type, provider_id
+            )
     if provider is None:
         return config
     if not provider.enabled:
         raise ValueError(f"Runtime provider is disabled: {provider_id}")
-    model = await get_runtime_model(
-        session, org_id, runtime_type, provider_id, model_id
-    )
+    model: ModelRow | None
+    if isinstance(provider, RuntimeGlobalProvider):
+        model = await get_global_runtime_model(
+            session, runtime_type, provider_id, model_id
+        )
+    else:
+        model = await get_runtime_model(
+            session, org_id, runtime_type, provider_id, model_id
+        )
     if model is None:
         raise ValueError(f"Runtime model is not configured: {model_ref}")
     if not model.enabled:
@@ -328,10 +529,11 @@ async def inject_runtime_provider_config(
     }
 
 
-def _provider_create_fields(org_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+def _provider_create_fields(
+    org_id: str, payload: Mapping[str, Any], *, scope: str
+) -> dict[str, Any]:
+    fields = {
         "id": str(uuid.uuid4()),
-        "org_id": org_id,
         "runtime_type": _required_text(payload.get("runtimeType"), "runtimeType"),
         "provider_id": _required_text(payload.get("providerId"), "providerId"),
         "name": _required_text(payload.get("name"), "name"),
@@ -342,6 +544,9 @@ def _provider_create_fields(org_id: str, payload: Mapping[str, Any]) -> dict[str
         "config_json": _optional_dict(payload.get("config"), "config"),
         "enabled": bool(payload.get("enabled", True)),
     }
+    if scope == ORGANIZATION_SCOPE:
+        fields["org_id"] = org_id
+    return fields
 
 
 def _provider_update_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -364,11 +569,14 @@ def _provider_update_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _model_create_fields(
-    org_id: str, runtime_type: str, provider_id: str, payload: Mapping[str, Any]
+    org_id: str,
+    runtime_type: str,
+    provider_id: str,
+    payload: Mapping[str, Any],
+    scope: str,
 ) -> dict[str, Any]:
-    return {
+    fields = {
         "id": str(uuid.uuid4()),
-        "org_id": org_id,
         "runtime_type": runtime_type,
         "provider_id": provider_id,
         "model_id": _required_text(payload.get("modelId"), "modelId"),
@@ -376,6 +584,9 @@ def _model_create_fields(
         "metadata_json": _optional_dict(payload.get("metadata"), "metadata"),
         "enabled": bool(payload.get("enabled", True)),
     }
+    if scope == ORGANIZATION_SCOPE:
+        fields["org_id"] = org_id
+    return fields
 
 
 def _model_update_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -418,11 +629,24 @@ def _optional_dict(value: object, field: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _to_provider(row: RuntimeProvider) -> dict[str, Any]:
+def _scope(value: object) -> str:
+    if value is None:
+        return GLOBAL_SCOPE
+    if not isinstance(value, str):
+        raise ValueError("scope must be a string")
+    scope = value.strip()
+    if scope not in {GLOBAL_SCOPE, ORGANIZATION_SCOPE}:
+        raise ValueError("scope must be global or organization")
+    return scope
+
+
+def _to_provider(row: ProviderRow, *, scope: str) -> dict[str, Any]:
     has_api_key = bool(row.api_key)
+    org_id = row.org_id if isinstance(row, RuntimeProvider) else None
     return {
         "id": row.id,
-        "orgId": row.org_id,
+        "scope": scope,
+        "orgId": org_id,
         "runtimeType": row.runtime_type,
         "providerId": row.provider_id,
         "name": row.name,
@@ -438,10 +662,12 @@ def _to_provider(row: RuntimeProvider) -> dict[str, Any]:
     }
 
 
-def _to_model(row: RuntimeModel) -> dict[str, Any]:
+def _to_model(row: ModelRow, *, scope: str) -> dict[str, Any]:
+    org_id = row.org_id if isinstance(row, RuntimeModel) else None
     return {
         "id": row.id,
-        "orgId": row.org_id,
+        "scope": scope,
+        "orgId": org_id,
         "runtimeType": row.runtime_type,
         "providerId": row.provider_id,
         "modelId": row.model_id,
@@ -453,9 +679,7 @@ def _to_model(row: RuntimeModel) -> dict[str, Any]:
     }
 
 
-def _to_execution_provider(
-    provider: RuntimeProvider, model: RuntimeModel
-) -> dict[str, Any]:
+def _to_execution_provider(provider: ProviderRow, model: ModelRow) -> dict[str, Any]:
     return {
         "providerId": provider.provider_id,
         "name": provider.name,
