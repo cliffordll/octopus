@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import AgentEnabledSkill, OrganizationSkill
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def list_organization_skills(
@@ -62,30 +63,22 @@ async def update_organization_skill(
 ) -> OrganizationSkill | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(OrganizationSkill)
-        .where(
-            OrganizationSkill.org_id == org_id,
-            OrganizationSkill.id == skill_id,
-        )
-        .values(**values)
-        .returning(OrganizationSkill)
+    return await update_returning_one(
+        session,
+        OrganizationSkill,
+        (OrganizationSkill.org_id == org_id) & (OrganizationSkill.id == skill_id),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_organization_skill(
     session: AsyncSession, org_id: str, skill_id: str
 ) -> OrganizationSkill | None:
-    result = await session.execute(
-        delete(OrganizationSkill)
-        .where(
-            OrganizationSkill.org_id == org_id,
-            OrganizationSkill.id == skill_id,
-        )
-        .returning(OrganizationSkill)
+    return await delete_returning_one(
+        session,
+        OrganizationSkill,
+        (OrganizationSkill.org_id == org_id) & (OrganizationSkill.id == skill_id),
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_enabled_skill_key(

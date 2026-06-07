@@ -5,8 +5,6 @@ from pathlib import Path
 import re
 import shutil
 
-from sqlalchemy.engine import make_url
-
 DEFAULT_INSTANCE_ID = "default"
 INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -21,30 +19,8 @@ def _expand_home_prefix(value: str) -> Path:
 
 def resolve_octopus_home_dir() -> Path:
     raw_home = os.environ.get("OCTOPUS_HOME", "").strip()
-    home = (
-        _expand_home_prefix(raw_home)
-        if raw_home
-        else _default_octopus_home_from_database_url() or Path.home() / ".octopus"
-    )
+    home = _expand_home_prefix(raw_home) if raw_home else Path.home() / ".octopus"
     return home.resolve()
-
-
-def _default_octopus_home_from_database_url() -> Path | None:
-    raw_database_url = os.environ.get(
-        "OCTOPUS_DATABASE_URL", "sqlite+aiosqlite:///./octopus.db"
-    ).strip()
-    if not raw_database_url:
-        return None
-    try:
-        url = make_url(raw_database_url)
-    except Exception:
-        return None
-    if url.get_backend_name() != "sqlite":
-        return None
-    database = url.database
-    if not database or database == ":memory:":
-        return None
-    return Path(database).expanduser().parent / ".octopus"
 
 
 def resolve_octopus_instance_id() -> str:
@@ -62,6 +38,18 @@ def resolve_octopus_instance_root() -> Path:
     ).resolve()
 
 
+def resolve_octopus_database_dir() -> Path:
+    return (resolve_octopus_instance_root() / "db").resolve()
+
+
+def resolve_octopus_sqlite_database_path() -> Path:
+    return (resolve_octopus_database_dir() / "octopus.db").resolve()
+
+
+def resolve_default_sqlite_database_url() -> str:
+    return f"sqlite+aiosqlite:///{resolve_octopus_sqlite_database_path().as_posix()}"
+
+
 def resolve_octopus_instance_data_root() -> Path:
     return (resolve_octopus_instance_root() / "data").resolve()
 
@@ -71,6 +59,17 @@ def resolve_octopus_run_log_dir() -> Path:
     if raw_dir:
         return _expand_home_prefix(raw_dir).resolve()
     return (resolve_octopus_instance_data_root() / "run-logs").resolve()
+
+
+def legacy_octopus_run_log_dir() -> Path:
+    return (resolve_octopus_home_dir() / "run-logs").resolve()
+
+
+def ensure_octopus_run_log_dir() -> Path:
+    return _ensure_canonical_paths(
+        resolve_octopus_run_log_dir(),
+        [legacy_octopus_run_log_dir()],
+    )
 
 
 def resolve_octopus_server_log_dir() -> Path:
@@ -92,9 +91,9 @@ def legacy_octopus_storage_dir() -> Path:
 
 
 def ensure_octopus_storage_dir() -> Path:
-    return _ensure_canonical_path(
+    return _ensure_canonical_paths(
         resolve_octopus_storage_dir(),
-        legacy_octopus_storage_dir(),
+        [legacy_octopus_storage_dir()],
     )
 
 
@@ -110,9 +109,9 @@ def legacy_octopus_workspace_operation_log_dir() -> Path:
 
 
 def ensure_octopus_workspace_operation_log_dir() -> Path:
-    return _ensure_canonical_path(
+    return _ensure_canonical_paths(
         resolve_octopus_workspace_operation_log_dir(),
-        legacy_octopus_workspace_operation_log_dir(),
+        [legacy_octopus_workspace_operation_log_dir()],
     )
 
 
@@ -132,17 +131,41 @@ def legacy_organization_workspace_root(org_id: str) -> Path:
     ).resolve()
 
 
-def ensure_organization_workspace_root(org_id: str) -> Path:
-    return _ensure_canonical_path(
-        organization_workspace_root(org_id),
+def legacy_organization_workspace_roots(org_id: str) -> list[Path]:
+    instance_root = resolve_octopus_instance_root()
+    home = resolve_octopus_home_dir()
+    paths = [
         legacy_organization_workspace_root(org_id),
+        (home / "workspaces" / org_id).resolve(),
+        (instance_root / "workspaces" / org_id).resolve(),
+        (
+            instance_root / "workspaces" / "organizations" / org_id / "workspaces"
+        ).resolve(),
+    ]
+    legacy_instance_workspace_root = (instance_root / "workspaces").resolve()
+    if _looks_like_workspace_root(legacy_instance_workspace_root):
+        paths.append(legacy_instance_workspace_root)
+    return paths
+
+
+def ensure_organization_workspace_root(org_id: str) -> Path:
+    return _ensure_canonical_paths(
+        organization_workspace_root(org_id),
+        legacy_organization_workspace_roots(org_id),
     )
 
 
-def _ensure_canonical_path(canonical: Path, legacy: Path) -> Path:
+def _ensure_canonical_paths(canonical: Path, legacy_paths: list[Path]) -> Path:
+    for legacy in legacy_paths:
+        _merge_legacy_path(canonical, legacy)
+    canonical.mkdir(parents=True, exist_ok=True)
+    return canonical
+
+
+def _merge_legacy_path(canonical: Path, legacy: Path) -> None:
     if legacy == canonical:
         canonical.mkdir(parents=True, exist_ok=True)
-        return canonical
+        return
 
     if legacy.exists():
         canonical.parent.mkdir(parents=True, exist_ok=True)
@@ -154,8 +177,6 @@ def _ensure_canonical_path(canonical: Path, legacy: Path) -> Path:
                 legacy,
                 stop_at=resolve_octopus_home_dir(),
             )
-    canonical.mkdir(parents=True, exist_ok=True)
-    return canonical
 
 
 def _merge_directory_contents(source: Path, target: Path) -> None:
@@ -182,6 +203,19 @@ def _remove_empty_parents(path: Path, *, stop_at: Path) -> None:
         except OSError:
             break
         current = current.parent
+
+
+def _looks_like_workspace_root(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    workspace_markers = {
+        "agents",
+        "artifacts",
+        "executions",
+        "plans",
+        "skills",
+    }
+    return any((path / marker).exists() for marker in workspace_markers)
 
 
 def agent_workspace_root(org_id: str, workspace_key: str) -> Path:
