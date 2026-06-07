@@ -67,13 +67,13 @@ def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> Non
 @pytest.fixture
 async def app(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> AsyncIterator[tuple[FastAPI, async_sessionmaker, Path]]:
-    root = (
-        Path.cwd() / ".octopus" / "test-tmp" / f"step17-{uuid.uuid4().hex}"
-    ).resolve()
+    root = (tmp_path / f"step17-{uuid.uuid4().hex}").resolve()
     root.mkdir(parents=True)
     monkeypatch.chdir(root)
     monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    monkeypatch.setenv("OCTOPUS_HOME", str(root / ".octopus"))
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
