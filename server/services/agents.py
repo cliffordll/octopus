@@ -76,7 +76,6 @@ from .agent_instructions import (
     normalize_instructions_paths,
 )
 from .organization_skills import OrganizationSkillService, organization_skills_root
-from .agent_names import pick_unique_agent_name
 from .workspace_paths import agent_workspace_root
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -85,6 +84,7 @@ _SENSITIVE_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REDACTED = "***REDACTED***"
+_DEFAULT_ENABLED_SKILLS = ("skills/control-plane",)
 _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "name",
     "role",
@@ -97,6 +97,7 @@ _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "budgetMonthlyCents",
     "metadata",
 )
+_AGENT_WORKSPACE_HOME_DIRS = ("instructions", "skills", "life", "memory")
 
 
 class AgentConflictError(ValueError):
@@ -136,19 +137,27 @@ def _workspace_key(agent_id: str, name: str) -> str:
 
 
 def _agent_home_root(row: AgentRow) -> Path:
-    workspace_key = _derive_url_key(row.workspace_key, row.id)
+    workspace_key = row.workspace_key or _derive_url_key(row.name, row.id)
     return agent_workspace_root(row.org_id, workspace_key)
 
 
 def _agent_home_root_from_values(values: dict[str, Any]) -> Path:
-    workspace_key = _derive_url_key(
-        cast(str | None, values.get("workspace_key")), cast(str, values["id"])
+    workspace_key = cast(str | None, values.get("workspace_key")) or _derive_url_key(
+        cast(str | None, values.get("name")), cast(str, values["id"])
     )
     return agent_workspace_root(cast(str, values["org_id"]), workspace_key)
 
 
 def _agent_skills_root(row: AgentRow) -> Path:
-    return _agent_home_root(row) / "skills"
+    return _ensure_agent_workspace_layout(_agent_home_root(row)) / "skills"
+
+
+def _ensure_agent_workspace_layout(agent_home: Path) -> Path:
+    root = agent_home.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    for dirname in _AGENT_WORKSPACE_HOME_DIRS:
+        (root / dirname).mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -254,19 +263,44 @@ def _organization_skill_selection_key(key: str) -> str:
     return key if key.startswith("org:") else f"org:{key}"
 
 
-def _runtime_config_with_context(row: AgentRow) -> dict[str, Any]:
+def _runtime_config_with_context(
+    row: AgentRow, base_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     organization_root = str(organization_skills_root(row.org_id))
-    config = dict(row.agent_runtime_config)
+    agent_home = _ensure_agent_workspace_layout(_agent_home_root(row))
+    config = dict(base_config if base_config is not None else row.agent_runtime_config)
     config.setdefault("skillsRootPath", organization_root)
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        runtime_context = {}
     return {
         **config,
         "_octopus": {
+            **runtime_context,
             "orgId": row.org_id,
             "agentId": row.id,
             "organizationSkillsRootPath": organization_root,
-            "agentSkillsRootPath": str(_agent_skills_root(row)),
+            "agentSkillsRootPath": str(agent_home / "skills"),
         },
     }
+
+
+async def prepare_agent_runtime_config(
+    session: AsyncSession,
+    row: AgentRow,
+    *,
+    base_config: dict[str, Any] | None = None,
+    extra_octopus: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    await OrganizationSkillService(session).list(row.org_id)
+    config = _runtime_config_with_context(row, base_config)
+    if extra_octopus:
+        runtime_context = config.get("_octopus")
+        config["_octopus"] = {
+            **(runtime_context if isinstance(runtime_context, dict) else {}),
+            **extra_octopus,
+        }
+    return config
 
 
 def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
@@ -315,8 +349,7 @@ class AgentService:
 
     async def suggest_name(self, org_id: str) -> str:
         existing = await list_org_agents(self._session, org_id)
-        name = pick_unique_agent_name([(row.name, row.status) for row in existing])
-        return self._deduplicate_name(name, existing)
+        return self._next_role_sequence_name(DEFAULT_AGENT_ROLE, existing)
 
     async def create_agent(
         self,
@@ -417,17 +450,21 @@ class AgentService:
         status: AgentStatus,
         activity_action: str,
     ) -> Agent:
+        role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
         manager_id = payload.get("reportsTo")
+        if "reportsTo" not in payload and actor_type == "agent":
+            manager_id = actor_id
         if manager_id is not None:
             await self._validate_manager(org_id, manager_id)
         existing = await list_org_agents(self._session, org_id)
         requested_name = str(payload.get("name", "")).strip()
-        candidate_name = requested_name or pick_unique_agent_name(
-            [(row.name, row.status) for row in existing]
-        )
-        name = self._deduplicate_name(candidate_name, existing)
+        if self._should_use_role_sequence_name(
+            requested_name, role=role, actor_type=actor_type
+        ):
+            name = self._next_role_sequence_name(role, existing)
+        else:
+            name = self._deduplicate_name(requested_name, existing)
         agent_id = str(uuid.uuid4())
-        role = cast(AgentRole, payload.get("role", DEFAULT_AGENT_ROLE))
         agent_runtime_type = payload.get("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
         agent_runtime_config = normalize_instructions_paths(
             dict(payload.get("agentRuntimeConfig", {}))
@@ -443,7 +480,7 @@ class AgentService:
             "icon": payload.get("icon")
             or f"{AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX}{uuid.uuid4()}",
             "status": status,
-            "reports_to": payload.get("reportsTo"),
+            "reports_to": manager_id,
             "capabilities": payload.get("capabilities"),
             "agent_runtime_type": agent_runtime_type,
             "agent_runtime_config": agent_runtime_config,
@@ -454,8 +491,11 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        agent_home = _ensure_agent_workspace_layout(
+            _agent_home_root_from_values(values)
+        )
         next_runtime_config = materialize_default_instructions_for_new_agent(
-            row, _agent_home_root_from_values(values)
+            row, agent_home
         )
         if next_runtime_config is not None:
             updated = await update_agent(
@@ -465,7 +505,11 @@ class AgentService:
             )
             if updated is not None:
                 row = updated
-        desired_skills = list(payload.get("desiredSkills", []))
+        desired_skills = list(
+            payload["desiredSkills"]
+            if "desiredSkills" in payload
+            else _DEFAULT_ENABLED_SKILLS
+        )
         if desired_skills:
             desired_skills = await replace_enabled_skill_keys(
                 self._session,
@@ -616,6 +660,57 @@ class AgentService:
             if desired_skills is not None
             else await list_enabled_skill_keys(self._session, row.id),
         )
+
+    async def apply_runtime_config(
+        self,
+        agent_id: str,
+        config: dict[str, Any],
+        *,
+        actor_type: str,
+        actor_id: str,
+        source: str,
+    ) -> AgentRow | None:
+        """Replace ``agent_runtime_config`` and record a config revision when
+        revision-tracked fields change.
+
+        Instruction edits compute a full replacement config and used to persist
+        it through the database-layer ``update_agent`` directly, bypassing the
+        revision recording. Routing those edits here keeps the config revision
+        history populated, matching upstream where instruction mutations call the
+        agent update with ``recordRevision``.
+        """
+
+        existing = await get_agent_by_id(self._session, agent_id)
+        if existing is None:
+            return None
+        before_config = self._config_snapshot(existing)
+        row = await update_agent(
+            self._session, agent_id, {"agent_runtime_config": config}
+        )
+        if row is None:
+            return None
+        after_config = self._config_snapshot(row)
+        changed_keys = [
+            key
+            for key in _CONFIG_REVISION_FIELDS
+            if before_config[key] != after_config[key]
+        ]
+        if changed_keys:
+            await create_config_revision(
+                self._session,
+                {
+                    "org_id": row.org_id,
+                    "agent_id": row.id,
+                    "created_by_agent_id": actor_id if actor_type == "agent" else None,
+                    "created_by_user_id": actor_id if actor_type != "agent" else None,
+                    "source": source,
+                    "rolled_back_from_revision_id": None,
+                    "changed_keys": changed_keys,
+                    "before_config": _sanitize_value(before_config),
+                    "after_config": _sanitize_value(after_config),
+                },
+            )
+        return row
 
     async def get_skill_snapshot(self, agent_id: str) -> AgentSkillSnapshot | None:
         row = await get_agent_by_id(self._session, agent_id)
@@ -1109,6 +1204,38 @@ class AgentService:
         while _derive_url_key(f"{requested} {index}") in used:
             index += 1
         return f"{requested} {index}"
+
+    def _should_use_role_sequence_name(
+        self, requested: str, *, role: AgentRole, actor_type: str
+    ) -> bool:
+        if actor_type == "agent":
+            return True
+        if not requested:
+            return True
+        return _derive_url_key(requested) == _derive_url_key(role)
+
+    def _next_role_sequence_name(
+        self, role: AgentRole, existing: Sequence[AgentRow]
+    ) -> str:
+        prefix = _derive_url_key(role)
+        used: set[int] = set()
+        for row in existing:
+            if row.status == "terminated":
+                continue
+            key = _derive_url_key(row.name)
+            if key == prefix:
+                used.add(1)
+                continue
+            marker = f"{prefix}-"
+            if not key.startswith(marker):
+                continue
+            suffix = key[len(marker) :]
+            if suffix.isdigit():
+                used.add(int(suffix))
+        index = 1
+        while index in used:
+            index += 1
+        return f"{prefix}-{index}"
 
     async def _chain_of_command(self, row: AgentRow) -> list[AgentChainOfCommandEntry]:
         chain: list[AgentChainOfCommandEntry] = []

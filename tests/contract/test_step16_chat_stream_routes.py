@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import json
@@ -45,7 +46,18 @@ class BlockingChatAdapter:
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         self._started.set()
-        await self._release.wait()
+        if context.cancel_event is not None:
+            release_task = asyncio.create_task(self._release.wait())
+            cancel_task = asyncio.create_task(context.cancel_event.wait())
+            done, pending = await asyncio.wait(
+                {release_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            if cancel_task in done:
+                raise asyncio.CancelledError
+        else:
+            await self._release.wait()
         self._finished.set()
         return RuntimeExecutionResult(
             exit_code=0, result_json={"summary": "blocking stream reply"}
@@ -65,6 +77,33 @@ def test_step16_chat_stream_contract_exposes_paths_and_event_type() -> None:
         paths.CHAT_MESSAGES_STREAM_STOP_PATH == "/api/chats/{id}/messages/stream/stop"
     )
     assert types.ChatStreamEvent.__annotations__["type"] is not None
+
+
+def test_chat_generation_lock_release_is_token_scoped() -> None:
+    from server.services.chat_generation_locks import (
+        _clear_chat_generations_for_tests,
+        cancel_active_chat_generation,
+        claim_chat_generation,
+        has_active_chat_generation,
+    )
+
+    _clear_chat_generations_for_tests()
+    first_cancel = asyncio.Event()
+    second_cancel = asyncio.Event()
+    first_release = claim_chat_generation("conversation-1", first_cancel)
+    assert first_release is not None
+    assert claim_chat_generation("conversation-1", second_cancel) is None
+    assert cancel_active_chat_generation("conversation-1") is True
+    assert first_cancel.is_set()
+
+    first_release()
+    second_release = claim_chat_generation("conversation-1", second_cancel)
+    assert second_release is not None
+    first_release()
+    assert has_active_chat_generation("conversation-1") is True
+    second_release()
+    assert has_active_chat_generation("conversation-1") is False
+    _clear_chat_generations_for_tests()
 
 
 @pytest.fixture

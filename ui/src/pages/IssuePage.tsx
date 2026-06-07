@@ -16,6 +16,8 @@ import type {
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
+  IssueWorkProduct,
+  LogReadResult,
   ProjectDetail,
   UpdateIssuePayload,
   WorkspaceOperation,
@@ -122,6 +124,91 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): 
   }
   const sorted = Array.from(merged.values()).sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
+}
+
+function metadataText(metadata: Record<string, unknown> | null | undefined, key: string): string {
+  const value = metadata?.[key];
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function nextLogOffset(log: LogReadResult): number | null {
+  if (typeof log.nextOffset === "number") return log.nextOffset;
+  if (typeof log.endOffset === "number") return log.endOffset;
+  return null;
+}
+
+function isWorkspaceProvisionOperation(operation: WorkspaceOperation): boolean {
+  return operation.phase === "workspace_provision";
+}
+
+function AutoScrollPre({
+  className,
+  content,
+}: {
+  className: string;
+  content: string;
+}) {
+  const ref = useRef<HTMLPreElement | null>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [content]);
+  return <pre className={className} ref={ref}>{content}</pre>;
+}
+
+function streamLogDelta(streamLog: string, persistedLog: string | undefined): string {
+  if (!streamLog) return "";
+  const persisted = persistedLog ?? "";
+  if (!persisted) return streamLog;
+  if (persisted.includes(streamLog)) return "";
+  if (streamLog.startsWith(persisted)) return streamLog.slice(persisted.length);
+  return streamLog;
+}
+
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function pathBasename(value: string | null | undefined): string {
+  if (!value?.trim()) return "";
+  const normalized = value.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) ?? value;
+}
+
+function workProductDisplayName(product: IssueWorkProduct): string {
+  return (
+    pathBasename(product.title) ||
+    pathBasename(metadataString(product.metadata, "workspacePath")) ||
+    pathBasename(product.externalId) ||
+    product.id
+  );
+}
+
+function workProductSourceLabel(product: IssueWorkProduct): string {
+  const source = metadataString(product.metadata, "source") ?? "";
+  const workspacePath = metadataString(product.metadata, "workspacePath") ?? "";
+  const browserPath = metadataString(product.metadata, "workspaceBrowserPath") ?? "";
+  const combinedPath = `${workspacePath}/${browserPath}`;
+  if (source.includes("run") || combinedPath.includes("/runs/") || combinedPath.includes("\\runs\\")) return "运行产物";
+  if (source.includes("execution_workspace")) return "工作区产物";
+  if (source.includes("organization_artifacts")) return "任务产物";
+  if (product.createdByRunId) return "运行产物";
+  return "任务产物";
+}
+
+function workProductSize(product: IssueWorkProduct): string {
+  const metadataByteSize = product.metadata?.byteSize;
+  const byteSize = typeof metadataByteSize === "number" ? metadataByteSize : product.byteSize;
+  return byteSize !== undefined && byteSize !== null ? formatBytes(byteSize) : "-";
+}
+
+function workProductSummary(product: IssueWorkProduct): string {
+  return product.summary ?? "server 已登记该产物。";
 }
 
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
@@ -387,7 +474,7 @@ function IssuePropertiesPanel({
   );
 }
 
-function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
+function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"] }) {
   const queryClient = useQueryClient();
   const workProductsQuery = useQuery({
     queryKey: ["issue-work-products", issue.id],
@@ -403,23 +490,36 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
     },
   });
   return (
-    <section aria-label="工作产物" className="issue-section-card">
+    <section aria-label="运行产物" className="issue-section-card">
       <div className="issue-section-heading">
-        <h2>工作产物</h2>
+        <h2>运行产物</h2>
         <span className="muted">{workProducts.length}</span>
       </div>
       <p className="muted issue-work-product-hint">
-        工作产物由智能体运行生成并由 server 记录。UI 只展示下载入口，只有点击下载时才会通过 contentPath 获取文件，不会自动写入本地仓库。
+        运行产物是智能体执行后生成并由 server 记录的交付文件。下载只读取 contentPath，不会写入本地工作区。
       </p>
       {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
       {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
+      {!workProductsQuery.isLoading && workProducts.length === 0 && (
+        <p className="muted">
+          {latestRunStatus === "succeeded"
+            ? "最新运行已成功，但 server 没有登记受管产物。可能没有生成文件，或文件写到了工作区 / artifacts 之外的路径。"
+            : "暂无运行产物。任务执行成功后，server 会把受管工作区或 artifacts 中的产物登记到这里。"}
+        </p>
+      )}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
-          {workProducts.map((product) => (
+          {workProducts.map((product) => {
+            const workspaceBrowserPath = metadataString(product.metadata, "workspaceBrowserPath");
+            const displayName = workProductDisplayName(product);
+            return (
             <article className="issue-work-product-card" key={product.id}>
-              <div>
-                <strong>{product.title}</strong>
-                <p>{product.summary ?? product.externalId ?? product.id}</p>
+              <div className="issue-work-product-title-row">
+                <div>
+                  <strong>{displayName}</strong>
+                  <p>{workProductSummary(product)}</p>
+                </div>
+                <Badge>{workProductSourceLabel(product)}</Badge>
               </div>
               <div className="issue-work-product-meta">
                 <Badge>{product.type}</Badge>
@@ -428,16 +528,22 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 {product.isPrimary && <Badge>primary</Badge>}
               </div>
               <dl className="issue-work-product-details">
-                <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
-                <div><dt>健康状态</dt><dd>{product.healthStatus}</dd></div>
-                <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
-                {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
+                <div><dt>大小</dt><dd>{workProductSize(product)}</dd></div>
+                <div><dt>运行</dt><dd>{product.createdByRunId ? product.createdByRunId.slice(0, 8) : "-"}</dd></div>
+                <div><dt>健康</dt><dd>{statusLabel(product.healthStatus)}</dd></div>
               </dl>
               <details className="storage-object-details">
-                <summary>存储对象</summary>
+                <summary>技术详情</summary>
                 <dl className="issue-work-product-details">
+                  {product.title !== displayName && <div><dt>原始标题</dt><dd>{product.title}</dd></div>}
+                  <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
+                  <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
+                  <div><dt>浏览路径</dt><dd>{metadataText(product.metadata, "workspaceBrowserPath")}</dd></div>
+                  <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
+                  <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
+                  {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
                   <div><dt>provider</dt><dd>{product.provider}</dd></div>
-                  <div><dt>大小</dt><dd>{product.byteSize !== undefined && product.byteSize !== null ? formatBytes(product.byteSize) : "-"}</dd></div>
+                  <div><dt>大小</dt><dd>{workProductSize(product)}</dd></div>
                   <div><dt>contentType</dt><dd>{product.contentType ?? "-"}</dd></div>
                   <div><dt>sha256</dt><dd>{product.sha256 ?? "-"}</dd></div>
                 </dl>
@@ -445,13 +551,21 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
               <div className="issue-work-product-actions">
                 {product.contentPath ? (
                   <>
-                    <a className="button secondary small-button" href={product.contentPath}>下载产物文件</a>
+                    <a className="button secondary small-button" href={product.contentPath}>下载运行产物</a>
                     <a className="button secondary small-button" href={product.contentPath} target="_blank" rel="noreferrer">预览内容</a>
                   </>
                 ) : (
                   <span className="download-unavailable">不可下载</span>
                 )}
-                {product.url && <a className="button secondary small-button" href={product.url}>打开产物</a>}
+                {workspaceBrowserPath && (
+                  <Link
+                    className="button secondary small-button"
+                    to={`/orgs/${issue.orgId}/workspaces?path=${encodeURIComponent(workspaceBrowserPath)}`}
+                  >
+                    在工作区打开
+                  </Link>
+                )}
+                {product.url && <a className="button secondary small-button" href={product.url}>打开运行产物</a>}
                 <button
                   className="danger small-button"
                   disabled={deleteWorkProduct.isPending}
@@ -462,7 +576,8 @@ function IssueWorkProductsPanel({ issue }: { issue: IssueDetail }) {
                 </button>
               </div>
             </article>
-          ))}
+          );
+          })}
         </div>
       )}
       {deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
@@ -655,6 +770,7 @@ function IssueRunsPanel({
   onSelect: (runId: string) => void;
   runs: HeartbeatRun[];
 }) {
+  const displayRuns = [...runs].sort((left, right) => runSortTime(left) - runSortTime(right));
   return (
     <section aria-label="运行记录" className="issue-section-card">
       <div className="issue-section-heading">
@@ -665,7 +781,7 @@ function IssueRunsPanel({
         <p className="muted">暂无运行记录。</p>
       ) : (
         <div className="issue-run-record-list">
-          {runs.map((run) => {
+          {displayRuns.map((run) => {
             const runId = heartbeatRunId(run);
             const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
             const summary = runSummary(displayRun);
@@ -706,6 +822,79 @@ interface IssueRunPanelData {
   run: UseQueryResult<HeartbeatRun, Error>;
 }
 
+function PaginatedLogView({
+  emptyText,
+  loadMore,
+  loadingText,
+  log,
+  preClassName,
+}: {
+  emptyText: string;
+  loadMore: (offset: number) => Promise<LogReadResult>;
+  loadingText: string;
+  log: UseQueryResult<LogReadResult, Error>;
+  preClassName: string;
+}) {
+  const [content, setContent] = useState("");
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [eof, setEof] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const data = log.data;
+    if (!data) {
+      setContent("");
+      setCursor(null);
+      setEof(true);
+      setLoadMoreError(null);
+      return;
+    }
+    setContent(data.content ?? "");
+    setCursor(data.eof === false ? nextLogOffset(data) : null);
+    setEof(data.eof !== false);
+    setLoadMoreError(null);
+  }, [log.data?.content, log.data?.endOffset, log.data?.eof, log.data?.nextOffset]);
+
+  async function handleLoadMore() {
+    if (cursor === null || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const next = await loadMore(cursor);
+      setContent((current) => `${current}${next.content ?? ""}`);
+      setCursor(next.eof === false ? nextLogOffset(next) : null);
+      setEof(next.eof !== false);
+    } catch (error) {
+      setLoadMoreError(error instanceof Error ? error : new Error("日志读取失败"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  return (
+    <>
+      {log.isLoading && <p className="muted">{loadingText}</p>}
+      {!log.isLoading && !content && <p className="muted">{emptyText}</p>}
+      {content && <AutoScrollPre className={preClassName} content={content} />}
+      {!eof && cursor !== null && (
+        <div className="issue-run-operation-actions">
+          <button
+            className="secondary small-button"
+            disabled={loadingMore}
+            onClick={handleLoadMore}
+            type="button"
+          >
+            {loadingMore ? "读取中..." : "加载更多日志"}
+          </button>
+          <span className="muted">已读取到 {formatBytes(cursor)}</span>
+        </div>
+      )}
+      {loadMoreError && <ErrorNotice error={loadMoreError} />}
+    </>
+  );
+}
+
 function IssueRunOutputPanel({
   data,
   onCancel,
@@ -724,6 +913,8 @@ function IssueRunOutputPanel({
   streamLog: string;
 }) {
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
+  const [showEvents, setShowEvents] = useState(true);
+  const [showRunLog, setShowRunLog] = useState(true);
   const [showDebugOutput, setShowDebugOutput] = useState(false);
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const run = data.run.data ?? null;
@@ -736,10 +927,18 @@ function IssueRunOutputPanel({
     queryKey: ["workspace-operation-log", selectedOperationLogId],
     queryFn: () => heartbeatApi.getWorkspaceOperationLog(selectedOperationLogId),
     enabled: Boolean(selectedOperationLogId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const runLog = useQuery({
+    queryKey: ["heartbeat-run-log", runId],
+    queryFn: () => heartbeatApi.getLog(runId),
+    enabled: Boolean(runId),
+    refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
   const canCancel = isLiveRun(run?.status);
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
   const liveRun = isLiveRun(run?.status);
+  const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
   return (
     <section aria-label="执行输出" className="issue-section-card issue-run-output">
       <div className="issue-section-heading">
@@ -761,6 +960,7 @@ function IssueRunOutputPanel({
       {data.run.error && <ErrorNotice error={data.run.error} />}
       {data.events.error && <ErrorNotice error={data.events.error} />}
       {data.operations.error && <ErrorNotice error={data.operations.error} />}
+      {runLog.error && <ErrorNotice error={runLog.error} />}
       {streamError && <p className="error-notice">{streamError}</p>}
       <section className="issue-run-output-block">
         <h3>运行详情</h3>
@@ -800,65 +1000,98 @@ function IssueRunOutputPanel({
           </details>
         )}
       </section>
-      {streamLog && (
+      {liveLogDelta && (
         <section className="issue-run-output-block">
           <div className="issue-run-output-heading">
-            <h3>实时日志</h3>
-            <Badge>stream log</Badge>
+            <h3>实时日志增量</h3>
+            <Badge>stream</Badge>
           </div>
-          <pre className="run-excerpt inline">{streamLog}</pre>
+          <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
         </section>
       )}
+      <section className="issue-run-output-block">
+        <div className="issue-run-output-heading">
+          <h3>运行日志</h3>
+          <div className="issue-run-operation-actions">
+            {showRunLog && runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+            <button className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
+              {showRunLog ? "隐藏运行日志" : "显示运行日志"}
+            </button>
+          </div>
+        </div>
+        {!showRunLog ? (
+          <p className="muted">运行日志已隐藏。</p>
+        ) : (
+          <PaginatedLogView
+            emptyText="暂无运行日志。"
+            loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
+            loadingText="加载运行日志中..."
+            log={runLog}
+            preClassName="run-excerpt inline"
+          />
+        )}
+      </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
           <h3>事件</h3>
-          {lowValueEvents.length > 0 && (
-            <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
-              {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+          <div className="issue-run-operation-actions">
+            <button className="secondary small-button" type="button" onClick={() => setShowEvents((value) => !value)}>
+              {showEvents ? "隐藏事件" : `显示事件 ${events.length}`}
             </button>
-          )}
+            {showEvents && lowValueEvents.length > 0 && (
+              <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
+                {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+              </button>
+            )}
+          </div>
         </div>
-        {data.events.isLoading && <p className="muted">加载事件中...</p>}
-        {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
-        {visibleEvents.length > 0 && (
-          <div className="agent-run-events">
-            {visibleEvents.map((event) => (
-              <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
-                <div className="agent-run-event-header">
-                  <span>#{event.seq}</span>
-                  <strong>{runEventLabel(event)}</strong>
-                  <Badge>{event.eventType}</Badge>
-                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
-                  {event.stream && <Badge>{event.stream}</Badge>}
-                </div>
-                {runEventBody(event) && (
-                  isTextRunEvent(event) && !isErrorRunEvent(event)
-                    ? <AgentReplyBody body={runEventBody(event)} />
-                    : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
-                )}
-                {hasJsonObject(event.payload) && (
-                  <details className="issue-run-inline-details">
-                    <summary>事件详情</summary>
-                    <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
-                  </details>
-                )}
-                <small className="muted">{formatDateTime(event.createdAt)}</small>
-              </article>
-            ))}
-          </div>
-        )}
-        {showLowValueEvents && lowValueEvents.length > 0 && (
-          <div className="issue-run-low-value-events">
-            {lowValueEvents.map((event) => (
-              <article className="agent-run-event compact" key={event.id}>
-                <div className="agent-run-event-header">
-                  <span>#{event.seq}</span>
-                  <strong>{event.eventType}</strong>
-                </div>
-                {event.message && <p className="muted">{event.message}</p>}
-              </article>
-            ))}
-          </div>
+        {!showEvents ? (
+          <p className="muted">事件已隐藏。</p>
+        ) : (
+          <>
+            {data.events.isLoading && <p className="muted">加载事件中...</p>}
+            {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+            {visibleEvents.length > 0 && (
+              <div className="agent-run-events">
+                {visibleEvents.map((event) => (
+                  <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
+                    <div className="agent-run-event-header">
+                      <span>#{event.seq}</span>
+                      <strong>{runEventLabel(event)}</strong>
+                      <Badge>{event.eventType}</Badge>
+                      {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                      {event.stream && <Badge>{event.stream}</Badge>}
+                    </div>
+                    {runEventBody(event) && (
+                      isTextRunEvent(event) && !isErrorRunEvent(event)
+                        ? <AgentReplyBody body={runEventBody(event)} />
+                        : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
+                    )}
+                    {hasJsonObject(event.payload) && (
+                      <details className="issue-run-inline-details">
+                        <summary>事件详情</summary>
+                        <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
+                      </details>
+                    )}
+                    <small className="muted">{formatDateTime(event.createdAt)}</small>
+                  </article>
+                ))}
+              </div>
+            )}
+            {showLowValueEvents && lowValueEvents.length > 0 && (
+              <div className="issue-run-low-value-events">
+                {lowValueEvents.map((event) => (
+                  <article className="agent-run-event compact" key={event.id}>
+                    <div className="agent-run-event-header">
+                      <span>#{event.seq}</span>
+                      <strong>{event.eventType}</strong>
+                    </div>
+                    {event.message && <p className="muted">{event.message}</p>}
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </section>
       <section className="issue-run-output-block">
@@ -877,6 +1110,33 @@ function IssueRunOutputPanel({
                 {operation.command && <p className="muted">{operation.command}</p>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
+                <div className="issue-run-operation-actions">
+                  <button
+                    className="secondary small-button"
+                    type="button"
+                    onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
+                  >
+                    {selectedOperationLogId === operation.id ? "收起步骤日志" : "查看该步骤日志"}
+                  </button>
+                  {operation.logBytes !== undefined && operation.logBytes !== null && (
+                    <span className="muted">{formatBytes(operation.logBytes)}</span>
+                  )}
+                </div>
+                {selectedOperationLogId === operation.id && (
+                  <div className="issue-run-operation-log">
+                    {isWorkspaceProvisionOperation(operation) && (
+                      <p className="muted">该日志为运行日志中的 workspace_provision 片段。</p>
+                    )}
+                    {operationLog.error && <ErrorNotice error={operationLog.error} />}
+                    <PaginatedLogView
+                      emptyText="暂无操作日志。"
+                      loadMore={(offset) => heartbeatApi.getWorkspaceOperationLog(operation.id, { offset })}
+                      loadingText="加载操作日志中..."
+                      log={operationLog}
+                      preClassName="issue-run-event-log"
+                    />
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -947,7 +1207,7 @@ export function IssuePage() {
   const [comment, setComment] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentUploadNotice, setAttachmentUploadNotice] = useState("");
-  const [attachmentUsage, setAttachmentUsage] = useState("attachment");
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
@@ -1230,17 +1490,18 @@ export function IssuePage() {
     },
   });
   const uploadAttachment = useMutation({
-    mutationFn: () => {
-      if (!attachmentFile) throw new Error("请选择附件文件");
+    mutationFn: (file?: File) => {
+      const selectedFile = file ?? attachmentFile;
+      if (!selectedFile) throw new Error("请选择附件文件");
       return issuesApi.uploadAttachment(orgId, issueId, {
-        file: attachmentFile,
-        usage: attachmentUsage.trim() || "attachment",
+        file: selectedFile,
+        usage: "attachment",
       });
     },
-    onSuccess: () => {
-      setAttachmentUploadNotice(`已上传 ${attachmentFile?.name ?? "附件"}`);
+    onSuccess: (_, file) => {
+      setAttachmentUploadNotice(`已上传 ${file?.name ?? attachmentFile?.name ?? "附件"}`);
       setAttachmentFile(null);
-      setAttachmentUsage("attachment");
+      setAttachmentMenuOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["issue-attachments", issueId] });
     },
     onMutate: () => {
@@ -1265,12 +1526,11 @@ export function IssuePage() {
     if (comment.trim()) addComment.mutate();
   }
   function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
-    setAttachmentFile(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+    setAttachmentFile(file);
     setAttachmentUploadNotice("");
-  }
-  function submitAttachment(event: FormEvent) {
-    event.preventDefault();
-    if (attachmentFile) uploadAttachment.mutate();
+    if (file) uploadAttachment.mutate(file);
+    event.target.value = "";
   }
   function submitSubIssue(event: FormEvent) {
     event.preventDefault();
@@ -1518,80 +1778,72 @@ export function IssuePage() {
 
             <IssueDocumentsPanel issueId={issueId} />
 
-            <IssueWorkProductsPanel issue={issue.data} />
-
-            <section aria-label="附件" className="issue-section-card">
-              <div className="issue-section-heading">
-                <h2>附件</h2>
-                <span className="muted">{attachments.data?.length ?? 0}</span>
-              </div>
-              {attachments.error && <ErrorNotice error={attachments.error} />}
-              {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
-              {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
-              {uploadAttachment.isPending && attachmentFile && (
-                <p className="issue-upload-status" role="status">正在上传 {attachmentFile.name}...</p>
-              )}
-              {!uploadAttachment.isPending && attachmentUploadNotice && (
-                <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
-              )}
-              {attachments.isSuccess && attachments.data.length === 0 && <p className="muted">暂无附件。</p>}
-              {attachments.data && attachments.data.length > 0 && (
-                <div className="issue-attachment-list">
-                  {attachments.data.map((attachment) => (
-                    <article className="issue-attachment-item" key={attachment.id}>
-                      <div>
-                        <strong>{attachment.originalFilename ?? attachment.id}</strong>
-                        <p className="muted">附件 · {attachment.usage} · {attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
-                        <details className="storage-object-details">
-                          <summary>存储对象</summary>
-                          <dl className="issue-work-product-details">
-                            <div><dt>provider</dt><dd>{attachment.provider}</dd></div>
-                            <div><dt>大小</dt><dd>{formatBytes(attachment.byteSize)}</dd></div>
-                            <div><dt>contentType</dt><dd>{attachment.contentType}</dd></div>
-                            <div><dt>sha256</dt><dd>{attachment.sha256}</dd></div>
-                          </dl>
-                        </details>
-                      </div>
-                      <div className="issue-attachment-actions">
-                        {attachment.contentPath ? (
-                          <a className="button secondary small-button" href={attachment.contentPath}>下载</a>
-                        ) : (
-                          <span className="download-unavailable">不可下载</span>
-                        )}
-                        <button
-                          className="danger small-button"
-                          disabled={deleteAttachment.isPending}
-                          onClick={() => deleteAttachment.mutate(attachment.id)}
-                          type="button"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-              <form className="form issue-attachment-form" onSubmit={submitAttachment}>
-                <label>
-                  附件文件
-                  <input onChange={selectAttachment} type="file" />
-                </label>
-                <label>
-                  用途
-                  <input value={attachmentUsage} onChange={(event) => setAttachmentUsage(event.target.value)} />
-                </label>
-                <button disabled={!attachmentFile || uploadAttachment.isPending} type="submit">上传附件</button>
-              </form>
-            </section>
+            <IssueWorkProductsPanel issue={issue.data} latestRunStatus={latestRun?.status} />
 
             <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
                 <h2>动态</h2>
                 <span className="muted">
-                  {comments.data?.length ?? 0} 条记录
+                  {comments.data?.length ?? 0} 条评论 · {attachments.data?.length ?? 0} 个文件
                 </span>
               </div>
               {comments.error && <ErrorNotice error={comments.error} />}
+              {attachments.error && <ErrorNotice error={attachments.error} />}
+              {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
+              {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
+              <section aria-label="附件" className="issue-attachments-inline">
+                {uploadAttachment.isPending && attachmentFile && (
+                  <p className="issue-upload-status" role="status">正在上传 {attachmentFile.name}...</p>
+                )}
+                {!uploadAttachment.isPending && attachmentUploadNotice && (
+                  <p className="issue-upload-status success" role="status">{attachmentUploadNotice}</p>
+                )}
+                {attachments.isLoading && <p className="muted">加载附件中...</p>}
+                {attachments.data?.length ? (
+                  <div className="issue-attachment-list">
+                    {attachments.data.map((attachment) => (
+                      <article className="issue-attachment-item" key={attachment.id}>
+                        <div className="issue-attachment-content">
+                          {attachment.contentPath ? (
+                            <a
+                              className="issue-attachment-title"
+                              href={attachment.contentPath}
+                              rel="noreferrer"
+                              target="_blank"
+                              title={attachment.originalFilename ?? attachment.id}
+                            >
+                              {attachment.originalFilename ?? attachment.id}
+                            </a>
+                          ) : (
+                            <strong>{attachment.originalFilename ?? attachment.id}</strong>
+                          )}
+                          <p className="muted">{attachment.contentType} · {formatBytes(attachment.byteSize)}</p>
+                          {attachment.contentPath && attachment.contentType.startsWith("image/") && (
+                            <a href={attachment.contentPath} rel="noreferrer" target="_blank">
+                              <img
+                                alt={attachment.originalFilename ?? "附件"}
+                                className="issue-attachment-preview"
+                                loading="lazy"
+                                src={attachment.contentPath}
+                              />
+                            </a>
+                          )}
+                        </div>
+                        <button
+                          aria-label={`删除 ${attachment.originalFilename ?? attachment.id}`}
+                          className="danger small-button"
+                          disabled={deleteAttachment.isPending}
+                          onClick={() => deleteAttachment.mutate(attachment.id)}
+                          title="删除附件"
+                          type="button"
+                        >
+                          删除
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
               <div className="issue-activity-list">
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
@@ -1609,6 +1861,24 @@ export function IssuePage() {
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required />
                 </label>
                 <div className="issue-comment-actions">
+                  <div className="issue-attachment-menu-anchor">
+                    <button
+                      className="secondary small-button"
+                      disabled={uploadAttachment.isPending}
+                      onClick={() => setAttachmentMenuOpen((open) => !open)}
+                      type="button"
+                    >
+                      {uploadAttachment.isPending ? "上传中..." : "添加附件"}
+                    </button>
+                    {attachmentMenuOpen && (
+                      <div className="issue-attachment-popover" role="menu">
+                        <label className="issue-attachment-popover-item">
+                          上传本地文件
+                          <input onChange={selectAttachment} type="file" />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                   <button type="submit">发送评论</button>
                 </div>
               </form>

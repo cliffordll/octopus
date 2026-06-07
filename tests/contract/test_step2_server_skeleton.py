@@ -25,7 +25,7 @@ def test_orgs_route_requires_actor_context() -> None:
 
 
 def test_server_command_starts_uvicorn_with_configured_bindings(
-    monkeypatch: MonkeyPatch,
+    monkeypatch: MonkeyPatch, tmp_path
 ) -> None:
     recorded: dict[str, object] = {}
 
@@ -36,6 +36,8 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
     monkeypatch.setenv("OCTOPUS_HOST", "0.0.0.0")
     monkeypatch.setenv("OCTOPUS_PORT", "9123")
     monkeypatch.setenv("OCTOPUS_LOG_LEVEL", "debug")
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test-instance")
     monkeypatch.setattr("uvicorn.run", fake_run)
 
     server.main()
@@ -46,3 +48,11 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
         "port": 9123,
         "log_level": "debug",
     }
+    assert (
+        tmp_path
+        / "octopus-home"
+        / "instances"
+        / "test-instance"
+        / "logs"
+        / "octopus.log"
+    ).exists()

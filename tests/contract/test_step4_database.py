@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool.impl import AsyncAdaptedQueuePool
 
 from packages.database.clients import (
     async_transaction,
@@ -157,6 +158,18 @@ async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_sqlite_file_engine_uses_default_async_queue_pool(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "cancel-safe.db"
+    engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        assert isinstance(engine.sync_engine.pool, AsyncAdaptedQueuePool)
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     eng = create_database_engine("sqlite+aiosqlite:///:memory:")
@@ -213,6 +226,25 @@ async def test_list_organizations_returns_seeded(session: AsyncSession) -> None:
     rows = await list_organizations(session)
     assert len(rows) == 1
     assert rows[0].url_key == "acme"
+
+
+async def test_list_organizations_orders_newest_first(session: AsyncSession) -> None:
+    older = Organization(
+        url_key="older",
+        name="Older",
+        issue_prefix="OLD",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    newer = Organization(
+        url_key="newer",
+        name="Newer",
+        issue_prefix="NEW",
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    async with async_transaction(session):
+        session.add_all([older, newer])
+    rows = await list_organizations(session)
+    assert [row.url_key for row in rows] == ["newer", "older"]
 
 
 async def test_list_org_issues_filters_by_org(session: AsyncSession) -> None:

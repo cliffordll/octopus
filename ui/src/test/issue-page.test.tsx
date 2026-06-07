@@ -55,7 +55,11 @@ it("shows an issue and records comments and review decisions", async () => {
         isPrimary: true,
         healthStatus: "healthy",
         summary: "实现登录流程并等待 review",
-        metadata: null,
+        metadata: {
+          source: "execution_workspace_scan",
+          workspacePath: "docs/login-flow.md",
+          workspaceBrowserPath: "artifacts/issues/issue-1/runs/run-1/login.md",
+        },
         createdByRunId: "run-1",
         createdAt: "2026-05-28T09:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
@@ -262,14 +266,21 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/issues/issue-1",
     expect.objectContaining({ method: "PATCH", body: JSON.stringify({ priority: "critical" }) }),
   );
-  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("登录流程 PR");
-  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("运行摘要");
-  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("pull_request");
-  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("UI 只展示下载入口");
-  expect(screen.getByRole("link", { name: "下载产物文件" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("登录流程 PR");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("运行摘要");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("pull_request");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("运行产物");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("技术详情");
+  expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("下载只读取 contentPath");
+  expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
+  expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/workspaces?path=artifacts%2Fissues%2Fissue-1%2Fruns%2Frun-1%2Flogin.md",
+  );
   expect(screen.getByRole("link", { name: "预览内容" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
-  expect(screen.getByRole("link", { name: "打开产物" })).toHaveAttribute("href", "https://example.com/pr/42");
-  expect(screen.getByRole("region", { name: "工作产物" })).toHaveTextContent("不可下载");
+  expect(screen.getByRole("link", { name: "打开运行产物" })).toHaveAttribute("href", "https://example.com/pr/42");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("不可下载");
   expect(await screen.findByRole("region", { name: "任务文档" })).toHaveTextContent("执行计划");
   expect(await screen.findByDisplayValue("## 执行步骤")).toBeInTheDocument();
   await userEvent.click(within(screen.getByRole("region", { name: "任务文档" })).getByRole("button", { name: "隐藏" }));
@@ -306,8 +317,11 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/work-products/wp-2",
     expect.objectContaining({ method: "DELETE" }),
   );
-  expect(await screen.findByRole("region", { name: "附件" })).toHaveTextContent("note.txt");
-  expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-1/content");
+  const activityRegion = await screen.findByRole("region", { name: "动态" });
+  const attachmentRegion = await screen.findByRole("region", { name: "附件" });
+  expect(attachmentRegion).toHaveTextContent("note.txt");
+  expect(activityRegion).toHaveTextContent("1 个文件");
+  expect(within(attachmentRegion).getByRole("link", { name: "note.txt" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
@@ -320,15 +334,15 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 
-  await userEvent.upload(screen.getByLabelText("附件文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
-  await userEvent.click(screen.getByRole("button", { name: "上传附件" }));
+  await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
+  await userEvent.upload(screen.getByLabelText("上传本地文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
   expect(await screen.findByRole("status")).toHaveTextContent("已上传 upload.txt");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/issues/issue-1/attachments",
     expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "删除" }));
+  await userEvent.click(within(attachmentRegion).getByRole("button", { name: "删除 note.txt" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/attachments/attachment-1",
     expect.objectContaining({ method: "DELETE" }),
@@ -429,6 +443,18 @@ it("executes an assigned issue through the issue execution route", async () => {
           status: "queued",
           createdAt: "2026-06-02T10:00:00Z",
         },
+        {
+          id: "run-0",
+          orgId: "org-1",
+          agentId: "agent-1",
+          issueId: "issue-1",
+          issueIdentifier: "OCT-1",
+          issueTitle: "实现登录流程",
+          invocationSource: "assignment",
+          status: "succeeded",
+          createdAt: "2026-06-02T09:00:00Z",
+          resultJson: { summary: "早期运行" },
+        },
       ] : []);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
@@ -512,8 +538,20 @@ it("executes an assigned issue through the issue execution route", async () => {
         { id: 9, runId: "run-1", agentId: "agent-1", seq: 9, eventType: "issue_execution_promoted", message: "promoted", createdAt: "2026-06-02T10:00:08Z" },
       ]);
     }
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
+      return respond({ content: "persisted run log", endOffset: 17, eof: false, nextOffset: 17 });
+    }
+    if (path === "/api/heartbeat-runs/run-1/log?offset=17" && init?.method === "GET") {
+      return respond({ content: "\ncontinued run log", endOffset: 35, eof: true });
+    }
     if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") {
-      return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "setup", status: "running", command: "npm test", stdoutExcerpt: "workspace output" }]);
+      return respond([{ id: "op-1", orgId: "org-1", heartbeatRunId: "run-1", phase: "workspace_provision", status: "running", command: "npm test", stdoutExcerpt: "workspace output", logBytes: 40 }]);
+    }
+    if (path === "/api/workspace-operations/op-1/log" && init?.method === "GET") {
+      return respond({ content: "operation log", endOffset: 13, eof: false, nextOffset: 13 });
+    }
+    if (path === "/api/workspace-operations/op-1/log?offset=13" && init?.method === "GET") {
+      return respond({ content: "\ncontinued operation log", endOffset: 37, eof: true });
     }
     if (path === "/api/heartbeat-runs/run-1/cancel" && init?.method === "POST") {
       return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", invocationSource: "assignment", status: "cancelled" });
@@ -543,12 +581,26 @@ it("executes an assigned issue through the issue execution route", async () => {
   );
   expect(await screen.findByRole("region", { name: "运行记录" })).toHaveTextContent("运行输出摘要");
   expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("等待执行");
+  const runRecords = screen.getByRole("region", { name: "运行记录" }).textContent ?? "";
+  expect(runRecords.indexOf("run-0")).toBeLessThan(runRecords.indexOf("run-1"));
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   expect(await screen.findByRole("region", { name: "执行输出" })).toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("persisted run log");
+  await userEvent.click(screen.getByRole("button", { name: "隐藏运行日志" }));
+  expect(screen.getByText("运行日志已隐藏。")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).not.toHaveTextContent("persisted run log");
+  await userEvent.click(screen.getByRole("button", { name: "显示运行日志" }));
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("persisted run log");
+  await userEvent.click(screen.getByRole("button", { name: "加载更多日志" }));
+  expect(await screen.findByText(/continued run log/)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-1/log?offset=17",
+    expect.objectContaining({ method: "GET" }),
+  );
   expect(screen.getByRole("heading", { name: "运行详情" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "事件" })).toBeInTheDocument();
   expect(screen.getByText("查看 result/context/usage")).toBeInTheDocument();
@@ -558,6 +610,11 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByText("缺少评审结论")).toBeInTheDocument();
   expect(screen.getByText("补充关闭信号")).toBeInTheDocument();
   expect(screen.getByText("延期任务已恢复执行")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "隐藏事件" }));
+  expect(screen.getByText("事件已隐藏。")).toBeInTheDocument();
+  expect(screen.queryByText("已入队")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /显示事件/ }));
+  expect(screen.getByText("已入队")).toBeInTheDocument();
   expect(screen.getByText("Agent 正在处理任务")).toBeInTheDocument();
   expect(screen.getByText(/长回复内容/)).toBeInTheDocument();
   expect(screen.queryByText(/最终结论/)).not.toBeInTheDocument();
@@ -569,9 +626,18 @@ it("executes an assigned issue through the issue execution route", async () => {
   await userEvent.click(screen.getByRole("button", { name: "展开" }));
   expect(screen.getByText("queued output")).toBeInTheDocument();
   expect(screen.getByText("workspace output")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "查看该步骤日志" }));
+  expect(screen.getByText("该日志为运行日志中的 workspace_provision 片段。")).toBeInTheDocument();
+  expect((await screen.findAllByText("operation log")).length).toBeGreaterThan(0);
+  await userEvent.click(screen.getByRole("button", { name: "加载更多日志" }));
+  expect(await screen.findByText(/continued operation log/)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/workspace-operations/op-1/log?offset=13",
+    expect.objectContaining({ method: "GET" }),
+  );
   await userEvent.click(screen.getByRole("button", { name: /显示低价值事件/ }));
   expect(screen.getByText("low value")).toBeInTheDocument();
-  expect(fetchMock).not.toHaveBeenCalledWith(
+  expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-1/log",
     expect.objectContaining({ method: "GET" }),
   );
@@ -630,7 +696,10 @@ it("refreshes server registered work products when an issue run succeeds", async
     isPrimary: false,
     healthStatus: "healthy",
     summary: "server 登记的生成文件",
-    metadata: null,
+    metadata: {
+      source: "organization_artifacts_scan",
+      workspacePath: "artifacts/readme-title.md",
+    },
     createdByRunId: "run-1",
     createdAt: "2026-06-04T10:00:00Z",
     updatedAt: "2026-06-04T10:00:00Z",
@@ -677,9 +746,11 @@ it("refreshes server registered work products when an issue run succeeds", async
   renderApp("/orgs/org-1/issues/issue-1");
   await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
 
-  expect(await screen.findByText("README 标题文档")).toBeInTheDocument();
+  expect((await screen.findAllByText("README 标题文档"))[0]).toBeInTheDocument();
   expect(screen.getByText("server 登记的生成文件")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "下载产物文件" })).toHaveAttribute("href", "/api/assets/asset-generated/content");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("organization_artifacts_scan");
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("artifacts/readme-title.md");
+  expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-generated/content");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/work-products",
     expect.objectContaining({ method: "GET" }),
@@ -765,6 +836,65 @@ it("allows re-executing an issue after the latest run failed", async () => {
   );
 });
 
+it("hides the live stream log when it duplicates the persisted run log", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-10",
+    title: "同步日志展示",
+    description: "避免重复日志",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 10,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+      return respond([{ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "running", createdAt: "2026-06-02T10:00:00Z" }]);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path.startsWith("/api/heartbeat-runs/run-1/stream") && init?.method === "GET") {
+      return respondStream([{ type: "log", content: "same log", nextOffset: 8, eof: false }]);
+    }
+    if (path === "/api/heartbeat-runs/run-1" && init?.method === "GET") return respond({ id: "run-1", orgId: "org-1", agentId: "agent-1", status: "running" });
+    if (path === "/api/heartbeat-runs/run-1/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") return respond({ content: "same log", endOffset: 8, eof: true });
+    if (path === "/api/heartbeat-runs/run-1/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByRole("heading", { name: "运行日志" })).toBeInTheDocument();
+  expect(await screen.findByText("same log")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "实时日志增量" })).not.toBeInTheDocument();
+});
+
 it("shows repeat execution after the latest run succeeded", async () => {
   const issue = {
     id: "issue-1",
@@ -828,6 +958,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "运行记录" })).toHaveTextContent("run-succeeded");
   expect(screen.getByText("运行：成功")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
 });
 
 it("refreshes issue runs when execute returns no new run id", async () => {

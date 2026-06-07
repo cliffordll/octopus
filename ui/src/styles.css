@@ -1607,6 +1607,35 @@ small {
   overflow-wrap: anywhere;
 }
 
+.project-workspace-fallback {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.14), rgba(15, 23, 42, 0.6));
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.project-workspace-fallback strong {
+  color: #f8d99b;
+  font-size: 12px;
+}
+
+.project-workspace-fallback span,
+.project-workspace-empty {
+  color: #9aa6b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.project-workspace-empty {
+  background: #111722;
+  border: 1px dashed #2b374b;
+  border-radius: 10px;
+  margin: 0;
+  padding: 12px;
+}
+
 .project-workspace-list,
 .issue-work-product-list {
   display: flex;
@@ -1856,6 +1885,7 @@ small {
   flex-basis: 14px;
   font-size: 14px;
   height: auto;
+  margin-left: auto;
   width: 14px;
 }
 
@@ -3834,17 +3864,13 @@ button.danger {
 
 .issue-comment-form {
   border-top: 1px solid #202a3b;
+  display: grid;
+  gap: 12px;
   padding-top: 14px;
 }
 
-.issue-attachment-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .issue-attachment-item {
-  align-items: center;
+  align-items: flex-start;
   background: #111722;
   border: 1px solid #263246;
   border-radius: 12px;
@@ -3854,17 +3880,103 @@ button.danger {
   padding: 12px;
 }
 
+.issue-activity-attachment {
+  border-style: dashed;
+}
+
 .issue-attachment-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
-.issue-attachment-form {
-  border-top: 1px solid #202a3b;
+.issue-attachment-summary-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.issue-attachments-inline {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
-  padding-top: 14px;
+}
+
+.issue-attachment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.issue-attachment-content {
+  min-width: 0;
+}
+
+.issue-attachment-title {
+  color: #d7deea;
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-attachment-title:hover {
+  text-decoration: underline;
+}
+
+.issue-attachment-preview {
+  background: #0a1018;
+  border: 1px solid #263246;
+  border-radius: 8px;
+  display: block;
+  margin-top: 8px;
+  max-height: 220px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.issue-attachment-menu-anchor {
+  position: relative;
+}
+
+.issue-attachment-popover {
+  background: #0f1724;
+  border: 1px solid #263246;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 30%);
+  min-width: 180px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+}
+
+.issue-attachment-popover-item {
+  align-items: center;
+  border-radius: 8px;
+  color: #d7deea;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.issue-attachment-popover-item:hover {
+  background: #172033;
+}
+
+.issue-attachment-popover-item input {
+  display: none;
+}
+
+.issue-comment-attachment-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px);
 }
 
 .issue-upload-status {
@@ -3895,6 +4007,7 @@ button.danger {
 .issue-work-product-card strong {
   color: #e8edf5;
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .issue-work-product-card p {
@@ -3902,6 +4015,22 @@ button.danger {
   font-size: 13px;
   line-height: 1.5;
   margin: 4px 0 0;
+}
+
+.issue-work-product-title-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.issue-work-product-title-row > div {
+  min-width: 0;
+}
+
+.issue-work-product-title-row .badge {
+  flex-shrink: 0;
 }
 
 .issue-comment-actions {
@@ -6048,6 +6177,12 @@ pre {
   margin: 0;
 }
 
+.agent-skill-selection-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .agent-skill-install-card label {
   color: #8792a6;
   display: flex;
@@ -6066,6 +6201,24 @@ pre {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.agent-skill-current-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-skill-current-list code {
+  background: #111722;
+  border: 1px solid #2b3548;
+  border-radius: 999px;
+  color: #cdd8e8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 9px;
 }
 
 .skill-yaml-textarea {

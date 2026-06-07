@@ -18,6 +18,13 @@ def apply_runtime_context_env(
     if not isinstance(workspace_context, dict):
         workspace_context = {}
 
+    for key in (
+        "RUDDER_CONVERSATION_ARTIFACTS_DIR",
+        "RUDDER_ISSUE_ARTIFACTS_DIR",
+        "RUDDER_RUN_ARTIFACTS_DIR",
+    ):
+        env.pop(key, None)
+
     env["RUDDER_AGENT_ID"] = context.agent_id
     env["RUDDER_ORG_ID"] = context.org_id
     env["RUDDER_RUN_ID"] = context.run_id

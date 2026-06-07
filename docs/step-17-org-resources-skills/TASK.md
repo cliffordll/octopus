@@ -142,7 +142,7 @@ Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时
   - `POST /api/orgs/{orgId}/skills/scan-local`
   - `POST /api/orgs/{orgId}/skills/{skillId}/install-update`
   - `DELETE /api/orgs/{orgId}/skills/{skillId}`
-- 本地 organization skill 文件落盘到 `.octopus/workspaces/org_<orgId>/skills/<slug>/SKILL.md`。
+- 本地 organization skill 文件落盘到 Octopus instance home 下的 `organizations/<orgId>/workspaces/skills/<slug>/SKILL.md`。
 - 已支持本地外部 skill source 闭环：
   - `import` 从一个包含 `SKILL.md` 的本地目录导入，复制为组织内副本，持久化 `sourceType=local_path`、`sourceLocator=<源目录>`、`sourceRef=<源内容 hash>` 和 `metadata.sourceKind=local_import`。
   - `scan-local` 扫描本地 root 下包含 `SKILL.md` 的 skill package，返回候选；可用 `importDiscovered=true` 导入未导入候选。

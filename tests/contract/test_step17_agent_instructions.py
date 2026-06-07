@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, Agent, Base, Organization
 from server.app import create_app
+from server.services.workspace_paths import resolve_octopus_instance_root
 
 
 DEFAULT_INSTRUCTIONS_FILES = [
@@ -108,8 +109,9 @@ async def _seed_agent(factory: async_sessionmaker, root_path: Path) -> tuple[str
     root = (
         root_path
         / ".octopus"
+        / "organizations"
+        / org_id
         / "workspaces"
-        / f"org_{org_id}"
         / "agents"
         / "agent"
         / "instructions"
@@ -207,6 +209,43 @@ async def test_agent_instructions_bundle_read_write_delete_and_activity(
     ]
 
 
+async def test_agent_instructions_bundle_edit_records_config_revision(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    """Editing the instructions bundle config must record an agent config
+    revision.
+
+    Regression: instruction edits persisted ``agent_runtime_config`` through the
+    database-layer ``update_agent`` directly, bypassing the service-layer
+    revision recording, so the config version history stayed empty.
+    """
+
+    application, factory, root_path = app
+    org_id, agent_id = await _seed_agent(factory, root_path)
+
+    before_code, before = await _request(
+        application, "GET", f"/api/agents/{agent_id}/config-revisions"
+    )
+    assert before_code == 200
+    assert before == []
+
+    patch_code, _bundle = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent_id}/instructions-bundle",
+        json_body={"entryFile": "MEMORY.md"},
+    )
+    assert patch_code == 200
+
+    after_code, revisions = await _request(
+        application, "GET", f"/api/agents/{agent_id}/config-revisions"
+    )
+    assert after_code == 200
+    assert len(revisions) == 1
+    assert revisions[0]["source"] == "instructions_bundle_patch"
+    assert "agentRuntimeConfig" in revisions[0]["changedKeys"]
+
+
 async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
@@ -255,6 +294,111 @@ async def test_agent_instructions_file_read_reconciles_legacy_prompt_template(
     assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
 
 
+async def test_agent_instructions_bundle_rehomes_stale_managed_root(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, root_path = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    stale_root = root_path / "old-home" / "agents" / "rehomed-agent" / "instructions"
+    stale_root.mkdir(parents=True)
+    stale_root.joinpath("SOUL.md").write_text("# Stale Soul\n", encoding="utf-8")
+    stale_root.joinpath("MEMORY.md").write_text("Carry this forward.", encoding="utf-8")
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="rehome-instructions-org",
+                name="Rehome Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Rehomed Agent",
+                workspace_key="rehomed-agent",
+                role="individual_contributor",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "instructionsRootPath": str(stale_root),
+                    "instructionsEntryFile": "SOUL.md",
+                    "instructionsFilePath": str(stale_root / "SOUL.md"),
+                },
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+    async with factory() as session:
+        row = await session.get(Agent, agent_id)
+        assert row is not None
+        config = row.agent_runtime_config
+
+    expected_root = (
+        resolve_octopus_instance_root()
+        / "organizations"
+        / org_id
+        / "workspaces"
+        / "agents"
+        / "rehomed-agent"
+        / "instructions"
+    ).resolve()
+    assert bundle_code == 200
+    assert bundle["rootPath"] == str(expected_root)
+    assert config["instructionsRootPath"] == str(expected_root)
+    assert config["instructionsFilePath"] == str(expected_root / "SOUL.md")
+    assert (expected_root / "SOUL.md").read_text(encoding="utf-8") == "# Stale Soul\n"
+    assert (expected_root / "MEMORY.md").read_text(
+        encoding="utf-8"
+    ) == "Carry this forward."
+
+
+async def test_agent_instructions_managed_root_preserves_workspace_key(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _ = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="workspace-key-org",
+                name="Workspace Key Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="CEO 1",
+                workspace_key="ceo-1--623d0e91",
+                role="individual_contributor",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={
+                    "instructionsBundleMode": "managed",
+                    "promptTemplate": "# Soul",
+                },
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+
+    assert bundle_code == 200
+    assert "/agents/ceo-1--623d0e91/instructions" in bundle["rootPath"].replace(
+        "\\", "/"
+    )
+
+
 async def test_agent_instructions_bundle_reconciles_empty_default_files(
     app: tuple[FastAPI, async_sessionmaker, Path],
 ) -> None:
@@ -264,8 +408,9 @@ async def test_agent_instructions_bundle_reconciles_empty_default_files(
     root = (
         root_path
         / ".octopus"
+        / "organizations"
+        / org_id
         / "workspaces"
-        / f"org_{org_id}"
         / "agents"
         / "ceo"
         / "instructions"

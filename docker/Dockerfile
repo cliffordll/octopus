@@ -45,7 +45,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     HOME=/data
 
 # /data 同时承载 sqlite 库文件与 per-agent runtime home
-# （.octopus/runtime-homes 建在进程 CWD 下，故 WORKDIR 指向 /data）。
+# （Octopus 本地状态默认建在 OCTOPUS_HOME/instances/<id> 下，故 WORKDIR 指向 /data）。
 RUN mkdir -p /data
 VOLUME ["/data"]
 WORKDIR /data

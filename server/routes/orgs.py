@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from packages.shared.api_paths.issues import ORG_ISSUE_LIST_MISSING_ORG_PATH
 from packages.shared.api_paths.organizations import (
@@ -11,6 +11,10 @@ from packages.shared.api_paths.organizations import (
     ORG_LIST_PATH,
     ORG_RESOURCE_DETAIL_PATH,
     ORG_RESOURCE_LIST_PATH,
+    ORG_WORKSPACE_FILE_CONTENT_PATH,
+    ORG_WORKSPACE_FILE_PATH,
+    ORG_WORKSPACE_ARCHIVE_PATH,
+    ORG_WORKSPACE_FILES_PATH,
 )
 from packages.shared.types.organization import OrganizationDetail, OrganizationSummary
 from packages.shared.types.resource import OrganizationResource
@@ -29,7 +33,15 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.orgs import get_org_detail, get_org_service
+from ..dependencies.organization_workspace_browser import (
+    get_organization_workspace_browser_service,
+)
 from ..dependencies.resources import get_resource_service
+from ..services.organization_workspace_browser import (
+    OrganizationWorkspaceFileDetail,
+    OrganizationWorkspaceFileList,
+    OrganizationWorkspaceBrowserService,
+)
 from ..services.orgs import OrgService
 from ..services.resources import ResourceService
 
@@ -184,6 +196,84 @@ async def delete_org_resource(
             detail="Organization resource not found",
         )
     return deleted
+
+
+@router.get(ORG_WORKSPACE_FILES_PATH)
+async def list_org_workspace_files(
+    orgId: str,
+    path: str = "",
+    _: None = Depends(require_organization_access),
+    service: OrganizationWorkspaceBrowserService = Depends(
+        get_organization_workspace_browser_service
+    ),
+) -> OrganizationWorkspaceFileList:
+    return await service.list_files(orgId, path)
+
+
+@router.get(ORG_WORKSPACE_FILE_PATH)
+async def read_org_workspace_file(
+    orgId: str,
+    path: str = "",
+    _: None = Depends(require_organization_access),
+    service: OrganizationWorkspaceBrowserService = Depends(
+        get_organization_workspace_browser_service
+    ),
+) -> OrganizationWorkspaceFileDetail:
+    return await service.read_file(orgId, path)
+
+
+@router.get(ORG_WORKSPACE_FILE_CONTENT_PATH)
+async def read_org_workspace_file_content(
+    orgId: str,
+    path: str = "",
+    _: None = Depends(require_organization_access),
+    service: OrganizationWorkspaceBrowserService = Depends(
+        get_organization_workspace_browser_service
+    ),
+) -> Response:
+    workspace_file = await service.read_attachment_file(orgId, path)
+    if not workspace_file.content_type.lower().startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Workspace file is not an image preview",
+        )
+    headers = {
+        "Cache-Control": "private, max-age=60",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f'inline; filename="{workspace_file.original_filename.replace(chr(34), "")}"',
+    }
+    if workspace_file.content_type == "image/svg+xml":
+        headers["Content-Security-Policy"] = (
+            "sandbox; default-src 'none'; img-src 'self' data:; "
+            "style-src 'unsafe-inline'"
+        )
+    return Response(
+        content=workspace_file.content,
+        media_type=workspace_file.content_type,
+        headers=headers,
+    )
+
+
+@router.get(ORG_WORKSPACE_ARCHIVE_PATH)
+async def read_org_workspace_archive(
+    orgId: str,
+    path: str = "",
+    _: None = Depends(require_organization_access),
+    service: OrganizationWorkspaceBrowserService = Depends(
+        get_organization_workspace_browser_service
+    ),
+) -> Response:
+    archive_file = await service.read_archive_file(orgId, path)
+    filename = archive_file.original_filename.replace(chr(34), "")
+    return Response(
+        content=archive_file.content,
+        media_type=archive_file.content_type,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.get(ORG_DETAIL_PATH)
