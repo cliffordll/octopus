@@ -9,7 +9,7 @@
 | 1 | Agent skill 未启用 | 已修复 |
 | 2 | 组织工作区 legacy layout 可能导致 UI 文件树为空 | 已修复 |
 | 3 | Agent workspace home 未初始化 `life/`、`memory/`、`skills/` | 已修复 |
-| 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
+| 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复，Step 23 已改为上游式 instance db layout |
 | 5 | 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径 | 已修复 |
 | 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
 | 7 | Run logs 默认不在 instance `data/run-logs` 下 | 已修复 |
@@ -226,13 +226,13 @@ memory/
 
 ### 背景
 
-开发阶段常见启动方式是在仓库根目录使用默认 SQLite：
+旧版本开发阶段常见启动方式是在仓库根目录使用默认 SQLite：
 
 ```text
 D:\coding\octopus\octopus.db
 ```
 
-此时组织工作区、agent workspace home、runtime home、storage/logs 等本地文件也应该落在同一个开发数据根附近：
+当时组织工作区、agent workspace home、runtime home、storage/logs 等本地文件也应该落在同一个开发数据根附近：
 
 ```text
 D:\coding\octopus\.octopus
@@ -263,27 +263,30 @@ C:\Users\<user>\.octopus\instances\default\organizations\<orgId>\workspaces\agen
 
 ### 修复
 
+Step 23 后修复规则调整为对齐上游 instance layout：
+
 - 显式设置 `OCTOPUS_HOME` 时仍以显式配置为准。
-- 未设置 `OCTOPUS_HOME` 且 `OCTOPUS_DATABASE_URL` 是本地 SQLite 文件时，默认 Octopus home 改为数据库文件同级的 `.octopus/`。
-- 使用 PostgreSQL、`:memory:` 或无法解析本地 DB 文件时，才退回 `~/.octopus`。
+- 未设置 `OCTOPUS_HOME` 时，默认 Octopus home 是用户目录下的 `.octopus`，不再从数据库 URL 反推。
+- SQLite 默认 URL 由 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 生成，文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
+- 使用 PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须同时绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
 
 ### 验收
 
-仓库根目录开发启动时，默认路径应是：
+仓库根目录开发如果显式设置 `OCTOPUS_HOME=D:\coding\octopus\.octopus`，默认路径应是：
 
 ```text
-D:\coding\octopus\octopus.db
+D:\coding\octopus\.octopus\instances\default\db\octopus.db
 D:\coding\octopus\.octopus\instances\default\organizations\<orgId>\workspaces
 ```
 
 如果正式/桌面运行希望使用用户目录，需要同时设置：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/data/octopus.db"
 $env:OCTOPUS_HOME = "C:/Users/<user>/.octopus"
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/db/octopus.db"
 ```
 
-或者由启动器保证这两个值来自同一个 instance 数据根。
+或者由启动器只设置 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`，让 server 生成默认 SQLite URL。
 
 ## 5. 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径
 
