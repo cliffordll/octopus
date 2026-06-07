@@ -96,6 +96,43 @@ def test_agent_hire_posts_to_agent_hires() -> None:
     )
 
 
+def test_agent_hire_can_let_server_assign_role_sequence_name() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            201,
+            json={
+                "agent": {"id": "agent-1", "name": "engineer-1", "status": "idle"},
+                "approval": None,
+            },
+        )
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "hire",
+                "--org-id",
+                "org-1",
+                "--role",
+                "engineer",
+                "--runtime",
+                "process",
+            ],
+            client=client,
+            stdout=io.StringIO(),
+        )
+        == 0
+    )
+    assert requests[0].url.path == "/api/orgs/org-1/agent-hires"
+    assert requests[0].read() == (
+        b'{"role":"engineer","agentRuntimeType":"process","agentRuntimeConfig":{}}'
+    )
+
+
 def test_agent_bootstrap_ceo_only_creates_for_empty_organization() -> None:
     requests: list[httpx.Request] = []
 

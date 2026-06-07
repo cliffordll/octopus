@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
+from anyio import CancelScope
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -48,11 +50,14 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.chats import get_chat_service
+from ..services.chat_generation_locks import (
+    cancel_active_chat_generation,
+    claim_chat_generation,
+)
 from ..services.chats import ChatAvailabilityError, ChatService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["chats"])
-_ACTIVE_STREAM_CANCEL_EVENTS: dict[str, asyncio.Event] = {}
 
 
 async def _get_conversation_or_404(
@@ -437,14 +442,13 @@ async def add_chat_message_stream_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
 
-    if id in _ACTIVE_STREAM_CANCEL_EVENTS:
+    cancel_event = asyncio.Event()
+    release_generation = claim_chat_generation(id, cancel_event)
+    if release_generation is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A chat reply is already being generated for this conversation",
         )
-
-    cancel_event = asyncio.Event()
-    _ACTIVE_STREAM_CANCEL_EVENTS[id] = cancel_event
 
     async def event_stream():
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -453,19 +457,38 @@ async def add_chat_message_stream_route(
             await queue.put(event)
 
         async def run_reply() -> CreatedChatMessages:
-            async with session_factory() as session:
+            session = session_factory()
+            try:
                 service = ChatService(session)
-                try:
-                    return await service.add_message_and_reply(
-                        id,
-                        payload,
-                        cancel_event=cancel_event,
-                        on_stream_event=on_stream_event,
-                        commit_after_user_message=True,
-                    )
-                except Exception:
+                result = await service.add_message_and_reply(
+                    id,
+                    payload,
+                    cancel_event=cancel_event,
+                    on_stream_event=on_stream_event,
+                    commit_after_user_message=True,
+                )
+                with CancelScope(shield=True):
+                    await session.commit()
+                return result
+            except BaseException:
+                with CancelScope(shield=True):
                     await session.rollback()
-                    raise
+                raise
+            finally:
+                with CancelScope(shield=True):
+                    await session.close()
+
+        async def cancel_reply_task() -> None:
+            cancel_event.set()
+            if not task.done():
+                with contextlib.suppress(
+                    TimeoutError, asyncio.CancelledError, Exception
+                ):
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
         task = asyncio.create_task(run_reply())
         try:
@@ -481,12 +504,14 @@ async def add_chat_message_stream_route(
                 yield _stream_line(event)
             result = await task
             yield _stream_line({"type": "final", "messages": result["messages"]})
+        except asyncio.CancelledError:
+            await cancel_reply_task()
+            raise
         except Exception as exc:
-            if not task.done():
-                task.cancel()
+            await cancel_reply_task()
             yield _stream_line({"type": "error", "error": str(exc), "messageId": None})
         finally:
-            _ACTIVE_STREAM_CANCEL_EVENTS.pop(id, None)
+            release_generation()
 
     return StreamingResponse(
         event_stream(),
@@ -502,11 +527,7 @@ async def stop_chat_message_stream_route(
     service: ChatService = Depends(get_chat_service),
 ) -> dict[str, bool]:
     await _get_conversation_or_404(id, request=request, service=service)
-    cancel_event = _ACTIVE_STREAM_CANCEL_EVENTS.get(id)
-    if cancel_event is None:
-        return {"stopped": False}
-    cancel_event.set()
-    return {"stopped": True}
+    return {"stopped": cancel_active_chat_generation(id)}
 
 
 def _stream_line(event: dict[str, Any]) -> str:

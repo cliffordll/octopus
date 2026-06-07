@@ -5,6 +5,7 @@ import sys
 import threading
 from collections.abc import AsyncIterator, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -205,7 +206,9 @@ async def test_claude_local_executes_stream_json_and_normalizes_result(
     )
     assert "--verbose" in capture["argv"]
     assert capture["argv"][capture["argv"].index("--model") + 1] == "claude-test-model"
-    assert capture["prompt"] == "Respond from Claude."
+    assert capture["prompt"].startswith("Respond from Claude.")
+    assert "## Runtime Tool Capability" in capture["prompt"]
+    assert "Do not guess tool input schemas" in capture["prompt"]
     assert result.exit_code == 0
     assert result.session_id_after == "claude-session-1"
     assert result.usage_json == {
@@ -321,7 +324,7 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/claude_local/org-claude/agent-claude/home"
+        "octopus-home/instances/test/organizations/org-claude/claude-home/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
@@ -375,7 +378,10 @@ async def test_opencode_local_executes_jsonl_and_normalizes_result(tmp_path) -> 
     assert capture["argv"][capture["argv"].index("--format") + 1] == "json"
     assert capture["argv"][capture["argv"].index("--model") + 1] == "openai/gpt-5"
     assert capture["argv"][capture["argv"].index("--variant") + 1] == "default"
-    assert capture["prompt"] == "Respond from OpenCode."
+    assert capture["prompt"].startswith("Respond from OpenCode.")
+    assert "## Runtime Tool Capability" in capture["prompt"]
+    assert "Do not guess tool input schemas" in capture["prompt"]
+    assert "`bash` requires both `description` and `command`" in capture["prompt"]
     assert result.exit_code == 0
     assert result.session_id_after == "ses_123"
     assert result.usage_json == {
@@ -519,7 +525,7 @@ async def test_opencode_local_injects_desired_skills_into_managed_home(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
     )
     assert capture["skillText"] == "# Review\n\nReview code changes."
     assert result.result_json is not None
@@ -574,11 +580,55 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        ".octopus/runtime-homes/opencode_local/org-opencode/agent-opencode/home"
+        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] == capture["home"]
     assert capture["credential"] == "token=test\n"
+
+
+async def test_opencode_local_keeps_profile_cache_inside_managed_home(
+    tmp_path,
+) -> None:
+    capture_path = tmp_path / "opencode-profile-env.json"
+    fake_opencode = tmp_path / "fake_opencode.py"
+    fake_opencode.write_text(
+        "\n".join(
+            [
+                "import json, os",
+                "keys = ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME']",
+                "with open(os.environ['OCTOPUS_TEST_CAPTURE'], 'w', encoding='utf-8') as fh:",
+                "    json.dump({key: os.environ.get(key) for key in keys}, fh)",
+                "print(json.dumps({'type':'step_start','sessionID':'opencode-session'}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = OpenCodeLocalRuntimeAdapter()
+    await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-opencode-profile-env",
+            agent_id="agent-opencode",
+            org_id="org-opencode",
+            agent_name="OpenCode Agent",
+            config={
+                "command": sys.executable,
+                "args": [str(fake_opencode)],
+                "env": {"OCTOPUS_TEST_CAPTURE": str(capture_path)},
+            },
+            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+        )
+    )
+
+    capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    home = Path(capture["HOME"])
+    assert Path(capture["USERPROFILE"]) == home
+    assert Path(capture["APPDATA"]) == home / "AppData" / "Roaming"
+    assert Path(capture["LOCALAPPDATA"]) == home / "AppData" / "Local"
+    assert Path(capture["XDG_CONFIG_HOME"]) == home / ".config"
+    assert Path(capture["XDG_CACHE_HOME"]) == home / ".cache"
+    assert Path(capture["XDG_DATA_HOME"]) == home / ".local" / "share"
 
 
 async def test_opencode_local_syncs_opencode_config_into_managed_home(
@@ -609,11 +659,12 @@ async def test_opencode_local_syncs_opencode_config_into_managed_home(
     )
     managed_home = (
         tmp_path
-        / ".octopus"
-        / "runtime-homes"
-        / "opencode_local"
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
         / "org-opencode"
-        / "agent-opencode"
+        / "opencode-home"
         / "home"
     )
     managed_home.joinpath(".config", "opencode").mkdir(parents=True)

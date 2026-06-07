@@ -4,10 +4,13 @@ import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Awaitable, Callable
+import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 import uuid
 
+from alembic import command
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
@@ -16,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.migrations.runner import upgrade_to_head
+from packages.database.migrations.runner import _build_config, upgrade_to_head
 from packages.database.schema import AgentWakeupRequest, Base, Organization
 from server.app import create_app
 
@@ -203,6 +206,72 @@ async def test_upgrade_to_head_creates_agent_state_tables(tmp_path: Path) -> Non
         "agent_task_sessions",
         "agent_wakeup_requests",
     }
+
+
+def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -> None:
+    db_path = tmp_path / "agent-skill-backfill.db"
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    config = _build_config(database_url)
+    command.upgrade(config, "20260603_000016")
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            insert into organizations (
+                id, url_key, name, status, issue_prefix, issue_counter,
+                budget_monthly_cents, spent_monthly_cents,
+                require_board_approval_for_new_agents,
+                default_chat_issue_creation_mode
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "org-1",
+                "skill-backfill",
+                "Skill Backfill",
+                "active",
+                "SB",
+                0,
+                0,
+                0,
+                False,
+                "manual_approval",
+            ),
+        )
+        connection.execute(
+            """
+            insert into agents (
+                id, org_id, name, workspace_key, role, status,
+                agent_runtime_type, agent_runtime_config, runtime_config,
+                budget_monthly_cents, spent_monthly_cents, permissions
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "agent-1",
+                "org-1",
+                "Existing Agent",
+                "agent-existing",
+                "general",
+                "idle",
+                "process",
+                json.dumps({}),
+                json.dumps({}),
+                0,
+                0,
+                json.dumps({}),
+            ),
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            "select agent_id, skill_key from agent_enabled_skills"
+        ).fetchall()
+
+    assert rows == [("agent-1", "skills/control-plane")]
 
 
 def test_heartbeat_tables_match_step11c_boundary() -> None:
@@ -477,6 +546,43 @@ async def test_ceo_agent_can_request_hire_with_board_approval(
     assert body["approval"]["type"] == "hire_agent"
     assert body["approval"]["requestedByAgentId"] == ceo["id"]
     assert body["approval"]["requestedByUserId"] is None
+    assert body["agent"]["name"] == "engineer-1"
+    assert body["agent"]["reportsTo"] == ceo["id"]
+
+
+async def test_agent_hired_by_agent_uses_role_sequence_and_reports_to_creator(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-create-sequence")
+    _, ceo = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "CEO", "role": "ceo"},
+    )
+
+    first_code, first = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "System", "role": "engineer"},
+        headers={"x-test-agent-id": ceo["id"], "x-test-org-id": org_id},
+    )
+    second_code, second = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agent-hires",
+        json={"name": "Builder", "role": "engineer"},
+        headers={"x-test-agent-id": ceo["id"], "x-test-org-id": org_id},
+    )
+
+    assert first_code == 201
+    assert second_code == 201
+    assert first["agent"]["name"] == "engineer-1"
+    assert first["agent"]["reportsTo"] == ceo["id"]
+    assert second["agent"]["name"] == "engineer-2"
+    assert second["agent"]["reportsTo"] == ceo["id"]
 
 
 async def test_non_ceo_agent_cannot_request_hire_without_create_permission(
@@ -1288,7 +1394,10 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         "skills.bundled.enabled=false",
         "-",
     )
-    assert captured["stdin"] == b"Complete the assigned task."
+    prompt = captured["stdin"].decode("utf-8")
+    assert prompt.startswith("Complete the assigned task.")
+    assert "## Runtime Tool Capability" in prompt
+    assert "Do not guess tool input schemas" in prompt
     assert run["sessionIdAfter"] == "thread-11e"
     assert run["usageJson"] == {
         "inputTokens": 12,

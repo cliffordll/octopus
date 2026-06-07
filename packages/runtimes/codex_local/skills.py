@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..paths import ensure_managed_runtime_home
 from ..skills import skill_snapshot_from_root
 
 
@@ -40,12 +41,7 @@ def _codex_skills_home(config: dict[str, Any]) -> Path:
         org_id = _string(context.get("orgId")) or org_id
         agent_id = _string(context.get("agentId")) or agent_id
     return (
-        Path.cwd()
-        / ".octopus"
-        / "runtime-homes"
-        / "codex_local"
-        / org_id
-        / agent_id
+        ensure_managed_runtime_home("codex_local", org_id=org_id, agent_id=agent_id)
         / "skills"
     )
 

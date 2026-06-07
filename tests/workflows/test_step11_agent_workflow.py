@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -12,7 +13,13 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
-from packages.database.schema import ActivityLog, Base, Organization
+from packages.database.schema import (
+    ActivityLog,
+    Agent,
+    AgentEnabledSkill,
+    Base,
+    Organization,
+)
 
 
 @pytest.fixture
@@ -102,6 +109,107 @@ async def test_agent_lifecycle_writes_activity_and_prevents_reporting_cycle(
         "agent.resumed",
         "agent.terminated",
     ]
+
+
+async def test_agent_creation_defaults_control_plane_skill_unless_explicit(
+    session: AsyncSession,
+) -> None:
+    from server.services.agents import AgentService
+
+    org = await _seed_org(session)
+    service = AgentService(session)
+
+    async with async_transaction(session):
+        default_agent = await service.create_agent(
+            org.id,
+            {"name": "Default Skills"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+        explicit_empty_agent = await service.create_agent(
+            org.id,
+            {"name": "Explicit Empty", "desiredSkills": []},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert default_agent["desiredSkills"] == ["skills/control-plane"]
+    assert explicit_empty_agent["desiredSkills"] == []
+
+    rows = (
+        (
+            await session.execute(
+                select(AgentEnabledSkill).order_by(
+                    AgentEnabledSkill.agent_id, AgentEnabledSkill.skill_key
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [(row.agent_id, row.skill_key) for row in rows] == [
+        (default_agent["id"], "skills/control-plane")
+    ]
+
+
+async def test_agent_runtime_config_prepares_organization_skills_root(
+    session: AsyncSession, tmp_path, monkeypatch
+) -> None:
+    from server.services.agents import AgentService, prepare_agent_runtime_config
+
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+    org = await _seed_org(session)
+    service = AgentService(session)
+
+    async with async_transaction(session):
+        agent = await service.create_agent(
+            org.id,
+            {"name": "Runtime Config"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    row = (
+        await session.execute(select(Agent).where(Agent.id == agent["id"]))
+    ).scalar_one()
+    config = await prepare_agent_runtime_config(session, row)
+    skills_root = Path(config["skillsRootPath"])
+
+    assert skills_root.is_dir()
+    assert (
+        skills_root
+        == (
+            tmp_path
+            / "octopus-home"
+            / "instances"
+            / "test"
+            / "organizations"
+            / org.id
+            / "workspaces"
+            / "skills"
+        ).resolve()
+    )
+    assert config["_octopus"]["organizationSkillsRootPath"] == str(skills_root)
+    agent_skills_root = Path(config["_octopus"]["agentSkillsRootPath"])
+    expected_agents_root = (
+        tmp_path
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
+        / org.id
+        / "workspaces"
+        / "agents"
+    ).resolve()
+    assert agent_skills_root.parent.parent == expected_agents_root
+    assert agent_skills_root.name == "skills"
+    assert agent_skills_root.parent.name == row.workspace_key
+    agent_home = agent_skills_root.parent
+    assert (agent_home / "instructions").is_dir()
+    assert (agent_home / "skills").is_dir()
+    assert (agent_home / "life").is_dir()
+    assert (agent_home / "memory").is_dir()
 
 
 async def test_agent_config_revision_and_runtime_session_reset_write_activity(

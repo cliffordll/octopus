@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 import uuid
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import (
+    Agent,
     Approval,
     Base,
     ChatConversation,
@@ -184,6 +186,58 @@ async def test_messenger_threads_chat_detail_and_read_state(
     assert detail_code == 200
     assert detail["conversation"]["id"] == conversation_id
     assert detail["messages"][0]["body"].startswith("## 需求")
+
+    read_code, read_state = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/messenger/threads/chat:{conversation_id}/read",
+    )
+    assert read_code == 200
+    assert read_state["threadKey"] == f"chat:{conversation_id}"
+    assert read_state["lastReadAt"] is not None
+
+
+async def test_mark_chat_thread_read_with_routed_agent_and_last_message(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    """Marking a chat thread read must not crash when the conversation carries a
+    routed agent and a ``last_message_at`` timestamp.
+
+    Regression: SQLite returns naive datetimes for ``last_message_at`` while the
+    user state ``last_read_at`` is set to ``datetime.now(UTC)`` (aware). The
+    unread check compared the two directly and raised ``TypeError`` (HTTP 500).
+    """
+
+    application, factory = app
+    org_id = await _seed_org(factory)
+    agent_id = str(uuid.uuid4())
+    conversation_id = str(uuid.uuid4())
+
+    async with factory() as session:
+        session.add(Agent(id=agent_id, org_id=org_id, name="Worker"))
+        session.add(
+            ChatConversation(
+                id=conversation_id,
+                org_id=org_id,
+                title="Routed chat",
+                status="active",
+                routed_agent_id=agent_id,
+                preferred_agent_id=agent_id,
+                last_message_at=datetime.now(UTC),
+                created_by_user_id="local-board",
+            )
+        )
+        session.add(
+            ChatMessage(
+                org_id=org_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                kind="message",
+                status="completed",
+                body="hello",
+            )
+        )
+        await session.commit()
 
     read_code, read_state = await _request(
         application,

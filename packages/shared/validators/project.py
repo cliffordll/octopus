@@ -15,9 +15,11 @@ from ..constants.project import (
 from ..types.project import (
     CreateProjectInlineResourceInput,
     CreateProjectPayload,
+    CreateProjectWorkspacePayload,
     ProjectResourceAttachmentInput,
     UpdateProjectPayload,
     UpdateProjectResourceAttachmentPayload,
+    UpdateProjectWorkspacePayload,
 )
 
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -46,6 +48,22 @@ _INLINE_RESOURCE_FIELDS = {
     "role",
     "note",
     "sortOrder",
+}
+_PROJECT_WORKSPACE_FIELDS = {
+    "name",
+    "sourceType",
+    "cwd",
+    "repoUrl",
+    "repoRef",
+    "defaultRef",
+    "visibility",
+    "setupCommand",
+    "cleanupCommand",
+    "remoteProvider",
+    "remoteWorkspaceRef",
+    "sharedWorkspaceKey",
+    "metadata",
+    "isPrimary",
 }
 
 
@@ -216,4 +234,56 @@ def validate_create_project(payload: Mapping[str, Any]) -> CreateProjectPayload:
 def validate_update_project(payload: Mapping[str, Any]) -> UpdateProjectPayload:
     return cast(
         UpdateProjectPayload, _validate_project_fields(payload, require_name=False)
+    )
+
+
+def _validate_project_workspace_fields(
+    payload: Mapping[str, Any], *, require_name: bool
+) -> dict[str, Any]:
+    _reject_unknown_fields(payload, allowed_fields=_PROJECT_WORKSPACE_FIELDS)
+    if require_name:
+        name = payload.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("'name' is required and must be a non-empty string")
+    elif "name" in payload and (
+        not isinstance(payload["name"], str) or not payload["name"].strip()
+    ):
+        raise ValueError("'name' must be a non-empty string when provided")
+    for field in (
+        "sourceType",
+        "cwd",
+        "repoUrl",
+        "repoRef",
+        "defaultRef",
+        "visibility",
+        "setupCommand",
+        "cleanupCommand",
+        "remoteProvider",
+        "remoteWorkspaceRef",
+        "sharedWorkspaceKey",
+    ):
+        _nullable_string(payload, field)
+    if "metadata" in payload and payload["metadata"] is not None:
+        if not isinstance(payload["metadata"], dict):
+            raise ValueError("'metadata' must be an object or null")
+    if "isPrimary" in payload and not isinstance(payload["isPrimary"], bool):
+        raise ValueError("'isPrimary' must be a boolean")
+    return dict(payload)
+
+
+def validate_create_project_workspace(
+    payload: Mapping[str, Any],
+) -> CreateProjectWorkspacePayload:
+    return cast(
+        CreateProjectWorkspacePayload,
+        _validate_project_workspace_fields(payload, require_name=True),
+    )
+
+
+def validate_update_project_workspace(
+    payload: Mapping[str, Any],
+) -> UpdateProjectWorkspacePayload:
+    return cast(
+        UpdateProjectWorkspacePayload,
+        _validate_project_workspace_fields(payload, require_name=False),
     )

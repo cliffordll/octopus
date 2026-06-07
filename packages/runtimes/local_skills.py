@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+from .paths import ensure_managed_runtime_home
 from .skills import skill_snapshot_from_root
 from .types import RuntimeExecutionContext
 
@@ -22,6 +23,7 @@ async def prepare_managed_home(
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     env.setdefault("AGENT_HOME", str(home))
+    configure_managed_profile_env(env, home)
     env["RUDDER_OPERATOR_HOME"] = str(operator_home)
     if linked:
         await context.on_log(
@@ -33,6 +35,22 @@ async def prepare_managed_home(
             ),
         )
     return home
+
+
+def configure_managed_profile_env(env: dict[str, str], home: Path) -> None:
+    env["APPDATA"] = str(home / "AppData" / "Roaming")
+    env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+    env["XDG_CONFIG_HOME"] = str(home / ".config")
+    env["XDG_CACHE_HOME"] = str(home / ".cache")
+    env["XDG_DATA_HOME"] = str(home / ".local" / "share")
+    for key in (
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+    ):
+        Path(env[key]).mkdir(parents=True, exist_ok=True)
 
 
 def desired_skills_from_config(config: dict[str, Any]) -> list[str]:
@@ -84,21 +102,31 @@ def _string_list(value: Any) -> list[str]:
 
 def _clear_desired_targets(skills_home: Path, desired_skills: list[str]) -> None:
     for key in desired_skills:
-        target = skills_home / key.removeprefix("agent:")
+        target = skills_home / _desired_runtime_name(key)
         if target.is_symlink() or target.is_file():
             target.unlink(missing_ok=True)
         elif target.exists():
             shutil.rmtree(target, ignore_errors=True)
 
 
+def _desired_runtime_name(value: str) -> str:
+    normalized = value.strip()
+    if normalized.startswith("agent:"):
+        return _desired_runtime_name(normalized.removeprefix("agent:"))
+    if normalized.startswith("skills/"):
+        return normalized.removeprefix("skills/")
+    if normalized.startswith("organization/"):
+        return normalized.rsplit("/", 1)[-1]
+    return normalized
+
+
 def _default_home(runtime_type: str, context: RuntimeExecutionContext) -> Path:
     return (
-        Path.cwd()
-        / ".octopus"
-        / "runtime-homes"
-        / runtime_type
-        / context.org_id
-        / context.agent_id
+        ensure_managed_runtime_home(
+            runtime_type,
+            org_id=context.org_id,
+            agent_id=context.agent_id,
+        )
         / "home"
     )
 

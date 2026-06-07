@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import os
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Mapping
@@ -53,8 +53,18 @@ from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
 )
 
-from .logs import LogReadResult, read_local_file_log
-from .workspace_paths import organization_workspace_root
+from .logs import (
+    LogReadResult,
+    append_local_file_log,
+    finalize_local_file_log,
+    read_local_file_log,
+)
+from . import workspace_paths as workspace_paths_module
+from .workspace_paths import (
+    ensure_organization_workspace_root,
+    ensure_octopus_workspace_operation_log_dir,
+    organization_workspace_root,
+)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -63,6 +73,21 @@ def _iso(value: datetime | None) -> str | None:
 
 def _as_record(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _operation_log_dir() -> Path:
+    return ensure_octopus_workspace_operation_log_dir()
+
+
+def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if "logBytes" in fields:
+        result["log_bytes"] = fields["logBytes"]
+    if "logSha256" in fields:
+        result["log_sha256"] = fields["logSha256"]
+    if "logCompressed" in fields:
+        result["log_compressed"] = fields["logCompressed"]
+    return result
 
 
 _WORK_PRODUCT_UPDATE_COLUMNS = {
@@ -109,6 +134,12 @@ _GENERATED_FILE_EXCLUDED_PARTS = {
 }
 _GENERATED_FILE_MAX_BYTES = 1_000_000
 _GENERATED_FILE_MAX_COUNT = 20
+
+
+@dataclass(frozen=True)
+class _IssueWorkspaceFallback:
+    org_id: str
+    id: str
 
 
 def _aware_utc(value: datetime) -> datetime:
@@ -281,8 +312,6 @@ class WorkspaceService:
         return self._to_execution_workspace(row) if row is not None else None
 
     async def resolve_for_issue(self, issue: Issue) -> ExecutionWorkspaceData | None:
-        if issue.project_id is None:
-            return None
         if issue.execution_workspace_id:
             existing = await get_execution_workspace_by_id(
                 self._session, issue.execution_workspace_id
@@ -294,6 +323,16 @@ class WorkspaceService:
                     {"last_used_at": datetime.now(UTC)},
                 )
                 return self._to_execution_workspace(touched or existing)
+        if issue.project_id is None:
+            org_root = self._org_workspace_root(issue.org_id)
+            return self._organization_workspace_fallback(
+                issue,
+                cwd=str(org_root),
+                warning=(
+                    "Issue has no project configured. Run will start in "
+                    f'shared organization workspace "{org_root}".'
+                ),
+            )
 
         project = await get_project_by_id(self._session, issue.project_id)
         if project is None or project.org_id != issue.org_id:
@@ -310,11 +349,28 @@ class WorkspaceService:
         strategy_type = _resolve_strategy_type(
             project_policy=project_policy, issue_settings=issue_settings, mode=mode
         )
-        project_workspace_id = await self._resolve_project_workspace_id(
+        project_workspace = await self._resolve_project_workspace(
             project_id=project.id,
             policy=project_policy,
             requested_id=issue.project_workspace_id,
         )
+        project_workspace_id = (
+            project_workspace.id if project_workspace is not None else None
+        )
+        fallback_cwd: str | None = None
+        warnings: list[str] = []
+        if project_workspace is None:
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project has no workspace configured. Run will start in "
+                f'shared organization workspace "{fallback_cwd}".'
+            )
+        elif not _string(project_workspace.cwd):
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project workspace has no local cwd configured. Run will start "
+                f'in shared organization workspace "{fallback_cwd}".'
+            )
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -335,12 +391,21 @@ class WorkspaceService:
                 "strategy_type": strategy_type,
                 "name": f"{project.name} workspace",
                 "status": "active",
+                "cwd": fallback_cwd,
                 "provider_type": "git_worktree"
                 if strategy_type == "git_worktree"
                 else "local_fs",
                 "metadata_json": {
                     "resolvedForIssueId": issue.id,
                     "resolvedMode": mode,
+                    **(
+                        {
+                            "fallback": "organization_workspace",
+                            "warnings": warnings,
+                        }
+                        if fallback_cwd
+                        else {}
+                    ),
                 },
             },
         )
@@ -373,11 +438,32 @@ class WorkspaceService:
         workspace = await self._ensure_managed_workspace_paths(workspace)
         services = await self.list_runtime_services_for_workspace(workspace["id"])
         org_root = self._org_workspace_root(issue.org_id)
+        agents_dir = org_root / "agents"
+        skills_dir = org_root / "skills"
+        plans_dir = org_root / "plans"
         artifacts_dir = org_root / "artifacts"
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        for path in (
+            org_root,
+            agents_dir,
+            skills_dir,
+            plans_dir,
+            artifacts_dir,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+        workspace = self._with_organization_workspace_paths(
+            workspace=workspace,
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
         workspace_env = self._workspace_env(
             workspace=workspace,
             org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
             artifacts_dir=artifacts_dir,
         )
         runtime_context = {
@@ -393,6 +479,83 @@ class WorkspaceService:
             "projectId": issue.project_id,
             "projectWorkspaceId": workspace["projectWorkspaceId"],
             "executionWorkspaceId": workspace["id"],
+            "workspace": runtime_context,
+        }
+
+    async def prepare_runtime_context_for_chat(
+        self,
+        *,
+        run_id: str,
+        org_id: str,
+        conversation_id: str,
+        primary_issue_id: str | None = None,
+    ) -> dict[str, Any]:
+        if primary_issue_id:
+            issue_context = await self.prepare_runtime_context_for_run(
+                run_id, {"issueId": primary_issue_id}
+            )
+            if issue_context is not None:
+                issue_context["conversationId"] = conversation_id
+                return issue_context
+
+        org_root = self._org_workspace_root(org_id)
+        agents_dir = org_root / "agents"
+        skills_dir = org_root / "skills"
+        plans_dir = org_root / "plans"
+        artifacts_dir = org_root / "artifacts"
+        for path in (
+            org_root,
+            agents_dir,
+            skills_dir,
+            plans_dir,
+            artifacts_dir,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+        fallback_workspace = self._organization_workspace_fallback(
+            _IssueWorkspaceFallback(
+                org_id=org_id,
+                id=conversation_id,
+            ),
+            cwd=str(org_root),
+            warning=(
+                "Chat has no primary issue workspace. Run will start in "
+                f'shared organization workspace "{org_root}".'
+            ),
+        )
+        workspace = dict(
+            self._with_organization_workspace_paths(
+                workspace=fallback_workspace,
+                org_root=org_root,
+                agents_dir=agents_dir,
+                skills_dir=skills_dir,
+                plans_dir=plans_dir,
+                artifacts_dir=artifacts_dir,
+            )
+        )
+
+        workspace_env = self._workspace_env(
+            workspace=cast(ExecutionWorkspaceData, workspace),
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
+        runtime_context = {
+            "rudderWorkspace": workspace,
+            "rudderWorkspaces": [workspace],
+            "rudderRuntimeServiceIntents": [],
+            "rudderRuntimeServices": [],
+            "env": workspace_env,
+        }
+        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = "[]"
+        return {
+            "conversationId": conversation_id,
+            "issueId": None,
+            "projectId": None,
+            "projectWorkspaceId": None,
+            "executionWorkspaceId": None,
             "workspace": runtime_context,
         }
 
@@ -653,40 +816,69 @@ class WorkspaceService:
             return []
         workspace_id = _string(workspace.get("id"))
         cwd = _string(workspace.get("cwd"))
-        if workspace_id is None or cwd is None:
+        if cwd is None:
             return []
-        root = Path(cwd).resolve()
-        if not root.is_dir():
+        workspace_ref = workspace_id or f"organization_workspace:{issue.org_id}"
+        worktree_root = Path(cwd).resolve()
+        if not worktree_root.is_dir():
             return []
         threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
         products: list[dict[str, Any]] = []
-        for path in _iter_generated_workspace_files(root, threshold):
-            rel_path = path.relative_to(root).as_posix()
-            content = path.read_bytes()
-            content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
-            products.append(
-                {
-                    "title": rel_path,
-                    "type": "document"
-                    if path.suffix.lower() in {".md", ".txt"}
-                    else "artifact",
-                    "provider": "rudder",
-                    "externalId": f"workspace-file:{workspace_id}:{rel_path}",
-                    "status": "active",
-                    "reviewState": "none",
-                    "isPrimary": len(products) == 0,
-                    "summary": "Generated file captured from execution workspace.",
-                    "content": content,
-                    "contentType": content_type,
-                    "filename": path.name,
-                    "metadata": {
-                        "source": "execution_workspace_scan",
-                        "workspacePath": rel_path,
-                        "executionWorkspaceId": workspace_id,
-                        "byteSize": len(content),
-                    },
-                }
-            )
+        scan_roots: list[tuple[str, Path]] = []
+        workspace_env = (
+            workspace_context.get("env")
+            if isinstance(workspace_context, dict)
+            else None
+        )
+        artifacts_dir = _string(workspace.get("orgArtifactsDir"))
+        if not artifacts_dir and isinstance(workspace_env, dict):
+            artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
+        artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
+        if artifacts_dir:
+            assert artifacts_root is not None
+            if artifacts_root.is_dir() and artifacts_root != worktree_root:
+                scan_roots.append(("organization_artifacts_scan", artifacts_root))
+        scan_roots.append(("execution_workspace_scan", worktree_root))
+        seen_paths: set[Path] = set()
+        for source, root in scan_roots:
+            for path in _iter_generated_workspace_files(root, threshold):
+                if len(products) >= _GENERATED_FILE_MAX_COUNT:
+                    break
+                resolved_path = path.resolve()
+                if resolved_path in seen_paths:
+                    continue
+                seen_paths.add(resolved_path)
+                rel_path = path.relative_to(root).as_posix()
+                workspace_browser_path = _workspace_browser_path(
+                    path=path,
+                    artifacts_root=artifacts_root,
+                )
+                content = path.read_bytes()
+                content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
+                products.append(
+                    {
+                        "title": rel_path,
+                        "type": "document"
+                        if path.suffix.lower() in {".md", ".txt"}
+                        else "artifact",
+                        "provider": "rudder",
+                        "externalId": f"{source}:{workspace_ref}:{rel_path}",
+                        "status": "active",
+                        "reviewState": "none",
+                        "isPrimary": len(products) == 0,
+                        "summary": "Generated file captured from managed workspace storage.",
+                        "content": content,
+                        "contentType": content_type,
+                        "filename": path.name,
+                        "metadata": {
+                            "source": source,
+                            "workspacePath": rel_path,
+                            "workspaceBrowserPath": workspace_browser_path,
+                            "executionWorkspaceId": workspace_id,
+                            "byteSize": len(content),
+                        },
+                    }
+                )
         if not products:
             return []
         return await self.persist_run_work_products(
@@ -774,7 +966,42 @@ class WorkspaceService:
                 "metadata_json": metadata,
             },
         )
+        log_ref = f"{org_id}/{row.id}.ndjson"
+        append_local_file_log(
+            _operation_log_dir(),
+            log_ref,
+            stream="system",
+            chunk=f"operation {phase} started",
+        )
+        row = await update_workspace_operation(
+            self._session,
+            row.id,
+            {
+                "log_store": "local_file",
+                "log_ref": log_ref,
+                "log_bytes": 0,
+                "log_compressed": False,
+            },
+        )
+        assert row is not None
         return self._to_operation(row)
+
+    async def append_operation_log(
+        self,
+        operation_id: str,
+        *,
+        stream: str,
+        chunk: str,
+    ) -> None:
+        row = await get_workspace_operation(self._session, operation_id)
+        if row is None or row.log_store != "local_file" or row.log_ref is None:
+            return
+        append_local_file_log(
+            _operation_log_dir(),
+            row.log_ref,
+            stream=stream,
+            chunk=chunk,
+        )
 
     async def finish_operation(
         self,
@@ -786,6 +1013,15 @@ class WorkspaceService:
         stderr_excerpt: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> WorkspaceOperationData | None:
+        row = await get_workspace_operation(self._session, operation_id)
+        log_fields: dict[str, Any] = {}
+        if row is not None and row.log_store == "local_file":
+            await self.append_operation_log(
+                operation_id,
+                stream="system",
+                chunk=f"operation finished with status {status}",
+            )
+            log_fields = finalize_local_file_log(_operation_log_dir(), row.log_ref)
         row = await update_workspace_operation(
             self._session,
             operation_id,
@@ -796,6 +1032,7 @@ class WorkspaceService:
                 "stderr_excerpt": stderr_excerpt,
                 "metadata_json": metadata,
                 "finished_at": datetime.now(UTC),
+                **_database_log_fields(log_fields),
             },
         )
         return self._to_operation(row) if row is not None else None
@@ -820,12 +1057,7 @@ class WorkspaceService:
             log: LogReadResult = {"content": "", "endOffset": 0, "eof": True}
         else:
             log = read_local_file_log(
-                Path(
-                    os.getenv(
-                        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR",
-                        ".octopus/workspace-operation-logs",
-                    )
-                ),
+                ensure_octopus_workspace_operation_log_dir(),
                 row.log_ref,
                 offset=offset,
                 limit_bytes=limit_bytes,
@@ -837,28 +1069,37 @@ class WorkspaceService:
             **log,
         }
 
-    async def _resolve_project_workspace_id(
+    async def _resolve_project_workspace(
         self,
         *,
         project_id: str,
         policy: dict[str, Any] | None,
         requested_id: str | None,
-    ) -> str | None:
+    ) -> Any | None:
+        workspaces = await list_project_workspaces(self._session, project_id)
         if requested_id:
-            return requested_id
+            return next(
+                (workspace for workspace in workspaces if workspace.id == requested_id),
+                None,
+            )
         policy_workspace_id = (
             policy.get("defaultProjectWorkspaceId") if policy is not None else None
         )
         if isinstance(policy_workspace_id, str):
-            return policy_workspace_id
-        workspaces = await list_project_workspaces(self._session, project_id)
+            return next(
+                (
+                    workspace
+                    for workspace in workspaces
+                    if workspace.id == policy_workspace_id
+                ),
+                None,
+            )
         primary = next(
             (workspace for workspace in workspaces if workspace.is_primary), None
         )
         if not workspaces:
             return None
-        selected = primary or workspaces[0]
-        return selected.id
+        return primary or workspaces[0]
 
     async def _ensure_managed_workspace_paths(
         self, workspace: ExecutionWorkspaceData
@@ -886,21 +1127,55 @@ class WorkspaceService:
         return workspace
 
     def _org_workspace_root(self, org_id: str) -> Path:
-        return organization_workspace_root(org_id)
+        if (
+            organization_workspace_root
+            is not workspace_paths_module.organization_workspace_root
+        ):
+            return organization_workspace_root(org_id)
+        return ensure_organization_workspace_root(org_id)
+
+    def _with_organization_workspace_paths(
+        self,
+        *,
+        workspace: ExecutionWorkspaceData,
+        org_root: Path,
+        agents_dir: Path,
+        skills_dir: Path,
+        plans_dir: Path,
+        artifacts_dir: Path,
+    ) -> ExecutionWorkspaceData:
+        enriched = dict(workspace)
+        enriched.update(
+            {
+                "source": workspace["providerType"],
+                "strategy": workspace["strategyType"],
+                "workspaceId": workspace["id"],
+                "orgWorkspaceRoot": str(org_root),
+                "orgAgentsDir": str(agents_dir),
+                "orgSkillsDir": str(skills_dir),
+                "orgPlansDir": str(plans_dir),
+                "orgArtifactsDir": str(artifacts_dir),
+            }
+        )
+        return cast(ExecutionWorkspaceData, enriched)
 
     def _workspace_env(
         self,
         *,
         workspace: ExecutionWorkspaceData,
         org_root: Path,
+        agents_dir: Path,
+        skills_dir: Path,
+        plans_dir: Path,
         artifacts_dir: Path,
     ) -> dict[str, str]:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
         return {
+            "RUDDER_WORKSPACE_CWD": workspace["cwd"] or "",
             "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
             "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
-            "RUDDER_WORKSPACE_ID": workspace["id"],
+            "RUDDER_WORKSPACE_ID": workspace["id"] or "",
             "RUDDER_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
             "RUDDER_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
             "RUDDER_WORKSPACE_BRANCH": workspace["branchName"] or "",
@@ -909,6 +1184,9 @@ class WorkspaceService:
             "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": "[]",
             "RUDDER_RUNTIME_SERVICES_JSON": services_json,
             "RUDDER_ORG_WORKSPACE_ROOT": str(org_root),
+            "RUDDER_ORG_AGENTS_DIR": str(agents_dir),
+            "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
+            "RUDDER_ORG_PLANS_DIR": str(plans_dir),
             "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
         }
 
@@ -963,6 +1241,45 @@ class WorkspaceService:
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }
+
+    def _organization_workspace_fallback(
+        self, issue: Issue | _IssueWorkspaceFallback, *, cwd: str, warning: str
+    ) -> ExecutionWorkspaceData:
+        now = datetime.now(UTC).isoformat()
+        return cast(
+            ExecutionWorkspaceData,
+            {
+                "id": None,
+                "orgId": issue.org_id,
+                "projectId": None,
+                "projectWorkspaceId": None,
+                "sourceIssueId": issue.id,
+                "mode": "shared_workspace",
+                "strategyType": "organization_workspace",
+                "name": "Organization workspace",
+                "status": "active",
+                "cwd": cwd,
+                "repoUrl": None,
+                "baseRef": None,
+                "branchName": None,
+                "providerType": "local_fs",
+                "providerRef": None,
+                "derivedFromExecutionWorkspaceId": None,
+                "lastUsedAt": now,
+                "openedAt": now,
+                "closedAt": None,
+                "cleanupEligibleAt": None,
+                "cleanupReason": None,
+                "metadata": {
+                    "resolvedForIssueId": issue.id,
+                    "resolvedMode": "shared_workspace",
+                    "fallback": "organization_workspace",
+                    "warnings": [warning],
+                },
+                "createdAt": now,
+                "updatedAt": now,
+            },
+        )
 
     def _to_runtime_service(self, row: WorkspaceRuntimeService) -> RuntimeServiceData:
         return {
@@ -1067,3 +1384,13 @@ def _json_dump(value: Any) -> str:
 
 def _string(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _workspace_browser_path(*, path: Path, artifacts_root: Path | None) -> str | None:
+    if artifacts_root is None:
+        return None
+    try:
+        rel_path = path.resolve().relative_to(artifacts_root.resolve()).as_posix()
+    except ValueError:
+        return None
+    return f"artifacts/{rel_path}"
