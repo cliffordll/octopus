@@ -24,6 +24,24 @@ uv run alembic revision -m "describe change"
 - 未设置 `OCTOPUS_HOME` 时，默认 home 是 `~/.octopus`；未设置 `OCTOPUS_INSTANCE_ID` 时，默认实例是 `default`。
 - 外部数据库当前推荐 PostgreSQL。MySQL 尚未作为支持目标验证，现有 query 和 migration 里存在 MySQL 不兼容点，不要直接用于生产或共享数据。
 
+如果要从 PostgreSQL 或其他外部数据库切回默认 SQLite，清空 `OCTOPUS_DATABASE_URL` 后重新迁移并启动。
+
+PowerShell：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+uv run alembic upgrade head
+uv run server
+```
+
+macOS / Linux：
+
+```bash
+unset OCTOPUS_DATABASE_URL
+uv run alembic upgrade head
+uv run server
+```
+
 PostgreSQL 连接前需要确保 Python 环境有 async driver：
 
 ```powershell
