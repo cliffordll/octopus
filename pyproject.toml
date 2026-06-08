@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "sqlalchemy[asyncio]>=2.0",
     "aiosqlite>=0.19",
+    "asyncpg>=0.31.0",
     "httpx>=0.28",
     "psutil>=6.0",
     "python-ulid>=2.0",
@@ -55,6 +56,8 @@ exclude = [
     "server/skills",
     "**/__pycache__",
     ".octopus",
+    ".codex-pytest-write-check",
+    ".pytest-tmp*",
     ".tmp-pytest",
     ".venv",
     ".uv-cache*",
@@ -65,4 +68,9 @@ reportUnknownArgumentType = "none"
 reportUnknownParameterType = "none"
 
 [tool.ruff]
-extend-exclude = ["server/skills", ".tmp-pytest"]
+extend-exclude = [
+    "server/skills",
+    ".codex-pytest-write-check",
+    ".pytest-tmp*",
+    ".tmp-pytest",
+]

@@ -22,6 +22,7 @@ from packages.database.schema import (
     Issue,
     Organization,
 )
+from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import Agent
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
@@ -39,22 +40,32 @@ async def session() -> AsyncIterator[AsyncSession]:
 
 
 async def _seed_agent(
-    session: AsyncSession, *, name: str, runtime_config: dict | None = None
+    session: AsyncSession,
+    *,
+    name: str,
+    runtime_type: AgentRuntimeType = "process",
+    runtime_config: dict | None = None,
 ) -> Agent:
     org = Organization(url_key=name.lower(), name=name, issue_prefix="RUN")
     agent_service = AgentService(session)
     async with async_transaction(session):
         session.add(org)
         await session.flush()
+        agent_runtime_config = (
+            {"model": "openai/gpt-5"}
+            if runtime_type == "opencode_local"
+            else {
+                "command": sys.executable,
+                "args": ["-c", "print('run-ok')"],
+            }
+        )
         agent = await agent_service.create_agent(
             org.id,
             {
                 "name": name,
+                "agentRuntimeType": runtime_type,
                 "runtimeConfig": runtime_config or {},
-                "agentRuntimeConfig": {
-                    "command": sys.executable,
-                    "args": ["-c", "print('run-ok')"],
-                },
+                "agentRuntimeConfig": agent_runtime_config,
             },
             actor_type="board",
             actor_id="local-board",
@@ -278,6 +289,38 @@ async def test_orphaned_running_run_enqueues_automatic_recovery(
     assert recovery[0]["processLossRetryCount"] == 1
     assert recovery[0]["contextSnapshot"] is not None
     assert recovery[0]["contextSnapshot"]["recovery"]["recoveryTrigger"] == "automatic"
+
+
+async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="OrphanedOpenCode",
+        runtime_type="opencode_local",
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        orphan = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+            process_pid=999_999,
+            process_started_at=datetime.now(UTC),
+        )
+        session.add(orphan)
+        await session.flush()
+        recovery = await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(orphan)
+    assert orphan.status == "failed"
+    assert orphan.error_code == "process_lost"
+    assert "999999" in (orphan.error or "")
+    assert recovery[0]["status"] == "queued"
+    assert recovery[0]["retryOfRunId"] == orphan.id
 
 
 async def test_process_run_persists_child_process_metadata(
