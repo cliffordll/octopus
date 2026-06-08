@@ -14,6 +14,7 @@ from packages.database.schema import (
     WorkspaceRuntimeService,
     WorkspaceOperation,
 )
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def list_project_workspaces(
@@ -57,24 +58,22 @@ async def update_project_workspace(
 ) -> ProjectWorkspace | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(ProjectWorkspace)
-        .where(ProjectWorkspace.id == workspace_id)
-        .values(**values)
-        .returning(ProjectWorkspace)
+    return await update_returning_one(
+        session,
+        ProjectWorkspace,
+        ProjectWorkspace.id == workspace_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_project_workspace(
     session: AsyncSession, workspace_id: str
 ) -> ProjectWorkspace | None:
-    result = await session.execute(
-        delete(ProjectWorkspace)
-        .where(ProjectWorkspace.id == workspace_id)
-        .returning(ProjectWorkspace)
+    return await delete_returning_one(
+        session,
+        ProjectWorkspace,
+        ProjectWorkspace.id == workspace_id,
     )
-    return result.scalar_one_or_none()
 
 
 async def clear_primary_project_workspace(
@@ -152,13 +151,12 @@ async def update_execution_workspace(
         return await get_execution_workspace_by_id(session, workspace_id)
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(ExecutionWorkspace)
-        .where(ExecutionWorkspace.id == workspace_id)
-        .values(**values)
-        .returning(ExecutionWorkspace)
+    return await update_returning_one(
+        session,
+        ExecutionWorkspace,
+        ExecutionWorkspace.id == workspace_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def create_workspace_runtime_service(
@@ -175,13 +173,12 @@ async def update_workspace_runtime_service(
 ) -> WorkspaceRuntimeService | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(WorkspaceRuntimeService)
-        .where(WorkspaceRuntimeService.id == service_id)
-        .values(**values)
-        .returning(WorkspaceRuntimeService)
+    return await update_returning_one(
+        session,
+        WorkspaceRuntimeService,
+        WorkspaceRuntimeService.id == service_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def list_workspace_runtime_services_for_run(
@@ -226,13 +223,12 @@ async def update_workspace_operation(
 ) -> WorkspaceOperation | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(WorkspaceOperation)
-        .where(WorkspaceOperation.id == operation_id)
-        .values(**values)
-        .returning(WorkspaceOperation)
+    return await update_returning_one(
+        session,
+        WorkspaceOperation,
+        WorkspaceOperation.id == operation_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def get_workspace_operation(

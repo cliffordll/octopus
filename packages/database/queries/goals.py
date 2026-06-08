@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Goal, ProjectGoal
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def list_org_goals(session: AsyncSession, org_id: str) -> Sequence[Goal]:
@@ -36,17 +37,11 @@ async def update_goal(
         return await get_goal_by_id(session, goal_id)
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(Goal).where(Goal.id == goal_id).values(**values).returning(Goal)
-    )
-    return result.scalar_one_or_none()
+    return await update_returning_one(session, Goal, Goal.id == goal_id, values)
 
 
 async def delete_goal(session: AsyncSession, goal_id: str) -> Goal | None:
-    result = await session.execute(
-        delete(Goal).where(Goal.id == goal_id).returning(Goal)
-    )
-    return result.scalar_one_or_none()
+    return await delete_returning_one(session, Goal, Goal.id == goal_id)
 
 
 async def list_project_goals(session: AsyncSession, project_id: str) -> Sequence[Goal]:

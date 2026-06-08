@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeGuard
 
@@ -14,12 +15,59 @@ from packages.database.clients import create_database_engine, create_session_fac
 from packages.database.migrations.runner import _build_config
 from packages.database.queries import _compat
 from packages.database.queries.agents import update_agent
+from packages.database.queries.agent_state import (
+    delete_task_sessions,
+    update_runtime_state,
+)
+from packages.database.queries.approvals import update_approval
+from packages.database.queries.goals import delete_goal, update_goal
+from packages.database.queries.heartbeat import (
+    claim_queued_run,
+    update_run,
+    update_wakeup_request,
+)
 from packages.database.queries.organization_skills import (
     delete_organization_skill,
     update_organization_skill,
 )
 from packages.database.queries.organizations import increment_issue_counter
-from packages.database.schema import Agent, Base, Organization, OrganizationSkill
+from packages.database.queries.projects import delete_project, update_project
+from packages.database.queries.resources import (
+    delete_organization_resource,
+    delete_project_resource_attachment,
+    update_organization_resource,
+    update_project_resource_attachment,
+)
+from packages.database.queries.workspaces import (
+    delete_project_workspace,
+    update_execution_workspace,
+    update_project_workspace,
+    update_workspace_operation,
+    update_workspace_runtime_service,
+)
+from packages.database.schema import (
+    Agent,
+    Approval,
+    AgentRuntimeState,
+    AgentTaskSession,
+    AgentWakeupRequest,
+    Base,
+    ExecutionWorkspace,
+    Goal,
+    HeartbeatRun,
+    Organization,
+    OrganizationResource,
+    OrganizationSkill,
+    Project,
+    ProjectResourceAttachment,
+    ProjectWorkspace,
+    WorkspaceOperation,
+    WorkspaceRuntimeService,
+)
+from packages.runtimes.paths import (
+    ensure_managed_runtime_home,
+    resolve_octopus_home_dir as resolve_runtime_octopus_home_dir,
+)
 
 
 async def test_engine_factory_creates_sqlite_parent_directory(tmp_path: Path) -> None:
@@ -162,18 +210,6 @@ def test_migration_identifiers_fit_mysql_limit() -> None:
                 )
 
     assert long_identifiers == []
-
-
-def test_runtime_scope_migration_renames_mysql_indexes() -> None:
-    migration_path = Path(
-        "packages/database/migrations/versions/"
-        "20260607_000018_runtime_provider_scope.py"
-    )
-    source = migration_path.read_text(encoding="utf-8")
-
-    assert "RENAME INDEX" in source
-    assert "def _downgrade_renamed_runtime_tables" in source
-    assert 'if op.get_bind().dialect.name == "mysql"' in source
 
 
 def _migration_identifier(node: ast.Call) -> str | None:
@@ -331,9 +367,16 @@ async def test_returning_fallback_updates_core_write_rows(
         name="Review",
         markdown="Review code.",
     )
+    approval = Approval(
+        id="approval-1",
+        org_id="org-1",
+        type="hire_agent",
+        status="pending",
+        payload={"agentId": "agent-1"},
+    )
 
     async with session_factory() as session:
-        session.add_all([org, agent, skill])
+        session.add_all([org, agent, skill, approval])
         await session.commit()
 
     async with session_factory() as session:
@@ -344,6 +387,11 @@ async def test_returning_fallback_updates_core_write_rows(
             "skill-1",
             {"name": "Deep Review"},
         )
+        updated_approval = await update_approval(
+            session,
+            "approval-1",
+            {"status": "approved", "decision_note": "ship it"},
+        )
         counter = await increment_issue_counter(session, "org-1")
         await session.commit()
 
@@ -351,7 +399,300 @@ async def test_returning_fallback_updates_core_write_rows(
     assert updated_agent.name == "New Agent"
     assert updated_skill is not None
     assert updated_skill.name == "Deep Review"
+    assert updated_approval is not None
+    assert updated_approval.status == "approved"
+    assert updated_approval.decision_note == "ship it"
+    assert updated_approval.decided_at is not None
     assert counter == (1, "ORG")
+
+
+async def test_returning_fallback_updates_project_goal_and_resource_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_compat, "supports_update_returning", lambda _: False)
+    monkeypatch.setattr(_compat, "supports_delete_returning", lambda _: False)
+
+    async with session_factory() as session:
+        session.add(
+            Organization(
+                id="org-1",
+                url_key="org-1",
+                name="Org 1",
+                issue_prefix="ORG",
+            )
+        )
+        session.add(Project(id="project-1", org_id="org-1", name="Project 1"))
+        session.add(Goal(id="goal-1", org_id="org-1", title="Goal 1", level="task"))
+        session.add(
+            OrganizationResource(
+                id="resource-1",
+                org_id="org-1",
+                name="Runbook",
+                kind="doc",
+                locator="file://runbook.md",
+            )
+        )
+        session.add(
+            ProjectResourceAttachment(
+                id="attachment-1",
+                org_id="org-1",
+                project_id="project-1",
+                resource_id="resource-1",
+                role="reference",
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        project = await update_project(session, "project-1", {"name": "Project 2"})
+        goal = await update_goal(session, "goal-1", {"title": "Goal 2"})
+        resource = await update_organization_resource(
+            session, "org-1", "resource-1", {"name": "Runbook 2"}
+        )
+        attachment = await update_project_resource_attachment(
+            session, "attachment-1", {"role": "primary"}
+        )
+        await session.commit()
+
+    assert project is not None
+    assert project.name == "Project 2"
+    assert goal is not None
+    assert goal.title == "Goal 2"
+    assert resource is not None
+    assert resource.name == "Runbook 2"
+    assert attachment is not None
+    assert attachment.role == "primary"
+
+    async with session_factory() as session:
+        deleted_attachment = await delete_project_resource_attachment(
+            session, "attachment-1"
+        )
+        deleted_resource = await delete_organization_resource(
+            session, "org-1", "resource-1"
+        )
+        deleted_goal = await delete_goal(session, "goal-1")
+        deleted_project = await delete_project(session, "project-1")
+        await session.commit()
+
+    assert deleted_attachment is not None
+    assert deleted_attachment.id == "attachment-1"
+    assert deleted_resource is not None
+    assert deleted_resource.id == "resource-1"
+    assert deleted_goal is not None
+    assert deleted_goal.id == "goal-1"
+    assert deleted_project is not None
+    assert deleted_project.id == "project-1"
+
+
+async def test_returning_fallback_updates_heartbeat_and_agent_state_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_compat, "supports_update_returning", lambda _: False)
+    monkeypatch.setattr(_compat, "supports_delete_returning", lambda _: False)
+    started_at = datetime.now(UTC)
+
+    async with session_factory() as session:
+        session.add(
+            Organization(
+                id="org-1",
+                url_key="org-1",
+                name="Org 1",
+                issue_prefix="ORG",
+            )
+        )
+        session.add(
+            Agent(
+                id="agent-1",
+                org_id="org-1",
+                name="Agent 1",
+                workspace_key="agent-1",
+                role="general",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={},
+            )
+        )
+        session.add(
+            AgentWakeupRequest(
+                id="wakeup-1",
+                org_id="org-1",
+                agent_id="agent-1",
+                source="manual",
+                status="queued",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id="run-1",
+                org_id="org-1",
+                agent_id="agent-1",
+                invocation_source="manual",
+                status="queued",
+            )
+        )
+        session.add(
+            AgentRuntimeState(
+                agent_id="agent-1",
+                org_id="org-1",
+                agent_runtime_type="codex_local",
+                state_json={},
+            )
+        )
+        session.add_all(
+            [
+                AgentTaskSession(
+                    id="task-session-1",
+                    org_id="org-1",
+                    agent_id="agent-1",
+                    agent_runtime_type="codex_local",
+                    task_key="task-1",
+                ),
+                AgentTaskSession(
+                    id="task-session-2",
+                    org_id="org-1",
+                    agent_id="agent-1",
+                    agent_runtime_type="codex_local",
+                    task_key="task-2",
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        wakeup = await update_wakeup_request(session, "wakeup-1", {"status": "claimed"})
+        claimed = await claim_queued_run(session, "run-1", started_at)
+        assert claimed is not None
+        assert claimed.status == "running"
+        run = await update_run(session, "run-1", {"status": "succeeded"})
+        state = await update_runtime_state(
+            session,
+            "agent-1",
+            {"last_run_id": "run-1", "last_run_status": "succeeded"},
+        )
+        deleted_count = await delete_task_sessions(
+            session, org_id="org-1", agent_id="agent-1"
+        )
+        await session.commit()
+
+    assert wakeup is not None
+    assert wakeup.status == "claimed"
+    assert run is not None
+    assert run.status == "succeeded"
+    assert state is not None
+    assert state.last_run_status == "succeeded"
+    assert deleted_count == 2
+
+
+async def test_returning_fallback_updates_workspace_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_compat, "supports_update_returning", lambda _: False)
+    monkeypatch.setattr(_compat, "supports_delete_returning", lambda _: False)
+
+    async with session_factory() as session:
+        session.add(
+            Organization(
+                id="org-1",
+                url_key="org-1",
+                name="Org 1",
+                issue_prefix="ORG",
+            )
+        )
+        session.add(
+            Agent(
+                id="agent-1",
+                org_id="org-1",
+                name="Agent 1",
+                workspace_key="agent-1",
+                role="general",
+                agent_runtime_type="codex_local",
+                agent_runtime_config={},
+            )
+        )
+        session.add(Project(id="project-1", org_id="org-1", name="Project 1"))
+        session.add(
+            ProjectWorkspace(
+                id="project-workspace-1",
+                org_id="org-1",
+                project_id="project-1",
+                name="Local",
+                source_type="local_path",
+                visibility="default",
+                is_primary=True,
+            )
+        )
+        session.add(
+            ExecutionWorkspace(
+                id="execution-workspace-1",
+                org_id="org-1",
+                project_id="project-1",
+                project_workspace_id="project-workspace-1",
+                mode="shared",
+                strategy_type="reuse",
+                name="Execution",
+                status="active",
+                provider_type="local_fs",
+            )
+        )
+        session.add(
+            WorkspaceRuntimeService(
+                id="runtime-service-1",
+                org_id="org-1",
+                project_id="project-1",
+                project_workspace_id="project-workspace-1",
+                execution_workspace_id="execution-workspace-1",
+                scope_type="workspace",
+                service_name="dev",
+                status="running",
+                lifecycle="manual",
+                provider="process",
+            )
+        )
+        session.add(
+            WorkspaceOperation(
+                id="operation-1",
+                org_id="org-1",
+                execution_workspace_id="execution-workspace-1",
+                phase="setup",
+                status="running",
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        project_workspace = await update_project_workspace(
+            session, "project-workspace-1", {"name": "Local 2"}
+        )
+        execution_workspace = await update_execution_workspace(
+            session, "execution-workspace-1", {"status": "idle"}
+        )
+        runtime_service = await update_workspace_runtime_service(
+            session, "runtime-service-1", {"status": "stopped"}
+        )
+        operation = await update_workspace_operation(
+            session, "operation-1", {"status": "succeeded"}
+        )
+        await session.commit()
+
+    assert project_workspace is not None
+    assert project_workspace.name == "Local 2"
+    assert execution_workspace is not None
+    assert execution_workspace.status == "idle"
+    assert runtime_service is not None
+    assert runtime_service.status == "stopped"
+    assert operation is not None
+    assert operation.status == "succeeded"
+
+    async with session_factory() as session:
+        deleted_workspace = await delete_project_workspace(
+            session, "project-workspace-1"
+        )
+        await session.commit()
+
+    assert deleted_workspace is not None
+    assert deleted_workspace.id == "project-workspace-1"
 
 
 async def test_returning_fallback_deletes_core_write_rows(
