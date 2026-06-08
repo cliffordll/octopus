@@ -124,6 +124,32 @@ def test_alembic_cli_without_database_url_uses_instance_sqlite_path(
     assert not (cwd / "octopus.db").exists()
 
 
+async def test_asyncmy_terminate_uses_force_close_for_invalidated_connections() -> None:
+    class FakeAsyncmyConnection:
+        def __init__(self) -> None:
+            self.force_close_called = False
+            self.terminate_called = False
+
+        def _terminate_force_close(self) -> None:
+            self.force_close_called = True
+
+        def terminate(self) -> None:
+            self.terminate_called = True
+            raise AssertionError("graceful asyncmy terminate should not be used")
+
+    engine = create_database_engine(
+        "mysql+asyncmy://user:pass@127.0.0.1:3306/octopus?charset=utf8mb4"
+    )
+    connection = FakeAsyncmyConnection()
+    try:
+        engine.sync_engine.dialect.do_terminate(connection)  # type: ignore[arg-type]
+    finally:
+        await engine.dispose()
+
+    assert connection.force_close_called
+    assert not connection.terminate_called
+
+
 def test_alembic_config_database_url_overrides_instance_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
