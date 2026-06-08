@@ -32,9 +32,13 @@ async def update_returning_one(
         )
         return result.scalar_one_or_none()
 
-    await session.execute(update(model).where(whereclause).values(**dict(values)))
     result = await session.execute(select(model).where(whereclause))
-    return result.scalar_one_or_none()
+    row = result.scalar_one_or_none()
+    if row is None:
+        return None
+    await session.execute(update(model).where(whereclause).values(**dict(values)))
+    await session.refresh(row)
+    return row
 
 
 async def delete_returning_one(
@@ -56,3 +60,24 @@ async def delete_returning_one(
         delete(model).where(whereclause).execution_options(synchronize_session=False)
     )
     return row
+
+
+async def delete_returning_count(
+    session: AsyncSession,
+    model: type[T],
+    whereclause: ColumnElement[bool],
+) -> int:
+    if supports_delete_returning(session):
+        result = await session.execute(
+            delete(model).where(whereclause).returning(model)
+        )
+        return len(result.scalars().all())
+
+    result = await session.execute(select(model).where(whereclause))
+    rows = result.scalars().all()
+    if not rows:
+        return 0
+    await session.execute(
+        delete(model).where(whereclause).execution_options(synchronize_session=False)
+    )
+    return len(rows)
