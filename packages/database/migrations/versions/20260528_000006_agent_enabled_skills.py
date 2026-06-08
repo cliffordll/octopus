@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260528_000006"
 down_revision = "20260527_000007"
@@ -50,6 +52,7 @@ def upgrade() -> None:
         "agent_enabled_skills",
         ["agent_id", "skill_key"],
         unique=True,
+        mysql_length=mysql_text_index_lengths("skill_key"),
     )
 
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260529_000012"
 down_revision = "20260529_000011"
@@ -52,12 +54,21 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.UniqueConstraint(
-            "org_id", "object_key", name="assets_company_object_key_uq"
-        ),
     )
     op.create_index("assets_company_created_idx", "assets", ["org_id", "created_at"])
-    op.create_index("assets_company_provider_idx", "assets", ["org_id", "provider"])
+    op.create_index(
+        "assets_company_provider_idx",
+        "assets",
+        ["org_id", "provider"],
+        mysql_length=mysql_text_index_lengths("provider"),
+    )
+    op.create_index(
+        "assets_company_object_key_uq",
+        "assets",
+        ["org_id", "object_key"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("object_key"),
+    )
 
     op.create_table(
         "chat_attachments",
@@ -121,6 +132,7 @@ def downgrade() -> None:
         "chat_attachments_conversation_message_idx", table_name="chat_attachments"
     )
     op.drop_table("chat_attachments")
+    op.drop_index("assets_company_object_key_uq", table_name="assets")
     op.drop_index("assets_company_provider_idx", table_name="assets")
     op.drop_index("assets_company_created_idx", table_name="assets")
     op.drop_table("assets")

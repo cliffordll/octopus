@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260528_000007"
 down_revision = "20260528_000006"
@@ -55,12 +57,6 @@ def upgrade() -> None:
         sa.Column("shared_workspace_key", sa.Text(), nullable=True),
         _json_column("metadata"),
         sa.Column("is_primary", sa.Boolean(), nullable=False),
-        sa.UniqueConstraint(
-            "project_id",
-            "remote_provider",
-            "remote_workspace_ref",
-            name="project_workspaces_project_remote_ref_idx",
-        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -88,11 +84,22 @@ def upgrade() -> None:
         "project_workspaces_project_source_type_idx",
         "project_workspaces",
         ["project_id", "source_type"],
+        mysql_length=mysql_text_index_lengths("source_type"),
     )
     op.create_index(
         "project_workspaces_company_shared_key_idx",
         "project_workspaces",
         ["org_id", "shared_workspace_key"],
+        mysql_length=mysql_text_index_lengths("shared_workspace_key"),
+    )
+    op.create_index(
+        "project_workspaces_project_remote_ref_idx",
+        "project_workspaces",
+        ["project_id", "remote_provider", "remote_workspace_ref"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths(
+            "remote_provider", "remote_workspace_ref"
+        ),
     )
     op.create_table(
         "execution_workspaces",
@@ -170,11 +177,13 @@ def upgrade() -> None:
         "execution_workspaces_company_project_status_idx",
         "execution_workspaces",
         ["org_id", "project_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "execution_workspaces_company_project_workspace_status_idx",
         "execution_workspaces",
         ["org_id", "project_workspace_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "execution_workspaces_company_source_issue_idx",
@@ -190,6 +199,7 @@ def upgrade() -> None:
         "execution_workspaces_company_branch_idx",
         "execution_workspaces",
         ["org_id", "branch_name"],
+        mysql_length=mysql_text_index_lengths("branch_name"),
     )
 
     op.create_table(
@@ -281,16 +291,19 @@ def upgrade() -> None:
         "workspace_runtime_services_company_workspace_status_idx",
         "workspace_runtime_services",
         ["org_id", "project_workspace_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "workspace_runtime_services_company_exec_workspace_status_idx",
         "workspace_runtime_services",
         ["org_id", "execution_workspace_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "workspace_runtime_services_company_project_status_idx",
         "workspace_runtime_services",
         ["org_id", "project_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "workspace_runtime_services_run_idx",
@@ -435,16 +448,19 @@ def upgrade() -> None:
         "issue_work_products_company_issue_type_idx",
         "issue_work_products",
         ["org_id", "issue_id", "type"],
+        mysql_length=mysql_text_index_lengths("type"),
     )
     op.create_index(
         "issue_work_products_company_execution_workspace_type_idx",
         "issue_work_products",
         ["org_id", "execution_workspace_id", "type"],
+        mysql_length=mysql_text_index_lengths("type"),
     )
     op.create_index(
         "issue_work_products_company_provider_external_id_idx",
         "issue_work_products",
         ["org_id", "provider", "external_id"],
+        mysql_length=mysql_text_index_lengths("provider", "external_id"),
     )
     op.create_index(
         "issue_work_products_company_updated_idx",

@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260528_000009"
 down_revision = "20260528_000008"
@@ -48,22 +50,25 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.UniqueConstraint(
-            "conversation_id",
-            "entity_type",
-            "entity_id",
-            name="chat_context_links_unique_conversation_entity_idx",
-        ),
+    )
+    op.create_index(
+        "chat_context_links_unique_conversation_entity_idx",
+        "chat_context_links",
+        ["conversation_id", "entity_type", "entity_id"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("entity_type", "entity_id"),
     )
     op.create_index(
         "chat_context_links_conversation_entity_idx",
         "chat_context_links",
         ["conversation_id", "entity_type", "entity_id"],
+        mysql_length=mysql_text_index_lengths("entity_type", "entity_id"),
     )
     op.create_index(
         "chat_context_links_company_entity_idx",
         "chat_context_links",
         ["org_id", "entity_type", "entity_id"],
+        mysql_length=mysql_text_index_lengths("entity_type", "entity_id"),
     )
 
 
