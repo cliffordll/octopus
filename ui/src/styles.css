@@ -5793,6 +5793,29 @@ pre {
   gap: 6px;
 }
 
+.segmented-control {
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+
+.segmented-control button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #8792a6;
+  min-height: 30px;
+}
+
+.segmented-control button.active {
+  background: #172133;
+  color: #dce5f2;
+}
+
 .instruction-create-actions {
   display: flex;
   gap: 6px;

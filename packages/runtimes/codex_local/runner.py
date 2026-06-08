@@ -629,7 +629,6 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
     linked = _sync_local_cli_credential_home_entries(operator_home, managed_home)
     env["HOME"] = str(managed_home)
     env["USERPROFILE"] = str(managed_home)
-    env.setdefault("AGENT_HOME", str(managed_home))
     configure_managed_profile_env(env, managed_home)
     env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
     if linked:

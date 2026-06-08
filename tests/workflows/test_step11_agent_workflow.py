@@ -206,7 +206,15 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     assert agent_skills_root.name == "skills"
     assert agent_skills_root.parent.name == row.workspace_key
     agent_home = agent_skills_root.parent
+    assert config["_octopus"]["agentHome"] == str(agent_home)
+    assert config["_octopus"]["agentInstructionsDir"] == str(
+        agent_home / "instructions"
+    )
+    assert config["_octopus"]["agentMemoryDir"] == str(agent_home / "memory")
+    assert config["_octopus"]["agentLifeDir"] == str(agent_home / "life")
     assert (agent_home / "instructions").is_dir()
+    assert (agent_home / "instructions" / "SOUL.md").is_file()
+    assert (agent_home / "instructions" / "MEMORY.md").is_file()
     assert (agent_home / "skills").is_dir()
     assert (agent_home / "life").is_dir()
     assert (agent_home / "memory").is_dir()

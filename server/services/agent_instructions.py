@@ -90,8 +90,6 @@ def normalize_instructions_paths(config: dict[str, Any]) -> dict[str, Any]:
 def materialize_default_instructions_for_new_agent(
     row: Agent, agent_home: Path
 ) -> dict[str, Any] | None:
-    if row.agent_runtime_type not in MANAGED_INSTRUCTIONS_RUNTIME_TYPES:
-        return None
     config = dict(row.agent_runtime_config)
     if any(_string(config.get(key)) for key in _EXPLICIT_INSTRUCTIONS_KEYS):
         return None

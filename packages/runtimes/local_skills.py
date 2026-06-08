@@ -22,7 +22,6 @@ async def prepare_managed_home(
     linked = _sync_local_cli_credential_home_entries(operator_home, home)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
-    env.setdefault("AGENT_HOME", str(home))
     configure_managed_profile_env(env, home)
     env["RUDDER_OPERATOR_HOME"] = str(operator_home)
     if linked:
