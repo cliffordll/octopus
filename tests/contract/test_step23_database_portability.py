@@ -54,6 +54,28 @@ def test_alembic_cli_uses_octopus_database_url_env(
     assert db_path.is_file()
 
 
+def test_alembic_cli_without_database_url_uses_instance_sqlite_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "dev")
+    monkeypatch.delenv("OCTOPUS_DATABASE_URL", raising=False)
+
+    project_root = Path(__file__).resolve().parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option(
+        "script_location", str(project_root / "packages" / "database" / "migrations")
+    )
+    command.current(config)
+
+    expected = tmp_path / "home" / "instances" / "dev" / "db" / "octopus.db"
+    assert expected.is_file()
+    assert not (cwd / "octopus.db").exists()
+
+
 def test_baseline_mysql_text_indexes_use_prefix_lengths() -> None:
     migration_paths = Path("packages/database/migrations/versions").glob("*.py")
     missing_prefix_lengths: list[tuple[str, str, str, tuple[str, ...]]] = []
