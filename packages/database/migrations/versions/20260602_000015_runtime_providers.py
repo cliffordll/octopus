@@ -3,6 +3,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260602_000015"
 down_revision = "20260529_000014"
@@ -44,11 +46,13 @@ def upgrade() -> None:
         "runtime_providers",
         ["org_id", "runtime_type", "provider_id"],
         unique=True,
+        mysql_length=mysql_text_index_lengths("runtime_type", "provider_id"),
     )
     op.create_index(
         "runtime_providers_org_runtime_idx",
         "runtime_providers",
         ["org_id", "runtime_type"],
+        mysql_length=mysql_text_index_lengths("runtime_type"),
     )
 
     op.create_table(
@@ -81,11 +85,15 @@ def upgrade() -> None:
         "runtime_models",
         ["org_id", "runtime_type", "provider_id", "model_id"],
         unique=True,
+        mysql_length=mysql_text_index_lengths(
+            "runtime_type", "provider_id", "model_id"
+        ),
     )
     op.create_index(
         "runtime_models_org_runtime_provider_idx",
         "runtime_models",
         ["org_id", "runtime_type", "provider_id"],
+        mysql_length=mysql_text_index_lengths("runtime_type", "provider_id"),
     )
 
 

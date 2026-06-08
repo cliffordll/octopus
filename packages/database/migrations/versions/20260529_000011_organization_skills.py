@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260529_000011"
 down_revision = "20260528_000010"
@@ -63,13 +65,23 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.UniqueConstraint("org_id", "key", name="organization_skills_org_key_idx"),
     )
     op.create_index(
-        "organization_skills_org_name_idx", "organization_skills", ["org_id", "name"]
+        "organization_skills_org_key_idx",
+        "organization_skills",
+        ["org_id", "key"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("key"),
+    )
+    op.create_index(
+        "organization_skills_org_name_idx",
+        "organization_skills",
+        ["org_id", "name"],
+        mysql_length=mysql_text_index_lengths("name"),
     )
 
 
 def downgrade() -> None:
     op.drop_index("organization_skills_org_name_idx", table_name="organization_skills")
+    op.drop_index("organization_skills_org_key_idx", table_name="organization_skills")
     op.drop_table("organization_skills")

@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260526_000001"
 down_revision = None
@@ -60,10 +62,18 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "organizations_url_key_idx", "organizations", ["url_key"], unique=True
+        "organizations_url_key_idx",
+        "organizations",
+        ["url_key"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("url_key"),
     )
     op.create_index(
-        "organizations_issue_prefix_idx", "organizations", ["issue_prefix"], unique=True
+        "organizations_issue_prefix_idx",
+        "organizations",
+        ["issue_prefix"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("issue_prefix"),
     )
 
     op.create_table(
@@ -124,36 +134,49 @@ def upgrade() -> None:
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
     )
-    op.create_index("issues_company_status_idx", "issues", ["org_id", "status"])
+    op.create_index(
+        "issues_company_status_idx",
+        "issues",
+        ["org_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
+    )
     op.create_index(
         "issues_company_status_board_order_idx",
         "issues",
         ["org_id", "status", "board_order"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "issues_company_assignee_status_idx",
         "issues",
         ["org_id", "assignee_agent_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "issues_company_assignee_user_status_idx",
         "issues",
         ["org_id", "assignee_user_id", "status"],
+        mysql_length=mysql_text_index_lengths("assignee_user_id", "status"),
     )
     op.create_index(
         "issues_company_reviewer_agent_status_idx",
         "issues",
         ["org_id", "reviewer_agent_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "issues_company_reviewer_user_status_idx",
         "issues",
         ["org_id", "reviewer_user_id", "status"],
+        mysql_length=mysql_text_index_lengths("reviewer_user_id", "status"),
     )
     op.create_index("issues_company_parent_idx", "issues", ["org_id", "parent_id"])
     op.create_index("issues_company_project_idx", "issues", ["org_id", "project_id"])
     op.create_index(
-        "issues_company_origin_idx", "issues", ["org_id", "origin_kind", "origin_id"]
+        "issues_company_origin_idx",
+        "issues",
+        ["org_id", "origin_kind", "origin_id"],
+        mysql_length=mysql_text_index_lengths("origin_kind", "origin_id"),
     )
     op.create_index(
         "issues_company_project_workspace_idx",
@@ -165,13 +188,20 @@ def upgrade() -> None:
         "issues",
         ["org_id", "execution_workspace_id"],
     )
-    op.create_index("issues_identifier_idx", "issues", ["identifier"], unique=True)
+    op.create_index(
+        "issues_identifier_idx",
+        "issues",
+        ["identifier"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("identifier"),
+    )
     if op.get_bind().dialect.name == "mysql":
         op.create_index(
             "issues_open_automation_execution_uq",
             "issues",
             ["org_id", "origin_kind", "origin_id"],
             unique=False,
+            mysql_length=mysql_text_index_lengths("origin_kind", "origin_id"),
         )
     else:
         op.create_index(
@@ -217,6 +247,7 @@ def upgrade() -> None:
         "approvals_company_status_type_idx",
         "approvals",
         ["org_id", "status", "type"],
+        mysql_length=mysql_text_index_lengths("status", "type"),
     )
 
     op.create_table(
@@ -258,6 +289,7 @@ def upgrade() -> None:
         "issue_comments_company_author_issue_created_at_idx",
         "issue_comments",
         ["org_id", "author_user_id", "issue_id", "created_at"],
+        mysql_length=mysql_text_index_lengths("author_user_id"),
     )
 
     op.create_table(
@@ -289,7 +321,10 @@ def upgrade() -> None:
     )
     op.create_index("activity_log_run_id_idx", "activity_log", ["run_id"])
     op.create_index(
-        "activity_log_entity_type_id_idx", "activity_log", ["entity_type", "entity_id"]
+        "activity_log_entity_type_id_idx",
+        "activity_log",
+        ["entity_type", "entity_id"],
+        mysql_length=mysql_text_index_lengths("entity_type", "entity_id"),
     )
 
     op.create_table(

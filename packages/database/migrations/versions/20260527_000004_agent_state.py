@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260527_000004"
 down_revision = "20260527_000003"
@@ -148,6 +150,7 @@ def upgrade() -> None:
         "agent_task_sessions",
         ["org_id", "agent_id", "agent_runtime_type", "task_key"],
         unique=True,
+        mysql_length=mysql_text_index_lengths("agent_runtime_type", "task_key"),
     )
     op.create_index(
         "agent_task_sessions_company_agent_updated_idx",
@@ -158,6 +161,7 @@ def upgrade() -> None:
         "agent_task_sessions_company_task_updated_idx",
         "agent_task_sessions",
         ["org_id", "task_key", "updated_at"],
+        mysql_length=mysql_text_index_lengths("task_key"),
     )
 
     op.create_table(
@@ -208,6 +212,7 @@ def upgrade() -> None:
         "agent_wakeup_requests_company_agent_status_idx",
         "agent_wakeup_requests",
         ["org_id", "agent_id", "status"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "agent_wakeup_requests_company_requested_idx",

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import ast
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TypeGuard
 
+from alembic import command
+from alembic.config import Config
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -35,6 +39,217 @@ def test_migration_runner_creates_sqlite_parent_directory(tmp_path: Path) -> Non
     _build_config(f"sqlite+aiosqlite:///{db_path.as_posix()}")
 
     assert db_path.parent.is_dir()
+
+
+def test_alembic_cli_uses_octopus_database_url_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "cli-env" / "octopus.db"
+    monkeypatch.setenv(
+        "OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}"
+    )
+
+    command.current(Config("alembic.ini"))
+
+    assert db_path.is_file()
+
+
+def test_baseline_mysql_text_indexes_use_prefix_lengths() -> None:
+    migration_paths = Path("packages/database/migrations/versions").glob("*.py")
+    missing_prefix_lengths: list[tuple[str, str, str, tuple[str, ...]]] = []
+    text_unique_constraints: list[tuple[str, str, str, tuple[str, ...]]] = []
+
+    for migration_path in migration_paths:
+        tree = ast.parse(migration_path.read_text(encoding="utf-8"))
+        table_text_columns: dict[str, set[str]] = {}
+
+        for node in ast.walk(tree):
+            if not _is_op_call(node, "create_table"):
+                continue
+            table_name = _constant_arg(node, 0)
+            if table_name is None:
+                continue
+            table_text_columns[table_name] = _text_columns_from_create_table(node)
+            text_unique_constraints.extend(
+                _text_unique_constraints(
+                    migration_path, table_name, node, table_text_columns[table_name]
+                )
+            )
+
+        for node in ast.walk(tree):
+            if not _is_op_call(node, "create_index"):
+                continue
+            index_name = _constant_arg(node, 0)
+            table_name = _constant_arg(node, 1)
+            column_names = _list_arg(node, 2)
+            if index_name is None or table_name is None or column_names is None:
+                continue
+            indexed_text_columns = tuple(
+                column_name
+                for column_name in column_names
+                if column_name in table_text_columns.get(table_name, set())
+            )
+            if not indexed_text_columns:
+                continue
+            if _has_keyword(node, "mysql_length"):
+                continue
+            if (
+                migration_path.name == "20260526_000001_baseline.py"
+                and index_name == "issues_open_automation_execution_uq"
+            ):
+                continue
+            missing_prefix_lengths.append(
+                (migration_path.name, table_name, index_name, indexed_text_columns)
+            )
+
+    assert missing_prefix_lengths == []
+    assert text_unique_constraints == []
+
+
+def test_migration_identifiers_fit_mysql_limit() -> None:
+    migration_paths = Path("packages/database/migrations/versions").glob("*.py")
+    long_identifiers: list[tuple[str, str, int]] = []
+
+    for migration_path in migration_paths:
+        tree = ast.parse(migration_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            identifier = _migration_identifier(node)
+            if identifier is not None and len(identifier) > 64:
+                long_identifiers.append(
+                    (migration_path.name, identifier, len(identifier))
+                )
+
+    assert long_identifiers == []
+
+
+def test_runtime_scope_migration_renames_mysql_indexes() -> None:
+    migration_path = Path(
+        "packages/database/migrations/versions/"
+        "20260607_000018_runtime_provider_scope.py"
+    )
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert "RENAME INDEX" in source
+    assert "def _downgrade_renamed_runtime_tables" in source
+    assert 'if op.get_bind().dialect.name == "mysql"' in source
+
+
+def _migration_identifier(node: ast.Call) -> str | None:
+    if not isinstance(node.func, ast.Attribute):
+        return None
+    if node.func.attr in {"create_index", "drop_index"}:
+        return _constant_arg(node, 0)
+    if node.func.attr not in {
+        "ForeignKeyConstraint",
+        "PrimaryKeyConstraint",
+        "UniqueConstraint",
+    }:
+        return None
+    for keyword in node.keywords:
+        if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+            if isinstance(keyword.value.value, str):
+                return keyword.value.value
+    return None
+
+
+def _is_op_call(node: ast.AST, function_name: str) -> TypeGuard[ast.Call]:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == function_name
+    )
+
+
+def _constant_arg(node: ast.Call, index: int) -> str | None:
+    if len(node.args) <= index:
+        return None
+    arg = node.args[index]
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    return None
+
+
+def _list_arg(node: ast.Call, index: int) -> tuple[str, ...] | None:
+    if len(node.args) <= index:
+        return None
+    arg = node.args[index]
+    if not isinstance(arg, ast.List):
+        return None
+    values: list[str] = []
+    for item in arg.elts:
+        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+            return None
+        values.append(item.value)
+    return tuple(values)
+
+
+def _has_keyword(node: ast.Call, keyword_name: str) -> bool:
+    return any(keyword.arg == keyword_name for keyword in node.keywords)
+
+
+def _text_columns_from_create_table(node: ast.Call) -> set[str]:
+    text_columns: set[str] = set()
+    for arg in node.args[1:]:
+        if not _is_column_call(arg):
+            continue
+        column_name = _constant_arg(arg, 0)
+        if column_name is None:
+            continue
+        if len(arg.args) > 1 and _is_type_call(arg.args[1], "Text"):
+            text_columns.add(column_name)
+    return text_columns
+
+
+def _text_unique_constraints(
+    migration_path: Path,
+    table_name: str,
+    create_table_call: ast.Call,
+    text_columns: set[str],
+) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    constraints: list[tuple[str, str, str, tuple[str, ...]]] = []
+    for arg in create_table_call.args[1:]:
+        if not _is_type_call(arg, "UniqueConstraint"):
+            continue
+        column_names = tuple(
+            item.value
+            for item in arg.args
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        )
+        indexed_text_columns = tuple(
+            column_name for column_name in column_names if column_name in text_columns
+        )
+        if indexed_text_columns:
+            constraints.append(
+                (
+                    migration_path.name,
+                    table_name,
+                    _constraint_name(arg),
+                    indexed_text_columns,
+                )
+            )
+    return constraints
+
+
+def _is_column_call(node: ast.AST) -> TypeGuard[ast.Call]:
+    return _is_type_call(node, "Column")
+
+
+def _is_type_call(node: ast.AST, type_name: str) -> TypeGuard[ast.Call]:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == type_name
+    )
+
+
+def _constraint_name(node: ast.Call) -> str:
+    for keyword in node.keywords:
+        if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
+            if isinstance(keyword.value.value, str):
+                return keyword.value.value
+    return "<unnamed>"
 
 
 def test_settings_default_database_url_uses_instance_sqlite_path(
