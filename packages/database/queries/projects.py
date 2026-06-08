@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Project
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def list_org_projects(session: AsyncSession, org_id: str) -> Sequence[Project]:
@@ -38,17 +39,10 @@ async def update_project(
         return await get_project_by_id(session, project_id)
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(Project)
-        .where(Project.id == project_id)
-        .values(**values)
-        .returning(Project)
+    return await update_returning_one(
+        session, Project, Project.id == project_id, values
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_project(session: AsyncSession, project_id: str) -> Project | None:
-    result = await session.execute(
-        delete(Project).where(Project.id == project_id).returning(Project)
-    )
-    return result.scalar_one_or_none()
+    return await delete_returning_one(session, Project, Project.id == project_id)
