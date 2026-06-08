@@ -1067,6 +1067,127 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
     assert "operation-ok" in adapter_log["content"]
 
 
+async def test_adapter_execution_truncates_database_excerpts(
+    monkeypatch,
+) -> None:
+    class LongLoggingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            await context.on_log("stdout", "x" * 70_000)
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "long output"},
+            )
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    root = Path("pytest-tmp") / f"step15-long-excerpts-{uuid.uuid4().hex}"
+    if root.exists():
+        shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    monkeypatch.setenv(
+        "OCTOPUS_WORKSPACE_OPERATION_LOG_DIR", str(root / "operation-logs")
+    )
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: (root / "organizations" / org_id / "workspaces").resolve(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: LongLoggingAdapter(),
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-long-excerpts",
+                name="Step 15 Long Excerpts",
+                issue_prefix="LEX",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            agent_service = AgentService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Long Excerpts",
+                    "executionWorkspacePolicy": {"enabled": True},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": "D:/work/long-excerpts"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Run with long workspace operation output",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await agent_service.create_agent(
+                org.id,
+                {
+                    "name": "Long Output Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"issueId": issue.id}},
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert run is not None
+            operations = await list_workspace_operations_for_run(session, run["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+        shutil.rmtree(root, ignore_errors=True)
+
+    adapter_operation = next(
+        operation
+        for operation in operations
+        if operation.command == "runtime_adapter.execute"
+    )
+    assert run["status"] == "succeeded"
+    assert run["stdoutExcerpt"] is not None
+    assert adapter_operation.stdout_excerpt is not None
+    assert len(run["stdoutExcerpt"]) <= 16_000
+    assert len(adapter_operation.stdout_excerpt) <= 16_000
+
+
 async def test_runtime_log_callbacks_are_serialized_for_one_session(
     monkeypatch,
 ) -> None:
