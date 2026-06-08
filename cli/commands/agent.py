@@ -63,6 +63,10 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     adapter_test_parser.add_argument("--runtime-config", default="{}")
     adapter_test_parser.add_argument("--runtime-extra-arg", action="append", default=[])
     adapter_test_parser.add_argument("--skip-opencode-permissions", action="store_true")
+    adapter_test_parser.add_argument("--live-probe", action="store_true")
+    adapter_test_parser.add_argument("--probe-timeout-sec", type=float)
+    adapter_test_parser.add_argument("--probe-arg", action="append", default=[])
+    adapter_test_parser.add_argument("--probe-models", action="store_true")
     adapter_test_parser.set_defaults(handler=test_adapter_environment)
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
@@ -135,6 +139,27 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--clear-legacy-prompt-template", action="store_true"
     )
     instructions_update_parser.set_defaults(handler=update_instructions_bundle)
+    memory_list_parser = actions.add_parser("memory-list")
+    memory_list_parser.add_argument("agent_id")
+    memory_list_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_list_parser.add_argument("--path", default="")
+    memory_list_parser.set_defaults(handler=list_memory_files)
+    memory_read_parser = actions.add_parser("memory-read")
+    memory_read_parser.add_argument("agent_id")
+    memory_read_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_read_parser.add_argument("--path", required=True)
+    memory_read_parser.set_defaults(handler=read_memory_file)
+    memory_write_parser = actions.add_parser("memory-write")
+    memory_write_parser.add_argument("agent_id")
+    memory_write_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_write_parser.add_argument("--path", required=True)
+    memory_write_parser.add_argument("--content", required=True)
+    memory_write_parser.set_defaults(handler=write_memory_file)
+    memory_delete_parser = actions.add_parser("memory-delete")
+    memory_delete_parser.add_argument("agent_id")
+    memory_delete_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_delete_parser.add_argument("--path", required=True)
+    memory_delete_parser.set_defaults(handler=delete_memory_file)
     create_parser = actions.add_parser("create")
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--name", required=True)
@@ -269,6 +294,19 @@ def _runtime_extra_args(args: argparse.Namespace) -> list[str]:
     return extra_args
 
 
+def _runtime_probe_config(args: argparse.Namespace) -> dict[str, Any]:
+    config: dict[str, Any] = {}
+    if getattr(args, "live_probe", False):
+        config["liveProbe"] = True
+    if getattr(args, "probe_timeout_sec", None) is not None:
+        config["probeTimeoutSec"] = args.probe_timeout_sec
+    if getattr(args, "probe_arg", None):
+        config["probeArgs"] = list(args.probe_arg)
+    if getattr(args, "probe_models", False):
+        config["probeModels"] = True
+    return config
+
+
 def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/orgs/{args.org_id}/agents")
 
@@ -298,14 +336,14 @@ def get_adapter_quota_windows(args: argparse.Namespace, client: ApiClient) -> An
 
 
 def test_adapter_environment(args: argparse.Namespace, client: ApiClient) -> Any:
+    agent_runtime_config = _runtime_config(
+        args.runtime, args.runtime_config, extra_args=_runtime_extra_args(args)
+    )
+    agent_runtime_config.update(_runtime_probe_config(args))
     return client.request(
         "POST",
         f"/api/orgs/{args.org_id}/adapters/{args.runtime}/test-environment",
-        json={
-            "agentRuntimeConfig": _runtime_config(
-                args.runtime, args.runtime_config, extra_args=_runtime_extra_args(args)
-            )
-        },
+        json={"agentRuntimeConfig": agent_runtime_config},
     )
 
 
@@ -438,6 +476,38 @@ def update_instructions_bundle(args: argparse.Namespace, client: ApiClient) -> A
         "PATCH",
         f"/api/agents/{args.agent_id}/instructions-bundle",
         json=payload,
+    )
+
+
+def list_memory_files(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET",
+        f"/api/agents/{args.agent_id}/memory/files",
+        params={"layer": args.layer, "path": args.path},
+    )
+
+
+def read_memory_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "GET",
+        f"/api/agents/{args.agent_id}/memory/file",
+        params={"layer": args.layer, "path": args.path},
+    )
+
+
+def write_memory_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "PUT",
+        f"/api/agents/{args.agent_id}/memory/file",
+        json={"layer": args.layer, "path": args.path, "content": args.content},
+    )
+
+
+def delete_memory_file(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "DELETE",
+        f"/api/agents/{args.agent_id}/memory/file",
+        params={"layer": args.layer, "path": args.path},
     )
 
 

@@ -31,6 +31,19 @@ function stubGoalFetch() {
       return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "planned", goalId: "goal-1" }]);
     }
     if (path === "/api/orgs/org-1/issues?goalId=goal-1" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/activity?entityType=goal&entityId=goal-1&limit=50" && init?.method === "GET") {
+      return respond([
+        {
+          id: "activity-1",
+          orgId: "org-1",
+          action: "goal.updated",
+          entityType: "goal",
+          entityId: "goal-1",
+          summary: "目标状态更新",
+          createdAt: "2026-06-08T10:00:00Z",
+        },
+      ]);
+    }
     if (path === "/api/goals/goal-1" && init?.method === "GET") return respond(goal);
     if (path === "/api/goals/goal-1/dependencies" && init?.method === "GET") {
       return respond({
@@ -117,7 +130,11 @@ it("shows upstream-style goal detail tabs and configuration", async () => {
     "/orgs/org-1/projects/project-1",
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "Activity" }));
-  expect(await screen.findByText("Blockers: linked_projects")).toBeInTheDocument();
+  const activityRegion = await screen.findByRole("region", { name: "Goal activity" });
+  expect(activityRegion).toHaveTextContent("goal.updated");
+  expect(activityRegion).toHaveTextContent("目标状态更新");
+  expect(activityRegion).toHaveTextContent("Blockers: linked_projects");
+  expect(activityRegion).not.toHaveTextContent("Activity API 尚未接入 UI");
   await userEvent.click(within(screen.getByRole("navigation", { name: "目标详情导航" })).getByRole("link", { name: "Configuration" }));
   await userEvent.clear(screen.getByLabelText("Description"));
   await userEvent.type(screen.getByLabelText("Description"), "更新目标");
