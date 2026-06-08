@@ -214,10 +214,8 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     assert "## Runtime Tool Capability" in prompt
     marker = "Conversation input:"
     assert marker in prompt
-    envelope_payload = prompt.split(marker, 1)[1].split(
-        "## Runtime Tool Capability", 1
-    )[0]
-    envelope = json.loads(envelope_payload.strip())
+    envelope_tail = prompt.split(marker, 1)[1].strip()
+    envelope, _ = json.JSONDecoder().raw_decode(envelope_tail)
     assert envelope["conversation"]["id"] == conversation["id"]
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
