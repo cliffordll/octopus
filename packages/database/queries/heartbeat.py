@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import AgentWakeupRequest, HeartbeatRun, HeartbeatRunEvent
+from ._compat import update_returning_one
 
 
 async def create_wakeup_request(
@@ -24,13 +25,12 @@ async def update_wakeup_request(
 ) -> AgentWakeupRequest | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(AgentWakeupRequest)
-        .where(AgentWakeupRequest.id == wakeup_id)
-        .values(**values)
-        .returning(AgentWakeupRequest)
+    return await update_returning_one(
+        session,
+        AgentWakeupRequest,
+        AgentWakeupRequest.id == wakeup_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def get_wakeup_by_idempotency_key(
@@ -90,13 +90,12 @@ async def update_run(
 ) -> HeartbeatRun | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(HeartbeatRun)
-        .where(HeartbeatRun.id == run_id)
-        .values(**values)
-        .returning(HeartbeatRun)
+    return await update_returning_one(
+        session,
+        HeartbeatRun,
+        HeartbeatRun.id == run_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def list_running_run_ids(session: AsyncSession, agent_id: str) -> set[str]:
@@ -144,17 +143,16 @@ async def list_queued_agent_ids(session: AsyncSession) -> set[str]:
 async def claim_queued_run(
     session: AsyncSession, run_id: str, started_at: datetime
 ) -> HeartbeatRun | None:
-    result = await session.execute(
-        update(HeartbeatRun)
-        .where(HeartbeatRun.id == run_id, HeartbeatRun.status == "queued")
-        .values(
-            status="running",
-            started_at=started_at,
-            updated_at=started_at,
-        )
-        .returning(HeartbeatRun)
+    return await update_returning_one(
+        session,
+        HeartbeatRun,
+        (HeartbeatRun.id == run_id) & (HeartbeatRun.status == "queued"),
+        {
+            "status": "running",
+            "started_at": started_at,
+            "updated_at": started_at,
+        },
     )
-    return result.scalar_one_or_none()
 
 
 async def append_run_event(

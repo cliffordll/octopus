@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Approval, ApprovalComment, Issue, IssueApproval
+from ._compat import update_returning_one
 
 
 async def create_approval(session: AsyncSession, fields: Mapping[str, Any]) -> Approval:
@@ -55,13 +56,12 @@ async def update_approval(
     ):
         values["decided_at"] = datetime.now(UTC)
 
-    result = await session.execute(
-        update(Approval)
-        .where(Approval.id == approval_id)
-        .values(**values)
-        .returning(Approval)
+    return await update_returning_one(
+        session,
+        Approval,
+        Approval.id == approval_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def list_approval_comments(
