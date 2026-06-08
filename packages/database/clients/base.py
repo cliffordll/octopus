@@ -17,14 +17,6 @@ def create_database_engine(url: str, *, echo: bool = False) -> AsyncEngine:
         _ensure_sqlite_parent_directory(parsed_url.database)
     elif backend == "postgresql":
         engine_kwargs["pool_pre_ping"] = True
-    elif backend == "mysql":
-        engine_kwargs.update(
-            {
-                "pool_pre_ping": True,
-                "pool_recycle": 1800,
-                "connect_args": {"charset": "utf8mb4"},
-            }
-        )
 
     engine = create_async_engine(url, **engine_kwargs)
     if backend == "sqlite":
