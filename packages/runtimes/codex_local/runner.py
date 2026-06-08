@@ -18,6 +18,7 @@ from ..instructions import runtime_prompt_from_config
 from ..local_skills import configure_managed_profile_env
 from ..provider_config import apply_provider_env, model_for_cli
 from ..paths import ensure_managed_runtime_home
+from ..session import effective_resume_session_id
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
     append_runtime_workspace_guidance,
@@ -78,7 +79,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     loaded_skills = _loaded_skills(env)
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
-    session_id = _runtime_session_id(context.config)
+    session_id = await effective_resume_session_id(
+        context.config,
+        cwd,
+        runtime_label="Codex",
+        on_log=context.on_log,
+    )
 
     attempt = await _run_attempt(
         context=context,

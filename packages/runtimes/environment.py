@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import contextlib
 import shutil
+import asyncio
+import os
 from typing import Any
 from urllib.parse import urlparse
+
+import httpx
 
 
 _PROXY_ENV_KEYS = (
@@ -40,6 +45,151 @@ def local_cli_environment_checks(
         _command_check(command, command_label),
         _auth_check(env_data, auth_env_keys, auth_hint),
     ]
+
+
+async def http_live_probe_check(config: dict[str, Any]) -> dict[str, str | None]:
+    if not _live_probe_enabled(config):
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "skipped",
+            "message": "HTTP live probe was not requested.",
+            "hint": "Set agentRuntimeConfig.liveProbe=true to verify endpoint reachability.",
+        }
+    url = _string(config.get("url"))
+    if url is None:
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "failed",
+            "message": "HTTP live probe cannot run without url.",
+            "hint": "Set agentRuntimeConfig.url.",
+        }
+    method = (_string(config.get("probeMethod")) or "GET").upper()
+    timeout_sec = _timeout_seconds(config.get("probeTimeoutSec"), default=3.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            response = await client.request(method, url)
+    except httpx.TimeoutException:
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "failed",
+            "message": f"HTTP live probe timed out after {timeout_sec:g}s.",
+            "hint": "Check endpoint reachability or increase probeTimeoutSec.",
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "failed",
+            "message": f"HTTP live probe failed: {exc}",
+            "hint": "Check endpoint DNS, TLS, network and server availability.",
+        }
+    if response.status_code >= 500:
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "failed",
+            "message": f"HTTP live probe returned {response.status_code}.",
+            "hint": "Inspect the runtime endpoint server logs.",
+        }
+    if response.status_code >= 400:
+        return {
+            "id": "liveProbe",
+            "label": "HTTP live probe",
+            "status": "warning",
+            "message": f"HTTP live probe reached endpoint but returned {response.status_code}.",
+            "hint": "Endpoint is reachable; verify auth and request method.",
+        }
+    return {
+        "id": "liveProbe",
+        "label": "HTTP live probe",
+        "status": "ok",
+        "message": f"HTTP live probe returned {response.status_code}.",
+        "hint": None,
+    }
+
+
+async def cli_hello_probe_check(
+    config: dict[str, Any],
+    *,
+    command: str,
+    label: str,
+    default_args: list[str],
+) -> dict[str, str | None]:
+    if not _live_probe_enabled(config):
+        return {
+            "id": "helloProbe",
+            "label": label,
+            "status": "skipped",
+            "message": "CLI hello probe was not requested.",
+            "hint": "Set agentRuntimeConfig.liveProbe=true to execute a lightweight CLI probe.",
+        }
+    args = _string_list(config.get("probeArgs"))
+    if not args:
+        args = default_args
+    env = dict(os.environ)
+    configured_env = config.get("env")
+    if isinstance(configured_env, dict):
+        env.update(
+            {
+                key: value
+                for key, value in configured_env.items()
+                if isinstance(key, str) and isinstance(value, str)
+            }
+        )
+    timeout_sec = _timeout_seconds(config.get("probeTimeoutSec"), default=5.0)
+    cwd = _string(config.get("cwd"))
+    process: asyncio.subprocess.Process | None = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            resolve_runtime_executable(command),
+            *args,
+            cwd=cwd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout_sec
+        )
+    except TimeoutError:
+        if process is not None:
+            with contextlib.suppress(Exception):
+                process.kill()
+                await process.communicate()
+        return {
+            "id": "helloProbe",
+            "label": label,
+            "status": "failed",
+            "message": f"CLI hello probe timed out after {timeout_sec:g}s.",
+            "hint": "Inspect command startup time or increase probeTimeoutSec.",
+        }
+    except OSError as exc:
+        return {
+            "id": "helloProbe",
+            "label": label,
+            "status": "failed",
+            "message": f"CLI hello probe failed to start: {exc}",
+            "hint": "Install the CLI or configure agentRuntimeConfig.command.",
+        }
+    output = (stdout + stderr).decode(errors="replace").strip()
+    if (process.returncode or 0) != 0:
+        return {
+            "id": "helloProbe",
+            "label": label,
+            "status": "failed",
+            "message": f"CLI hello probe exited with code {process.returncode}: {_first_line(output)}",
+            "hint": "Run the configured command manually with probeArgs.",
+        }
+    return {
+        "id": "helloProbe",
+        "label": label,
+        "status": "ok",
+        "message": f"CLI hello probe succeeded: {_first_line(output)}",
+        "hint": None,
+    }
 
 
 def aggregate_status(checks: list[dict[str, str | None]]) -> str:
@@ -191,3 +341,23 @@ def _auth_check(
 
 def _string(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _live_probe_enabled(config: dict[str, Any]) -> bool:
+    return config.get("liveProbe") is True
+
+
+def _timeout_seconds(value: Any, *, default: float) -> float:
+    if isinstance(value, (float, int)) and not isinstance(value, bool) and value > 0:
+        return min(float(value), 30.0)
+    return default
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    return []
+
+
+def _first_line(value: str) -> str:
+    return next((line.strip() for line in value.splitlines() if line.strip()), "")
