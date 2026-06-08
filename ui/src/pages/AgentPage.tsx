@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
+import type { AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -563,7 +563,7 @@ function AgentRunDetail({
 
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
-  const activeTab = ["dashboard", "profile", "configuration", "skills", "runs"].includes(tab) ? tab : "dashboard";
+  const activeTab = ["dashboard", "profile", "memory", "configuration", "skills", "runs"].includes(tab) ? tab : "dashboard";
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<AgentRole>("general");
@@ -592,6 +592,11 @@ export function AgentPage() {
   const [showInstructionForm, setShowInstructionForm] = useState(false);
   const [newInstructionName, setNewInstructionName] = useState("");
   const [instructionDraft, setInstructionDraft] = useState("");
+  const [memoryLayer, setMemoryLayer] = useState<"memory" | "life">("memory");
+  const [memoryDirectoryPath, setMemoryDirectoryPath] = useState("");
+  const [selectedMemoryPath, setSelectedMemoryPath] = useState("");
+  const [newMemoryFilePath, setNewMemoryFilePath] = useState("");
+  const [memoryDraft, setMemoryDraft] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
@@ -639,6 +644,11 @@ export function AgentPage() {
     queryKey: ["agent-instructions-bundle", agentId],
     queryFn: () => agentsApi.instructionsBundle(agentId),
     enabled: activeTab === "profile",
+  });
+  const memoryFiles = useQuery({
+    queryKey: ["agent-memory-files", agentId, memoryLayer, memoryDirectoryPath],
+    queryFn: () => agentsApi.memoryFiles(agentId, memoryLayer, memoryDirectoryPath),
+    enabled: activeTab === "memory",
   });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
@@ -756,6 +766,25 @@ export function AgentPage() {
       setInstructionDraft("");
       void queryClient.invalidateQueries({ queryKey: ["agent-instructions-bundle", agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent-instructions-file", agentId] });
+    },
+  });
+  const upsertMemoryFile = useMutation({
+    mutationFn: ({ path, content }: { path: string; content: string }) =>
+      agentsApi.upsertMemoryFile(agentId, { layer: memoryLayer, path, content }),
+    onSuccess: (file) => {
+      setSelectedMemoryPath(file.filePath);
+      setMemoryDraft(file.content);
+      void queryClient.invalidateQueries({ queryKey: ["agent-memory-files", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-memory-file", agentId] });
+    },
+  });
+  const deleteMemoryFile = useMutation({
+    mutationFn: (path: string) => agentsApi.deleteMemoryFile(agentId, memoryLayer, path),
+    onSuccess: () => {
+      setSelectedMemoryPath("");
+      setMemoryDraft("");
+      void queryClient.invalidateQueries({ queryKey: ["agent-memory-files", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent-memory-file", agentId] });
     },
   });
   const assignTask = useMutation({
@@ -896,6 +925,19 @@ export function AgentPage() {
   });
   const selectedFileContent = selectedBundleFile.data?.content;
   const selectedInstructionContent = selectedFileContent?.trim() ? selectedFileContent : (selectedInstruction?.content ?? selectedFileContent ?? "");
+  const memoryEntries = memoryFiles.data?.entries ?? [];
+  const sortedMemoryEntries = useMemo(
+    () => [...memoryEntries].sort((left, right) => {
+      if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+      return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+    }),
+    [memoryEntries],
+  );
+  const selectedMemoryFile = useQuery({
+    queryKey: ["agent-memory-file", agentId, memoryLayer, selectedMemoryPath],
+    queryFn: () => agentsApi.readMemoryFile(agentId, memoryLayer, selectedMemoryPath),
+    enabled: activeTab === "memory" && Boolean(selectedMemoryPath),
+  });
   useEffect(() => {
     if (!selectedInstruction?.path) return;
     const ancestors = instructionFileDirectoryAncestors(selectedInstruction.path);
@@ -909,6 +951,14 @@ export function AgentPage() {
   useEffect(() => {
     setInstructionDraft(selectedInstructionContent);
   }, [selectedInstructionContent]);
+  useEffect(() => {
+    setMemoryDraft(selectedMemoryFile.data?.content ?? "");
+  }, [selectedMemoryFile.data?.content]);
+  useEffect(() => {
+    setSelectedMemoryPath("");
+    setMemoryDraft("");
+    setMemoryDirectoryPath("");
+  }, [memoryLayer]);
   function toggleInstructionDir(path: string) {
     setExpandedInstructionDirs((current) => {
       const next = new Set(current);
@@ -938,6 +988,40 @@ export function AgentPage() {
     upsertInstruction.mutate({ path: newInstructionName.trim(), content: "" });
     setSelectedInstructionKey(newInstructionName.trim());
     closeInstructionForm();
+  }
+  function defaultMemoryFileName() {
+    const prefix = memoryDirectoryPath ? `${memoryDirectoryPath}/` : "";
+    if (memoryLayer === "memory") {
+      return prefix + new Date().toISOString().slice(0, 10) + ".md";
+    }
+    return prefix + "notes.md";
+  }
+  function resolveNewMemoryFilePath(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return defaultMemoryFileName();
+    if (!memoryDirectoryPath || trimmed.includes("/") || trimmed.includes("\\")) return trimmed;
+    return `${memoryDirectoryPath}/${trimmed}`;
+  }
+  function createMemoryFile(event: FormEvent) {
+    event.preventDefault();
+    const path = resolveNewMemoryFilePath(newMemoryFilePath);
+    upsertMemoryFile.mutate({ path, content: "" });
+    setNewMemoryFilePath("");
+  }
+  function selectMemoryEntry(entry: AgentMemoryFileEntry) {
+    if (entry.isDirectory) {
+      setMemoryDirectoryPath(entry.path);
+      setSelectedMemoryPath("");
+      setMemoryDraft("");
+      return;
+    }
+    setSelectedMemoryPath(entry.path);
+  }
+  function goMemoryDirectoryUp() {
+    if (!memoryDirectoryPath) return;
+    const parts = memoryDirectoryPath.split("/").filter(Boolean);
+    setMemoryDirectoryPath(parts.slice(0, -1).join("/"));
+    setSelectedMemoryPath("");
   }
   function enableSkill(name: string) {
     if (!name.trim()) return;
@@ -1017,6 +1101,7 @@ export function AgentPage() {
           <nav aria-label="智能体详情导航" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/dashboard`}>概览</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/profile`}>说明</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/memory`}>记忆</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
@@ -1140,6 +1225,107 @@ export function AgentPage() {
                   </>
                 ) : selectedInstructionContent ? (
                   <pre>{selectedInstructionContent}</pre>
+                ) : (
+                  <div className="instruction-empty-content" />
+                )}
+              </article>
+            </div>
+          </section>}
+          {activeTab === "memory" && <section aria-label="Agent Memory" className="agent-instructions-page">
+            {memoryFiles.error && <ErrorNotice error={memoryFiles.error} />}
+            {selectedMemoryFile.error && <ErrorNotice error={selectedMemoryFile.error} />}
+            {upsertMemoryFile.error && <ErrorNotice error={upsertMemoryFile.error} />}
+            {deleteMemoryFile.error && <ErrorNotice error={deleteMemoryFile.error} />}
+            <div className="agent-instructions-grid">
+              <aside aria-label="记忆文件列表" className="instruction-files-card">
+                <div className="instruction-card-header">
+                  <div>
+                    <h2>记忆</h2>
+                    <p className="muted">{memoryLayer === "memory" ? "daily notes" : "life"}</p>
+                  </div>
+                </div>
+                <div className="segmented-control">
+                  <button className={memoryLayer === "memory" ? "active" : ""} onClick={() => setMemoryLayer("memory")} type="button">Daily</button>
+                  <button className={memoryLayer === "life" ? "active" : ""} onClick={() => setMemoryLayer("life")} type="button">Life</button>
+                </div>
+                <form className="instruction-create-form" onSubmit={createMemoryFile}>
+                  <label>
+                    文件路径
+                    <input
+                      placeholder={defaultMemoryFileName()}
+                      value={newMemoryFilePath}
+                      onChange={(event) => setNewMemoryFilePath(event.target.value)}
+                    />
+                  </label>
+                  <button className="small-button" disabled={upsertMemoryFile.isPending} type="submit">新建</button>
+                </form>
+                <div className="instruction-directory">
+                  <button
+                    className="instruction-directory-button"
+                    disabled={!memoryDirectoryPath}
+                    onClick={goMemoryDirectoryUp}
+                    type="button"
+                  >
+                    <span className="instruction-file-label">
+                      <span className="instruction-directory-icon" aria-hidden="true">D</span>
+                      <span>{memoryDirectoryPath || "/"}</span>
+                    </span>
+                    <span className="instruction-directory-toggle" aria-hidden="true">..</span>
+                  </button>
+                </div>
+                <div className="instruction-file-tree">
+                  {memoryFiles.isLoading && <p className="muted">加载中...</p>}
+                  {memoryFiles.data?.message && <p className="muted">{memoryFiles.data.message}</p>}
+                  {sortedMemoryEntries.map((entry) => (
+                    <button
+                      className={`instruction-file-button ${selectedMemoryPath === entry.path ? "selected" : ""}`}
+                      key={entry.path}
+                      onClick={() => selectMemoryEntry(entry)}
+                      style={{ "--instruction-file-depth": 0 } as CSSProperties}
+                      type="button"
+                    >
+                      <span className="instruction-file-label">
+                        <span className="instruction-file-icon" aria-hidden="true">{entry.isDirectory ? "D" : "F"}</span>
+                        <span>{entry.name}</span>
+                      </span>
+                      {!entry.isDirectory && <small>{entry.size ?? 0}</small>}
+                    </button>
+                  ))}
+                </div>
+              </aside>
+              <article aria-label="记忆文件内容" className="instruction-content-card">
+                {selectedMemoryPath ? (
+                  <>
+                    <div className="instruction-card-header">
+                      <div>
+                        <h2>{selectedMemoryPath.split("/").at(-1) ?? selectedMemoryPath}</h2>
+                        <p className="muted">{memoryLayer}/{selectedMemoryPath}</p>
+                      </div>
+                    </div>
+                    <textarea
+                      aria-label="记忆文件内容"
+                      className="instruction-content-editor"
+                      value={memoryDraft}
+                      onChange={(event) => setMemoryDraft(event.target.value)}
+                    />
+                    <div className="instruction-create-actions">
+                      <button
+                        className="danger"
+                        disabled={deleteMemoryFile.isPending}
+                        onClick={() => deleteMemoryFile.mutate(selectedMemoryPath)}
+                        type="button"
+                      >
+                        删除文件
+                      </button>
+                      <button
+                        disabled={upsertMemoryFile.isPending}
+                        onClick={() => upsertMemoryFile.mutate({ path: selectedMemoryPath, content: memoryDraft })}
+                        type="button"
+                      >
+                        保存文件
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <div className="instruction-empty-content" />
                 )}

@@ -249,6 +249,35 @@ class AgentInstructionsPathResult(TypedDict):
     path: str | None
 
 
+class AgentMemoryFileEntry(TypedDict):
+    name: str
+    path: str
+    isDirectory: bool
+    size: int | None
+    updatedAt: str | None
+
+
+class AgentMemoryFileList(TypedDict):
+    agentId: str
+    orgId: str
+    layer: str
+    rootPath: str
+    directoryPath: str
+    entries: list[AgentMemoryFileEntry]
+    message: str | None
+
+
+class AgentMemoryFileDetail(TypedDict):
+    agentId: str
+    orgId: str
+    layer: str
+    rootPath: str
+    filePath: str
+    content: str
+    size: int
+    updatedAt: str | None
+
+
 class ProviderQuotaResult(TypedDict, total=False):
     provider: str
     source: str | None

@@ -268,6 +268,10 @@ def _runtime_config_with_context(
 ) -> dict[str, Any]:
     organization_root = str(organization_skills_root(row.org_id))
     agent_home = _ensure_agent_workspace_layout(_agent_home_root(row))
+    instructions_dir = agent_home / "instructions"
+    memory_dir = agent_home / "memory"
+    life_dir = agent_home / "life"
+    skills_dir = agent_home / "skills"
     config = dict(base_config if base_config is not None else row.agent_runtime_config)
     config.setdefault("skillsRootPath", organization_root)
     runtime_context = config.get("_octopus")
@@ -279,8 +283,12 @@ def _runtime_config_with_context(
             **runtime_context,
             "orgId": row.org_id,
             "agentId": row.id,
+            "agentHome": str(agent_home),
+            "agentInstructionsDir": str(instructions_dir),
+            "agentMemoryDir": str(memory_dir),
+            "agentLifeDir": str(life_dir),
             "organizationSkillsRootPath": organization_root,
-            "agentSkillsRootPath": str(agent_home / "skills"),
+            "agentSkillsRootPath": str(skills_dir),
         },
     }
 
