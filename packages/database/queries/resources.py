@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import OrganizationResource, ProjectResourceAttachment
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def get_organization_resource_by_id(
@@ -59,30 +60,28 @@ async def update_organization_resource(
 ) -> OrganizationResource | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(OrganizationResource)
-        .where(
+    return await update_returning_one(
+        session,
+        OrganizationResource,
+        and_(
             OrganizationResource.org_id == org_id,
             OrganizationResource.id == resource_id,
-        )
-        .values(**values)
-        .returning(OrganizationResource)
+        ),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_organization_resource(
     session: AsyncSession, org_id: str, resource_id: str
 ) -> OrganizationResource | None:
-    result = await session.execute(
-        delete(OrganizationResource)
-        .where(
+    return await delete_returning_one(
+        session,
+        OrganizationResource,
+        and_(
             OrganizationResource.org_id == org_id,
             OrganizationResource.id == resource_id,
-        )
-        .returning(OrganizationResource)
+        ),
     )
-    return result.scalar_one_or_none()
 
 
 async def list_project_resource_attachments(
@@ -139,24 +138,22 @@ async def update_project_resource_attachment(
 ) -> ProjectResourceAttachment | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(ProjectResourceAttachment)
-        .where(ProjectResourceAttachment.id == attachment_id)
-        .values(**values)
-        .returning(ProjectResourceAttachment)
+    return await update_returning_one(
+        session,
+        ProjectResourceAttachment,
+        ProjectResourceAttachment.id == attachment_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_project_resource_attachment(
     session: AsyncSession, attachment_id: str
 ) -> ProjectResourceAttachment | None:
-    result = await session.execute(
-        delete(ProjectResourceAttachment)
-        .where(ProjectResourceAttachment.id == attachment_id)
-        .returning(ProjectResourceAttachment)
+    return await delete_returning_one(
+        session,
+        ProjectResourceAttachment,
+        ProjectResourceAttachment.id == attachment_id,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_project_resource_attachments(
