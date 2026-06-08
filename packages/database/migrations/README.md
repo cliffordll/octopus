@@ -38,6 +38,26 @@ $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
 
+本机 PostgreSQL 开发示例：
+
+```sql
+CREATE USER octopus WITH PASSWORD 'octopus';
+CREATE DATABASE octopus OWNER octopus;
+\c octopus
+GRANT ALL ON SCHEMA public TO octopus;
+```
+
+```powershell
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
+```
+
+使用 PostgreSQL 后不会使用 `<OCTOPUS_HOME>/instances/<instance>/db/octopus.db`；但 `OCTOPUS_HOME` 仍负责文件侧 instance 数据，例如 `organizations/<orgId>/workspaces`、`data/storage`、`data/run-logs`、`logs` 和 runtime homes。
+
 macOS / Linux shell PostgreSQL 示例：
 
 ```bash
