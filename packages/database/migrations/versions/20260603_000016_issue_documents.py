@@ -3,6 +3,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260603_000016"
 down_revision = "20260602_000015"
@@ -109,13 +111,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["issue_id"], ["issues.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["org_id"], ["organizations.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "org_id",
-            "issue_id",
-            "key",
-            name="issue_documents_company_issue_key_uq",
-        ),
         sa.UniqueConstraint("document_id", name="issue_documents_document_uq"),
+    )
+    op.create_index(
+        "issue_documents_company_issue_key_uq",
+        "issue_documents",
+        ["org_id", "issue_id", "key"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("key"),
     )
     op.create_index(
         "issue_documents_company_issue_updated_idx",
@@ -128,6 +131,7 @@ def downgrade() -> None:
     op.drop_index(
         "issue_documents_company_issue_updated_idx", table_name="issue_documents"
     )
+    op.drop_index("issue_documents_company_issue_key_uq", table_name="issue_documents")
     op.drop_table("issue_documents")
     op.drop_index(
         "document_revisions_company_document_created_idx",
