@@ -22,7 +22,7 @@ uv run alembic revision -m "describe change"
 - `OCTOPUS_DATABASE_URL` 控制当前进程连接的数据库。
 - 默认值是本地 SQLite：`sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
 - 未设置 `OCTOPUS_HOME` 时，默认 home 是 `~/.octopus`；未设置 `OCTOPUS_INSTANCE_ID` 时，默认实例是 `default`。
-- 外部数据库当前推荐 PostgreSQL。MySQL 尚未作为支持目标验证，现有 query 和 migration 里存在 MySQL 不兼容点，不要直接用于生产或共享数据。
+- 外部数据库推荐 PostgreSQL；当前分支同时提供 MySQL/MariaDB 兼容路径，连接串使用 `mysql+asyncmy://...`。
 
 PostgreSQL 连接前需要确保 Python 环境有 async driver：
 
@@ -46,6 +46,22 @@ export OCTOPUS_AUTO_MIGRATE=1
 uv run server
 ```
 
+PowerShell MySQL 示例：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+uv run server
+```
+
+macOS / Linux shell MySQL 示例：
+
+```bash
+export OCTOPUS_DATABASE_URL="mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+export OCTOPUS_AUTO_MIGRATE=1
+uv run server
+```
+
 生产或共享数据库建议先手动迁移，再启动服务：
 
 ```powershell
@@ -54,9 +70,32 @@ uv run alembic upgrade head
 uv run server
 ```
 
+MySQL 手动迁移示例：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+uv run alembic upgrade head
+uv run server
+```
+
+清除数据库环境变量并切回默认 SQLite：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+uv run alembic upgrade head
+```
+
+macOS / Linux shell：
+
+```bash
+unset OCTOPUS_DATABASE_URL
+uv run alembic upgrade head
+```
+
 注意：
 
-- 先在 PostgreSQL 中创建空库，并确保连接账号拥有建表、建索引和写入权限。
+- 先在 PostgreSQL、MySQL 或 MariaDB 中创建空库，并确保连接账号拥有建表、建索引和写入权限。
+- MySQL/MariaDB 推荐使用 `utf8mb4` 字符集，并在连接串中保留 `?charset=utf8mb4`。
 - 密码中如果包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后放入连接串。
 - `OCTOPUS_AUTO_MIGRATE=1` 只影响当前启动进程；生产或共享环境更推荐显式执行 `uv run alembic upgrade head`。
 
