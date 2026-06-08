@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, Agent, Base, Organization
 from server.app import create_app
+from server.services.workspace_paths import resolve_octopus_instance_root
 
 
 DEFAULT_INSTRUCTIONS_FILES = [
@@ -66,13 +67,13 @@ def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> Non
 @pytest.fixture
 async def app(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> AsyncIterator[tuple[FastAPI, async_sessionmaker, Path]]:
-    root = (
-        Path.cwd() / ".octopus" / "test-tmp" / f"step17-{uuid.uuid4().hex}"
-    ).resolve()
+    root = (tmp_path / f"step17-{uuid.uuid4().hex}").resolve()
     root.mkdir(parents=True)
     monkeypatch.chdir(root)
     monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    monkeypatch.setenv("OCTOPUS_HOME", str(root / ".octopus"))
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -339,10 +340,7 @@ async def test_agent_instructions_bundle_rehomes_stale_managed_root(
         config = row.agent_runtime_config
 
     expected_root = (
-        root_path
-        / ".octopus"
-        / "instances"
-        / "default"
+        resolve_octopus_instance_root()
         / "organizations"
         / org_id
         / "workspaces"
@@ -469,6 +467,51 @@ async def test_agent_instructions_bundle_reconciles_empty_default_files(
     assert memory_detail["content"] == "Keep this custom memory."
     assert bundle_code == 200
     assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
+
+
+async def test_agent_instructions_bundle_materializes_for_process_agent_on_first_read(
+    app: tuple[FastAPI, async_sessionmaker, Path],
+) -> None:
+    application, factory, _root_path = app
+    org_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="process-instructions-org",
+                name="Process Instructions Org",
+                issue_prefix=org_id[:6].upper(),
+            )
+        )
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="CEO",
+                workspace_key="ceo",
+                role="ceo",
+                agent_runtime_type="process",
+                agent_runtime_config={},
+            )
+        )
+        await session.commit()
+
+    bundle_code, bundle = await _request(
+        application, "GET", f"/api/agents/{agent_id}/instructions-bundle"
+    )
+    soul_code, soul_detail = await _request(
+        application,
+        "GET",
+        f"/api/agents/{agent_id}/instructions-bundle/file",
+        params={"path": "SOUL.md"},
+    )
+
+    assert bundle_code == 200
+    assert bundle["mode"] == "managed"
+    assert [file["path"] for file in bundle["files"]] == DEFAULT_INSTRUCTIONS_FILES
+    assert soul_code == 200
+    assert "# SOUL.md -- CEO Persona" in soul_detail["content"]
 
 
 async def test_agent_instructions_path_update_and_path_guard(

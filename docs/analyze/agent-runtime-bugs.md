@@ -2,14 +2,14 @@
 
 ## Bug 列表
 
-当前记录：11 个。
+当前记录：12 个。
 
 | 编号 | 问题 | 状态 |
 | --- | --- | --- |
 | 1 | Agent skill 未启用 | 已修复 |
 | 2 | 组织工作区 legacy layout 可能导致 UI 文件树为空 | 已修复 |
 | 3 | Agent workspace home 未初始化 `life/`、`memory/`、`skills/` | 已修复 |
-| 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复 |
+| 4 | SQLite DB 与 Octopus home 默认不同源导致 workspace 写到用户目录 | 已修复，Step 23 已改为上游式 instance db layout |
 | 5 | 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径 | 已修复 |
 | 6 | Agent workspace key 被二次 normalize 导致目录分裂 | 已修复 |
 | 7 | Run logs 默认不在 instance `data/run-logs` 下 | 已修复 |
@@ -17,6 +17,7 @@
 | 9 | Issue run 的 `cwd` 可能被旧 agent runtime config 带回 repo 根目录 | 已修复 |
 | 10 | 无 project 的 issue run 没有 fallback 到 organization workspace | 已修复 |
 | 11 | Chat run 没有 organization artifacts context，产物落到 cwd | 已修复 |
+| 12 | runtime home、workspace、DB 路径仍存在非上游式 legacy/error layout | 已修复，Step 23C |
 
 ## 1. Agent skill 未启用
 
@@ -226,13 +227,13 @@ memory/
 
 ### 背景
 
-开发阶段常见启动方式是在仓库根目录使用默认 SQLite：
+旧版本开发阶段常见启动方式是在仓库根目录使用默认 SQLite：
 
 ```text
 D:\coding\octopus\octopus.db
 ```
 
-此时组织工作区、agent workspace home、runtime home、storage/logs 等本地文件也应该落在同一个开发数据根附近：
+当时组织工作区、agent workspace home、runtime home、storage/logs 等本地文件也应该落在同一个开发数据根附近：
 
 ```text
 D:\coding\octopus\.octopus
@@ -263,27 +264,30 @@ C:\Users\<user>\.octopus\instances\default\organizations\<orgId>\workspaces\agen
 
 ### 修复
 
+Step 23 后修复规则调整为对齐上游 instance layout：
+
 - 显式设置 `OCTOPUS_HOME` 时仍以显式配置为准。
-- 未设置 `OCTOPUS_HOME` 且 `OCTOPUS_DATABASE_URL` 是本地 SQLite 文件时，默认 Octopus home 改为数据库文件同级的 `.octopus/`。
-- 使用 PostgreSQL、`:memory:` 或无法解析本地 DB 文件时，才退回 `~/.octopus`。
+- 未设置 `OCTOPUS_HOME` 时，默认 Octopus home 是用户目录下的 `.octopus`，不再从数据库 URL 反推。
+- SQLite 默认 URL 由 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 生成，文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
+- 使用 PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须同时绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
 
 ### 验收
 
-仓库根目录开发启动时，默认路径应是：
+仓库根目录开发如果显式设置 `OCTOPUS_HOME=D:\coding\octopus\.octopus`，默认路径应是：
 
 ```text
-D:\coding\octopus\octopus.db
+D:\coding\octopus\.octopus\instances\default\db\octopus.db
 D:\coding\octopus\.octopus\instances\default\organizations\<orgId>\workspaces
 ```
 
 如果正式/桌面运行希望使用用户目录，需要同时设置：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/data/octopus.db"
 $env:OCTOPUS_HOME = "C:/Users/<user>/.octopus"
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/db/octopus.db"
 ```
 
-或者由启动器保证这两个值来自同一个 instance 数据根。
+或者由启动器只设置 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`，让 server 生成默认 SQLite URL。
 
 ## 5. 切换 Octopus home 后已有 managed instructions 仍指向旧绝对路径
 
@@ -599,3 +603,91 @@ RUDDER_ORG_ARTIFACTS_DIR
 - 普通 chat run 的 adapter env 中不存在 `RUDDER_CONVERSATION_ARTIFACTS_DIR`、`RUDDER_ISSUE_ARTIFACTS_DIR`、`RUDDER_RUN_ARTIFACTS_DIR`。
 - 普通 chat run 的 cwd 是 organization workspace root，而不是 `D:\coding\octopus`。
 - `tests/contract/test_step11_chat_loop.py` 覆盖 chat runtime organization artifacts env。
+
+## 12. runtime home、workspace、DB 路径仍存在非上游式 legacy/error layout
+
+### 背景
+
+Step 23 已把默认 SQLite 路径对齐到 instance db layout：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db
+```
+
+但文件侧 layout 仍需要继续收口。上游 Rudder 的 runtime home 和 workspace 不是全局目录，而是挂在 instance 和 organization 下。Octopus 中历史上出现过这些非 canonical 路径：
+
+```text
+<OCTOPUS_HOME>/runtime-homes
+<OCTOPUS_HOME>/instances/<instance>/runtime-homes
+<OCTOPUS_HOME>/instances/<instance>/workspaces
+<OCTOPUS_HOME>/test-tmp
+```
+
+详细路径规则归 Step 23C 收口。
+
+canonical instance root：
+
+```text
+<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>
+```
+
+核心目录应统一属于同一个 instance root：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/db/octopus.db
+<OCTOPUS_HOME>/instances/<instance>/data/storage
+<OCTOPUS_HOME>/instances/<instance>/data/run-logs
+<OCTOPUS_HOME>/instances/<instance>/logs
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/workspaces
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/codex-home/agents/<agentId>
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/opencode-home
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/claude-home
+```
+
+### 症状
+
+- `.octopus/runtime-homes` 或 `.octopus/instances/default/runtime-homes` 下仍有 runtime 数据。
+- `.octopus/instances/default/workspaces` 下出现 workspace 数据，但 UI 和 runtime 使用的是 `organizations/<orgId>/workspaces`。
+- 测试在 `.octopus/test-tmp` 留下临时数据，污染产品 home。
+- 数据库、workspace、runtime home、storage、logs 看起来都在 `.octopus` 下，但不属于同一个 canonical instance root。
+
+### 预期行为
+
+runtime home 应使用 organization-scoped 路径：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/codex-home/agents/<agentId>
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/opencode-home
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/claude-home
+```
+
+organization workspace 应使用：
+
+```text
+<OCTOPUS_HOME>/instances/<instance>/organizations/<orgId>/workspaces
+```
+
+测试临时数据不应写入产品 home。
+
+### 修复
+
+Step 23C 已修复：
+
+- 新写入不得再创建 `runtime-homes` 或 instance-level `workspaces`。
+- 对 legacy runtime home 和 legacy workspace 做 lazy migration。
+- storage、run logs、server logs 默认路径应保持 instance-scoped。
+- 冲突数据不覆盖，保留在 legacy path 供人工处理。
+- 测试临时目录改为 pytest `tmp_path` 或 repo-local `.tmp-pytest`。
+
+### 验收
+
+- 上游对齐路径下能看到 organization workspace、agent workspace home、runtime managed home、storage、run logs 和 server logs。
+- `.octopus/runtime-homes/...` 和 `.octopus/instances/<instance>/runtime-homes/...` 不再作为目标目录。
+- `.octopus/instances/<instance>/workspaces` 不再作为目标目录。
+- `.octopus/test-tmp` 不再由测试创建。
+
+### 验证
+
+- `tests/contract/test_workspace_paths.py` 覆盖 storage、run logs、workspace operation logs、legacy organization workspace 和 instance-level workspaces 迁移。
+- `tests/contract/test_step23_database_portability.py` 覆盖 legacy runtime-homes 和 instance-level runtime-homes 迁移。
+- `tests/contract/test_step17_agent_instructions.py` 不再写入 `.octopus/test-tmp`。

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from server.services.workspace_paths import resolve_default_sqlite_database_url
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -23,7 +25,7 @@ class Settings:
             log_level=os.environ.get("OCTOPUS_LOG_LEVEL", "info"),
             database_url=os.environ.get(
                 "OCTOPUS_DATABASE_URL",
-                "sqlite+aiosqlite:///./octopus.db",
+                resolve_default_sqlite_database_url(),
             ),
             auto_migrate=_env_bool("OCTOPUS_AUTO_MIGRATE", False),
             local_trusted=_env_bool("OCTOPUS_LOCAL_TRUSTED", False),

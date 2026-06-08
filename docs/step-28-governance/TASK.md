@@ -1,4 +1,4 @@
-# Step 25: Budget / Governance
+# Step 28: Budget / Governance
 
 状态：待开发
 
@@ -12,7 +12,7 @@
 
 ## 依赖边界
 
-Step 24 已实现 cost event、cost summary 和 activity query。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
+Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary。本步骤只补齐预算治理、quota window 与 skills analytics 等后置治理能力。
 
 ## 任务
 
@@ -66,7 +66,7 @@ Step 24 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/shared/validators/`：新增 budget update、budget policy upsert、incident resolve validator。
 - `packages/database/schema/`：新增 `BudgetPolicy`、`BudgetIncident`。
 - `packages/database/migrations/versions/20260528_000009_budget_governance.py`：新增上游对齐表、索引和外键。
-- `tests/contract/test_step25_budget_contract.py`：覆盖 migration、validator、enum 和 schema 默认值。
+- `tests/contract/test_step28_budget_contract.py`：覆盖 migration、validator、enum 和 schema 默认值。
 
 验收：
 
@@ -89,8 +89,8 @@ Step 24 已实现 cost event、cost summary 和 activity query。本步骤只补
   - `POST /api/orgs/{orgId}/budget-incidents/{incidentId}/resolve`
   - `PATCH /api/orgs/{orgId}/budgets`
   - `PATCH /api/agents/{agentId}/budgets`
-- `tests/contract/test_step25_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch。
-- `tests/workflows/test_step25_budget_workflow.py`：覆盖 soft incident、hard incident、approval、pause、resume、cancel queued/running runs。
+- `tests/contract/test_step28_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch。
+- `tests/workflows/test_step28_budget_workflow.py`：覆盖 soft incident、hard incident、approval、pause、resume、cancel queued/running runs。
 
 验收：
 
@@ -109,7 +109,7 @@ Step 24 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/runtimes/registry.py`：补齐列出可提供 quota windows 的 adapter。
 - `server/services/quota_windows.py`：聚合 `get_runtime_quota_windows`，设置超时并把失败映射为 `{ok: false, error, windows: []}`。
 - `server/routes/costs.py`：新增 `GET /api/orgs/{orgId}/costs/quota-windows`。
-- `tests/contract/test_step25_quota_windows.py`：覆盖 org access、unknown org、provider failure、timeout、success aggregation。
+- `tests/contract/test_step28_quota_windows.py`：覆盖 org access、unknown org、provider failure、timeout、success aggregation。
 
 验收：
 
@@ -126,8 +126,8 @@ Step 24 已实现 cost event、cost summary 和 activity query。本步骤只补
 - `packages/database/queries/agent_skills.py`：新增 skill usage evidence 查询。
 - `server/services/agent_skills.py` 或独立 `server/services/skills_analytics.py`：实现 organization/agent/time window 统计。
 - 现有 runtime skills analytics route：由空响应切换为真实统计。
-- `tests/contract/test_step25_skills_analytics.py`：覆盖 response shape、时间窗口、org/agent scope。
-- `tests/workflows/test_step25_skills_analytics_workflow.py`：覆盖 loaded/requested/used evidence 计数。
+- `tests/contract/test_step28_skills_analytics.py`：覆盖 response shape、时间窗口、org/agent scope。
+- `tests/workflows/test_step28_skills_analytics_workflow.py`：覆盖 loaded/requested/used evidence 计数。
 
 验收：
 
@@ -157,8 +157,8 @@ uv run pyright .
 对应子任务还需运行新增或受影响测试，例如：
 
 ```powershell
-uv run pytest tests/contract/test_step25_budget_contract.py -q
-uv run pytest tests/contract/test_step25_budget_routes.py -q
-uv run pytest tests/workflows/test_step25_budget_workflow.py -q
-uv run pytest tests/contract/test_step25_quota_windows.py -q
+uv run pytest tests/contract/test_step28_budget_contract.py -q
+uv run pytest tests/contract/test_step28_budget_routes.py -q
+uv run pytest tests/workflows/test_step28_budget_workflow.py -q
+uv run pytest tests/contract/test_step28_quota_windows.py -q
 ```

@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Issue, IssueApproval
+from ._compat import update_returning_one
 
 
 async def create_issue(session: AsyncSession, fields: Mapping[str, Any]) -> Issue:
@@ -65,10 +66,7 @@ async def update_issue(
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
 
-    result = await session.execute(
-        update(Issue).where(Issue.id == issue_id).values(**values).returning(Issue)
-    )
-    return result.scalar_one_or_none()
+    return await update_returning_one(session, Issue, Issue.id == issue_id, values)
 
 
 async def recover_blocked_linked_issues_for_approval(
