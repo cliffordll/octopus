@@ -90,6 +90,19 @@ def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+DATABASE_TEXT_EXCERPT_MAX_CHARS = 16_000
+_TRUNCATED_EXCERPT_SUFFIX = "\n[truncated]"
+
+
+def database_text_excerpt(value: str | None) -> str | None:
+    if value is None or len(value) <= DATABASE_TEXT_EXCERPT_MAX_CHARS:
+        return value
+    return (
+        value[: DATABASE_TEXT_EXCERPT_MAX_CHARS - len(_TRUNCATED_EXCERPT_SUFFIX)]
+        + _TRUNCATED_EXCERPT_SUFFIX
+    )
+
+
 _WORK_PRODUCT_UPDATE_COLUMNS = {
     "projectId": "project_id",
     "executionWorkspaceId": "execution_workspace_id",
@@ -664,7 +677,7 @@ class WorkspaceService:
                 row.id,
                 {
                     "status": "failed",
-                    "stderr_excerpt": message,
+                    "stderr_excerpt": database_text_excerpt(message),
                     "metadata_json": metadata,
                     "finished_at": datetime.now(UTC),
                 },
@@ -1028,8 +1041,8 @@ class WorkspaceService:
             {
                 "status": status,
                 "exit_code": exit_code,
-                "stdout_excerpt": stdout_excerpt,
-                "stderr_excerpt": stderr_excerpt,
+                "stdout_excerpt": database_text_excerpt(stdout_excerpt),
+                "stderr_excerpt": database_text_excerpt(stderr_excerpt),
                 "metadata_json": metadata,
                 "finished_at": datetime.now(UTC),
                 **_database_log_fields(log_fields),
