@@ -213,6 +213,8 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     assert config["_octopus"]["agentMemoryDir"] == str(agent_home / "memory")
     assert config["_octopus"]["agentLifeDir"] == str(agent_home / "life")
     assert (agent_home / "instructions").is_dir()
+    assert (agent_home / "instructions" / "SOUL.md").is_file()
+    assert (agent_home / "instructions" / "MEMORY.md").is_file()
     assert (agent_home / "skills").is_dir()
     assert (agent_home / "life").is_dir()
     assert (agent_home / "memory").is_dir()

@@ -66,6 +66,24 @@ macOS / Linux：
 export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///$HOME/.octopus/instances/default/db/octopus.db"
 ```
 
+如果之前设置过 PostgreSQL 或其他外部数据库，清空 `OCTOPUS_DATABASE_URL` 后会切回默认 SQLite。
+
+PowerShell：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+uv run alembic upgrade head
+uv run server
+```
+
+macOS / Linux：
+
+```bash
+unset OCTOPUS_DATABASE_URL
+uv run alembic upgrade head
+uv run server
+```
+
 ### PostgreSQL
 
 先在 PostgreSQL 中创建空库，并确保连接账号有建表、建索引和写入权限。
