@@ -21,7 +21,11 @@ uv run alembic revision -m "describe change"
 
 - `OCTOPUS_DATABASE_URL` 控制当前进程连接的数据库。
 - 默认值是 instance-scoped 本地 SQLite：`sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
-- 外部数据库推荐 PostgreSQL；MySQL 是兼容生产路径。两者都需要部署配置显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`，避免数据库和 workspace/runtime/storage/logs 分属不同 instance。
+- PostgreSQL 支持两种部署方式：
+  - remote PostgreSQL：连接已有 PostgreSQL 服务，适合生产或共享环境。
+  - local PostgreSQL：在本机启动 PostgreSQL 服务，数据目录建议放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/postgres/`，以便和 workspace/runtime/storage/logs 同属一个 Octopus instance。
+- MySQL 是兼容生产路径。
+- 使用 PostgreSQL/MySQL 时，部署配置必须显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`，避免数据库和 workspace/runtime/storage/logs 分属不同 instance。
 
 PowerShell PostgreSQL 示例：
 
@@ -31,11 +35,35 @@ $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
 
+PowerShell 本地 PostgreSQL 示例：
+
+```powershell
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+# 先自行 initdb/pg_ctl 或用本地 PostgreSQL 管理工具启动服务；
+# 数据目录建议为 .octopus/instances/local-pg/db/postgres/
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:PASSWORD@127.0.0.1:5432/octopus"
+uv run alembic upgrade head
+uv run server
+```
+
 macOS / Linux shell PostgreSQL 示例：
 
 ```bash
 export OCTOPUS_DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
 export OCTOPUS_AUTO_MIGRATE=1
+uv run server
+```
+
+macOS / Linux 本地 PostgreSQL 示例：
+
+```bash
+export OCTOPUS_HOME="$PWD/.octopus"
+export OCTOPUS_INSTANCE_ID=local-pg
+# 先自行 initdb/pg_ctl 或用本地 PostgreSQL 管理工具启动服务；
+# 数据目录建议为 .octopus/instances/local-pg/db/postgres/
+export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:PASSWORD@127.0.0.1:5432/octopus"
+uv run alembic upgrade head
 uv run server
 ```
 
@@ -66,6 +94,7 @@ uv run server
 注意：
 
 - 先在 PostgreSQL 中创建空库，并确保连接账号拥有建表、建索引和写入权限。
+- local PostgreSQL 不是 SQLite 单文件模式；它需要独立 PostgreSQL server 进程。当前 Octopus 只消费 `OCTOPUS_DATABASE_URL`，不会自动 `initdb`、分配端口或启动/停止 PostgreSQL。
 - MySQL 也需要提前创建空库，字符集建议 `utf8mb4`。
 - MySQL 不支持 PostgreSQL/SQLite 的 partial unique index；`issues_open_automation_execution_uq` 在 MySQL migration 中降级为普通非唯一索引，完整等价约束需要后续用 MySQL 专用 generated column 或应用层锁补强。
 - 密码中如果包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后放入连接串。
