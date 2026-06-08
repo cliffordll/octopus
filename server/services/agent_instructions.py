@@ -434,6 +434,20 @@ class AgentInstructionsService:
         if state["mode"] == "managed" and isinstance(state["rootPath"], Path):
             _write_bundle(state["rootPath"], _default_bundle(row.role))
         if (
+            state["rootPath"] is None
+            and not state["warnings"]
+            and not any(
+                _string(state["config"].get(key)) for key in _EXPLICIT_INSTRUCTIONS_KEYS
+            )
+            and not state["legacyPromptTemplateActive"]
+            and not state["legacyBootstrapPromptTemplateActive"]
+        ):
+            config = await self._ensure_writable_bundle(row, {})
+            updated = await update_agent(
+                self._session, row.id, {"agent_runtime_config": config}
+            )
+            return updated or row
+        if (
             state["mode"] == "managed"
             and state["rootPath"] is None
             and (

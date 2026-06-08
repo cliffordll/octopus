@@ -745,6 +745,11 @@ small {
   font-style: normal;
 }
 
+.runtime-provider-group-header .badge {
+  color: #a9caef;
+  justify-self: flex-start;
+}
+
 .runtime-model-list.compact {
   max-height: none;
 }

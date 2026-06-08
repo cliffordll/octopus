@@ -55,7 +55,7 @@
 
 ## Server 接入
 
-- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址，默认 SQLite 本地文件；外部数据库当前推荐 PostgreSQL async 连接串 `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME`。
+- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址；默认 SQLite 文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`；外部数据库支持 PostgreSQL async 连接串 `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME`，MySQL 兼容连接串为 `mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4`。
 - `server/lifespan.py` 管理 engine/session factory 和可选迁移。
 - `server/dependencies/database.py` 提供 request session。
 - resources service 通过 query 层访问数据库，并在 service 内转换成 shared response。
@@ -71,7 +71,8 @@
 本步骤验收对象是 schema migration，不以 `curl` 作为主入口。先对一个新的 SQLite 数据库执行升级：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus-demo.db"
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "demo"
 uv run alembic upgrade head
 uv run alembic current
 ```
@@ -86,7 +87,8 @@ uv run server
 如需以启动流程验收自动迁移，可删除测试用空库后使用新的文件名执行：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus-auto-demo.db"
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "auto-demo"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
@@ -94,13 +96,20 @@ uv run server
 外部 PostgreSQL 验收示例：
 
 ```powershell
-uv add asyncpg
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
 uv run alembic upgrade head
 uv run server
 ```
 
-当前 migration 和 query 主要按 SQLite/PostgreSQL 路径维护；MySQL 暂未作为支持目标验证。
+MySQL 兼容验收示例：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+uv run alembic upgrade head
+uv run server
+```
+
+完整 MySQL 写入兼容扩展归 Step 23 维护。
 
 当前 HTTP 正向资源写入仍受运行时开发 actor 未接入影响，见 Step 5。
 
