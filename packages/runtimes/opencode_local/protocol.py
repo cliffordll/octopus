@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..session import runtime_session_id
+
 
 def build_args(config: dict[str, Any]) -> list[str]:
     # Preserve legacy test/custom-command behavior where `args` prefixes the
     # command, while `extraArgs` mirrors upstream OpenCode run-subcommand flags.
     args = _string_list(config.get("args"))
     args.extend(["run", "--format", "json"])
+    session_id = runtime_session_id(config)
+    if session_id:
+        args.extend(["--session", session_id])
     model = string(config.get("model"))
     if model:
         args.extend(["--model", model])
@@ -118,6 +123,21 @@ def auth_required(stdout: str, stderr: str, error: str | None) -> bool:
             "authentication required",
             "unauthorized",
             "api key",
+        )
+    )
+
+
+def unknown_session(stdout: str, stderr: str, error: str | None) -> bool:
+    haystack = "\n".join([stdout, stderr, error or ""]).lower()
+    return any(
+        marker in haystack
+        for marker in (
+            "unknown session",
+            "session not found",
+            "session id not found",
+            "no session found",
+            "cannot resume",
+            "resume failed",
         )
     )
 
