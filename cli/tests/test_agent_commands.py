@@ -544,6 +544,90 @@ def test_agent_adapter_commands_cover_step14_routes() -> None:
     )
 
 
+def test_agent_adapter_test_environment_accepts_live_probe_options() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "adapter-test-environment",
+                "--org-id",
+                "org-1",
+                "--runtime",
+                "opencode_local",
+                "--runtime-config",
+                '{"model":"openai/gpt-5"}',
+                "--live-probe",
+                "--probe-timeout-sec",
+                "2.5",
+                "--probe-arg=--version",
+                "--probe-models",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/orgs/org-1/adapters/opencode_local/test-environment"
+    assert requests[0].read() == (
+        b'{"agentRuntimeConfig":{"model":"openai/gpt-5","liveProbe":true,'
+        b'"probeTimeoutSec":2.5,"probeArgs":["--version"],"probeModels":true}}'
+    )
+
+
+def test_agent_memory_commands_cover_memory_file_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["agent", "memory-list", "agent-1", "--layer", "life", "--path", "projects"], client=client) == 0
+    assert main(["agent", "memory-read", "agent-1", "--layer", "memory", "--path", "2026-06-08.md"], client=client) == 0
+    assert (
+        main(
+            [
+                "agent",
+                "memory-write",
+                "agent-1",
+                "--layer",
+                "memory",
+                "--path",
+                "2026-06-08.md",
+                "--content",
+                "Updated memory",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert main(["agent", "memory-delete", "agent-1", "--layer", "life", "--path", "projects/context.md"], client=client) == 0
+
+    assert [request.url.path for request in requests] == [
+        "/api/agents/agent-1/memory/files",
+        "/api/agents/agent-1/memory/file",
+        "/api/agents/agent-1/memory/file",
+        "/api/agents/agent-1/memory/file",
+    ]
+    assert "layer=life" in str(requests[0].url)
+    assert "path=projects" in str(requests[0].url)
+    assert "layer=memory" in str(requests[1].url)
+    assert "path=2026-06-08.md" in str(requests[1].url)
+    assert requests[2].method == "PUT"
+    assert requests[2].read() == (
+        b'{"layer":"memory","path":"2026-06-08.md","content":"Updated memory"}'
+    )
+    assert requests[3].method == "DELETE"
+    assert "layer=life" in str(requests[3].url)
+
+
 def test_agent_skills_commands_cover_step14_routes() -> None:
     requests: list[httpx.Request] = []
 
