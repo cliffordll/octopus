@@ -29,6 +29,8 @@ def test_agent_create_lifecycle_and_invoke_use_existing_routes() -> None:
                 "engineer",
                 "--runtime",
                 "process",
+                "--runtime-config",
+                "{}",
             ],
             client=client,
             stdout=io.StringIO(),
@@ -79,6 +81,8 @@ def test_agent_hire_posts_to_agent_hires() -> None:
                 "engineer",
                 "--runtime",
                 "process",
+                "--runtime-config",
+                "{}",
                 "--source-issue-id",
                 "issue-1",
                 "--source-issue",
@@ -121,6 +125,8 @@ def test_agent_hire_can_let_server_assign_role_sequence_name() -> None:
                 "engineer",
                 "--runtime",
                 "process",
+                "--runtime-config",
+                "{}",
             ],
             client=client,
             stdout=io.StringIO(),
@@ -131,6 +137,39 @@ def test_agent_hire_can_let_server_assign_role_sequence_name() -> None:
     assert requests[0].read() == (
         b'{"role":"engineer","agentRuntimeType":"process","agentRuntimeConfig":{}}'
     )
+
+
+def test_agent_create_rejects_implicit_empty_process_runtime_config() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-1", "status": "idle"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    stderr = io.StringIO()
+    assert (
+        main(
+            [
+                "agent",
+                "create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "Builder",
+                "--role",
+                "engineer",
+                "--runtime",
+                "process",
+            ],
+            client=client,
+            stdout=io.StringIO(),
+            stderr=stderr,
+        )
+        == 1
+    )
+    assert "process runtime requires --runtime-config" in stderr.getvalue()
+    assert requests == []
 
 
 def test_agent_bootstrap_ceo_only_creates_for_empty_organization() -> None:
