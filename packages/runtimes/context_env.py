@@ -64,15 +64,42 @@ def apply_runtime_context_env(
         "RUDDER_WORKSPACE_WORKTREE_PATH",
         workspace_context.get("worktreePath"),
     )
-    agent_home = _string(workspace_context.get("agentHome"))
+    agent_home = _first_string(
+        workspace_context.get("agentHome"), runtime_context.get("agentHome")
+    )
     if agent_home:
         env["AGENT_HOME"] = agent_home
         env["RUDDER_AGENT_ROOT"] = agent_home
     _set_env(
-        env, "RUDDER_AGENT_INSTRUCTIONS_DIR", workspace_context.get("instructionsDir")
+        env,
+        "RUDDER_AGENT_INSTRUCTIONS_DIR",
+        _first_string(
+            workspace_context.get("instructionsDir"),
+            runtime_context.get("agentInstructionsDir"),
+        ),
     )
-    _set_env(env, "RUDDER_AGENT_MEMORY_DIR", workspace_context.get("memoryDir"))
-    _set_env(env, "RUDDER_AGENT_SKILLS_DIR", workspace_context.get("skillsDir"))
+    _set_env(
+        env,
+        "RUDDER_AGENT_MEMORY_DIR",
+        _first_string(
+            workspace_context.get("memoryDir"), runtime_context.get("agentMemoryDir")
+        ),
+    )
+    _set_env(
+        env,
+        "RUDDER_AGENT_LIFE_DIR",
+        _first_string(
+            workspace_context.get("lifeDir"), runtime_context.get("agentLifeDir")
+        ),
+    )
+    _set_env(
+        env,
+        "RUDDER_AGENT_SKILLS_DIR",
+        _first_string(
+            workspace_context.get("skillsDir"),
+            runtime_context.get("agentSkillsRootPath"),
+        ),
+    )
     _set_env(
         env, "RUDDER_ORG_WORKSPACE_ROOT", workspace_context.get("orgWorkspaceRoot")
     )
@@ -99,3 +126,11 @@ def _set_env(env: dict[str, str], key: str, value: Any) -> None:
 
 def _string(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _first_string(*values: Any) -> str | None:
+    for value in values:
+        text = _string(value)
+        if text:
+            return text
+    return None

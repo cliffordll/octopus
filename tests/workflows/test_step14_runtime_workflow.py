@@ -327,7 +327,7 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
         "octopus-home/instances/test/organizations/org-claude/claude-home/home"
     )
     assert capture["userProfile"] == capture["home"]
-    assert capture["agentHome"] == capture["home"]
+    assert capture["agentHome"] is None
     assert capture["credential"] == "github.com: {}\n"
 
 
@@ -583,7 +583,7 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
         "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
     )
     assert capture["userProfile"] == capture["home"]
-    assert capture["agentHome"] == capture["home"]
+    assert capture["agentHome"] is None
     assert capture["credential"] == "token=test\n"
 
 
