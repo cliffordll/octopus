@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260527_000006"
 down_revision = "20260527_000005"
@@ -75,6 +77,7 @@ def upgrade() -> None:
         "chat_conversations_org_status_updated_idx",
         "chat_conversations",
         ["org_id", "status", "updated_at"],
+        mysql_length=mysql_text_index_lengths("status"),
     )
     op.create_index(
         "chat_conversations_primary_issue_idx",

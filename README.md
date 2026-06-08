@@ -30,6 +30,12 @@ uv sync
 uv add asyncpg
 ```
 
+MySQL async driver 已包含在本项目依赖中，更新依赖即可：
+
+```powershell
+uv sync
+```
+
 默认可以直接使用 SQLite，不需要额外数据库服务。
 
 ## 2. 数据库配置
@@ -83,6 +89,46 @@ export OCTOPUS_DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME
 ```
 
 如果密码中包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后再写入连接串。
+
+### MySQL / MariaDB
+
+先在 MySQL 或 MariaDB 中创建空库，并确保连接账号有建表、建索引和写入权限。推荐使用 `utf8mb4` 字符集。
+
+PowerShell：
+
+```powershell
+$env:OCTOPUS_DATABASE_URL = "mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+```
+
+macOS / Linux：
+
+```bash
+export OCTOPUS_DATABASE_URL="mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4"
+```
+
+如果密码中包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后再写入连接串。
+
+### 清除数据库环境变量
+
+如果要从 MySQL/PostgreSQL 切回默认 SQLite，需要清除当前 shell 里的 `OCTOPUS_DATABASE_URL`。
+
+PowerShell：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+```
+
+macOS / Linux：
+
+```bash
+unset OCTOPUS_DATABASE_URL
+```
+
+清除后，新的 `uv run server` 或 `uv run alembic upgrade head` 会回到默认 SQLite：
+
+```text
+sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db
+```
 
 ## 3. 数据库创建与更新
 

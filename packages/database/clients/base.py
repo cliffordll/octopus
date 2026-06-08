@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 from sqlalchemy import event
@@ -29,6 +30,8 @@ def create_database_engine(url: str, *, echo: bool = False) -> AsyncEngine:
     engine = create_async_engine(url, **engine_kwargs)
     if backend == "sqlite":
         _configure_sqlite_engine(engine)
+    elif parsed_url.drivername == "mysql+asyncmy":
+        _configure_asyncmy_terminate(engine)
     return engine
 
 
@@ -47,3 +50,26 @@ def _configure_sqlite_engine(engine: AsyncEngine) -> None:
             cursor.execute("PRAGMA journal_mode=TRUNCATE")
         finally:
             cursor.close()
+
+
+def _configure_asyncmy_terminate(engine: AsyncEngine) -> None:
+    def _force_terminate(_: object, dbapi_connection: Any) -> None:
+        force_close = getattr(dbapi_connection, "_terminate_force_close", None)
+        if callable(force_close):
+            force_close()
+            return
+
+        raw_connection = getattr(dbapi_connection, "_connection", None)
+        close = getattr(raw_connection, "close", None)
+        if callable(close):
+            close()
+            return
+
+        terminate = getattr(dbapi_connection, "terminate", None)
+        if callable(terminate):
+            terminate()
+
+    engine.sync_engine.dialect.do_terminate = MethodType(  # type: ignore[method-assign]
+        _force_terminate,
+        engine.sync_engine.dialect,
+    )

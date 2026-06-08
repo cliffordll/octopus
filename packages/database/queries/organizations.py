@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Organization
+from ._compat import supports_update_returning, update_returning_one
 
 
 async def list_organizations(session: AsyncSession) -> Sequence[Organization]:
@@ -76,12 +77,22 @@ async def increment_issue_counter(
     issue identifier. Returns ``None`` when the organization is missing.
     """
 
-    result = await session.execute(
+    stmt = (
         update(Organization)
         .where(Organization.id == organization_id)
         .values(issue_counter=Organization.issue_counter + 1)
-        .returning(Organization.issue_counter, Organization.issue_prefix)
     )
+    if supports_update_returning(session):
+        result = await session.execute(
+            stmt.returning(Organization.issue_counter, Organization.issue_prefix)
+        )
+    else:
+        await session.execute(stmt)
+        result = await session.execute(
+            select(Organization.issue_counter, Organization.issue_prefix).where(
+                Organization.id == organization_id
+            )
+        )
     row = result.first()
     if row is None:
         return None
@@ -99,10 +110,9 @@ async def update_organization(
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
 
-    result = await session.execute(
-        update(Organization)
-        .where(Organization.id == organization_id)
-        .values(**values)
-        .returning(Organization)
+    return await update_returning_one(
+        session,
+        Organization,
+        Organization.id == organization_id,
+        values,
     )
-    return result.scalar_one_or_none()

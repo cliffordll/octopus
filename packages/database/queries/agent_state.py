@@ -4,10 +4,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import AgentConfigRevision, AgentRuntimeState, AgentTaskSession
+from ._compat import delete_returning_count, update_returning_one
 
 
 async def create_config_revision(
@@ -62,13 +63,12 @@ async def update_runtime_state(
 ) -> AgentRuntimeState | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(AgentRuntimeState)
-        .where(AgentRuntimeState.agent_id == agent_id)
-        .values(**values)
-        .returning(AgentRuntimeState)
+    return await update_returning_one(
+        session,
+        AgentRuntimeState,
+        AgentRuntimeState.agent_id == agent_id,
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def list_task_sessions(
@@ -92,14 +92,12 @@ async def delete_task_sessions(
     task_key: str | None = None,
     agent_runtime_type: str | None = None,
 ) -> int:
-    statement = delete(AgentTaskSession).where(
-        AgentTaskSession.org_id == org_id, AgentTaskSession.agent_id == agent_id
-    )
+    conditions = [
+        AgentTaskSession.org_id == org_id,
+        AgentTaskSession.agent_id == agent_id,
+    ]
     if task_key is not None:
-        statement = statement.where(AgentTaskSession.task_key == task_key)
+        conditions.append(AgentTaskSession.task_key == task_key)
     if agent_runtime_type is not None:
-        statement = statement.where(
-            AgentTaskSession.agent_runtime_type == agent_runtime_type
-        )
-    result = await session.execute(statement.returning(AgentTaskSession.id))
-    return len(result.scalars().all())
+        conditions.append(AgentTaskSession.agent_runtime_type == agent_runtime_type)
+    return await delete_returning_count(session, AgentTaskSession, and_(*conditions))

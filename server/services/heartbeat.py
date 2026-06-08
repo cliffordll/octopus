@@ -69,7 +69,7 @@ from .logs import (
 )
 from .runtime_providers import inject_runtime_provider_config
 from .workspace_paths import ensure_octopus_run_log_dir
-from .workspaces import WorkspaceService
+from .workspaces import WorkspaceService, database_text_excerpt
 
 LOCAL_CHILD_PROCESS_RUNTIMES = {
     "process",
@@ -982,8 +982,8 @@ class HeartbeatService:
                     }
                     if result.result_json or runtime_services or work_products
                     else None,
-                    "stdout_excerpt": stdout or None,
-                    "stderr_excerpt": stderr or None,
+                    "stdout_excerpt": database_text_excerpt(stdout or None),
+                    "stderr_excerpt": database_text_excerpt(stderr or None),
                 },
             )
             assert final is not None
@@ -1041,8 +1041,8 @@ class HeartbeatService:
                     "error": message,
                     "error_code": "adapter_failed",
                     **self._finalize_run_log_fields(running),
-                    "stdout_excerpt": stdout or None,
-                    "stderr_excerpt": stderr or None,
+                    "stdout_excerpt": database_text_excerpt(stdout or None),
+                    "stderr_excerpt": database_text_excerpt(stderr or None),
                 },
             )
             assert failed is not None
