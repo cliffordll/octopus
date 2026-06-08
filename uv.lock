@@ -78,6 +78,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/00/65/68e576aecd2a43d383123e3a66339e6a3535495b0e81443e374a3d3c356d/asyncmy-0.2.11-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:577272e238aff9b985eb880b49b1ba009e1fd1133b754fc71c833ab5bd9561ee", size = 5143375, upload-time = "2026-01-15T11:32:15.38Z" },
     { url = "https://files.pythonhosted.org/packages/4e/e4/cd30ea75ab96e5c6fe0daf6bd1871753fe5a1677515530fa0bc1a807dd6c/asyncmy-0.2.11-cp313-cp313-win32.whl", hash = "sha256:29536a08bf8c96437188ae4080fdd09c5a82cbe93794d0996cd0dd238f632664", size = 1559106, upload-time = "2026-01-15T11:32:16.895Z" },
     { url = "https://files.pythonhosted.org/packages/0c/3e/497e3ac839d7d18e79770b977f90e6f17a87181f95b8aed59359ff4aba0c/asyncmy-0.2.11-cp313-cp313-win_amd64.whl", hash = "sha256:f095af7b980505158609ca0bcdd0d14d1e48893e43fc1856c7cecfd9439f498c", size = 1635619, upload-time = "2026-01-15T11:32:18.241Z" },
+]
+
+[[package]]
 name = "asyncpg"
 version = "0.31.0"
 source = { registry = "https://pypi.org/simple" }
