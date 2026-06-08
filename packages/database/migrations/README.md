@@ -20,7 +20,8 @@ uv run alembic revision -m "describe change"
 数据库连接：
 
 - `OCTOPUS_DATABASE_URL` 控制当前进程连接的数据库。
-- 默认值是本地 SQLite：`sqlite+aiosqlite:///./octopus.db`。
+- 默认值是本地 SQLite：`sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
+- 未设置 `OCTOPUS_HOME` 时，默认 home 是 `~/.octopus`；未设置 `OCTOPUS_INSTANCE_ID` 时，默认实例是 `default`。
 - 外部数据库当前推荐 PostgreSQL。MySQL 尚未作为支持目标验证，现有 query 和 migration 里存在 MySQL 不兼容点，不要直接用于生产或共享数据。
 
 PostgreSQL 连接前需要确保 Python 环境有 async driver：
@@ -36,6 +37,26 @@ $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
+
+本机 PostgreSQL 开发示例：
+
+```sql
+CREATE USER octopus WITH PASSWORD 'octopus';
+CREATE DATABASE octopus OWNER octopus;
+\c octopus
+GRANT ALL ON SCHEMA public TO octopus;
+```
+
+```powershell
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
+```
+
+使用 PostgreSQL 后不会使用 `<OCTOPUS_HOME>/instances/<instance>/db/octopus.db`；但 `OCTOPUS_HOME` 仍负责文件侧 instance 数据，例如 `organizations/<orgId>/workspaces`、`data/storage`、`data/run-logs`、`logs` 和 runtime homes。
 
 macOS / Linux shell PostgreSQL 示例：
 
@@ -75,7 +96,6 @@ PowerShell 示例：
 
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "1"
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
 uv run server
 ```
 
@@ -83,7 +103,6 @@ macOS / Linux shell 示例：
 
 ```bash
 export OCTOPUS_AUTO_MIGRATE=1
-export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///./octopus.db"
 uv run server
 ```
 

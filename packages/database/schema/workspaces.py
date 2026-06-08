@@ -164,7 +164,7 @@ class WorkspaceRuntimeService(Base):
             "status",
         ),
         Index(
-            "workspace_runtime_services_company_execution_workspace_status_idx",
+            "workspace_runtime_services_company_exec_workspace_status_idx",
             "org_id",
             "execution_workspace_id",
             "status",

@@ -41,44 +41,67 @@ server 通过 `OCTOPUS_DATABASE_URL` 读取数据库连接。
 默认值：
 
 ```text
-sqlite+aiosqlite:///./octopus.db
+sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db
 ```
 
-这表示数据库文件会创建在当前启动目录下：
+如果不设置 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID`，默认等价于：
 
 ```text
-octopus.db
+sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/db/octopus.db
 ```
 
 ### SQLite 本地开发
 
+默认可以不设置 `OCTOPUS_DATABASE_URL`。如果需要显式指定 SQLite 文件，PowerShell：
+
 PowerShell：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/<user>/.octopus/instances/default/db/octopus.db"
 ```
 
 macOS / Linux：
 
 ```bash
-export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///./octopus.db"
+export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///$HOME/.octopus/instances/default/db/octopus.db"
 ```
 
 ### PostgreSQL
 
 先在 PostgreSQL 中创建空库，并确保连接账号有建表、建索引和写入权限。
 
+本机 PostgreSQL 示例：
+
+```sql
+CREATE USER octopus WITH PASSWORD 'octopus';
+CREATE DATABASE octopus OWNER octopus;
+\c octopus
+GRANT ALL ON SCHEMA public TO octopus;
+```
+
 PowerShell：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
 ```
 
 macOS / Linux：
 
 ```bash
-export OCTOPUS_DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+export OCTOPUS_HOME=".octopus"
+export OCTOPUS_INSTANCE_ID="local-pg"
+export OCTOPUS_LOCAL_TRUSTED=1
+export OCTOPUS_AUTO_MIGRATE=1
+export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
 ```
+
+使用 PostgreSQL 后不会使用本地 SQLite 文件 `octopus.db`；但 `OCTOPUS_HOME` 仍负责文件侧 instance 数据，例如 workspace、storage、run logs、server logs 和 runtime homes。
 
 如果密码中包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后再写入连接串。
 
@@ -200,7 +223,6 @@ bucket 需要提前创建；当前 server 不负责自动创建 bucket。
 最小本地启动流程：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
@@ -255,23 +277,21 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 
 ## 8. 运行目录说明
 
-从仓库根目录开发启动时，默认 SQLite 数据库和 Octopus home 应保持同源：
-如果数据库是 `./octopus.db`，Octopus home 默认解析为 `./.octopus`。
-正式或桌面运行可以把数据库和 Octopus home 都放到用户目录，但不要只移动其中一个。
+默认运行数据不会写入仓库根目录。未显式设置 `OCTOPUS_HOME` 时，Octopus home 默认是用户目录下的 `.octopus`。
 
 workspace、runtime home、skills 的区别见 `docs/guides/skills.md`；任务队列和 run 调度见 `docs/guides/task-queue.md`。
 
 ```text
-octopus.db
-.octopus/instances/default/data/storage
-.octopus/instances/default/data/run-logs
-.octopus/instances/default/logs
-.octopus/instances/default/organizations
+<OCTOPUS_HOME>/instances/default/db/octopus.db
+<OCTOPUS_HOME>/instances/default/data/storage
+<OCTOPUS_HOME>/instances/default/data/run-logs
+<OCTOPUS_HOME>/instances/default/logs
+<OCTOPUS_HOME>/instances/default/organizations
 ```
 
 含义：
 
-- `octopus.db`：默认 SQLite 数据库文件。
+- `<OCTOPUS_HOME>/instances/<instance_id>/db/octopus.db`：默认 SQLite 数据库文件。
 - `.octopus/instances/<instance_id>/data/storage`：本地附件、任务产物和 asset 内容；可通过 `OCTOPUS_STORAGE_DIR` 覆盖。
 - `.octopus/instances/<instance_id>/data/run-logs`：heartbeat/runtime run 原始执行日志；可通过 `OCTOPUS_RUN_LOG_DIR` 覆盖。
 - `.octopus/instances/<instance_id>/logs`：server/app 文件日志；可通过 `OCTOPUS_LOG_DIR` 覆盖。
@@ -283,31 +303,30 @@ octopus.db
 
 - 显式设置 `OCTOPUS_HOME` 时，以 `OCTOPUS_HOME` 为准。
 - `OCTOPUS_INSTANCE_ID` 是本地实例 ID，默认值为 `default`，会参与解析 `<OCTOPUS_HOME>/instances/<instance_id>` 下的文件目录。
-- 未设置 `OCTOPUS_HOME` 且使用本地 SQLite 时，Octopus home 默认放在 SQLite 数据库文件同级的 `.octopus/`。
-- 使用 PostgreSQL 或无法从数据库 URL 推导本地文件时，才退回用户目录 `~/.octopus`。
+- 未设置 `OCTOPUS_HOME` 时，Octopus home 默认是 `~/.octopus`。
+- 未设置 `OCTOPUS_DATABASE_URL` 时，SQLite 数据库默认放在 `<OCTOPUS_HOME>/instances/<instance_id>/db/octopus.db`。
+- 显式设置 `OCTOPUS_DATABASE_URL` 时，数据库连接以该环境变量为准。
 
-例如开发阶段从仓库根目录启动：
+例如 Windows 默认路径：
 
 ```text
-D:\coding\octopus\octopus.db
-D:\coding\octopus\.octopus
+C:\Users\<user>\.octopus\instances\default\db\octopus.db
+C:\Users\<user>\.octopus\instances\default\data\storage
 ```
 
-正式或桌面运行如果希望数据都在用户目录，应同时设置数据库和 home，例如：
+如果希望使用指定目录，可以同时设置数据库和 home，例如：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/lianaipeng/.octopus/instances/default/data/octopus.db"
+$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/lianaipeng/.octopus/instances/default/db/octopus.db"
 $env:OCTOPUS_HOME = "C:/Users/lianaipeng/.octopus"
 ```
 
-如果要在同一台机器上隔离多个本地实例，需要同时隔离数据库和文件目录。`OCTOPUS_INSTANCE_ID` 只会改变 storage、logs、workspace、runtime home 等文件侧路径；数据库连接仍由 `OCTOPUS_DATABASE_URL` 决定。
+如果要在同一台机器上隔离多个本地实例，设置 `OCTOPUS_INSTANCE_ID` 即可同时影响默认数据库和文件目录。显式设置 `OCTOPUS_DATABASE_URL` 时，数据库连接仍由该环境变量决定。
 
 例如启动一个 `dev` 实例：
 
 ```powershell
 $env:OCTOPUS_INSTANCE_ID = "dev"
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./.octopus/instances/dev/data/octopus.db"
-$env:OCTOPUS_HOME = ".octopus"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 uv run server
@@ -316,10 +335,11 @@ uv run server
 此时本地文件会写入：
 
 ```text
-.octopus/instances/dev/data/storage
-.octopus/instances/dev/data/run-logs
-.octopus/instances/dev/logs
-.octopus/instances/dev/organizations
+<OCTOPUS_HOME>/instances/dev/db/octopus.db
+<OCTOPUS_HOME>/instances/dev/data/storage
+<OCTOPUS_HOME>/instances/dev/data/run-logs
+<OCTOPUS_HOME>/instances/dev/logs
+<OCTOPUS_HOME>/instances/dev/organizations
 ```
 
 这些目录是本地运行产物，不应提交到 Git。
@@ -346,8 +366,7 @@ uv run --no-sync pyright .
 开发阶段如果可以丢弃本地数据，可以删除：
 
 ```powershell
-Remove-Item -Force .\octopus.db
-Remove-Item -Recurse -Force .\.octopus
+Remove-Item -Recurse -Force "$env:USERPROFILE\.octopus\instances\default"
 ```
 
 如果文件被占用，先停止正在运行的 server、runtime 或测试进程。
@@ -368,11 +387,11 @@ uv run server
 | `OCTOPUS_PORT` | `8000` | server 端口 |
 | `OCTOPUS_LOG_LEVEL` | `info` | uvicorn 日志等级 |
 | `OCTOPUS_LOG_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/logs` | server/app 文件日志目录 |
-| `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///./octopus.db` | 数据库连接 |
+| `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///<OCTOPUS_HOME>/instances/<instance_id>/db/octopus.db` | 数据库连接 |
 | `OCTOPUS_AUTO_MIGRATE` | `false` | 启动时是否自动执行 Alembic 迁移 |
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
-| `OCTOPUS_HOME` | SQLite DB 同级 `.octopus`；非本地 SQLite 时为 `~/.octopus` | Octopus instance home 根目录 |
-| `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离文件侧数据目录；完整隔离需同步设置 `OCTOPUS_DATABASE_URL` |
+| `OCTOPUS_HOME` | `~/.octopus` | Octopus instance home 根目录 |
+| `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离默认数据库和文件侧数据目录 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 heartbeat scheduler |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
 | `OCTOPUS_STORAGE_PROVIDER` | `local_disk` | 文件存储 provider，可选 `local_disk`、`minio`、`s3` |

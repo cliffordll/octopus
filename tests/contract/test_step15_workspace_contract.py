@@ -78,7 +78,7 @@ def test_workspace_tables_match_upstream_step15_scope() -> None:
     assert "execution_workspaces_company_project_status_idx" in {
         idx.name for idx in schema.ExecutionWorkspace.__table__.indexes
     }
-    assert "workspace_runtime_services_company_execution_workspace_status_idx" in {
+    assert "workspace_runtime_services_company_exec_workspace_status_idx" in {
         idx.name for idx in schema.WorkspaceRuntimeService.__table__.indexes
     }
     assert "issue_work_products_company_issue_type_idx" in {

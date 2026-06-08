@@ -315,18 +315,18 @@ it("manages runtime providers and models from settings", async () => {
     }
     if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([
-        { providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
-        { providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
+        { scope: "global", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
+        { scope: "organization", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
     }
     if (path === "/api/orgs/org-1/runtime-providers?runtimeType=codex_local" && init?.method === "GET") {
       return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
-      return respond([{ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
+      return respond([{ scope: "global", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
-      return respond([{ modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
+      return respond([{ scope: "organization", modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers" && init?.method === "POST") {
       return respond({ providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local" }, 201);
@@ -387,7 +387,9 @@ it("manages runtime providers and models from settings", async () => {
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
+  expect(kimiProvider.getAllByText("Global").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
+  expect(openrouterProvider.getAllByText("Organization").length).toBeGreaterThanOrEqual(2);
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
   expect(kimiProvider.getByRole("button", { name: "Kimi 更多操作" })).toBeInTheDocument();
@@ -407,6 +409,13 @@ it("manages runtime providers and models from settings", async () => {
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"providerId":"openrouter"'),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers",
+    expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"scope":"global"'),
     }),
   );
 
@@ -445,6 +454,13 @@ it("manages runtime providers and models from settings", async () => {
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"modelId":"kimi/kimi-k3"'),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+    expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"scope":"global"'),
     }),
   );
 

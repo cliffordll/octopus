@@ -961,6 +961,80 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
 });
 
+it("ignores stale selected runs that do not belong to the issue", async () => {
+  localStorage.setItem("octopus:issue-run:org-1:issue-1", "stale-running-run");
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-4",
+    title: "生成说明书",
+    description: "运行已结束但任务尚未关闭",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 4,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+      return respond([{
+        runId: "run-succeeded",
+        orgId: "org-1",
+        agentId: "agent-1",
+        issueId: "issue-1",
+        invocationSource: "assignment",
+        status: "succeeded",
+        createdAt: "2026-06-04T01:46:42Z",
+        finishedAt: "2026-06-04T01:49:46Z",
+      }]);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/stale-running-run" && init?.method === "GET") {
+      return respond({
+        id: "stale-running-run",
+        orgId: "org-1",
+        agentId: "agent-1",
+        invocationSource: "assignment",
+        status: "running",
+        contextSnapshot: { issueId: "other-issue" },
+      });
+    }
+    if (path === "/api/heartbeat-runs/stale-running-run/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/stale-running-run/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
+  expect(screen.getByText("运行：成功")).toBeInTheDocument();
+  expect(screen.queryByText("运行：运行中")).not.toBeInTheDocument();
+});
+
 it("refreshes issue runs when execute returns no new run id", async () => {
   const issue = {
     id: "issue-1",

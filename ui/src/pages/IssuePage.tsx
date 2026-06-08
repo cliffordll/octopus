@@ -106,21 +106,40 @@ function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
   return run?.id || run?.runId || "";
 }
 
+function runContextIssueId(run: HeartbeatRun | null | undefined): string | null {
+  const value = run?.contextSnapshot?.issueId ?? run?.contextSnapshot?.primaryIssueId;
+  return typeof value === "string" && value ? value : null;
+}
+
+function runBelongsToIssue(run: HeartbeatRun | null | undefined, issueId: string, listedRunIds: Set<string>): boolean {
+  if (!run) return false;
+  const runId = heartbeatRunId(run);
+  if (runId && listedRunIds.has(runId)) return true;
+  return run.issueId === issueId || runContextIssueId(run) === issueId;
+}
+
 function runSortTime(run: HeartbeatRun): number {
   const value = run.createdAt ?? run.startedAt ?? run.updatedAt ?? "";
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
 
-function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null): HeartbeatRun | null {
+function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, issueId: string): HeartbeatRun | null {
   const merged = new Map<string, HeartbeatRun>();
+  const listedRunIds = new Set<string>();
   for (const run of runs) {
     const id = heartbeatRunId(run);
-    if (id) merged.set(id, run);
+    if (id) {
+      listedRunIds.add(id);
+      merged.set(id, run);
+    }
   }
-  if (currentRun) {
+  if (currentRun && runBelongsToIssue(currentRun, issueId, listedRunIds)) {
     const id = heartbeatRunId(currentRun);
-    if (id) merged.set(id, { ...merged.get(id), ...currentRun });
+    if (id) {
+      const listedRun = merged.get(id);
+      merged.set(id, listedRun ? { ...listedRun, ...currentRun } : currentRun);
+    }
   }
   const sorted = Array.from(merged.values()).sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
@@ -1449,7 +1468,7 @@ export function IssuePage() {
     };
   }, [currentRunId, issueId, orgId, queryClient, runDetail.data?.status]);
   useEffect(() => {
-    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
     const latestRunId = heartbeatRunId(latestRun);
     if (!latestRunId || !isTerminalRun(latestRun?.status)) return;
     const refreshKey = `${latestRunId}:${latestRun?.status}`;
@@ -1557,7 +1576,7 @@ export function IssuePage() {
     updateIssue.mutate({ status: "in_review" });
   }
   function executeCurrentIssue() {
-    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
     if (uploadAttachment.isPending) {
       setExecuteNotice("附件上传中，上传完成后再启动执行。");
       return;
@@ -1579,7 +1598,7 @@ export function IssuePage() {
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
-  const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null);
+  const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
