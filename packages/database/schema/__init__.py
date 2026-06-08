@@ -19,6 +19,7 @@ from .chats import (
     ChatConversationUserState,
     ChatMessage,
 )
+from .costs import CostEvent
 from .documents import Document, DocumentRevision, IssueDocument
 from .approvals import Approval
 from .approval_comments import ApprovalComment
@@ -64,6 +65,7 @@ __all__ = [
     "ChatConversation",
     "ChatConversationUserState",
     "ChatMessage",
+    "CostEvent",
     "Document",
     "DocumentRevision",
     "IssueDocument",
