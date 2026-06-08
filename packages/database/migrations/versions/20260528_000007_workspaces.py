@@ -283,7 +283,7 @@ def upgrade() -> None:
         ["org_id", "project_workspace_id", "status"],
     )
     op.create_index(
-        "workspace_runtime_services_company_execution_workspace_status_idx",
+        "workspace_runtime_services_company_exec_workspace_status_idx",
         "workspace_runtime_services",
         ["org_id", "execution_workspace_id", "status"],
     )
@@ -493,7 +493,7 @@ def downgrade() -> None:
         table_name="workspace_runtime_services",
     )
     op.drop_index(
-        "workspace_runtime_services_company_execution_workspace_status_idx",
+        "workspace_runtime_services_company_exec_workspace_status_idx",
         table_name="workspace_runtime_services",
     )
     op.drop_index(
