@@ -28,14 +28,15 @@ routes
 
 - 明确数据库支持矩阵：
   - SQLite：local/dev/demo。
-  - PostgreSQL：推荐生产路径。
+  - PostgreSQL：推荐生产路径；支持 remote PostgreSQL，也支持用户自行管理的 local PostgreSQL。
   - MySQL：兼容生产路径。
 - 对齐数据库位置和 instance layout：
   - 显式设置 `OCTOPUS_HOME` 时，以显式配置为准。
   - 未设置 `OCTOPUS_HOME` 时，默认 home 仍是用户目录下的 `.octopus`，与上游默认 `~/.rudder` 语义对齐。
   - SQLite 默认 URL 不再是 `sqlite+aiosqlite:///./octopus.db`；应解析为 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
   - 本地开发若显式设置 `OCTOPUS_HOME=.octopus`，SQLite 默认文件应为 `<当前目录>/.octopus/instances/default/db/octopus.db`。
-  - 使用 PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
+  - 使用 remote PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
+  - 使用 local PostgreSQL 时，PostgreSQL data directory 建议放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/postgres/`，但连接仍通过 `postgresql+asyncpg://...` 指向本机 PostgreSQL 服务。
   - 文档需要说明数据库连接和文件侧 instance root 的关系，避免 DB 在一个位置、workspace/runtime home 在另一个位置。
 - 检查已有绝对路径迁移风险：
   - `agents.agent_runtime_config.instructionsRootPath`、`instructionsFilePath` 等 managed path 可能已持久化旧 home。
@@ -67,6 +68,7 @@ routes
 - 不把 MySQL 作为唯一生产推荐；PostgreSQL 仍是优先生产路径。
 - 不迁移线上数据；本步骤只提供代码和迁移兼容能力。
 - 不把数据库 URL 当作完整 instance 隔离方案；SQLite/PostgreSQL/MySQL 都必须与文件侧 instance root 绑定清楚。
+- 不在本步骤实现 embedded PostgreSQL 进程管理；local PostgreSQL 需要用户或启动器自行 `initdb`、启动、停止和分配端口。
 - 不重做 Step 25 activity、Step 27 cost、Step 28 governance 的业务语义。
 
 ## 验收
@@ -75,7 +77,7 @@ routes
 - PostgreSQL migration smoke 和核心写入测试通过。
 - MySQL migration smoke 和核心写入测试通过。
 - `agents/chats/issues/skills` 写入接口在三类数据库上使用同一 service/query API。
-- SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，外部 PostgreSQL/MySQL 与显式 `OCTOPUS_HOME`、`OCTOPUS_INSTANCE_ID` 的关系有明确文档和测试覆盖。
+- SQLite 默认文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`；remote PostgreSQL/MySQL 与显式 `OCTOPUS_HOME`、`OCTOPUS_INSTANCE_ID` 的关系有明确文档和测试覆盖；local PostgreSQL 的推荐 data directory 为 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/postgres/`。
 - 切换 home 或数据库位置后，已有 managed instructions 绝对路径不会导致 workspace browser、agent workspace home 和 runtime 读取目录分裂。
 - 文档说明 `OCTOPUS_DATABASE_URL` 三类连接串、推荐生产路径和已知限制。
 
@@ -88,6 +90,7 @@ routes
 - 已改造当前阻塞面核心写路径：agents、chats、issues、organization skills，以及 issue counter / checkout issue。
 - MySQL migration 已处理 baseline partial unique index 的直接兼容问题：MySQL 路径降级为普通非唯一索引，并在 migration README 记录等价约束待补。
 - README、UI README、CLI README、migration README 和相关历史分析文档已同步默认 SQLite layout、PostgreSQL/MySQL 连接串和外部数据库与 instance root 的关系。
+- migration README 已补充 remote PostgreSQL 与 local PostgreSQL 两种配置方式；local PostgreSQL 目前需要外部进程管理，Octopus 只通过 `OCTOPUS_DATABASE_URL` 连接。
 - 新增 `tests/contract/test_step23_database_portability.py` 覆盖默认数据库 URL、SQLite 父目录创建、核心 write returning fallback；更新 workspace path 测试覆盖新 instance db layout。
 
 ## 剩余风险 / 后续项
