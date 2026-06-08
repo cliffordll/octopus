@@ -741,7 +741,12 @@ async def test_agent_update_merges_runtime_configuration_unless_replace_requeste
         json={"agentRuntimeConfig": {"model": "updated"}},
     )
     assert code == 200
-    assert merged["agentRuntimeConfig"] == {"cwd": "workspace", "model": "updated"}
+    assert merged["agentRuntimeConfig"]["cwd"] == "workspace"
+    assert merged["agentRuntimeConfig"]["model"] == "updated"
+    assert merged["agentRuntimeConfig"]["instructionsBundleMode"] == "managed"
+    assert merged["agentRuntimeConfig"]["instructionsEntryFile"] == "SOUL.md"
+    assert merged["agentRuntimeConfig"]["instructionsRootPath"]
+    assert merged["agentRuntimeConfig"]["instructionsFilePath"]
 
     code, replaced = await _request(
         app,
