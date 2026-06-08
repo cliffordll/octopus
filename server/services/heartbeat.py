@@ -71,6 +71,16 @@ from .runtime_providers import inject_runtime_provider_config
 from .workspace_paths import ensure_octopus_run_log_dir
 from .workspaces import WorkspaceService
 
+LOCAL_CHILD_PROCESS_RUNTIMES = {
+    "process",
+    "claude_local",
+    "codex_local",
+    "gemini_local",
+    "opencode_local",
+    "pi_local",
+    "hermes_local",
+}
+
 
 def _run_log_dir() -> Path:
     return ensure_octopus_run_log_dir()
@@ -479,7 +489,7 @@ class HeartbeatService:
             agent = await get_agent_by_id(self._session, run.agent_id)
             tracks_local_child = (
                 agent is not None
-                and agent.agent_runtime_type in {"process", "codex_local"}
+                and agent.agent_runtime_type in LOCAL_CHILD_PROCESS_RUNTIMES
                 and run.process_pid is not None
             )
             detached_message: str | None = None
