@@ -64,11 +64,6 @@ from packages.database.schema import (
     WorkspaceOperation,
     WorkspaceRuntimeService,
 )
-from packages.runtimes.paths import (
-    ensure_managed_runtime_home,
-    resolve_octopus_home_dir as resolve_runtime_octopus_home_dir,
-)
-
 
 async def test_engine_factory_creates_sqlite_parent_directory(tmp_path: Path) -> None:
     db_path = tmp_path / "home" / "instances" / "dev" / "db" / "octopus.db"
