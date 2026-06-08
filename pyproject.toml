@@ -55,6 +55,8 @@ exclude = [
     "server/skills",
     "**/__pycache__",
     ".octopus",
+    ".codex-pytest-write-check",
+    ".pytest-tmp*",
     ".tmp-pytest",
     ".venv",
     ".uv-cache*",
@@ -65,4 +67,9 @@ reportUnknownArgumentType = "none"
 reportUnknownParameterType = "none"
 
 [tool.ruff]
-extend-exclude = ["server/skills", ".tmp-pytest"]
+extend-exclude = [
+    "server/skills",
+    ".codex-pytest-write-check",
+    ".pytest-tmp*",
+    ".tmp-pytest",
+]

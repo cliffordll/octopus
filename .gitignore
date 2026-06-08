@@ -68,6 +68,8 @@ secrets.json
 logs/
 tmp/
 pytest-tmp/
+.codex-pytest-write-check/
+.pytest-tmp*/
 .octopus/
 .octopus-test-tmp/
 
