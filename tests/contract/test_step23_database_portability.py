@@ -64,10 +64,6 @@ from packages.database.schema import (
     WorkspaceOperation,
     WorkspaceRuntimeService,
 )
-from packages.runtimes.paths import (
-    ensure_managed_runtime_home,
-    resolve_octopus_home_dir as resolve_runtime_octopus_home_dir,
-)
 from server.config import Settings
 
 
