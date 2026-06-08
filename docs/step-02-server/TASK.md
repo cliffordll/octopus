@@ -33,7 +33,7 @@
 | `OCTOPUS_HOST` | `127.0.0.1` | server 绑定地址 |
 | `OCTOPUS_PORT` | `8000` | server 端口 |
 | `OCTOPUS_LOG_LEVEL` | `info` | 日志等级 |
-| `OCTOPUS_DATABASE_URL` | `sqlite+aiosqlite:///./octopus.db` | 数据库连接；外部数据库当前推荐 `postgresql+asyncpg://...` |
+| `OCTOPUS_DATABASE_URL` | instance-scoped SQLite URL | 数据库连接；默认指向 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，外部数据库支持 `postgresql+asyncpg://...` 与 `mysql+asyncmy://...` |
 | `OCTOPUS_AUTO_MIGRATE` | `false` | 启动前是否执行 Alembic `upgrade head` |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | Step 13 起是否启动 heartbeat scheduler |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | Step 13 起的 scheduler 周期秒数 |
@@ -64,7 +64,7 @@ PowerShell 使用 `curl.exe`，避免 `curl` 被解析为 PowerShell 别名。
 启动服务：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "sqlite+aiosqlite:///./octopus.db"
+$env:OCTOPUS_HOME = ".octopus"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
 ```
@@ -72,7 +72,6 @@ uv run server
 如需连接外部 PostgreSQL，先确保已安装 async driver，再替换连接串：
 
 ```powershell
-uv add asyncpg
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 uv run server
