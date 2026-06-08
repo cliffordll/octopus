@@ -43,6 +43,14 @@ def get_runtime_adapter(runtime_type: str) -> RuntimeAdapter:
     raise ValueError(f"Unknown runtime adapter: {runtime_type}")
 
 
+def list_quota_runtime_types() -> list[str]:
+    return [
+        runtime_type
+        for runtime_type, adapter in _ADAPTERS.items()
+        if getattr(adapter, "quota_provider", None) is not None
+    ]
+
+
 async def list_runtime_models(
     runtime_type: str, config: dict | None = None
 ) -> list[dict[str, str]]:

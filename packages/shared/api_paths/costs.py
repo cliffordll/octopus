@@ -9,3 +9,11 @@ ORG_COST_BY_PROVIDER_PATH = "/api/orgs/{orgId}/costs/by-provider"
 ORG_COST_BY_BILLER_PATH = "/api/orgs/{orgId}/costs/by-biller"
 ORG_COST_WINDOW_SPEND_PATH = "/api/orgs/{orgId}/costs/window-spend"
 ORG_COST_BY_PROJECT_PATH = "/api/orgs/{orgId}/costs/by-project"
+ORG_COST_QUOTA_WINDOWS_PATH = "/api/orgs/{orgId}/costs/quota-windows"
+ORG_BUDGET_OVERVIEW_PATH = "/api/orgs/{orgId}/budgets/overview"
+ORG_BUDGET_POLICY_LIST_PATH = "/api/orgs/{orgId}/budgets/policies"
+ORG_BUDGET_INCIDENT_RESOLVE_PATH = (
+    "/api/orgs/{orgId}/budget-incidents/{incidentId}/resolve"
+)
+ORG_BUDGET_PATCH_PATH = "/api/orgs/{orgId}/budgets"
+AGENT_BUDGET_PATCH_PATH = "/api/agents/{agentId}/budgets"

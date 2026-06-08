@@ -115,6 +115,9 @@ class CostService:
                 "biller": row.biller,
             },
         )
+        from .budgets import BudgetService
+
+        await BudgetService(self._session).evaluate_cost_event(row)
         return _to_cost_event(row)
 
     async def record_run_cost_if_present(self, run_id: str) -> CostEventType | None:
@@ -168,9 +171,7 @@ class CostService:
             "totalTokens": totals["totalTokens"],
         }
 
-    async def by_agent(
-        self, org_id: str, query: CostQuery
-    ) -> list[CostDimensionRow]:
+    async def by_agent(self, org_id: str, query: CostQuery) -> list[CostDimensionRow]:
         return _group(rows=await self._list(org_id, query), keys=("agent_id",))
 
     async def by_provider(
@@ -178,14 +179,10 @@ class CostService:
     ) -> list[CostDimensionRow]:
         return _group(rows=await self._list(org_id, query), keys=("provider",))
 
-    async def by_biller(
-        self, org_id: str, query: CostQuery
-    ) -> list[CostDimensionRow]:
+    async def by_biller(self, org_id: str, query: CostQuery) -> list[CostDimensionRow]:
         return _group(rows=await self._list(org_id, query), keys=("biller",))
 
-    async def by_project(
-        self, org_id: str, query: CostQuery
-    ) -> list[CostDimensionRow]:
+    async def by_project(self, org_id: str, query: CostQuery) -> list[CostDimensionRow]:
         return _group(rows=await self._list(org_id, query), keys=("project_id",))
 
     async def by_agent_model(
@@ -275,7 +272,9 @@ def _totals(rows: Iterable[CostEvent]) -> dict[str, int]:
     }
 
 
-def _group(*, rows: Iterable[CostEvent], keys: tuple[str, ...]) -> list[CostDimensionRow]:
+def _group(
+    *, rows: Iterable[CostEvent], keys: tuple[str, ...]
+) -> list[CostDimensionRow]:
     grouped: dict[tuple[str | None, ...], dict[str, int]] = {}
     for row in rows:
         key = tuple(_row_value(row, item) for item in keys)
@@ -334,9 +333,7 @@ def _assign_dimension(item: CostDimensionRow, name: str, value: str | None) -> N
         raise ValueError(f"Unsupported cost dimension {name}")
 
 
-def _cost_cents_from(
-    result: dict[str, object], usage: dict[str, object]
-) -> int | None:
+def _cost_cents_from(result: dict[str, object], usage: dict[str, object]) -> int | None:
     for source in (result, usage):
         value = source.get("costCents")
         if isinstance(value, int) and not isinstance(value, bool):

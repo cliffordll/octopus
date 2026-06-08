@@ -60,7 +60,9 @@ def upgrade() -> None:
         "cost_events",
         ["org_id", "project_id", "occurred_at"],
     )
-    op.create_index("cost_events_org_provider_idx", "cost_events", ["org_id", "provider"])
+    op.create_index(
+        "cost_events_org_provider_idx", "cost_events", ["org_id", "provider"]
+    )
     op.create_index("cost_events_org_biller_idx", "cost_events", ["org_id", "biller"])
     op.create_index(
         "cost_events_org_source_idx",
