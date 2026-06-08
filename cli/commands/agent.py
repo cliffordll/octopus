@@ -140,7 +140,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--name", required=True)
     create_parser.add_argument("--role", required=True, choices=ROLES)
     create_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
-    create_parser.add_argument("--runtime-config", default="{}")
+    create_parser.add_argument("--runtime-config")
     create_parser.add_argument("--model")
     create_parser.add_argument("--runtime-extra-arg", action="append", default=[])
     create_parser.add_argument("--skip-opencode-permissions", action="store_true")
@@ -153,7 +153,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     hire_parser.add_argument("--name")
     hire_parser.add_argument("--role", required=True, choices=ROLES)
     hire_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
-    hire_parser.add_argument("--runtime-config", default="{}")
+    hire_parser.add_argument("--runtime-config")
     hire_parser.add_argument("--model")
     hire_parser.add_argument("--runtime-extra-arg", action="append", default=[])
     hire_parser.add_argument("--skip-opencode-permissions", action="store_true")
@@ -204,7 +204,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     bootstrap_parser.add_argument("--org-id", required=True)
     bootstrap_parser.add_argument("--name", required=True)
     bootstrap_parser.add_argument("--runtime", required=True, choices=RUNTIMES)
-    bootstrap_parser.add_argument("--runtime-config", default="{}")
+    bootstrap_parser.add_argument("--runtime-config")
     bootstrap_parser.add_argument("--model")
     bootstrap_parser.add_argument("--runtime-extra-arg", action="append", default=[])
     bootstrap_parser.add_argument("--skip-opencode-permissions", action="store_true")
@@ -230,11 +230,16 @@ def _json_object(value: str) -> dict[str, Any]:
 
 def _runtime_config(
     runtime: str | None,
-    value: str,
+    value: str | None,
     model: str | None = None,
     extra_args: list[str] | None = None,
 ) -> dict[str, Any]:
-    config = _json_object(value)
+    if runtime == "process" and value is None:
+        raise ValueError(
+            "process runtime requires --runtime-config with a command, "
+            'for example {"command":"python","args":["-c","print(1)"]}'
+        )
+    config = _json_object(value or "{}")
     if model is not None:
         config["model"] = model
     if extra_args:
@@ -484,6 +489,11 @@ def hire_agent(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def update_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    if args.runtime == "process" and args.runtime_config is None:
+        raise ValueError(
+            "process runtime requires --runtime-config with a command, "
+            'for example {"command":"python","args":["-c","print(1)"]}'
+        )
     payload = {
         key: value
         for key, value in {
