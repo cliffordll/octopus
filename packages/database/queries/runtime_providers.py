@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import (
@@ -14,6 +14,7 @@ from ..schema import (
     RuntimeModelDefault,
     RuntimeProvider,
 )
+from ._compat import delete_returning_one, update_returning_one
 
 
 async def list_runtime_providers(
@@ -72,6 +73,7 @@ async def create_runtime_provider(
     row = RuntimeProvider(**dict(fields))
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return row
 
 
@@ -81,6 +83,7 @@ async def create_global_runtime_provider(
     row = RuntimeGlobalProvider(**dict(fields))
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return row
 
 
@@ -93,17 +96,16 @@ async def update_runtime_provider(
 ) -> RuntimeProvider | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(RuntimeProvider)
-        .where(
+    return await update_returning_one(
+        session,
+        RuntimeProvider,
+        and_(
             RuntimeProvider.org_id == org_id,
             RuntimeProvider.runtime_type == runtime_type,
             RuntimeProvider.provider_id == provider_id,
-        )
-        .values(**values)
-        .returning(RuntimeProvider)
+        ),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def update_global_runtime_provider(
@@ -114,45 +116,42 @@ async def update_global_runtime_provider(
 ) -> RuntimeGlobalProvider | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(RuntimeGlobalProvider)
-        .where(
+    return await update_returning_one(
+        session,
+        RuntimeGlobalProvider,
+        and_(
             RuntimeGlobalProvider.runtime_type == runtime_type,
             RuntimeGlobalProvider.provider_id == provider_id,
-        )
-        .values(**values)
-        .returning(RuntimeGlobalProvider)
+        ),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_runtime_provider(
     session: AsyncSession, org_id: str, runtime_type: str, provider_id: str
 ) -> RuntimeProvider | None:
-    result = await session.execute(
-        delete(RuntimeProvider)
-        .where(
+    return await delete_returning_one(
+        session,
+        RuntimeProvider,
+        and_(
             RuntimeProvider.org_id == org_id,
             RuntimeProvider.runtime_type == runtime_type,
             RuntimeProvider.provider_id == provider_id,
-        )
-        .returning(RuntimeProvider)
+        ),
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_global_runtime_provider(
     session: AsyncSession, runtime_type: str, provider_id: str
 ) -> RuntimeGlobalProvider | None:
-    result = await session.execute(
-        delete(RuntimeGlobalProvider)
-        .where(
+    return await delete_returning_one(
+        session,
+        RuntimeGlobalProvider,
+        and_(
             RuntimeGlobalProvider.runtime_type == runtime_type,
             RuntimeGlobalProvider.provider_id == provider_id,
-        )
-        .returning(RuntimeGlobalProvider)
+        ),
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_runtime_models_for_provider(
@@ -247,6 +246,7 @@ async def create_runtime_model(
     row = RuntimeModel(**dict(fields))
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return row
 
 
@@ -256,6 +256,7 @@ async def create_global_runtime_model(
     row = RuntimeGlobalModel(**dict(fields))
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return row
 
 
@@ -269,18 +270,17 @@ async def update_runtime_model(
 ) -> RuntimeModel | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(RuntimeModel)
-        .where(
+    return await update_returning_one(
+        session,
+        RuntimeModel,
+        and_(
             RuntimeModel.org_id == org_id,
             RuntimeModel.runtime_type == runtime_type,
             RuntimeModel.provider_id == provider_id,
             RuntimeModel.model_id == model_id,
-        )
-        .values(**values)
-        .returning(RuntimeModel)
+        ),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def update_global_runtime_model(
@@ -292,17 +292,16 @@ async def update_global_runtime_model(
 ) -> RuntimeGlobalModel | None:
     values = dict(fields)
     values["updated_at"] = datetime.now(UTC)
-    result = await session.execute(
-        update(RuntimeGlobalModel)
-        .where(
+    return await update_returning_one(
+        session,
+        RuntimeGlobalModel,
+        and_(
             RuntimeGlobalModel.runtime_type == runtime_type,
             RuntimeGlobalModel.provider_id == provider_id,
             RuntimeGlobalModel.model_id == model_id,
-        )
-        .values(**values)
-        .returning(RuntimeGlobalModel)
+        ),
+        values,
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_runtime_model(
@@ -312,17 +311,16 @@ async def delete_runtime_model(
     provider_id: str,
     model_id: str,
 ) -> RuntimeModel | None:
-    result = await session.execute(
-        delete(RuntimeModel)
-        .where(
+    return await delete_returning_one(
+        session,
+        RuntimeModel,
+        and_(
             RuntimeModel.org_id == org_id,
             RuntimeModel.runtime_type == runtime_type,
             RuntimeModel.provider_id == provider_id,
             RuntimeModel.model_id == model_id,
-        )
-        .returning(RuntimeModel)
+        ),
     )
-    return result.scalar_one_or_none()
 
 
 async def delete_global_runtime_model(
@@ -331,16 +329,15 @@ async def delete_global_runtime_model(
     provider_id: str,
     model_id: str,
 ) -> RuntimeGlobalModel | None:
-    result = await session.execute(
-        delete(RuntimeGlobalModel)
-        .where(
+    return await delete_returning_one(
+        session,
+        RuntimeGlobalModel,
+        and_(
             RuntimeGlobalModel.runtime_type == runtime_type,
             RuntimeGlobalModel.provider_id == provider_id,
             RuntimeGlobalModel.model_id == model_id,
-        )
-        .returning(RuntimeGlobalModel)
+        ),
     )
-    return result.scalar_one_or_none()
 
 
 async def get_runtime_model_default(
@@ -366,4 +363,5 @@ async def create_runtime_model_default(
     row = RuntimeModelDefault(**dict(fields))
     session.add(row)
     await session.flush()
+    await session.refresh(row)
     return row
