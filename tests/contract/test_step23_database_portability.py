@@ -19,7 +19,18 @@ from packages.database.queries.organization_skills import (
     update_organization_skill,
 )
 from packages.database.queries.organizations import increment_issue_counter
-from packages.database.schema import Agent, Base, Organization, OrganizationSkill
+from packages.database.queries.runtime_providers import (
+    create_global_runtime_provider,
+    delete_global_runtime_provider,
+    update_global_runtime_provider,
+)
+from packages.database.schema import (
+    Agent,
+    Base,
+    Organization,
+    OrganizationSkill,
+    RuntimeGlobalProvider,
+)
 from packages.runtimes.paths import (
     ensure_managed_runtime_home,
     resolve_octopus_home_dir as resolve_runtime_octopus_home_dir,
@@ -494,3 +505,52 @@ async def test_returning_fallback_deletes_core_write_rows(
 
     assert deleted is not None
     assert deleted.id == "skill-1"
+
+
+async def test_runtime_provider_writes_do_not_require_returning(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_compat, "supports_update_returning", lambda _: False)
+    monkeypatch.setattr(_compat, "supports_delete_returning", lambda _: False)
+
+    async with session_factory() as session:
+        created = await create_global_runtime_provider(
+            session,
+            {
+                "id": "provider-1",
+                "runtime_type": "codex_local",
+                "provider_id": "openai",
+                "name": "OpenAI",
+                "protocol": "openai",
+                "config_json": {},
+            },
+        )
+        await session.commit()
+
+    assert created.created_at is not None
+    assert created.updated_at is not None
+
+    async with session_factory() as session:
+        updated = await update_global_runtime_provider(
+            session,
+            "codex_local",
+            "openai",
+            {"name": "OpenAI Global"},
+        )
+        await session.commit()
+
+    assert updated is not None
+    assert updated.name == "OpenAI Global"
+
+    async with session_factory() as session:
+        deleted = await delete_global_runtime_provider(session, "codex_local", "openai")
+        await session.commit()
+
+    assert deleted is not None
+    assert deleted.id == "provider-1"
+
+    async with session_factory() as session:
+        remaining = await session.get(RuntimeGlobalProvider, "provider-1")
+
+    assert remaining is None
