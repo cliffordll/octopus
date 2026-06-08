@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260528_000010"
 down_revision = "20260528_000009"
@@ -47,17 +49,19 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
-        sa.UniqueConstraint(
-            "org_id",
-            "thread_key",
-            "user_id",
-            name="messenger_thread_user_states_org_thread_user_idx",
-        ),
+    )
+    op.create_index(
+        "messenger_thread_user_states_org_thread_user_idx",
+        "messenger_thread_user_states",
+        ["org_id", "thread_key", "user_id"],
+        unique=True,
+        mysql_length=mysql_text_index_lengths("thread_key", "user_id"),
     )
     op.create_index(
         "messenger_thread_user_states_org_user_idx",
         "messenger_thread_user_states",
         ["org_id", "user_id"],
+        mysql_length=mysql_text_index_lengths("user_id"),
     )
 
 

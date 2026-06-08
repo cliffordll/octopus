@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from packages.database.migrations.mysql import mysql_text_index_lengths
+
 
 revision = "20260527_000002"
 down_revision = "20260526_000001"
@@ -87,6 +89,7 @@ def upgrade() -> None:
         "organization_resources_org_kind_idx",
         "organization_resources",
         ["org_id", "kind"],
+        mysql_length=mysql_text_index_lengths("kind"),
     )
 
     op.create_table(
