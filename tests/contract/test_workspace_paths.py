@@ -11,12 +11,37 @@ from server.services.workspace_paths import (
     ensure_octopus_workspace_operation_log_dir,
     organization_workspace_relative_path,
     organization_workspace_root,
+    resolve_default_sqlite_database_url,
+    resolve_octopus_database_dir,
     resolve_octopus_home_dir,
     resolve_octopus_instance_root,
     resolve_octopus_run_log_dir,
+    resolve_octopus_sqlite_database_path,
     resolve_octopus_storage_dir,
     resolve_octopus_workspace_operation_log_dir,
 )
+
+
+def test_default_database_uses_instance_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("OCTOPUS_HOME", raising=False)
+    monkeypatch.delenv("OCTOPUS_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("OCTOPUS_DATABASE_URL", raising=False)
+
+    database_path = (
+        tmp_path / ".octopus" / "instances" / "default" / "db" / "octopus.db"
+    ).resolve()
+
+    assert resolve_octopus_home_dir() == (tmp_path / ".octopus").resolve()
+    assert resolve_octopus_database_dir() == database_path.parent
+    assert resolve_octopus_sqlite_database_path() == database_path
+    assert resolve_default_sqlite_database_url() == (
+        f"sqlite+aiosqlite:///{database_path.as_posix()}"
+    )
+    assert database_path.parent.is_dir()
+    assert resolve_octopus_sqlite_database_path() != (Path.cwd() / "octopus.db")
 
 
 def test_organization_workspace_uses_octopus_instance_home(
