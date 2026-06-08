@@ -1,6 +1,6 @@
 # Step 24: Agent Memory
 
-状态：开发中；已在 `step-24-agent-memory` 分支实现 runtime memory contract 的第一批闭环。
+状态：开发中；已在 `step-24-agent-memory` 分支实现 runtime memory contract、专用 memory/life API 和 Agent Memory UI。
 
 ## 背景
 
@@ -57,3 +57,10 @@
 - Local runtime env 支持从 workspace context 或 `_octopus` fallback 注入 `AGENT_HOME`、`RUDDER_AGENT_MEMORY_DIR`、`RUDDER_AGENT_LIFE_DIR` 等路径。
 - Codex/Claude/OpenCode managed HOME 不再默认占用 `AGENT_HOME`；`HOME/USERPROFILE` 仍用于 runtime CLI 凭据、缓存和 profile 隔离。
 - 已补 contract/workflow tests 覆盖 tacit memory 加载、lazy memory/life、runtime env fallback、managed HOME 与长期 `AGENT_HOME` 分离。
+- 新增 agent-scoped memory/life 文件 API：
+  - `GET /api/agents/{id}/memory/files?layer=memory|life&path=...`
+  - `GET /api/agents/{id}/memory/file?layer=memory|life&path=...`
+  - `PUT /api/agents/{id}/memory/file`
+  - `DELETE /api/agents/{id}/memory/file?layer=memory|life&path=...`
+- Agent 详情页新增“记忆”tab，可在 `memory` daily notes 和 `life` 长期目录之间切换，并支持创建、读取、编辑、删除文件。
+- 已补 API contract tests 覆盖 memory/life 写读列删、nested life 文件、非法路径和非法 layer 拒绝；已补 Agent 页面测试覆盖 Memory UI 基本交互。

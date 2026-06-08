@@ -24,6 +24,8 @@ from packages.shared.api_paths.agents import (
     AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH,
     AGENT_INSTRUCTIONS_BUNDLE_PATH,
     AGENT_INSTRUCTIONS_PATH,
+    AGENT_MEMORY_FILE_PATH,
+    AGENT_MEMORY_FILES_PATH,
     AGENT_PAUSE_PATH,
     AGENT_RESET_SESSION_PATH,
     AGENT_RESUME_PATH,
@@ -71,6 +73,8 @@ from packages.shared.types.agent import (
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
     AgentInstructionsPathResult,
+    AgentMemoryFileDetail,
+    AgentMemoryFileList,
     AgentRuntimeState,
     AgentSkillAnalytics,
     AgentSkillSnapshot,
@@ -91,6 +95,7 @@ from packages.shared.validators.agent import (
     validate_update_agent_instructions_bundle,
     validate_update_agent_instructions_path,
     validate_upsert_agent_instructions_file,
+    validate_upsert_agent_memory_file,
 )
 from packages.shared.validators.heartbeat import validate_wake_agent
 
@@ -101,11 +106,13 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.agent_instructions import get_agent_instructions_service
+from ..dependencies.agent_memory import get_agent_memory_service
 from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
 from ..services.agent_instructions import AgentInstructionsService
+from ..services.agent_memory import AgentMemoryService
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.workspaces import WorkspaceService
 
@@ -505,6 +512,125 @@ async def delete_agent_instructions_file_route(
         result = await instructions_service.delete_file(
             id,
             path,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.get(AGENT_MEMORY_FILES_PATH)
+async def list_agent_memory_files_route(
+    request: Request,
+    id: str,
+    layer: str = "memory",
+    path: str = "",
+    agent_service: AgentService = Depends(get_agent_service),
+    memory_service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemoryFileList:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        result = await memory_service.list_files(id, layer=layer, directory_path=path)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.get(AGENT_MEMORY_FILE_PATH)
+async def read_agent_memory_file_route(
+    request: Request,
+    id: str,
+    layer: str = "memory",
+    path: str = "",
+    agent_service: AgentService = Depends(get_agent_service),
+    memory_service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemoryFileDetail:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        result = await memory_service.read_file(id, layer=layer, file_path=path)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.put(AGENT_MEMORY_FILE_PATH)
+async def upsert_agent_memory_file_route(
+    request: Request,
+    id: str,
+    body: dict[str, Any] = Body(...),
+    agent_service: AgentService = Depends(get_agent_service),
+    memory_service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemoryFileDetail:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        payload = validate_upsert_agent_memory_file(body)
+        actor = require_actor_identity(request)
+        result = await memory_service.write_file(
+            id,
+            layer=payload["layer"],
+            file_path=payload["path"],
+            content=payload["content"],
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return result
+
+
+@router.delete(AGENT_MEMORY_FILE_PATH)
+async def delete_agent_memory_file_route(
+    request: Request,
+    id: str,
+    layer: str = "memory",
+    path: str = "",
+    agent_service: AgentService = Depends(get_agent_service),
+    memory_service: AgentMemoryService = Depends(get_agent_memory_service),
+) -> AgentMemoryFileList:
+    await _get_agent_or_404(id, request=request, service=agent_service)
+    try:
+        actor = require_actor_identity(request)
+        result = await memory_service.delete_file(
+            id,
+            layer=layer,
+            file_path=path,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
         )

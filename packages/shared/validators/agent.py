@@ -298,3 +298,17 @@ def validate_upsert_agent_instructions_file(
             else {}
         ),
     }
+
+
+def validate_upsert_agent_memory_file(payload: Mapping[str, Any]) -> dict[str, str]:
+    _reject_unknown_fields(payload, {"layer", "path", "content"})
+    layer = payload.get("layer")
+    if layer not in {"memory", "life"}:
+        raise ValueError("'layer' must be one of ['memory', 'life']")
+    path = payload.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("'path' is required and must be a non-empty string")
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise ValueError("'content' is required and must be a string")
+    return {"layer": str(layer), "path": path.strip(), "content": content}

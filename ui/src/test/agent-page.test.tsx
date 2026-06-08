@@ -82,6 +82,69 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path.startsWith("/api/agents/agent-1/instructions-bundle/file") && init?.method === "DELETE") {
       return respond({ path: new URL(`http://local${path}`).searchParams.get("path"), content: "", size: 0, language: "markdown", markdown: true, isEntryFile: false, editable: true, deprecated: false, virtual: false });
     }
+    if (path === "/api/agents/agent-1/memory/files?layer=memory&path=" && init?.method === "GET") {
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        layer: "memory",
+        rootPath: "D:/work/app/.agent/memory",
+        directoryPath: "",
+        entries: [
+          { name: "2026-06-08.md", path: "2026-06-08.md", isDirectory: false, size: 16, updatedAt: "2026-06-08T00:00:00Z" },
+        ],
+        message: null,
+      });
+    }
+    if (path === "/api/agents/agent-1/memory/files?layer=life&path=" && init?.method === "GET") {
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        layer: "life",
+        rootPath: "D:/work/app/.agent/life",
+        directoryPath: "",
+        entries: [
+          { name: "projects", path: "projects", isDirectory: true, size: null, updatedAt: "2026-06-08T00:00:00Z" },
+        ],
+        message: null,
+      });
+    }
+    if (path.startsWith("/api/agents/agent-1/memory/file") && init?.method === "GET") {
+      const filePath = new URL(`http://local${path}`).searchParams.get("path");
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        layer: "memory",
+        rootPath: "D:/work/app/.agent/memory",
+        filePath,
+        content: "Daily memory note",
+        size: 17,
+        updatedAt: "2026-06-08T00:00:00Z",
+      });
+    }
+    if (path === "/api/agents/agent-1/memory/file" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        layer: body.layer,
+        rootPath: `D:/work/app/.agent/${body.layer}`,
+        filePath: body.path,
+        content: body.content,
+        size: body.content.length,
+        updatedAt: "2026-06-08T00:00:00Z",
+      });
+    }
+    if (path.startsWith("/api/agents/agent-1/memory/file") && init?.method === "DELETE") {
+      return respond({
+        agentId: "agent-1",
+        orgId: "org-1",
+        layer: "memory",
+        rootPath: "D:/work/app/.agent/memory",
+        directoryPath: "",
+        entries: [],
+        message: "This folder is empty.",
+      });
+    }
     if (path === "/api/agents/agent-1/archive" && init?.method === "POST") return respond({ ...agent, status: "terminated" });
     return respond({ ...agent, status: "paused" });
   });
@@ -108,6 +171,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(tabs).getByRole("link", { name: "说明" })).toHaveAttribute(
     "href",
     "/orgs/org-1/agents/agent-1/profile",
+  );
+  expect(within(tabs).getByRole("link", { name: "记忆" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/agents/agent-1/memory",
   );
   expect(within(tabs).getByRole("link", { name: "技能" })).toHaveAttribute(
     "href",
@@ -160,6 +227,26 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/instructions-bundle/file?path=NOTES.md",
     expect.objectContaining({ method: "DELETE" }),
+  );
+  await userEvent.click(within(tabs).getByRole("link", { name: "记忆" }));
+  const memoryPanel = screen.getByRole("region", { name: "Agent Memory" });
+  expect(await within(memoryPanel).findByRole("heading", { name: "记忆" })).toBeInTheDocument();
+  await userEvent.click(within(memoryPanel).getByRole("button", { name: /2026-06-08\.md/ }));
+  const memoryContent = screen.getByRole("article", { name: "记忆文件内容" });
+  expect(await within(memoryContent).findByDisplayValue(/Daily memory note/)).toBeInTheDocument();
+  fireEvent.change(within(memoryContent).getByLabelText("记忆文件内容"), { target: { value: "Updated daily memory" } });
+  await userEvent.click(within(memoryContent).getByRole("button", { name: "保存文件" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/memory/file",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ layer: "memory", path: "2026-06-08.md", content: "Updated daily memory" }),
+    }),
+  );
+  await userEvent.click(within(memoryPanel).getByRole("button", { name: "Life" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/memory/files?layer=life&path=",
+    expect.objectContaining({ method: "GET" }),
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "概览" }));
   expect(await screen.findByText("成功")).toBeInTheDocument();

@@ -8,6 +8,8 @@ import type {
   AgentInstructionsPathResult,
   AgentDetail,
   AgentHireResult,
+  AgentMemoryFileDetail,
+  AgentMemoryFileList,
   AgentRuntimeEnvironmentTestResult,
   AgentRuntimeModel,
   AgentRuntimeState,
@@ -23,6 +25,7 @@ import type {
   UpdateAgentInstructionsBundlePayload,
   UpdateAgentInstructionsFilePayload,
   UpdateAgentInstructionsPathPayload,
+  UpdateAgentMemoryFilePayload,
   UpdateAgentPayload,
 } from "./types";
 
@@ -139,6 +142,26 @@ export const agentsApi = {
   deleteInstructionFile: (agentId: string, path: string): Promise<AgentInstructionsBundle> =>
     request<AgentInstructionsBundle>(
       `${agentRoot(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ),
+  memoryFiles: (agentId: string, layer: "memory" | "life", path = ""): Promise<AgentMemoryFileList> =>
+    request<AgentMemoryFileList>(
+      `${agentRoot(agentId)}/memory/files?layer=${encodeURIComponent(layer)}&path=${encodeURIComponent(path)}`,
+      { method: "GET" },
+    ),
+  readMemoryFile: (agentId: string, layer: "memory" | "life", path: string): Promise<AgentMemoryFileDetail> =>
+    request<AgentMemoryFileDetail>(
+      `${agentRoot(agentId)}/memory/file?layer=${encodeURIComponent(layer)}&path=${encodeURIComponent(path)}`,
+      { method: "GET" },
+    ),
+  upsertMemoryFile: (agentId: string, payload: UpdateAgentMemoryFilePayload): Promise<AgentMemoryFileDetail> =>
+    request<AgentMemoryFileDetail>(`${agentRoot(agentId)}/memory/file`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteMemoryFile: (agentId: string, layer: "memory" | "life", path: string): Promise<AgentMemoryFileList> =>
+    request<AgentMemoryFileList>(
+      `${agentRoot(agentId)}/memory/file?layer=${encodeURIComponent(layer)}&path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ),
   pause: (agentId: string): Promise<Agent> =>
