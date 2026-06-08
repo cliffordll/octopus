@@ -31,6 +31,95 @@ export interface CreateOrganizationPayload {
 
 export type UpdateOrganizationPayload = Partial<CreateOrganizationPayload>;
 
+export interface CostEvent {
+  id: string;
+  orgId: string;
+  agentId: string | null;
+  projectId: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
+  runtimeType: string | null;
+  provider: string | null;
+  model: string | null;
+  biller: string | null;
+  costCents: number;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  usage: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface CreateCostEventPayload {
+  agentId?: string;
+  projectId?: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  runtimeType?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  biller?: string | null;
+  costCents?: number;
+  costUsd?: number;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  usage?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  occurredAt?: string;
+}
+
+export interface CostQuery {
+  agentId?: string;
+  projectId?: string;
+  provider?: string;
+  biller?: string;
+  model?: string;
+  startTime?: string;
+  endTime?: string;
+  limit?: number;
+}
+
+export interface CostSummary {
+  orgId: string;
+  totalCostCents: number;
+  eventCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface CostDimensionRow {
+  costCents: number;
+  eventCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  agentId?: string | null;
+  projectId?: string | null;
+  provider?: string;
+  biller?: string;
+  model?: string;
+  runtimeType?: string | null;
+}
+
+export interface CostTrendRow {
+  bucket: string;
+  costCents: number;
+  eventCount: number;
+}
+
+export interface CostWindowSpend {
+  orgId: string;
+  costCents: number;
+  eventCount: number;
+  startTime: string | null;
+  endTime: string | null;
+}
+
 export interface OrganizationWorkspaceFileEntry {
   name: string;
   path: string;
@@ -208,6 +297,47 @@ export interface IssueFilters {
   parentId?: string;
   originKind?: IssueOriginKind;
   originId?: string;
+}
+
+export interface ActivityEvent {
+  id: string;
+  orgId: string;
+  actorType?: string;
+  actorId?: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  agentId?: string | null;
+  runId?: string | null;
+  details?: Record<string, unknown> | null;
+  summary?: string | null;
+  createdAt: string;
+}
+
+export interface ActivityQuery {
+  agentId?: string;
+  userId?: string;
+  actorType?: string;
+  actorId?: string;
+  action?: string;
+  entityType?: string;
+  entityId?: string;
+  runId?: string;
+  startTime?: string;
+  endTime?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface CreateActivityPayload {
+  actorId: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  actorType?: "agent" | "user" | "system" | "board";
+  agentId?: string | null;
+  runId?: string | null;
+  details?: Record<string, unknown> | null;
 }
 
 export interface CreateIssuePayload {

@@ -61,6 +61,7 @@ from packages.shared.types.heartbeat import (
 )
 
 from .agents import AgentConflictError, prepare_agent_runtime_config
+from .costs import CostService
 from .logs import (
     LogReadResult,
     append_local_file_log,
@@ -987,6 +988,18 @@ class HeartbeatService:
                 },
             )
             assert final is not None
+            try:
+                await CostService(self._session).record_run_cost_if_present(final.id)
+            except Exception as exc:
+                await self._append_event(
+                    final,
+                    sequence,
+                    "cost.collection_failed",
+                    message=f"Cost collection failed: {exc}",
+                    level="warning",
+                    payload={"error": str(exc)},
+                )
+                sequence += 1
             await update_wakeup_request(
                 self._session,
                 running.wakeup_request_id or "",

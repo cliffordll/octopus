@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalsApi } from "../api/approvals";
+import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
 import { chatsApi } from "../api/chats";
+import { costsApi } from "../api/costs";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
 import { messengerApi } from "../api/messenger";
@@ -192,6 +194,104 @@ describe("issue API", () => {
         method: "POST",
         body: JSON.stringify({ body: "Ship it" }),
       }),
+    );
+  });
+});
+
+describe("cost API", () => {
+  it("reports and queries cost summaries", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "cost-1", costCents: 42 }, 201))
+      .mockReturnValueOnce(jsonResponse({ totalCostCents: 42, eventCount: 1 }))
+      .mockReturnValueOnce(jsonResponse([{ agentId: "agent-1", costCents: 42 }]))
+      .mockReturnValueOnce(jsonResponse([{ provider: "openai", costCents: 42 }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await costsApi.report("org-1", { agentId: "agent-1", costCents: 42 });
+    await costsApi.summary("org-1", { startTime: "2026-06-01T00:00:00Z" });
+    await costsApi.byAgent("org-1");
+    await costsApi.byProvider("org-1", { provider: "openai" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/cost-events",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/costs/summary?startTime=2026-06-01T00%3A00%3A00Z",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/orgs/org-1/costs/by-agent",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/orgs/org-1/costs/by-provider?provider=openai",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+});
+
+describe("activity API", () => {
+  it("queries organization and issue activity plus linked run objects", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse([{ id: "activity-1", action: "goal.updated" }]))
+      .mockReturnValueOnce(jsonResponse({ id: "activity-2", action: "goal.updated" }, 201))
+      .mockReturnValueOnce(jsonResponse([{ id: "activity-3", action: "issue.updated" }]))
+      .mockReturnValueOnce(jsonResponse([{ id: "run-1", status: "succeeded" }]))
+      .mockReturnValueOnce(jsonResponse([{ id: "issue-1", title: "Review" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await activityApi.listOrg("org-1", { entityType: "goal", entityId: "goal-1", limit: 10 });
+    await activityApi.create("org-1", {
+      actorId: "system",
+      action: "goal.updated",
+      entityType: "goal",
+      entityId: "goal-1",
+      details: { status: "active" },
+    });
+    await activityApi.listIssue("issue-1");
+    await activityApi.issueRuns("issue-1");
+    await activityApi.runIssues("run-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/orgs/org-1/activity?entityType=goal&entityId=goal-1&limit=10",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/orgs/org-1/activity",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          actorId: "system",
+          action: "goal.updated",
+          entityType: "goal",
+          entityId: "goal-1",
+          details: { status: "active" },
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/issues/issue-1/activity",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/issues/issue-1/runs",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/heartbeat-runs/run-1/issues",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 });

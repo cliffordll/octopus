@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
-import type { Goal, GoalLevel, GoalStatus, IssueListItem, ProjectDetail } from "../api/types";
+import type { ActivityEvent, Goal, GoalLevel, GoalStatus, IssueListItem, ProjectDetail } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { GoalTree } from "../components/GoalTree";
@@ -73,6 +74,16 @@ function WorkSection({
   );
 }
 
+function activitySummary(event: ActivityEvent): string {
+  if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
+  const details = event.details ?? {};
+  for (const key of ["summary", "message", "title", "note"]) {
+    const value = details[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return event.entityId;
+}
+
 export function GoalPage() {
   const { orgId = "", goalId = "", tab = "work" } = useParams();
   const activeTab = ["work", "children", "activity", "configuration"].includes(tab) ? tab : "work";
@@ -90,6 +101,11 @@ export function GoalPage() {
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const issues = useQuery({ queryKey: ["issues", orgId, "goal", goalId], queryFn: () => issuesApi.list(orgId, { goalId }) });
   const dependencies = useQuery({ queryKey: ["goal-dependencies", goalId], queryFn: () => goalsApi.dependencies(goalId) });
+  const goalActivity = useQuery({
+    queryKey: ["goal-activity", orgId, goalId],
+    queryFn: () => activityApi.listOrg(orgId, { entityType: "goal", entityId: goalId, limit: 50 }),
+    enabled: activeTab === "activity" && Boolean(orgId && goalId),
+  });
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const childGoals = goalList.filter((item) => item.parentId === goalId);
@@ -183,9 +199,23 @@ export function GoalPage() {
             </section>
           )}
           {activeTab === "activity" && (
-            <section className="panel">
+            <section aria-label="Goal activity" className="panel">
               <h2>Activity</h2>
-              <p className="muted">Activity API 尚未接入 UI，当前仅展示目标依赖状态。</p>
+              {goalActivity.error && <ErrorNotice error={goalActivity.error} />}
+              <div className="issue-activity-list">
+                {Array.isArray(goalActivity.data) && goalActivity.data.map((event) => (
+                  <article className="issue-activity-item" key={event.id}>
+                    <div className="issue-activity-avatar">A</div>
+                    <p>
+                      <strong>{event.action}</strong>
+                      <span>{activitySummary(event)}</span>
+                    </p>
+                  </article>
+                ))}
+                {goalActivity.isSuccess && Array.isArray(goalActivity.data) && goalActivity.data.length === 0 && (
+                  <p className="muted">暂无 Activity。</p>
+                )}
+              </div>
               <p className="muted">Blockers: {dependencies.data?.blockers.length ? dependencies.data.blockers.join(", ") : "None"}</p>
             </section>
           )}
