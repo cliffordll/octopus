@@ -1139,7 +1139,7 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     managed_home = codex_home / "home"
     assert captured_env["HOME"] == str(managed_home)
     assert captured_env["USERPROFILE"] == str(managed_home)
-    assert captured_env["AGENT_HOME"] == str(managed_home)
+    assert "AGENT_HOME" not in captured_env
     assert captured_env["GIT_CONFIG_GLOBAL"] == str(managed_home / ".gitconfig")
     assert "GIT_AUTHOR_NAME" not in captured_env
     assert "GIT_AUTHOR_EMAIL" not in captured_env
@@ -1284,6 +1284,7 @@ async def test_codex_execute_injects_runtime_context_env(
                     "agentHome": "D:/agents/agent-14",
                     "instructionsDir": "D:/agents/agent-14/instructions",
                     "memoryDir": "D:/agents/agent-14/memory",
+                    "lifeDir": "D:/agents/agent-14/life",
                     "skillsDir": "D:/agents/agent-14/skills",
                     "orgWorkspaceRoot": "D:/orgs/org-14/workspaces",
                     "orgSkillsDir": "D:/orgs/org-14/skills",
@@ -1325,6 +1326,7 @@ async def test_codex_execute_injects_runtime_context_env(
         "D:/agents/agent-14/instructions"
     )
     assert captured_env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+    assert captured_env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
     assert captured_env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
     assert captured_env["RUDDER_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
     assert captured_env["RUDDER_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
@@ -1568,6 +1570,11 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
         assert env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
         assert env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
         assert env["AGENT_HOME"] == "D:/agents/agent-14"
+        assert env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+            "D:/agents/agent-14/instructions"
+        )
+        assert env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+        assert env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
         assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
         assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
 
@@ -1812,6 +1819,11 @@ def _runtime_context_for_env(
                 **runtime_context,
                 "taskId": "task-1",
                 "wakeReason": "assignment",
+                "agentHome": "D:/agents/agent-14",
+                "agentInstructionsDir": "D:/agents/agent-14/instructions",
+                "agentMemoryDir": "D:/agents/agent-14/memory",
+                "agentLifeDir": "D:/agents/agent-14/life",
+                "agentSkillsRootPath": "D:/agents/agent-14/skills",
             },
         },
         workspace={
@@ -1819,8 +1831,6 @@ def _runtime_context_for_env(
                 "cwd": "D:/workspaces/task-1",
                 "source": "workspace",
                 "strategy": "worktree",
-                "agentHome": "D:/agents/agent-14",
-                "skillsDir": "D:/agents/agent-14/skills",
             },
             "rudderRuntimePrimaryUrl": "http://svc",
         },

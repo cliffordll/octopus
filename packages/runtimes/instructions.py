@@ -6,7 +6,12 @@ from typing import Any
 
 def runtime_prompt_from_config(config: dict[str, Any]) -> str:
     return _join_prompt_sections(
-        [_base_prompt_from_config(config), _heartbeat_prompt(config)]
+        [
+            _base_prompt_from_config(config),
+            _tacit_memory_prompt(config),
+            _agent_memory_guidance(config),
+            _heartbeat_prompt(config),
+        ]
     )
 
 
@@ -21,6 +26,56 @@ def _base_prompt_from_config(config: dict[str, Any]) -> str:
         return instructions_path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+def _tacit_memory_prompt(config: dict[str, Any]) -> str:
+    memory_path = _resolve_tacit_memory_path(config)
+    if memory_path is None:
+        return ""
+    try:
+        memory = memory_path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if not memory.strip():
+        return ""
+    return _join_prompt_sections(["## Tacit Agent Memory", memory])
+
+
+def _resolve_tacit_memory_path(config: dict[str, Any]) -> Path | None:
+    instructions_path = _resolve_instructions_path(config)
+    if instructions_path is not None:
+        memory_path = instructions_path.parent / "MEMORY.md"
+        if not _same_path(instructions_path, memory_path):
+            return memory_path
+    octopus = config.get("_octopus")
+    if not isinstance(octopus, dict):
+        return None
+    instructions_dir = _string(octopus.get("agentInstructionsDir"))
+    if not instructions_dir:
+        return None
+    return Path(instructions_dir).expanduser() / "MEMORY.md"
+
+
+def _agent_memory_guidance(config: dict[str, Any]) -> str:
+    octopus = config.get("_octopus")
+    if not isinstance(octopus, dict):
+        return ""
+    agent_home = _string(octopus.get("agentHome"))
+    if not agent_home:
+        return ""
+    return "\n".join(
+        [
+            "## Agent Memory Contract",
+            "",
+            f"Your durable agent home is `{agent_home}`.",
+            "- Keep stable preferences, operating patterns, and lessons learned in `$AGENT_HOME/instructions/MEMORY.md`.",
+            "- Keep daily notes in `$AGENT_HOME/memory/YYYY-MM-DD.md`.",
+            "- Keep structured long-term knowledge in `$AGENT_HOME/life/`.",
+            "- Use the `para-memory-files` skill for memory file operations when it is available.",
+            "- Do not store secrets, credentials, or transient task logs in long-term memory.",
+            "- Do not assume `$HOME` is long-term memory; local runtimes may use it for CLI credentials and caches.",
+        ]
+    )
 
 
 def _heartbeat_prompt(config: dict[str, Any]) -> str:
@@ -99,3 +154,10 @@ def _string(value: Any) -> str | None:
 
 def _join_prompt_sections(sections: list[str]) -> str:
     return "\n\n".join(section.strip() for section in sections if section.strip())
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left.absolute() == right.absolute()
