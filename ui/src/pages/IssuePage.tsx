@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
 import { heartbeatApi } from "../api/heartbeat";
@@ -8,6 +9,7 @@ import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import type {
   Agent,
+  ActivityEvent,
   Goal,
   HeartbeatRun,
   HeartbeatRunEvent,
@@ -218,6 +220,16 @@ function workProductSourceLabel(product: IssueWorkProduct): string {
   if (source.includes("organization_artifacts")) return "任务产物";
   if (product.createdByRunId) return "运行产物";
   return "任务产物";
+}
+
+function activitySummary(event: ActivityEvent): string {
+  if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
+  const details = event.details ?? {};
+  for (const key of ["summary", "message", "title", "note"]) {
+    const value = details[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return event.entityId;
 }
 
 function workProductSize(product: IssueWorkProduct): string {
@@ -1253,6 +1265,11 @@ export function IssuePage() {
     queryKey: ["comments", issueId],
     queryFn: () => issuesApi.listComments(issueId),
   });
+  const issueActivity = useQuery({
+    queryKey: ["issue-activity", issueId],
+    queryFn: () => activityApi.listIssue(issueId),
+    enabled: Boolean(issueId),
+  });
   const attachments = useQuery({
     queryKey: ["issue-attachments", issueId],
     queryFn: () => issuesApi.listAttachments(issueId),
@@ -1807,6 +1824,7 @@ export function IssuePage() {
                 </span>
               </div>
               {comments.error && <ErrorNotice error={comments.error} />}
+              {issueActivity.error && <ErrorNotice error={issueActivity.error} />}
               {attachments.error && <ErrorNotice error={attachments.error} />}
               {uploadAttachment.error && <ErrorNotice error={uploadAttachment.error} />}
               {deleteAttachment.error && <ErrorNotice error={deleteAttachment.error} />}
@@ -1864,13 +1882,22 @@ export function IssuePage() {
                 ) : null}
               </section>
               <div className="issue-activity-list">
+                {Array.isArray(issueActivity.data) && issueActivity.data.map((item) => (
+                  <article className="issue-activity-item" key={item.id}>
+                    <div className="issue-activity-avatar">A</div>
+                    <p>
+                      <strong>{item.action}</strong>
+                      <span>{activitySummary(item)}</span>
+                    </p>
+                  </article>
+                ))}
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
                     <div className="issue-activity-avatar">C</div>
                     <p>{item.body}</p>
                   </article>
                 ))}
-                {comments.isSuccess && comments.data.length === 0 && (
+                {comments.isSuccess && comments.data.length === 0 && (!Array.isArray(issueActivity.data) || issueActivity.data.length === 0) && (
                   <p className="muted">暂无动态。</p>
                 )}
               </div>

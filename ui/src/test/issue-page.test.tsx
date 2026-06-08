@@ -123,11 +123,24 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond([]);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") {
       return respond({ issueId: "issue-1" });
+    }
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") {
+      return respond([
+        {
+          id: "activity-1",
+          orgId: "org-1",
+          action: "issue.status_changed",
+          entityType: "issue",
+          entityId: "issue-1",
+          summary: "进入评审",
+          createdAt: "2026-06-08T10:00:00Z",
+        },
+      ]);
     }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
       return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
@@ -323,6 +336,8 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(activityRegion).toHaveTextContent("1 个文件");
   expect(within(attachmentRegion).getByRole("link", { name: "note.txt" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
+  expect(activityRegion).toHaveTextContent("issue.status_changed");
+  expect(activityRegion).toHaveTextContent("进入评审");
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
   ]);
@@ -430,7 +445,7 @@ it("executes an assigned issue through the issue execution route", async () => {
       return respond([{ id: "goal-1", orgId: "org-1", title: "提升体验", level: "organization", status: "active", parentId: null, ownerAgentId: null }]);
     }
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond(hasExecuted ? [
         {
           id: "run-1",
@@ -714,7 +729,7 @@ it("refreshes server registered work products when an issue run succeeds", async
     }
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond(hasFinished ? [{ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "succeeded", createdAt: "2026-06-04T10:00:00Z" }] : []);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
@@ -801,7 +816,7 @@ it("allows re-executing an issue after the latest run failed", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([failedRun]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([failedRun]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
@@ -869,7 +884,7 @@ it("hides the live stream log when it duplicates the persisted run log", async (
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond([{ id: "run-1", orgId: "org-1", agentId: "agent-1", issueId: "issue-1", status: "running", createdAt: "2026-06-02T10:00:00Z" }]);
     }
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
@@ -928,7 +943,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond([{
         runId: "run-succeeded",
         orgId: "org-1",
@@ -995,7 +1010,7 @@ it("ignores stale selected runs that do not belong to the issue", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
       return respond([{
         runId: "run-succeeded",
         orgId: "org-1",
@@ -1068,7 +1083,7 @@ it("refreshes issue runs when execute returns no new run id", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
@@ -1084,7 +1099,7 @@ it("refreshes issue runs when execute returns no new run id", async () => {
 
   expect(screen.getByRole("status")).toHaveTextContent("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/issues/issue-1/heartbeat-runs",
+    "/api/issues/issue-1/runs",
     expect.objectContaining({ method: "GET" }),
   );
 });
@@ -1123,7 +1138,7 @@ it("explains why an unassigned issue cannot be executed", async () => {
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     return respond(issue);
   });

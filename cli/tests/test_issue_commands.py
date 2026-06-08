@@ -213,7 +213,7 @@ def test_issue_execute_and_runs_use_issue_routes() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.url.path.endswith("/heartbeat-runs"):
+        if request.url.path.endswith("/runs"):
             return httpx.Response(200, json=[{"id": "run-1", "status": "queued"}])
         return httpx.Response(202, json={"id": "run-1", "status": "queued"})
 
@@ -225,7 +225,7 @@ def test_issue_execute_and_runs_use_issue_routes() -> None:
     assert requests[0].url.path == "/api/issues/issue-1/execute"
     assert requests[0].read() == b"{}"
     assert requests[1].method == "GET"
-    assert requests[1].url.path == "/api/issues/issue-1/heartbeat-runs"
+    assert requests[1].url.path == "/api/issues/issue-1/runs"
 
 
 def test_issue_comment_and_review_post_payloads() -> None:

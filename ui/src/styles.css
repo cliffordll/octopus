@@ -423,6 +423,52 @@ small {
   padding: 14px;
 }
 
+.cost-settings-summary,
+.cost-settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.cost-settings-summary {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 16px;
+}
+
+.cost-settings-summary > div,
+.cost-settings-list {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.cost-settings-summary span,
+.cost-settings-row span {
+  color: #8ea0b8;
+  font-size: 0.82rem;
+}
+
+.cost-settings-summary strong {
+  display: block;
+  font-size: 1.2rem;
+  margin-top: 4px;
+}
+
+.cost-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.cost-settings-list h4 {
+  margin: 0 0 10px;
+}
+
+.cost-settings-row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 30px;
+}
+
 .settings-section-content > .runtime-settings {
   height: 100%;
   overflow: hidden;

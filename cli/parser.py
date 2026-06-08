@@ -4,10 +4,12 @@ import argparse
 
 from .client import DEFAULT_API_BASE
 from .commands import (
+    activity,
     agent,
     approval,
     asset,
     chat,
+    cost,
     goal,
     heartbeat,
     issue,
@@ -27,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="json_mode")
     resources = parser.add_subparsers(dest="resource", required=True)
     organization.configure(resources)
+    activity.configure(resources)
+    cost.configure(resources)
     issue.configure(resources)
     approval.configure(resources)
     project.configure(resources)

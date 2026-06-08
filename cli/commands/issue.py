@@ -164,7 +164,7 @@ def execute_issue(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def list_issue_runs(args: argparse.Namespace, client: ApiClient) -> Any:
-    return client.request("GET", f"/api/issues/{args.issue_id}/heartbeat-runs")
+    return client.request("GET", f"/api/issues/{args.issue_id}/runs")
 
 
 def checkout_issue(args: argparse.Namespace, client: ApiClient) -> Any:
