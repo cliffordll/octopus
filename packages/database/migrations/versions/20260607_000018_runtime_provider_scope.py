@@ -78,11 +78,13 @@ def upgrade() -> None:
         "runtime_global_providers",
         ["runtime_type", "provider_id"],
         unique=True,
+        mysql_length={"runtime_type": 191, "provider_id": 191},
     )
     op.create_index(
         "runtime_global_providers_runtime_idx",
         "runtime_global_providers",
         ["runtime_type"],
+        mysql_length={"runtime_type": 191},
     )
 
     op.create_table(
@@ -113,11 +115,13 @@ def upgrade() -> None:
         "runtime_global_models",
         ["runtime_type", "provider_id", "model_id"],
         unique=True,
+        mysql_length={"runtime_type": 191, "provider_id": 191, "model_id": 191},
     )
     op.create_index(
         "runtime_global_models_runtime_provider_idx",
         "runtime_global_models",
         ["runtime_type", "provider_id"],
+        mysql_length={"runtime_type": 191, "provider_id": 191},
     )
 
     op.create_table(
@@ -148,6 +152,7 @@ def upgrade() -> None:
         "runtime_model_defaults",
         ["scope_type", "scope_id", "runtime_type"],
         unique=True,
+        mysql_length={"scope_type": 191, "runtime_type": 191},
     )
 
 
