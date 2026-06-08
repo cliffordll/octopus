@@ -55,7 +55,7 @@
 
 ## Server 接入
 
-- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址；默认 SQLite 文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`；外部数据库支持 PostgreSQL async 连接串 `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME`，MySQL 兼容连接串为 `mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4`。
+- `server/config.py` 从 `OCTOPUS_DATABASE_URL` 读取连接地址；默认 SQLite 文件位于 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`；PostgreSQL 支持 remote 服务或用户自行管理的 local 服务，连接串均为 `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME`；MySQL 兼容连接串为 `mysql+asyncmy://USER:PASSWORD@HOST:3306/DBNAME?charset=utf8mb4`。
 - `server/lifespan.py` 管理 engine/session factory 和可选迁移。
 - `server/dependencies/database.py` 提供 request session。
 - resources service 通过 query 层访问数据库，并在 service 内转换成 shared response。
@@ -97,6 +97,18 @@ uv run server
 
 ```powershell
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+uv run alembic upgrade head
+uv run server
+```
+
+本地 PostgreSQL 验收示例：
+
+```powershell
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+# 先自行启动本机 PostgreSQL，推荐 data directory:
+# .octopus/instances/local-pg/db/postgres/
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:PASSWORD@127.0.0.1:5432/octopus"
 uv run alembic upgrade head
 uv run server
 ```
