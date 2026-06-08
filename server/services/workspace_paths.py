@@ -5,8 +5,6 @@ from pathlib import Path
 import re
 import shutil
 
-from sqlalchemy.engine import make_url
-
 DEFAULT_INSTANCE_ID = "default"
 INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -21,30 +19,22 @@ def _expand_home_prefix(value: str) -> Path:
 
 def resolve_octopus_home_dir() -> Path:
     raw_home = os.environ.get("OCTOPUS_HOME", "").strip()
-    home = (
-        _expand_home_prefix(raw_home)
-        if raw_home
-        else _default_octopus_home_from_database_url() or Path.home() / ".octopus"
-    )
+    home = _expand_home_prefix(raw_home) if raw_home else Path.home() / ".octopus"
     return home.resolve()
 
 
-def _default_octopus_home_from_database_url() -> Path | None:
-    raw_database_url = os.environ.get(
-        "OCTOPUS_DATABASE_URL", "sqlite+aiosqlite:///./octopus.db"
-    ).strip()
-    if not raw_database_url:
-        return None
-    try:
-        url = make_url(raw_database_url)
-    except Exception:
-        return None
-    if url.get_backend_name() != "sqlite":
-        return None
-    database = url.database
-    if not database or database == ":memory:":
-        return None
-    return Path(database).expanduser().parent / ".octopus"
+def resolve_octopus_database_dir() -> Path:
+    return (resolve_octopus_instance_root() / "db").resolve()
+
+
+def resolve_octopus_sqlite_database_path() -> Path:
+    return (resolve_octopus_database_dir() / "octopus.db").resolve()
+
+
+def resolve_default_sqlite_database_url() -> str:
+    database_path = resolve_octopus_sqlite_database_path()
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite+aiosqlite:///{database_path.as_posix()}"
 
 
 def resolve_octopus_instance_id() -> str:
