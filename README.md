@@ -70,17 +70,38 @@ export OCTOPUS_DATABASE_URL="sqlite+aiosqlite:///$HOME/.octopus/instances/defaul
 
 先在 PostgreSQL 中创建空库，并确保连接账号有建表、建索引和写入权限。
 
+本机 PostgreSQL 示例：
+
+```sql
+CREATE USER octopus WITH PASSWORD 'octopus';
+CREATE DATABASE octopus OWNER octopus;
+\c octopus
+GRANT ALL ON SCHEMA public TO octopus;
+```
+
 PowerShell：
 
 ```powershell
-$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+$env:OCTOPUS_HOME = ".octopus"
+$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
 ```
 
 macOS / Linux：
 
 ```bash
-export OCTOPUS_DATABASE_URL="postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME"
+export OCTOPUS_HOME=".octopus"
+export OCTOPUS_INSTANCE_ID="local-pg"
+export OCTOPUS_LOCAL_TRUSTED=1
+export OCTOPUS_AUTO_MIGRATE=1
+export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
+uv run server
 ```
+
+使用 PostgreSQL 后不会使用本地 SQLite 文件 `octopus.db`；但 `OCTOPUS_HOME` 仍负责文件侧 instance 数据，例如 workspace、storage、run logs、server logs 和 runtime homes。
 
 如果密码中包含 `@`、`:`、`/`、`#` 等字符，需要 URL encode 后再写入连接串。
 
