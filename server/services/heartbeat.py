@@ -124,6 +124,19 @@ class HeartbeatService:
             return None
         if agent.status in ("terminated", "pending_approval"):
             raise AgentConflictError("Agent is not invokable in its current state")
+        from .budgets import BudgetService
+
+        context = {
+            **self._payload_context(payload.get("payload")),
+            **self._payload_context_snapshot(payload.get("contextSnapshot")),
+        }
+        block = await BudgetService(self._session).get_invocation_block(
+            agent.org_id,
+            agent.id,
+            project_id=cast(str | None, context.get("projectId")),
+        )
+        if block is not None:
+            raise ValueError(block.reason)
         idempotency_key = payload.get("idempotencyKey")
         if idempotency_key:
             existing = await get_wakeup_by_idempotency_key(

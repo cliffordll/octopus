@@ -101,9 +101,7 @@ async def test_cost_event_creation_records_activity_and_spend(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
     application, factory = app
-    org_id, agent_id, project_id = await _seed_org_agent_project(
-        factory, prefix="cost"
-    )
+    org_id, agent_id, project_id = await _seed_org_agent_project(factory, prefix="cost")
 
     code, event = await _request(
         application,
@@ -149,9 +147,7 @@ async def test_cost_summary_groups_by_dimensions_and_filters_dates(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
     application, factory = app
-    org_id, agent_id, project_id = await _seed_org_agent_project(
-        factory, prefix="sum"
-    )
+    org_id, agent_id, project_id = await _seed_org_agent_project(factory, prefix="sum")
     for payload in [
         {
             "agentId": agent_id,

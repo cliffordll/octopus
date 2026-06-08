@@ -33,11 +33,15 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     _add_query_args(issue_parser)
     issue_parser.set_defaults(handler=list_issue_activity)
 
-    issue_runs_parser = actions.add_parser("issue-runs", help="List runs linked to an issue")
+    issue_runs_parser = actions.add_parser(
+        "issue-runs", help="List runs linked to an issue"
+    )
     issue_runs_parser.add_argument("issue_id")
     issue_runs_parser.set_defaults(handler=list_issue_runs)
 
-    run_issues_parser = actions.add_parser("run-issues", help="List issues linked to a run")
+    run_issues_parser = actions.add_parser(
+        "run-issues", help="List issues linked to a run"
+    )
     run_issues_parser.add_argument("run_id")
     run_issues_parser.set_defaults(handler=list_run_issues)
 
