@@ -4,10 +4,14 @@ import json
 from typing import Any
 
 from ..provider_config import model_for_cli
+from ..session import runtime_session_id
 
 
 def build_args(config: dict[str, Any]) -> list[str]:
     args = _string_list(config.get("extraArgs", config.get("args", [])))
+    session_id = runtime_session_id(config)
+    if session_id:
+        args.extend(["--resume", session_id])
     args.extend(["--print", "-", "--output-format", "stream-json", "--verbose"])
     model = model_for_cli(config)
     if model:
@@ -117,6 +121,29 @@ def max_turns(result_json: dict[str, Any] | None) -> bool:
         or stop_reason == "max_turns"
         or "max turns" in result.lower()
         or "maximum turns" in result.lower()
+    )
+
+
+def unknown_session(
+    stdout: str, stderr: str, result_json: dict[str, Any] | None
+) -> bool:
+    messages = [stdout, stderr]
+    if result_json is not None:
+        for key in ("result", "error", "message"):
+            value = result_json.get(key)
+            if isinstance(value, str):
+                messages.append(value)
+    haystack = "\n".join(messages).lower()
+    return any(
+        marker in haystack
+        for marker in (
+            "unknown session",
+            "session not found",
+            "session id not found",
+            "no conversation found",
+            "cannot resume",
+            "resume failed",
+        )
     )
 
 

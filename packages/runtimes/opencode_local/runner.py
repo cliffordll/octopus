@@ -15,6 +15,7 @@ from ..local_skills import (
     materialize_runtime_skills,
     prepare_managed_home,
 )
+from ..session import effective_resume_session_id
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
     append_runtime_workspace_guidance,
@@ -28,6 +29,7 @@ from .protocol import (
     parse_jsonl,
     provider,
     string,
+    unknown_session,
 )
 
 
@@ -44,7 +46,19 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         ),
         context.workspace,
     )
-    args = build_args(context.config)
+    runtime_config = dict(context.config)
+    session_id = await effective_resume_session_id(
+        runtime_config,
+        cwd,
+        runtime_label="OpenCode",
+        on_log=context.on_log,
+    )
+    if session_id is None:
+        runtime_config["sessionIdBefore"] = None
+        runtime_context = runtime_config.get("_octopus")
+        if isinstance(runtime_context, dict):
+            runtime_config["_octopus"] = {**runtime_context, "sessionIdBefore": None}
+    args = build_args(runtime_config)
     env = dict(os.environ)
     configured_env = context.config.get("env")
     if isinstance(configured_env, dict):
@@ -73,6 +87,63 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
+    result = await _run_once(
+        command=command,
+        args=args,
+        cwd=cwd,
+        prompt=prompt,
+        env=env,
+        context=context,
+        timeout_sec=timeout_sec,
+        loaded_skills=loaded_skills,
+    )
+    if (
+        session_id
+        and not result.timed_out
+        and (result.exit_code or 0) != 0
+        and result.result_json is not None
+        and unknown_session(
+            str(result.result_json.get("stdout") or ""),
+            str(result.result_json.get("stderr") or ""),
+            str(result.result_json.get("error") or ""),
+        )
+    ):
+        await context.on_log(
+            "stdout",
+            (
+                f'[octopus] OpenCode resume session "{session_id}" is unavailable; '
+                "retrying with a fresh session.\n"
+            ),
+        )
+        retry_config = dict(runtime_config)
+        retry_config["sessionIdBefore"] = None
+        runtime_context = retry_config.get("_octopus")
+        if isinstance(runtime_context, dict):
+            retry_config["_octopus"] = {**runtime_context, "sessionIdBefore": None}
+        result = await _run_once(
+            command=command,
+            args=build_args(retry_config),
+            cwd=cwd,
+            prompt=prompt,
+            env=env,
+            context=context,
+            timeout_sec=timeout_sec,
+            loaded_skills=loaded_skills,
+        )
+    return result
+
+
+async def _run_once(
+    *,
+    command: str,
+    args: list[str],
+    cwd: str | None,
+    prompt: str,
+    env: dict[str, str],
+    context: RuntimeExecutionContext,
+    timeout_sec: float,
+    loaded_skills: list[dict[str, str | None]],
+) -> RuntimeExecutionResult:
     process = await asyncio.create_subprocess_exec(
         command,
         *args,

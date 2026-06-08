@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..environment import aggregate_status, local_cli_environment_checks
+from ..environment import (
+    aggregate_status,
+    cli_hello_probe_check,
+    local_cli_environment_checks,
+)
 from ..types import RuntimeEnvironmentTestResult
+from .models import list_models
 from .protocol import string
 
 
@@ -17,6 +22,15 @@ async def test_environment(config: dict[str, Any]) -> RuntimeEnvironmentTestResu
         auth_hint="Set provider API key env or configure local OpenCode authentication.",
     )
     checks.append(_model_check(config.get("model")))
+    checks.append(
+        await cli_hello_probe_check(
+            config,
+            command=command,
+            label="OpenCode CLI hello probe",
+            default_args=["--version"],
+        )
+    )
+    checks.append(await _available_model_check(config))
     return RuntimeEnvironmentTestResult(
         agent_runtime_type="opencode_local",
         status=aggregate_status(checks),
@@ -48,5 +62,50 @@ def _model_check(value: Any) -> dict[str, str | None]:
         "label": "OpenCode model",
         "status": "ok",
         "message": f"Configured model: {model}",
+        "hint": None,
+    }
+
+
+async def _available_model_check(config: dict[str, Any]) -> dict[str, str | None]:
+    if config.get("liveProbe") is not True:
+        return {
+            "id": "availableModel",
+            "label": "OpenCode available model",
+            "status": "skipped",
+            "message": "OpenCode model availability probe was not requested.",
+            "hint": "Set agentRuntimeConfig.liveProbe=true to run `opencode models`.",
+        }
+    configured = string(config.get("model"))
+    if configured is None:
+        return {
+            "id": "availableModel",
+            "label": "OpenCode available model",
+            "status": "failed",
+            "message": "Cannot verify model availability without configured model.",
+            "hint": "Set agentRuntimeConfig.model.",
+        }
+    models = await list_models(config)
+    ids = {model["id"] for model in models if isinstance(model.get("id"), str)}
+    if not ids:
+        return {
+            "id": "availableModel",
+            "label": "OpenCode available model",
+            "status": "warning",
+            "message": "OpenCode models probe returned no models.",
+            "hint": "Verify OpenCode auth/config and run `opencode models` manually.",
+        }
+    if configured not in ids:
+        return {
+            "id": "availableModel",
+            "label": "OpenCode available model",
+            "status": "failed",
+            "message": f"Configured model is not available to OpenCode: {configured}",
+            "hint": "Choose a model returned by `opencode models`.",
+        }
+    return {
+        "id": "availableModel",
+        "label": "OpenCode available model",
+        "status": "ok",
+        "message": f"Configured model is available: {configured}",
         "hint": None,
     }
