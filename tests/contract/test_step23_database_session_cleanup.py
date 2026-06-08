@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
+from server.lifespan import _dispose_engine
 
 
 class BrokenTransaction:
@@ -40,6 +43,26 @@ class BrokenSession:
         self.invalidate_called = True
 
 
+class SlowCloseSession:
+    def __init__(self) -> None:
+        self.invalidate_called = False
+
+    async def close(self) -> None:
+        await asyncio.sleep(10)
+
+    async def invalidate(self) -> None:
+        self.invalidate_called = True
+
+
+class SlowDisposeEngine:
+    def __init__(self) -> None:
+        self.dispose_started = False
+
+    async def dispose(self) -> None:
+        self.dispose_started = True
+        await asyncio.sleep(10)
+
+
 async def test_get_session_preserves_original_exception_when_cleanup_fails() -> None:
     session = BrokenSession()
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
@@ -58,3 +81,22 @@ async def test_get_session_preserves_original_exception_when_cleanup_fails() -> 
     assert session.transaction.rollback_called
     assert session.invalidate_called
     assert session.close_called
+
+
+async def test_close_session_times_out_and_invalidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(database_dependency, "REQUEST_DB_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    session = SlowCloseSession()
+
+    await database_dependency._close_session(session)  # type: ignore[arg-type]
+
+    assert session.invalidate_called
+
+
+async def test_dispose_engine_times_out() -> None:
+    engine = SlowDisposeEngine()
+
+    await _dispose_engine(engine, timeout_seconds=0.01)  # type: ignore[arg-type]
+
+    assert engine.dispose_started
