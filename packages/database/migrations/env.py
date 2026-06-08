@@ -14,6 +14,10 @@ from packages.database.schema import Base
 from server.services.workspace_paths import resolve_default_sqlite_database_url
 
 config = context.config
+database_url = os.environ.get("OCTOPUS_DATABASE_URL")
+if database_url:
+    _ensure_sqlite_parent_directory(database_url)
+    config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
