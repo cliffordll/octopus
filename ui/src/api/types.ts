@@ -1037,6 +1037,41 @@ export interface UpdateAgentInstructionsFilePayload {
   clearLegacyPromptTemplate?: boolean;
 }
 
+export interface AgentMemoryFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number | null;
+  updatedAt: string | null;
+}
+
+export interface AgentMemoryFileList {
+  agentId: string;
+  orgId: string;
+  layer: "memory" | "life";
+  rootPath: string;
+  directoryPath: string;
+  entries: AgentMemoryFileEntry[];
+  message: string | null;
+}
+
+export interface AgentMemoryFileDetail {
+  agentId: string;
+  orgId: string;
+  layer: "memory" | "life";
+  rootPath: string;
+  filePath: string;
+  content: string;
+  size: number;
+  updatedAt: string | null;
+}
+
+export interface UpdateAgentMemoryFilePayload {
+  layer: "memory" | "life";
+  path: string;
+  content: string;
+}
+
 export interface HeartbeatRun {
   id: string;
   runId?: string;
