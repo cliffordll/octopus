@@ -21,7 +21,10 @@ def test_default_database_url_does_not_use_repo_root(
         tmp_path / ".octopus" / "instances" / "default" / "db" / "octopus.db"
     ).resolve()
     assert settings.database_url == f"sqlite+aiosqlite:///{database_path.as_posix()}"
-    assert settings.database_url != f"sqlite+aiosqlite:///{(Path.cwd() / 'octopus.db').as_posix()}"
+    assert (
+        settings.database_url
+        != f"sqlite+aiosqlite:///{(Path.cwd() / 'octopus.db').as_posix()}"
+    )
 
 
 def test_database_url_env_override_is_preserved(
