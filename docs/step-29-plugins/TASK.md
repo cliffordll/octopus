@@ -48,6 +48,7 @@
 - 实现 webhook ingress，记录 delivery 并转发给 plugin worker。
 - 实现 plugin state store、host services、secrets/config 能力边界和日志归集。
 - 实现 plugin UI 静态资源路由、UI contributions、bridge data/action 和 SSE stream。
+- 实现产品 UI 中的插件管理页，operator 必须能看到 available/installed 插件、安装、启用、停用、查看 jobs/logs，并能确认 bundled fixtures 已进入 catalog。
 - 规划 Python 版本 SDK/脚手架兼容边界；优先保证 server 能加载已约定结构的插件，再考虑作者工具。
 - 补齐一方插件目录约定，Linear 插件作为上游对照目标，不在无证据情况下改成 Octopus 私有插件模型。
 
@@ -89,7 +90,8 @@
 - 实现 plugin UI 静态资源路由和 same-origin trusted JS 加载边界。
 - 实现 UI contributions registry，覆盖 page、settingsPage、detailTab、dashboardWidget、sidebar/projectSidebarItem、commentAnnotation/action 等上游已声明 slot。
 - 实现 bridge data/action API、UI stream/SSE 和基础 host context 注入。
-- 验收：UI contribution metadata、bridge `getData`/`performAction`、stream 基础响应和 slot filtering tests。
+- 实现插件管理 UI 入口，展示 available/installed、状态、capabilities、jobs/logs，并提供 install/enable/disable 操作。
+- 验收：UI contribution metadata、bridge `getData`/`performAction`、stream 基础响应、slot filtering tests 和插件管理页前端测试。
 
 ### 29F: Bundled plugins、SDK 兼容和文档
 
