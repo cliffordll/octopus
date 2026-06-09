@@ -219,6 +219,19 @@ function normalizeSkillSource(value: string): string {
   return value.trim().toLowerCase().replaceAll("-", "_");
 }
 
+function skillComparableSlug(entry: Record<string, unknown>): string {
+  const candidates = [entry.key, entry.selectionKey, entry.runtimeName, entry.name]
+    .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    const normalized = candidate.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? candidate;
+    const withoutPrefix = normalized.includes(":") ? normalized.split(":").at(-1) ?? normalized : normalized;
+    const slug = withoutPrefix.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (slug) return slug;
+  }
+  return "";
+}
+
 function skillSourceCandidates(entry: Record<string, unknown>): string[] {
   const keys = ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "locationLabel", "selectionKey"];
   return [
@@ -305,29 +318,28 @@ function skillEntryKey(entry: Record<string, unknown>, index: number): string {
 }
 
 function skillEnabled(entry: Record<string, unknown>, desiredSkills: string[]): boolean {
-  const value = entry.enabled;
-  if (typeof value === "boolean") return value;
-  const names = skillAliases(entry)
-    .map((item) => item.toLowerCase())
-    .filter(Boolean);
+  if (booleanSkillField(entry, "alwaysEnabled")) return true;
+  const desiredValue = entry.desired;
+  if (typeof desiredValue === "boolean") return desiredValue;
+  const names = skillIdentityKeys(entry);
   const desired = desiredSkills.map((item) => item.toLowerCase());
   return names.some((name) => desired.includes(name));
 }
 
-function skillAliases(entry: Record<string, unknown>): string[] {
-  return [entry.key, entry.name, entry.runtimeName, entry.selectionKey]
+function skillIdentityKeys(entry: Record<string, unknown>): string[] {
+  return [entry.selectionKey, entry.key]
     .map((item) => (typeof item === "string" ? item.toLowerCase() : ""))
     .filter(Boolean);
 }
 
-type SkillSourceGroup = "内置技能" | "社区技能" | "组织技能" | "外部技能";
+type SkillSourceGroup = "内置技能" | "组织技能" | "智能体私有技能" | "外部发现";
 
 function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
   const sourceClass = skillSourceKind(entry);
   if (isBuiltInSkillEntry(entry)) return "内置技能";
-  if (isCommunitySkillEntry(entry)) return "社区技能";
   if (sourceClass === "organization") return "组织技能";
-  return "外部技能";
+  if (["agent", "agent_home", "agent_private", "private"].includes(sourceClass)) return "智能体私有技能";
+  return "外部发现";
 }
 
 function skillState(entry: Record<string, unknown>): string {
@@ -864,10 +876,19 @@ export function AgentPage() {
     !selectedRuntimeModel || runtimeModelOptions.some((model) => runtimeModelReference(model) === selectedRuntimeModel);
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
-  const builtInSkillEntries = skillEntries.filter(isBuiltInSkillEntry);
-  const communitySkillEntries = skillEntries.filter((entry) => !isBuiltInSkillEntry(entry) && isCommunitySkillEntry(entry));
+  const builtInSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "内置技能");
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
-  const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部技能");
+  const agentPrivateSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "智能体私有技能");
+  const managedSkillSlugs = new Set(
+    [...builtInSkillEntries, ...organizationSkillEntries, ...agentPrivateSkillEntries]
+      .map(skillComparableSlug)
+      .filter(Boolean),
+  );
+  const externalSkillEntries = skillEntries.filter((entry) => {
+    if (skillSourceGroup(entry) !== "外部发现") return false;
+    const slug = skillComparableSlug(entry);
+    return !slug || !managedSkillSlugs.has(slug);
+  });
   const skillWarnings = (skills.data?.warnings ?? []).filter(visibleSkillWarning);
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
   const instructionDocs: InstructionDoc[] = instructionsBundle.data
@@ -1004,8 +1025,8 @@ export function AgentPage() {
     if (!name.trim()) return;
     setPendingSkillActionKey(actionKey);
     const target = name.trim().toLowerCase();
-    const entry = skillEntries.find((item) => skillAliases(item).includes(target));
-    const targets = new Set(entry ? skillAliases(entry) : [target]);
+    const entry = skillEntries.find((item) => skillIdentityKeys(item).includes(target));
+    const targets = new Set(entry ? skillIdentityKeys(entry) : [target]);
     const nextDesired = desiredSkillRows.filter((item) => !targets.has(item.toLowerCase()));
     syncSkills.mutate(nextDesired);
   }
@@ -1555,9 +1576,9 @@ export function AgentPage() {
               )}
               {[
                 { label: "内置技能", rows: builtInSkillEntries },
-                { label: "社区技能", rows: communitySkillEntries },
                 { label: "组织技能", rows: organizationSkillEntries },
-                { label: "外部技能", rows: externalSkillEntries },
+                { label: "智能体私有技能", rows: agentPrivateSkillEntries },
+                { label: "外部发现", rows: externalSkillEntries },
               ].map((group) => (
                 <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>
                   <div className="agent-skill-source-heading">
@@ -1635,7 +1656,7 @@ export function AgentPage() {
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
                             <span className="agent-skill-tag-facts">
-                              {!isCommunitySkillEntry(entry) && <span>{sourceText}</span>}
+                              <span>{sourceText}</span>
                               <span>{state}</span>
                               <span>{version ? `v${version}` : "-"}</span>
                             </span>
