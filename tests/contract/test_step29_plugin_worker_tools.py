@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import Base
-from server.services.plugin_registry import PluginRegistryService
-from server.services.plugin_tool_dispatcher import PluginToolDispatcher
-from server.services.plugin_worker_manager import PluginWorkerManager
+from server.plugins.registry import PluginRegistryService
+from server.plugins.tool_dispatcher import PluginToolDispatcher
+from server.plugins.worker_manager import PluginWorkerManager
 
 
 class FakeWorker:
