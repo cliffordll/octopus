@@ -505,8 +505,19 @@ async def add_chat_message_stream_route(
             result = await task
             yield _stream_line({"type": "final", "messages": result["messages"]})
         except asyncio.CancelledError:
-            await cancel_reply_task()
-            raise
+            if task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                yield _stream_line(
+                    {
+                        "type": "error",
+                        "error": "Chat request was cancelled",
+                        "messageId": None,
+                    }
+                )
+            else:
+                await cancel_reply_task()
+                raise
         except Exception as exc:
             await cancel_reply_task()
             yield _stream_line({"type": "error", "error": str(exc), "messageId": None})
