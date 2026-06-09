@@ -79,7 +79,11 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.type(await screen.findByLabelText(/智能体名称/), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "hermes_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "gemini_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "cursor" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "pi_local" })).not.toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "http");
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
@@ -97,7 +101,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
         role: "cto",
         title: "Runtime owner",
         capabilities: "Own runtime rollout",
-        agentRuntimeType: "hermes_local",
+        agentRuntimeType: "http",
         agentRuntimeConfig: { model: "provider/model" },
         budgetMonthlyCents: 5000,
         metadata: { team: "runtime" },
@@ -220,6 +224,50 @@ it("requires provider/model when creating a model-provider runtime agent", async
         role: "engineer",
         agentRuntimeType: "opencode_local",
         agentRuntimeConfig: { model: "deepseek/deepseek-v4-flash" },
+      }),
+    }),
+  );
+}, 10000);
+
+it("builds openclaw gateway config from dedicated runtime fields", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "CEO", role: "ceo", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "openclaw-1" });
+    }
+    if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
+      return respond({ agent: { id: "agent-2", name: "OpenClaw Agent", role: "engineer", status: "idle" }, approval: null }, 201);
+    }
+    return respond({ id: "agent-2", name: "OpenClaw Agent", role: "engineer", status: "idle" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  await userEvent.type(await screen.findByLabelText(/智能体名称/), "OpenClaw Agent");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "openclaw_gateway");
+  expect(screen.getByText("使用推荐默认配置")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Gateway URL")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  await userEvent.type(await screen.findByLabelText("Gateway URL"), "wss://gateway.example/ws");
+  await userEvent.type(screen.getByLabelText("Auth token"), "secret-token");
+  await userEvent.selectOptions(screen.getByLabelText("Session key strategy"), "issue");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/agent-hires",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "OpenClaw Agent",
+        role: "engineer",
+        agentRuntimeType: "openclaw_gateway",
+        agentRuntimeConfig: {
+          url: "wss://gateway.example/ws",
+          authToken: "secret-token",
+          sessionKeyStrategy: "issue",
+        },
       }),
     }),
   );

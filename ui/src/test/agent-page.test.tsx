@@ -562,6 +562,7 @@ it("toggles opencode local skip permissions without replacing other extra args",
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await userEvent.click(await screen.findByRole("button", { name: "个性化配置" }));
   const checkbox = await screen.findByLabelText("跳过 OpenCode 权限确认");
   expect(checkbox).toBeChecked();
   expect(screen.getByText(/仅适用于本地可信开发环境/)).toBeInTheDocument();
@@ -604,7 +605,7 @@ it("tests agent runtime availability from configuration", async () => {
   await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
 
   expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
-  expect(screen.getByText("CWD")).toBeInTheDocument();
+  expect(screen.getAllByText("CWD").length).toBeGreaterThan(0);
   expect(screen.getByText("ok")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/adapters/codex_local/test-environment",
@@ -628,6 +629,54 @@ it("shows a model configuration input for opencode agents without configured mod
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
   expect(await screen.findByLabelText("模型配置")).toHaveValue("openai/gpt-5");
+});
+
+it("updates http runtime config from dedicated runtime fields", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "http",
+    agentRuntimeConfig: { url: "https://old.example/run", method: "POST", timeoutSec: 30 },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ ...agent, ...JSON.parse(String(init.body)) });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByText("HTTP endpoint runtime")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Endpoint URL")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  const url = await screen.findByLabelText("Endpoint URL");
+  await userEvent.clear(url);
+  await userEvent.type(url, "https://runtime.example/execute");
+  await userEvent.selectOptions(screen.getByLabelText("HTTP method"), "PUT");
+  const timeout = screen.getByLabelText("Timeout seconds");
+  await userEvent.clear(timeout);
+  await userEvent.type(timeout, "45");
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  const updateCall = fetchMock.mock.calls.find(([path, init]) => (
+    path === "/api/agents/agent-1" && init?.method === "PATCH"
+  ));
+  expect(updateCall).toBeDefined();
+  expect(JSON.parse(String(updateCall?.[1]?.body)).agentRuntimeConfig).toEqual({
+    url: "https://runtime.example/execute",
+    method: "PUT",
+    timeoutSec: 45,
+  });
 });
 
 it("shows runtime test failures from configuration", async () => {
