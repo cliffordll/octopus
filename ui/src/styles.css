@@ -435,7 +435,9 @@ small {
 }
 
 .plugin-settings-section {
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .plugins-settings-header {
@@ -455,6 +457,10 @@ small {
   border: 1px solid #273244;
   border-radius: 8px;
   padding: 12px;
+}
+
+.plugin-settings-section .plugins-layout {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .plugin-settings-section .plugin-row,

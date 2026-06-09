@@ -11,16 +11,19 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_ACTION_PATH,
     PLUGIN_AVAILABLE_PATH,
     PLUGIN_CONFIG_PATH,
+    PLUGIN_CONFIG_TEST_PATH,
     PLUGIN_DATA_PATH,
+    PLUGIN_DASHBOARD_PATH,
+    PLUGIN_DETAIL_PATH,
     PLUGIN_DISABLE_PATH,
     PLUGIN_ENABLE_PATH,
     PLUGIN_EXAMPLES_PATH,
+    PLUGIN_HEALTH_PATH,
     PLUGIN_INSTALL_PATH,
     PLUGIN_JOB_TRIGGER_PATH,
     PLUGIN_JOBS_PATH,
     PLUGIN_LOGS_PATH,
     PLUGIN_LIST_PATH,
-    PLUGIN_DETAIL_PATH,
     PLUGIN_STATIC_PATH,
     PLUGIN_UI_CONTRIBUTIONS_PATH,
     PLUGIN_UI_STREAM_PATH,
@@ -100,6 +103,19 @@ async def list_example_plugins_route(request: Request) -> dict[str, Any]:
     return _catalog_response(catalog, examples_only=True)
 
 
+@router.get(PLUGIN_DETAIL_PATH)
+async def get_plugin_route(
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return await PluginRegistryService(session).get_plugin(pluginId)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
 @router.post(PLUGIN_ENABLE_PATH)
 async def enable_plugin_route(
     request: Request,
@@ -148,6 +164,19 @@ async def disable_plugin_route(
         ) from exc
 
 
+@router.get(PLUGIN_CONFIG_PATH)
+async def get_plugin_config_route(
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return await PluginRegistryService(session).get_config(pluginId)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
 @router.post(PLUGIN_CONFIG_PATH)
 async def save_plugin_config_route(
     pluginId: str,
@@ -159,6 +188,111 @@ async def save_plugin_config_route(
         if not isinstance(config_json, dict):
             raise ValueError("'configJson' is required and must be an object")
         return await PluginRegistryService(session).upsert_config(pluginId, config_json)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.post(PLUGIN_CONFIG_TEST_PATH)
+async def test_plugin_config_route(
+    request: Request,
+    pluginId: str,
+    body: dict[str, Any] = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        config_json = body.get("configJson")
+        if not isinstance(config_json, dict):
+            raise ValueError("'configJson' is required and must be an object")
+        registry = PluginRegistryService(session)
+        plugin = await registry.get_plugin(pluginId)
+        worker_manager = _worker_manager(request)
+        if worker_manager is not None and worker_manager.is_running(pluginId):
+            return await worker_manager.validate_config(pluginId, config_json)
+        required = (
+            plugin["manifest"].get("instanceConfigSchema", {}).get("required", [])
+        )
+        missing = [
+            field
+            for field in required
+            if isinstance(field, str) and field not in config_json
+        ]
+        return {
+            "valid": len(missing) == 0,
+            "missing": missing,
+            "source": "local-schema",
+        }
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(PLUGIN_HEALTH_PATH)
+async def get_plugin_health_route(
+    request: Request,
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        plugin = await PluginRegistryService(session).get_plugin(pluginId)
+        worker_manager = _worker_manager(request)
+        worker_running = (
+            worker_manager.is_running(pluginId) if worker_manager is not None else False
+        )
+        return {
+            "pluginId": plugin["id"],
+            "pluginKey": plugin["pluginKey"],
+            "status": plugin["status"],
+            "workerRunning": worker_running,
+            "healthy": plugin["status"] == "ready"
+            and (
+                worker_running
+                or "worker" not in plugin["manifest"].get("entrypoints", {})
+            ),
+        }
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.get(PLUGIN_DASHBOARD_PATH)
+async def get_plugin_dashboard_route(
+    request: Request,
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        registry = PluginRegistryService(session)
+        plugin = await registry.get_plugin(pluginId)
+        jobs = await registry.list_jobs(pluginId)
+        logs = await registry.list_logs(pluginId)
+        worker_manager = _worker_manager(request)
+        return {
+            "plugin": plugin,
+            "counts": {
+                "jobs": len(jobs),
+                "logs": len(logs),
+                "uiSlots": len(plugin["manifest"].get("ui", {}).get("slots", [])),
+                "tools": len(plugin["manifest"].get("tools", [])),
+                "webhooks": len(plugin["manifest"].get("webhooks", [])),
+            },
+            "health": {
+                "status": plugin["status"],
+                "workerRunning": worker_manager.is_running(pluginId)
+                if worker_manager is not None
+                else False,
+            },
+            "recentLogs": logs[:5],
+            "jobs": jobs,
+        }
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
