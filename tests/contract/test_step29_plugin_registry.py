@@ -140,10 +140,18 @@ class FakeBridgeWorker:
 
     async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         self.calls.append((method, params))
+        if method == "activate":
+            return {"activated": True}
+        if method == "deactivate":
+            return {"deactivated": True}
         if method == "getData":
             return {"items": [{"id": "LIN-1"}], "key": params["key"]}
         if method == "performAction":
             return {"ok": True, "action": params["key"]}
+        if method == "handleWebhook":
+            return {"handled": params["endpointKey"]}
+        if method == "runJob":
+            return {"ran": params["jobKey"]}
         return {"method": method}
 
 
@@ -285,6 +293,41 @@ async def test_step29_plugin_management_routes_install_and_lifecycle(
     assert uninstalled["status"] == "uninstalled"
 
 
+async def test_step29_plugin_lifecycle_routes_activate_and_deactivate_worker(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    worker = FakeBridgeWorker()
+    worker_manager = PluginWorkerManager()
+    application.state.plugin_worker_manager = worker_manager
+    application.state.plugin_worker_factory = lambda plugin_id: worker
+    install_code, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-linear",
+        },
+    )
+
+    enable_code, enabled = await _request(
+        application, "POST", f"/api/plugins/{installed['id']}/enable"
+    )
+    disable_code, disabled = await _request(
+        application, "POST", f"/api/plugins/{installed['id']}/disable"
+    )
+
+    assert install_code == 201
+    assert enable_code == 200
+    assert enabled["status"] == "ready"
+    assert worker_manager.is_running(installed["id"]) is False
+    assert disable_code == 200
+    assert disabled["status"] == "disabled"
+    assert [call[0] for call in worker.calls] == ["activate", "deactivate"]
+
+
 async def test_step29_plugin_management_routes_save_config(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -369,6 +412,7 @@ async def test_step29_plugin_jobs_logs_webhook_and_state_routes(
             "sourceLocator": "packages/plugins/examples/plugin-linear",
         },
     )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
 
     jobs_code, jobs = await _request(
         application, "GET", f"/api/plugins/{installed['id']}/jobs"
@@ -404,6 +448,104 @@ async def test_step29_plugin_jobs_logs_webhook_and_state_routes(
     assert delivery["status"] == "received"
     assert logs_code == 200
     assert logs[0]["message"] == "Webhook received"
+
+
+async def test_step29_plugin_webhook_route_validates_and_forwards_to_worker(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    worker_manager = PluginWorkerManager()
+    application.state.plugin_worker_manager = worker_manager
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-linear",
+        },
+    )
+    disabled_code, disabled_delivery = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/webhooks/issue",
+        json_body={"issueId": "LIN-1"},
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+    missing_code, missing_delivery = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/webhooks/missing",
+        json_body={"issueId": "LIN-1"},
+    )
+    worker = FakeBridgeWorker()
+    worker_manager.register_worker(installed["id"], worker)
+    forwarded_code, forwarded_delivery = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/webhooks/issue",
+        json_body={"issueId": "LIN-1"},
+    )
+
+    assert disabled_code == 409
+    assert disabled_delivery["detail"] == "Plugin is not ready"
+    assert missing_code == 404
+    assert missing_delivery["detail"] == "Plugin webhook endpoint not found"
+    assert forwarded_code == 200
+    assert forwarded_delivery["status"] == "succeeded"
+    assert forwarded_delivery["responseJson"] == {"handled": "issue"}
+    assert worker.calls[-1][0] == "handleWebhook"
+
+
+async def test_step29_plugin_job_trigger_validates_and_forwards_to_worker(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    worker_manager = PluginWorkerManager()
+    application.state.plugin_worker_manager = worker_manager
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-linear",
+        },
+    )
+    jobs_code, jobs = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/jobs"
+    )
+    disabled_code, disabled_run = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/jobs/{jobs[0]['id']}/trigger",
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+    worker = FakeBridgeWorker()
+    worker_manager.register_worker(installed["id"], worker)
+    forwarded_code, forwarded_run = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/jobs/{jobs[0]['id']}/trigger",
+        json_body={"context": {"manual": True}},
+    )
+
+    assert jobs_code == 200
+    assert disabled_code == 409
+    assert disabled_run["detail"] == "Plugin is not ready"
+    assert forwarded_code == 200
+    assert forwarded_run["status"] == "succeeded"
+    assert forwarded_run["outputJson"] == {"ran": "sync"}
+    assert worker.calls[-1] == (
+        "runJob",
+        {
+            "jobId": jobs[0]["id"],
+            "jobKey": "sync",
+            "context": {"manual": True},
+        },
+    )
 
 
 async def test_step29_plugin_ui_bridge_contributions_and_worker_routes(

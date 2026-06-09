@@ -20,6 +20,37 @@ class PluginWorkerManager:
     def unregister_worker(self, plugin_id: str) -> None:
         self._workers.pop(plugin_id, None)
 
+    async def activate_plugin(
+        self,
+        plugin_id: str,
+        worker: PluginWorkerHandle,
+        *,
+        manifest: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.register_worker(plugin_id, worker)
+        try:
+            return await worker.call(
+                "activate",
+                {
+                    "pluginId": plugin_id,
+                    "manifest": manifest,
+                    "config": config,
+                },
+            )
+        except Exception:
+            self.unregister_worker(plugin_id)
+            raise
+
+    async def deactivate_plugin(self, plugin_id: str) -> dict[str, Any]:
+        worker = self._workers.get(plugin_id)
+        if worker is None:
+            return {"deactivated": False}
+        try:
+            return await worker.call("deactivate", {"pluginId": plugin_id})
+        finally:
+            self.unregister_worker(plugin_id)
+
     def is_running(self, plugin_id: str) -> bool:
         return plugin_id in self._workers
 
@@ -84,6 +115,24 @@ class PluginWorkerManager:
             {
                 "key": key,
                 "input": input_json,
+                "context": context,
+            },
+        )
+
+    async def run_job(
+        self,
+        plugin_id: str,
+        *,
+        job_id: str,
+        job_key: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.call(
+            plugin_id,
+            "runJob",
+            {
+                "jobId": job_id,
+                "jobKey": job_key,
                 "context": context,
             },
         )

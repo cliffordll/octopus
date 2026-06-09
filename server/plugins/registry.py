@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.schema import (
     Plugin,
     PluginConfig,
+    PluginEntity,
     PluginJob,
     PluginJobRun,
     PluginLog,
@@ -125,6 +126,27 @@ class PluginRegistryService:
             "updatedAt": _iso(row.updated_at),
         }
 
+    async def get_config(self, plugin_id: str) -> dict[str, Any]:
+        await self._get_plugin(plugin_id)
+        result = await self._session.execute(
+            select(PluginConfig).where(PluginConfig.plugin_id == plugin_id)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return {
+                "pluginId": plugin_id,
+                "configJson": {},
+                "createdAt": None,
+                "updatedAt": None,
+            }
+        return {
+            "id": row.id,
+            "pluginId": row.plugin_id,
+            "configJson": row.config_json,
+            "createdAt": _iso(row.created_at),
+            "updatedAt": _iso(row.updated_at),
+        }
+
     async def set_state(
         self, plugin_id: str, key: str, value_json: Any
     ) -> dict[str, Any]:
@@ -153,6 +175,92 @@ class PluginRegistryService:
             "createdAt": _iso(row.created_at),
             "updatedAt": _iso(row.updated_at),
         }
+
+    async def get_state(self, plugin_id: str, key: str) -> dict[str, Any] | None:
+        await self._get_plugin(plugin_id)
+        result = await self._session.execute(
+            select(PluginState).where(
+                PluginState.plugin_id == plugin_id,
+                PluginState.key == key,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "pluginId": row.plugin_id,
+            "key": row.key,
+            "valueJson": row.value_json,
+            "createdAt": _iso(row.created_at),
+            "updatedAt": _iso(row.updated_at),
+        }
+
+    async def upsert_entity_mapping(
+        self,
+        plugin_id: str,
+        *,
+        external_type: str,
+        external_id: str,
+        local_type: str,
+        local_id: str,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        await self._get_plugin(plugin_id)
+        for field_name, value in {
+            "externalType": external_type,
+            "externalId": external_id,
+            "localType": local_type,
+            "localId": local_id,
+        }.items():
+            if not value.strip():
+                raise ValueError(f"'{field_name}' must be a non-empty string")
+        result = await self._session.execute(
+            select(PluginEntity).where(
+                PluginEntity.plugin_id == plugin_id,
+                PluginEntity.external_type == external_type,
+                PluginEntity.external_id == external_id,
+            )
+        )
+        row = result.scalar_one_or_none()
+        timestamp = _now()
+        if row is None:
+            row = PluginEntity(
+                plugin_id=plugin_id,
+                external_type=external_type,
+                external_id=external_id,
+                local_type=local_type,
+                local_id=local_id,
+                metadata_json=metadata_json,
+            )
+            self._session.add(row)
+        else:
+            row.local_type = local_type
+            row.local_id = local_id
+            row.metadata_json = metadata_json
+            row.updated_at = timestamp
+        await self._session.flush()
+        return _entity_summary(row)
+
+    async def list_entity_mappings(
+        self,
+        plugin_id: str,
+        *,
+        external_type: str | None = None,
+        local_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        await self._get_plugin(plugin_id)
+        statement = (
+            select(PluginEntity)
+            .where(PluginEntity.plugin_id == plugin_id)
+            .order_by(PluginEntity.created_at.asc(), PluginEntity.id.asc())
+        )
+        if external_type is not None:
+            statement = statement.where(PluginEntity.external_type == external_type)
+        if local_type is not None:
+            statement = statement.where(PluginEntity.local_type == local_type)
+        result = await self._session.execute(statement)
+        return [_entity_summary(row) for row in result.scalars().all()]
 
     async def list_jobs(self, plugin_id: str) -> list[dict[str, Any]]:
         await self._get_plugin(plugin_id)
@@ -307,6 +415,20 @@ def _job_summary(row: PluginJob) -> dict[str, Any]:
         "displayName": row.display_name,
         "schedule": row.schedule,
         "enabled": row.enabled,
+        "createdAt": _iso(row.created_at),
+        "updatedAt": _iso(row.updated_at),
+    }
+
+
+def _entity_summary(row: PluginEntity) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "pluginId": row.plugin_id,
+        "externalType": row.external_type,
+        "externalId": row.external_id,
+        "localType": row.local_type,
+        "localId": row.local_id,
+        "metadataJson": row.metadata_json,
         "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
     }
