@@ -13,13 +13,17 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_ENABLE_PATH,
     PLUGIN_EXAMPLES_PATH,
     PLUGIN_INSTALL_PATH,
+    PLUGIN_JOB_TRIGGER_PATH,
+    PLUGIN_JOBS_PATH,
+    PLUGIN_LOGS_PATH,
     PLUGIN_LIST_PATH,
     PLUGIN_DETAIL_PATH,
+    PLUGIN_WEBHOOK_PATH,
 )
 
 from ..dependencies.database import get_session
-from ..services.plugin_catalog import PluginCatalog, load_plugin_catalog
-from ..services.plugin_registry import PluginRegistryService
+from ..plugins.catalog import PluginCatalog, load_plugin_catalog
+from ..plugins.registry import PluginRegistryService
 
 router = APIRouter(tags=["plugins"])
 
@@ -119,6 +123,102 @@ async def save_plugin_config_route(
         if not isinstance(config_json, dict):
             raise ValueError("'configJson' is required and must be an object")
         return await PluginRegistryService(session).upsert_config(pluginId, config_json)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.post("/api/plugins/{pluginId}/state/{key}")
+async def save_plugin_state_route(
+    pluginId: str,
+    key: str,
+    body: dict[str, Any] = Body(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return await PluginRegistryService(session).set_state(
+            pluginId,
+            key,
+            body.get("valueJson"),
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(PLUGIN_JOBS_PATH)
+async def list_plugin_jobs_route(
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    try:
+        return await PluginRegistryService(session).list_jobs(pluginId)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.post(PLUGIN_JOB_TRIGGER_PATH)
+async def trigger_plugin_job_route(
+    pluginId: str,
+    jobId: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        return await PluginRegistryService(session).record_job_run(
+            pluginId,
+            jobId,
+            status="queued",
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.post(PLUGIN_WEBHOOK_PATH)
+async def receive_plugin_webhook_route(
+    pluginId: str,
+    endpointKey: str,
+    body: dict[str, Any] = Body(default={}),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    service = PluginRegistryService(session)
+    try:
+        delivery = await service.record_webhook_delivery(
+            pluginId,
+            endpoint_key=endpointKey,
+            request_json=body,
+            status="received",
+        )
+        await service.add_log(
+            pluginId,
+            level="info",
+            message="Webhook received",
+            details_json={"endpointKey": endpointKey},
+        )
+        return delivery
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.get(PLUGIN_LOGS_PATH)
+async def list_plugin_logs_route(
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    try:
+        return await PluginRegistryService(session).list_logs(pluginId)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

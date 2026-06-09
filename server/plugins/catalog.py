@@ -83,7 +83,11 @@ def _raw_plugin_id(path: Path) -> str:
     except (OSError, ValueError, json.JSONDecodeError):
         return path.parent.name
     plugin_id = data.get("id")
-    return plugin_id if isinstance(plugin_id, str) and plugin_id.strip() else path.parent.name
+    return (
+        plugin_id
+        if isinstance(plugin_id, str) and plugin_id.strip()
+        else path.parent.name
+    )
 
 
 def _readme_path(plugin_dir: Path) -> Path | None:

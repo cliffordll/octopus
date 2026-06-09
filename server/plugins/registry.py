@@ -6,7 +6,15 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.schema import Plugin, PluginConfig, PluginState
+from packages.database.schema import (
+    Plugin,
+    PluginConfig,
+    PluginJob,
+    PluginJobRun,
+    PluginLog,
+    PluginState,
+    PluginWebhookDelivery,
+)
 from packages.shared.constants.plugins import PLUGIN_STATUSES
 from packages.shared.types.plugins import PluginManifest
 from packages.shared.validators.plugins import validate_plugin_manifest
@@ -42,10 +50,12 @@ class PluginRegistryService:
             row = Plugin(**fields)
             self._session.add(row)
             await self._session.flush()
+            await self._sync_jobs(row.id, validated)
             return _plugin_summary(row)
         for key, value in fields.items():
             setattr(existing, key, value)
         await self._session.flush()
+        await self._sync_jobs(existing.id, validated)
         return _plugin_summary(existing)
 
     async def list_plugins(self, *, status: str | None = None) -> list[dict[str, Any]]:
@@ -144,6 +154,90 @@ class PluginRegistryService:
             "updatedAt": _iso(row.updated_at),
         }
 
+    async def list_jobs(self, plugin_id: str) -> list[dict[str, Any]]:
+        await self._get_plugin(plugin_id)
+        result = await self._session.execute(
+            select(PluginJob)
+            .where(PluginJob.plugin_id == plugin_id)
+            .order_by(PluginJob.created_at.asc(), PluginJob.id.asc())
+        )
+        return [_job_summary(row) for row in result.scalars().all()]
+
+    async def record_job_run(
+        self,
+        plugin_id: str,
+        job_id: str,
+        *,
+        status: str = "queued",
+        output_json: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        await self._get_plugin(plugin_id)
+        job = await self._session.get(PluginJob, job_id)
+        if job is None or job.plugin_id != plugin_id:
+            raise LookupError("Plugin job not found")
+        row = PluginJobRun(
+            plugin_id=plugin_id,
+            job_id=job_id,
+            status=status,
+            output_json=output_json,
+            error=error,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _job_run_summary(row)
+
+    async def record_webhook_delivery(
+        self,
+        plugin_id: str,
+        *,
+        endpoint_key: str,
+        request_json: dict[str, Any] | None,
+        status: str = "received",
+        response_json: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        await self._get_plugin(plugin_id)
+        row = PluginWebhookDelivery(
+            plugin_id=plugin_id,
+            webhook_key=endpoint_key,
+            request_json=request_json,
+            status=status,
+            response_json=response_json,
+            error=error,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _webhook_delivery_summary(row)
+
+    async def add_log(
+        self,
+        plugin_id: str,
+        *,
+        level: str,
+        message: str,
+        details_json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        await self._get_plugin(plugin_id)
+        row = PluginLog(
+            plugin_id=plugin_id,
+            level=level,
+            message=message,
+            details_json=details_json,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return _log_summary(row)
+
+    async def list_logs(self, plugin_id: str) -> list[dict[str, Any]]:
+        await self._get_plugin(plugin_id)
+        result = await self._session.execute(
+            select(PluginLog)
+            .where(PluginLog.plugin_id == plugin_id)
+            .order_by(PluginLog.created_at.desc(), PluginLog.id.desc())
+        )
+        return [_log_summary(row) for row in result.scalars().all()]
+
     async def _get_plugin(self, plugin_id: str) -> Plugin:
         row = await self._session.get(Plugin, plugin_id)
         if row is None:
@@ -155,6 +249,34 @@ class PluginRegistryService:
             select(Plugin).where(Plugin.plugin_key == plugin_key)
         )
         return result.scalar_one_or_none()
+
+    async def _sync_jobs(self, plugin_id: str, manifest: PluginManifest) -> None:
+        for job in manifest.get("jobs", []):
+            job_key = job.get("jobKey")
+            display_name = job.get("displayName")
+            if not isinstance(job_key, str) or not isinstance(display_name, str):
+                raise ValueError("Plugin job manifest is missing required fields")
+            result = await self._session.execute(
+                select(PluginJob).where(
+                    PluginJob.plugin_id == plugin_id,
+                    PluginJob.job_key == job_key,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                self._session.add(
+                    PluginJob(
+                        plugin_id=plugin_id,
+                        job_key=job_key,
+                        display_name=display_name,
+                        schedule=job.get("schedule"),
+                    )
+                )
+            else:
+                row.display_name = display_name
+                row.schedule = job.get("schedule")
+                row.updated_at = _now()
+        await self._session.flush()
 
 
 def _plugin_summary(row: Plugin) -> dict[str, Any]:
@@ -174,6 +296,60 @@ def _plugin_summary(row: Plugin) -> dict[str, Any]:
         "uninstalledAt": _iso(row.uninstalled_at),
         "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
+    }
+
+
+def _job_summary(row: PluginJob) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "pluginId": row.plugin_id,
+        "jobKey": row.job_key,
+        "displayName": row.display_name,
+        "schedule": row.schedule,
+        "enabled": row.enabled,
+        "createdAt": _iso(row.created_at),
+        "updatedAt": _iso(row.updated_at),
+    }
+
+
+def _job_run_summary(row: PluginJobRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "pluginId": row.plugin_id,
+        "jobId": row.job_id,
+        "status": row.status,
+        "outputJson": row.output_json,
+        "error": row.error,
+        "startedAt": _iso(row.started_at),
+        "finishedAt": _iso(row.finished_at),
+        "createdAt": _iso(row.created_at),
+    }
+
+
+def _webhook_delivery_summary(row: PluginWebhookDelivery) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "pluginId": row.plugin_id,
+        "webhookKey": row.webhook_key,
+        "status": row.status,
+        "requestJson": row.request_json,
+        "responseJson": row.response_json,
+        "error": row.error,
+        "durationMs": row.duration_ms,
+        "startedAt": _iso(row.started_at),
+        "finishedAt": _iso(row.finished_at),
+        "createdAt": _iso(row.created_at),
+    }
+
+
+def _log_summary(row: PluginLog) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "pluginId": row.plugin_id,
+        "level": row.level,
+        "message": row.message,
+        "detailsJson": row.details_json,
+        "createdAt": _iso(row.created_at),
     }
 
 

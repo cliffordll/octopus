@@ -23,7 +23,7 @@ from packages.database.schema import (
     PluginWebhookDelivery,
 )
 from server.app import create_app
-from server.services.plugin_registry import PluginRegistryService
+from server.plugins.registry import PluginRegistryService
 
 
 @pytest.fixture
@@ -72,8 +72,21 @@ def _manifest(plugin_id: str = "linear.connector") -> dict[str, Any]:
         "apiVersion": 1,
         "version": "0.1.0",
         "displayName": "Linear",
-        "capabilities": ["issues.read"],
+        "capabilities": ["issues.read", "jobs.schedule", "webhooks.receive"],
         "entrypoints": {"worker": "./dist/worker.js"},
+        "jobs": [
+            {
+                "jobKey": "sync",
+                "displayName": "Sync",
+                "schedule": "*/15 * * * *",
+            }
+        ],
+        "webhooks": [
+            {
+                "endpointKey": "issue",
+                "displayName": "Issue",
+            }
+        ],
     }
 
 
@@ -240,3 +253,97 @@ async def test_step29_plugin_management_routes_save_config(
     assert status_code == 200
     assert config["pluginId"] == installed["id"]
     assert config["configJson"] == {"apiTokenSecretRef": "secret:linear"}
+
+
+async def test_step29_plugin_registry_jobs_logs_and_webhook_delivery(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        service = PluginRegistryService(session)
+        plugin = await service.install_plugin(
+            manifest=_manifest(),
+            source_type="bundled",
+            source_locator="packages/plugins/examples/plugin-linear",
+        )
+
+        jobs = await service.list_jobs(plugin["id"])
+        run = await service.record_job_run(
+            plugin["id"],
+            jobs[0]["id"],
+            status="succeeded",
+            output_json={"imported": 2},
+        )
+        delivery = await service.record_webhook_delivery(
+            plugin["id"],
+            endpoint_key="issue",
+            request_json={"issueId": "LIN-1"},
+            status="succeeded",
+            response_json={"ok": True},
+        )
+        log = await service.add_log(
+            plugin["id"],
+            level="info",
+            message="Imported issues",
+            details_json={"count": 2},
+        )
+        await session.commit()
+
+    assert jobs[0]["jobKey"] == "sync"
+    assert jobs[0]["displayName"] == "Sync"
+    assert run["status"] == "succeeded"
+    assert run["outputJson"] == {"imported": 2}
+    assert delivery["webhookKey"] == "issue"
+    assert delivery["requestJson"] == {"issueId": "LIN-1"}
+    assert log["message"] == "Imported issues"
+    assert log["detailsJson"] == {"count": 2}
+
+
+async def test_step29_plugin_jobs_logs_webhook_and_state_routes(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "packages/plugins/examples/plugin-linear",
+        },
+    )
+
+    jobs_code, jobs = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/jobs"
+    )
+    trigger_code, run = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/jobs/{jobs[0]['id']}/trigger",
+    )
+    state_code, state = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/state/cursor",
+        json_body={"valueJson": {"page": 2}},
+    )
+    webhook_code, delivery = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/webhooks/issue",
+        json_body={"issueId": "LIN-1"},
+    )
+    logs_code, logs = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/logs"
+    )
+
+    assert jobs_code == 200
+    assert jobs[0]["jobKey"] == "sync"
+    assert trigger_code == 200
+    assert run["status"] == "queued"
+    assert state_code == 200
+    assert state["valueJson"] == {"page": 2}
+    assert webhook_code == 200
+    assert delivery["status"] == "received"
+    assert logs_code == 200
+    assert logs[0]["message"] == "Webhook received"

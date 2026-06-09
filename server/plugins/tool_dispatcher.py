@@ -4,8 +4,8 @@ from typing import Any
 
 from packages.shared.constants.plugins import PLUGIN_CAPABILITIES
 
-from .plugin_registry import PluginRegistryService
-from .plugin_worker_manager import PluginWorkerManager
+from .registry import PluginRegistryService
+from .worker_manager import PluginWorkerManager
 
 
 class PluginToolDispatcher:

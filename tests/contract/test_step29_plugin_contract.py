@@ -19,7 +19,7 @@ from packages.shared.constants.plugins import (
 )
 from packages.shared.validators.plugins import validate_plugin_manifest
 from server.app import create_app
-from server.services.plugin_catalog import load_plugin_catalog
+from server.plugins.catalog import load_plugin_catalog
 
 
 def _manifest(plugin_id: str = "linear.connector") -> dict:
