@@ -838,8 +838,10 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
   expect(screen.getByText("内置技能")).toBeInTheDocument();
-  expect(screen.getByText("社区技能")).toBeInTheDocument();
-  expect(screen.getByText("外部技能")).toBeInTheDocument();
+  expect(screen.getByText("组织技能")).toBeInTheDocument();
+  expect(screen.getByText("智能体私有技能")).toBeInTheDocument();
+  expect(screen.getByText("外部发现")).toBeInTheDocument();
+  expect(screen.queryByText("社区技能")).not.toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
   expect(screen.queryByText("Deploy")).not.toBeInTheDocument();
@@ -952,7 +954,8 @@ it("manages skills from agent configuration", async () => {
             runtimeName: "Deep Research",
             sourceLocator: "server/skills/community/deep-research",
             state: "available",
-            enabled: false,
+            enabled: true,
+            desired: false,
             description: "Research deeply",
           },
         ],
@@ -979,9 +982,10 @@ it("manages skills from agent configuration", async () => {
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "智能体私有技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "社区技能" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
   expect(await screen.findByText("deep-research")).toBeInTheDocument();
@@ -997,8 +1001,8 @@ it("manages skills from agent configuration", async () => {
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByText("Deep Research")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
+  expect(screen.queryByText("Deep Research")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   expect(screen.getByText("自动启用")).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
