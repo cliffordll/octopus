@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import Any, TypedDict
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,10 @@ from packages.database.queries.costs import (
 )
 from packages.database.queries.heartbeat import get_run
 from packages.database.queries.organizations import get_organization_by_id
+from packages.database.queries.runtime_providers import (
+    get_global_runtime_model,
+    get_runtime_model,
+)
 from packages.database.schema import CostEvent, Project
 from packages.shared.types.cost import (
     CostDimensionRow,
@@ -29,6 +34,12 @@ from packages.shared.types.cost import (
 from packages.shared.validators.cost import parse_cost_datetime
 
 _UNATTRIBUTED = "unattributed"
+
+
+class EstimatedCost(TypedDict):
+    costCents: int
+    costUsd: float
+    roundedUpToMinimumCent: bool
 
 
 class CostService:
@@ -126,38 +137,124 @@ class CostService:
             return None
         result = run.result_json if isinstance(run.result_json, dict) else {}
         usage = run.usage_json if isinstance(run.usage_json, dict) else {}
+        return await self.record_runtime_result_cost_if_present(
+            org_id=run.org_id,
+            agent_id=run.agent_id,
+            source_type="run",
+            source_id=run.id,
+            runtime_type=_string(result.get("runtimeType")),
+            result_json=result,
+            usage_json=usage,
+            occurred_at=run.finished_at or run.started_at or run.created_at,
+        )
+
+    async def record_runtime_result_cost_if_present(
+        self,
+        *,
+        org_id: str,
+        agent_id: str | None,
+        source_type: str,
+        source_id: str,
+        runtime_type: str | None,
+        result_json: dict[str, Any] | None,
+        usage_json: dict[str, Any] | None,
+        project_id: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> CostEventType | None:
+        result = result_json if isinstance(result_json, dict) else {}
+        usage = usage_json if isinstance(usage_json, dict) else {}
         cost_cents = _cost_cents_from(result, usage)
+        estimated = False
+        estimate: EstimatedCost | None = None
+        pricing: dict[str, float] | None = None
+        if cost_cents is None or cost_cents <= 0:
+            pricing = await self._model_pricing(
+                org_id=org_id,
+                runtime_type=runtime_type,
+                provider=_string(result.get("provider")),
+                model=_string(result.get("model")),
+            )
+            estimate = _estimated_cost(usage, result, pricing)
+            if estimate is not None:
+                cost_cents = estimate["costCents"]
+                estimated = True
         if cost_cents is None or cost_cents <= 0:
             return None
+        metadata: dict[str, Any] = {"runtimeCostResult": result}
+        if estimated:
+            metadata["estimatedFromModelPricing"] = True
+            metadata["pricing"] = pricing
+            metadata["estimatedCostUsd"] = estimate["costUsd"] if estimate else None
+            if estimate and estimate["roundedUpToMinimumCent"]:
+                metadata["roundedUpToMinimumCent"] = True
+        payload: CreateCostEventPayload = {
+            "sourceType": source_type,
+            "sourceId": source_id,
+            "runtimeType": runtime_type,
+            "provider": _string(result.get("provider")),
+            "model": _string(result.get("model")),
+            "biller": _string(result.get("biller")),
+            "costCents": cost_cents,
+            "inputTokens": _optional_int(
+                usage.get("inputTokens") or result.get("inputTokens")
+            ),
+            "outputTokens": _optional_int(
+                usage.get("outputTokens") or result.get("outputTokens")
+            ),
+            "totalTokens": _optional_int(
+                usage.get("totalTokens") or result.get("totalTokens")
+            ),
+            "usage": usage or None,
+            "metadata": metadata,
+            "occurredAt": (occurred_at or datetime.now(UTC)).isoformat(),
+        }
+        if estimated:
+            payload["costUsd"] = (
+                estimate["costUsd"] if estimate else round(cost_cents / 100, 6)
+            )
+        if agent_id is not None:
+            payload["agentId"] = agent_id
+        if project_id is not None:
+            payload["projectId"] = project_id
         return await self.create_event(
-            run.org_id,
-            {
-                "agentId": run.agent_id,
-                "sourceType": "run",
-                "sourceId": run.id,
-                "runtimeType": _string(result.get("runtimeType")),
-                "provider": _string(result.get("provider")),
-                "model": _string(result.get("model")),
-                "biller": _string(result.get("biller")),
-                "costCents": cost_cents,
-                "inputTokens": _optional_int(
-                    usage.get("inputTokens") or result.get("inputTokens")
-                ),
-                "outputTokens": _optional_int(
-                    usage.get("outputTokens") or result.get("outputTokens")
-                ),
-                "totalTokens": _optional_int(
-                    usage.get("totalTokens") or result.get("totalTokens")
-                ),
-                "usage": usage or None,
-                "metadata": {"runtimeCostResult": result},
-                "occurredAt": (
-                    run.finished_at or run.started_at or run.created_at
-                ).isoformat(),
-            },
+            org_id,
+            payload,
             actor_type="system",
             actor_id="runtime-cost-collector",
         )
+
+    async def _model_pricing(
+        self,
+        *,
+        org_id: str,
+        runtime_type: str | None,
+        provider: str | None,
+        model: str | None,
+    ) -> dict[str, float] | None:
+        if not runtime_type or not provider or not model:
+            return None
+        provider_id, model_id = _model_lookup_parts(provider, model)
+        row = await get_runtime_model(
+            self._session,
+            org_id,
+            runtime_type,
+            provider_id,
+            model_id,
+        )
+        if row is None:
+            row = await get_global_runtime_model(
+                self._session,
+                runtime_type,
+                provider_id,
+                model_id,
+            )
+        if row is None:
+            return None
+        metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+        raw_pricing = metadata.get("pricing")
+        if not isinstance(raw_pricing, dict):
+            return None
+        return _pricing(raw_pricing)
 
     async def summary(self, org_id: str, query: CostQuery) -> CostSummary:
         rows = await self._list(org_id, query)
@@ -343,6 +440,61 @@ def _cost_cents_from(result: dict[str, object], usage: dict[str, object]) -> int
         if isinstance(value, int | float) and not isinstance(value, bool):
             return int(round(float(value) * 100))
     return None
+
+
+def _estimated_cost(
+    usage: dict[str, object],
+    result: dict[str, object],
+    pricing: dict[str, float] | None,
+) -> EstimatedCost | None:
+    if not pricing:
+        return None
+    input_tokens = _optional_int(usage.get("inputTokens") or result.get("inputTokens"))
+    output_tokens = _optional_int(
+        usage.get("outputTokens") or result.get("outputTokens")
+    )
+    cached_input_tokens = _optional_int(
+        usage.get("cachedInputTokens") or result.get("cachedInputTokens")
+    )
+    cost_usd = 0.0
+    cost_usd += (input_tokens or 0) / 1_000_000 * pricing.get("inputCostPer1M", 0)
+    cost_usd += (output_tokens or 0) / 1_000_000 * pricing.get("outputCostPer1M", 0)
+    cost_usd += (
+        (cached_input_tokens or 0) / 1_000_000 * pricing.get("cachedInputCostPer1M", 0)
+    )
+    if cost_usd <= 0:
+        return None
+    rounded_cents = int(round(cost_usd * 100))
+    cost_cents = max(1, rounded_cents)
+    return {
+        "costCents": cost_cents,
+        "costUsd": round(cost_usd, 6),
+        "roundedUpToMinimumCent": rounded_cents == 0,
+    }
+
+
+def _pricing(value: dict[str, object]) -> dict[str, float] | None:
+    result: dict[str, float] = {}
+    for key in ("inputCostPer1M", "outputCostPer1M", "cachedInputCostPer1M"):
+        amount = value.get(key)
+        if isinstance(amount, bool) or not isinstance(amount, int | float):
+            continue
+        normalized = float(amount)
+        if normalized < 0:
+            continue
+        result[key] = normalized
+    return result or None
+
+
+def _model_lookup_parts(provider: str, model: str) -> tuple[str, str]:
+    if "/" not in model:
+        return provider, model
+    model_provider, model_id = model.split("/", 1)
+    model_provider = model_provider.strip()
+    model_id = model_id.strip()
+    if model_provider and model_id:
+        return model_provider, model_id
+    return provider, model
 
 
 def _optional_int(value: object) -> int | None:
