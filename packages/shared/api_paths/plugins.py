@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 PLUGIN_LIST_PATH = "/api/plugins"
+PLUGIN_INSTALL_PATH = "/api/plugins/install"
 PLUGIN_AVAILABLE_PATH = "/api/plugins/available"
 PLUGIN_EXAMPLES_PATH = "/api/plugins/examples"
 PLUGIN_DETAIL_PATH = "/api/plugins/{pluginId}"
