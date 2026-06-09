@@ -8,6 +8,8 @@ from typing import Any
 from packages.shared.types.plugins import PluginManifest
 from packages.shared.validators.plugins import validate_plugin_manifest
 
+DEFAULT_PLUGIN_CATALOG_ROOT = Path(__file__).parent / "bundled"
+
 
 @dataclass(frozen=True)
 class PluginCatalogEntry:

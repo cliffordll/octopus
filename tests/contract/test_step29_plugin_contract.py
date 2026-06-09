@@ -11,6 +11,9 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_DETAIL_PATH,
     PLUGIN_EXAMPLES_PATH,
     PLUGIN_LIST_PATH,
+    PLUGIN_STATIC_PATH,
+    PLUGIN_UI_CONTRIBUTIONS_PATH,
+    PLUGIN_UI_STREAM_PATH,
 )
 from packages.shared.constants.plugins import (
     PLUGIN_CAPABILITIES,
@@ -19,7 +22,7 @@ from packages.shared.constants.plugins import (
 )
 from packages.shared.validators.plugins import validate_plugin_manifest
 from server.app import create_app
-from server.plugins.catalog import load_plugin_catalog
+from server.plugins.catalog import DEFAULT_PLUGIN_CATALOG_ROOT, load_plugin_catalog
 
 
 def _manifest(plugin_id: str = "linear.connector") -> dict:
@@ -107,6 +110,9 @@ def test_step29_plugin_paths_match_management_contract() -> None:
     assert PLUGIN_EXAMPLES_PATH == "/api/plugins/examples"
     assert PLUGIN_DETAIL_PATH == "/api/plugins/{pluginId}"
     assert PLUGIN_CONFIG_PATH == "/api/plugins/{pluginId}/config"
+    assert PLUGIN_UI_CONTRIBUTIONS_PATH == "/api/plugins/ui/contributions"
+    assert PLUGIN_UI_STREAM_PATH == "/api/plugins/{pluginId}/stream"
+    assert PLUGIN_STATIC_PATH == "/api/plugins/{pluginId}/static/{assetPath:path}"
 
 
 def test_step29_plugin_constants_cover_manifest_surface() -> None:
@@ -244,3 +250,30 @@ async def test_step29_plugin_examples_route_filters_examples(tmp_path) -> None:
     payload = response.json()
     assert [item["id"] for item in payload["items"]] == ["linear.connector"]
     assert payload["errors"] == []
+
+
+async def test_step29_plugin_default_catalog_exposes_bundled_required_plugins() -> None:
+    catalog = load_plugin_catalog(DEFAULT_PLUGIN_CATALOG_ROOT)
+    ids = {entry.plugin_id for entry in catalog.entries}
+
+    assert catalog.errors == []
+    assert {
+        "linear.connector",
+        "plugin-authoring-smoke-example",
+        "plugin-file-browser-example",
+        "kitchen-sink",
+        "github.connector",
+        "slack.connector",
+        "jira.connector",
+        "notion.connector",
+    } <= ids
+
+    application = create_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        response = await client.get("/api/plugins/available")
+
+    assert response.status_code == 200
+    route_ids = {item["id"] for item in response.json()["items"]}
+    assert ids <= route_ids

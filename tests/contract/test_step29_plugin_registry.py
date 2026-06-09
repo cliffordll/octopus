@@ -24,6 +24,7 @@ from packages.database.schema import (
 )
 from server.app import create_app
 from server.plugins.registry import PluginRegistryService
+from server.plugins.worker_manager import PluginWorkerManager
 
 
 @pytest.fixture
@@ -88,6 +89,62 @@ def _manifest(plugin_id: str = "linear.connector") -> dict[str, Any]:
             }
         ],
     }
+
+
+def _ui_manifest(plugin_id: str = "linear.connector") -> dict[str, Any]:
+    return {
+        **_manifest(plugin_id),
+        "capabilities": [
+            "issues.read",
+            "jobs.schedule",
+            "webhooks.receive",
+            "ui.page.register",
+            "ui.detailTab.register",
+            "ui.dashboardWidget.register",
+        ],
+        "entrypoints": {
+            "worker": "./dist/worker.js",
+            "ui": "./dist/ui",
+        },
+        "ui": {
+            "slots": [
+                {
+                    "type": "page",
+                    "id": "linear-page",
+                    "displayName": "Linear",
+                    "exportName": "LinearPage",
+                    "routePath": "linear",
+                    "order": 10,
+                },
+                {
+                    "type": "detailTab",
+                    "id": "linear-issue-tab",
+                    "displayName": "Linear",
+                    "exportName": "LinearIssueTab",
+                    "entityTypes": ["issue"],
+                },
+                {
+                    "type": "dashboardWidget",
+                    "id": "linear-widget",
+                    "displayName": "Linear",
+                    "exportName": "LinearWidget",
+                },
+            ]
+        },
+    }
+
+
+class FakeBridgeWorker:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((method, params))
+        if method == "getData":
+            return {"items": [{"id": "LIN-1"}], "key": params["key"]}
+        if method == "performAction":
+            return {"ok": True, "action": params["key"]}
+        return {"method": method}
 
 
 def test_step29_plugin_schema_matches_expected_tables_and_columns() -> None:
@@ -347,3 +404,98 @@ async def test_step29_plugin_jobs_logs_webhook_and_state_routes(
     assert delivery["status"] == "received"
     assert logs_code == 200
     assert logs[0]["message"] == "Webhook received"
+
+
+async def test_step29_plugin_ui_bridge_contributions_and_worker_routes(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    worker_manager = PluginWorkerManager()
+    application.state.plugin_worker_manager = worker_manager
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _ui_manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "packages/plugins/examples/plugin-linear",
+        },
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+    worker = FakeBridgeWorker()
+    worker_manager.register_worker(installed["id"], worker)
+
+    contributions_code, contributions = await _request(
+        application,
+        "GET",
+        "/api/plugins/ui/contributions?slotType=detailTab&entityType=issue",
+    )
+    data_code, data = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/data/issues",
+        json_body={"context": {"projectId": "project-1"}},
+    )
+    action_code, action = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/actions/import",
+        json_body={
+            "input": {"issueId": "LIN-1"},
+            "context": {"projectId": "project-1"},
+        },
+    )
+
+    assert contributions_code == 200
+    assert [slot["id"] for slot in contributions["items"]] == ["linear-issue-tab"]
+    assert contributions["items"][0]["pluginId"] == installed["id"]
+    assert contributions["items"][0]["assetBaseUrl"].endswith(
+        f"/api/plugins/{installed['id']}/static/"
+    )
+    assert data_code == 200
+    assert data["result"] == {"items": [{"id": "LIN-1"}], "key": "issues"}
+    assert action_code == 200
+    assert action["result"] == {"ok": True, "action": "import"}
+    assert worker.calls[0] == (
+        "getData",
+        {"key": "issues", "context": {"projectId": "project-1"}},
+    )
+
+
+async def test_step29_plugin_ui_stream_and_static_routes(
+    tmp_path,
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    plugin_dir = tmp_path / "linear"
+    ui_dir = plugin_dir / "dist" / "ui"
+    ui_dir.mkdir(parents=True)
+    (ui_dir / "plugin.js").write_text(
+        "export const marker = 'linear';", encoding="utf-8"
+    )
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _ui_manifest(),
+            "sourceType": "local",
+            "sourceLocator": str(plugin_dir),
+        },
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        static_response = await client.get(
+            f"/api/plugins/{installed['id']}/static/plugin.js"
+        )
+        stream_response = await client.get(f"/api/plugins/{installed['id']}/stream")
+
+    assert static_response.status_code == 200
+    assert "marker = 'linear'" in static_response.text
+    assert stream_response.status_code == 200
+    assert stream_response.headers["content-type"].startswith("text/event-stream")
+    assert '"pluginId":"' in stream_response.text

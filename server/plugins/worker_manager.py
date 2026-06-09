@@ -54,5 +54,39 @@ class PluginWorkerManager:
             },
         )
 
+    async def get_data(
+        self,
+        plugin_id: str,
+        *,
+        key: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.call(
+            plugin_id,
+            "getData",
+            {
+                "key": key,
+                "context": context,
+            },
+        )
+
+    async def perform_action(
+        self,
+        plugin_id: str,
+        *,
+        key: str,
+        input_json: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self.call(
+            plugin_id,
+            "performAction",
+            {
+                "key": key,
+                "input": input_json,
+                "context": context,
+            },
+        )
+
 
 PluginWorkerFactory = Callable[[str], PluginWorkerHandle]

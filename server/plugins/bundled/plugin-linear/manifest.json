@@ -1,0 +1,71 @@
+{
+  "id": "linear.connector",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Linear",
+  "description": "Browse Linear issues and import them into Octopus projects.",
+  "author": "Octopus",
+  "categories": ["connector", "issue-tracking"],
+  "capabilities": [
+    "http.outbound",
+    "secrets.read-ref",
+    "plugin.state.read",
+    "plugin.state.write",
+    "issues.read",
+    "issues.create",
+    "issues.update",
+    "projects.read",
+    "organizations.read",
+    "agent.tools.register",
+    "ui.page.register",
+    "ui.detailTab.register",
+    "activity.log.write"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "instanceConfigSchema": {
+    "type": "object",
+    "required": ["apiTokenSecretRef"],
+    "properties": {
+      "apiTokenSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      }
+    }
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "page",
+        "id": "linear-page",
+        "displayName": "Linear",
+        "exportName": "LinearPage",
+        "routePath": "linear"
+      },
+      {
+        "type": "detailTab",
+        "id": "linear-issue-tab",
+        "displayName": "Linear",
+        "exportName": "LinearIssueTab",
+        "entityTypes": ["issue"]
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "linear.search",
+      "displayName": "Search Linear",
+      "description": "Search Linear issues.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}
