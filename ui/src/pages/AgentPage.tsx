@@ -8,6 +8,7 @@ import type { AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
@@ -17,15 +18,9 @@ const RUNTIMES: AgentRuntimeType[] = [
   "http",
   "claude_local",
   "codex_local",
-  "gemini_local",
   "opencode_local",
-  "pi_local",
-  "cursor",
   "openclaw_gateway",
-  "hermes_local",
 ];
-const OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions";
-
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
@@ -47,22 +42,6 @@ function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): 
   if (!supportsRuntimeModels(runtime)) return config;
   const model = typeof config.model === "string" ? config.model.trim() : "";
   return { ...config, model: validateModelReference(model) };
-}
-
-function runtimeConfigExtraArgs(config: Record<string, unknown>): string[] {
-  return Array.isArray(config.extraArgs)
-    ? config.extraArgs.filter((item): item is string => typeof item === "string")
-    : [];
-}
-
-function hasOpenCodeSkipPermissions(config: Record<string, unknown>): boolean {
-  return runtimeConfigExtraArgs(config).includes(OPENCODE_SKIP_PERMISSIONS_ARG);
-}
-
-function setOpenCodeSkipPermissions(config: Record<string, unknown>, enabled: boolean): Record<string, unknown> {
-  const extraArgs = runtimeConfigExtraArgs(config).filter((item) => item !== OPENCODE_SKIP_PERMISSIONS_ARG);
-  if (enabled) extraArgs.push(OPENCODE_SKIP_PERMISSIONS_ARG);
-  return extraArgs.length > 0 ? { ...config, extraArgs } : Object.fromEntries(Object.entries(config).filter(([key]) => key !== "extraArgs"));
 }
 
 function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
@@ -846,14 +825,9 @@ export function AgentPage() {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
   }
-  function toggleOpenCodeSkipPermissions(enabled: boolean) {
-    try {
-      const config = readJsonObjectSafe(agentRuntimeConfig);
-      setAgentRuntimeConfig(JSON.stringify(setOpenCodeSkipPermissions(config, enabled), null, 2));
-      setConfigurationError(null);
-    } catch (error) {
-      setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
-    }
+  function updateAgentRuntimeConfig(next: Record<string, unknown>) {
+    setAgentRuntimeConfig(JSON.stringify(next, null, 2));
+    setConfigurationError(null);
   }
   const isPendingApproval = agent.data?.status === "pending_approval";
   const isTerminated = agent.data?.status === "terminated";
@@ -893,8 +867,6 @@ export function AgentPage() {
     supportsRuntimeModels(runtime)
       ? (readJsonObjectSafe(agentRuntimeConfig).model as string | undefined) ?? ""
       : "";
-  const opencodeSkipPermissionsEnabled =
-    runtime === "opencode_local" && hasOpenCodeSkipPermissions(readJsonObjectSafe(agentRuntimeConfig));
   const selectedRuntimeModelKnown =
     !selectedRuntimeModel || runtimeModelOptions.some((model) => runtimeModelReference(model) === selectedRuntimeModel);
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
@@ -1406,23 +1378,15 @@ export function AgentPage() {
                           )}
                         </label>
                       )}
-                      {runtime === "opencode_local" && (
-                        <label className="agent-property-row agent-toggle-row">
-                          <span>跳过 OpenCode 权限确认</span>
-                          <div>
-                            <input
-                              aria-label="跳过 OpenCode 权限确认"
-                              checked={opencodeSkipPermissionsEnabled}
-                              type="checkbox"
-                              onChange={(event) => toggleOpenCodeSkipPermissions(event.target.checked)}
-                            />
-                            <small>
-                              开启后 OpenCode 会使用 --dangerously-skip-permissions，自动批准未显式拒绝的本地工具权限请求。仅适用于本地可信开发环境。
-                            </small>
-                          </div>
-                        </label>
-                      )}
-                      <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+                      <RuntimeConfigFields
+                        runtime={runtime}
+                        value={readJsonObjectSafe(agentRuntimeConfig)}
+                        onChange={updateAgentRuntimeConfig}
+                      />
+                      <details className="runtime-config-advanced agent-property-row-wide">
+                        <summary>高级 JSON</summary>
+                        <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
+                      </details>
                     </div>
                     <div className="agent-runtime-test-row">
                       <button className="secondary" disabled={testRuntime.isPending} onClick={runRuntimeTest} type="button">

@@ -4875,6 +4875,118 @@ pre {
   width: 100%;
 }
 
+.agent-property-row-wide {
+  border-bottom: 1px solid #202a3b;
+  padding: 12px 0;
+}
+
+.runtime-config-panel {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 10px 12px;
+}
+
+.runtime-config-summary {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.runtime-config-summary-text {
+  align-items: baseline;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-config-summary-text strong {
+  color: #e8edf5;
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.runtime-config-summary-text span,
+.runtime-config-summary-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-config-summary-text small {
+  color: #7f8a9e;
+}
+
+.runtime-config-fields {
+  border-top: 1px solid #202a3b;
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.runtime-config-fields label {
+  display: grid;
+  gap: 6px;
+}
+
+.runtime-config-fields textarea {
+  min-height: 88px;
+}
+
+.runtime-config-fields label:has(textarea) {
+  grid-column: 1 / -1;
+}
+
+.runtime-config-check-row {
+  align-items: center;
+  background: #0f141d;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  display: flex !important;
+  gap: 14px;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.runtime-config-check-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.runtime-config-check-row strong {
+  color: #e8edf5;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.runtime-config-check-row small {
+  color: #8f9bad;
+}
+
+.runtime-config-check-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.runtime-config-advanced {
+  margin: 4px 0 10px;
+}
+
+.runtime-config-advanced summary {
+  color: #9aa6b8;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .agent-toggle-row > div {
   align-items: flex-start;
   display: flex;
