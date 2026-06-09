@@ -4,15 +4,17 @@ import { costsApi } from "../api/costs";
 import { healthApi } from "../api/health";
 import type { CostDimensionRow, ServerHealth, StorageHealthConfig } from "../api/types";
 import { getLocalePreference, setLocalePreference, type AppLocale } from "../utils/locale";
+import { PluginsPage } from "../pages/PluginsPage";
 import { ErrorNotice } from "./ErrorNotice";
 import { RuntimeProviderSettings } from "./RuntimeProviderSettings";
 
-type SettingsSection = "general" | "providers" | "costs" | "storage" | "about";
+type SettingsSection = "general" | "providers" | "costs" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
   { id: "providers", eyebrow: "Runtime Providers", label: "供应商", description: "运行时 provider 和 model。" },
   { id: "costs", eyebrow: "Costs", label: "成本", description: "运行时成本归集和摘要。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
+  { id: "plugins", eyebrow: "Plugins", label: "插件", description: "安装、启用和检查插件。" },
   { id: "general", eyebrow: "General", label: "通用", description: "组织级基础设置。" },
   { id: "about", eyebrow: "About", label: "关于", description: "组织和版本信息。" },
 ];
@@ -153,6 +155,8 @@ export function OrganizationSettingsPanel({ orgId }: { orgId: string }) {
           <CostSettingsSection current={current} orgId={orgId} />
         ) : activeSection === "storage" ? (
           <StorageSettingsSection current={current} />
+        ) : activeSection === "plugins" ? (
+          <PluginsPage embedded />
         ) : activeSection === "general" ? (
           <section className="settings-empty-section settings-general-section" aria-label={current.label}>
             <div className="settings-section-heading-copy">
