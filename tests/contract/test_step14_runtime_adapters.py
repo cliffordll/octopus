@@ -59,7 +59,27 @@ def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
     assert registry.get_runtime_adapter("http").type == "http"
     assert registry.get_runtime_adapter("claude_local").type == "claude_local"
     assert registry.get_runtime_adapter("opencode_local").type == "opencode_local"
+    assert registry.get_runtime_adapter("openclaw_gateway").type == "openclaw_gateway"
+    assert (
+        registry.get_runtime_adapter("openclaw_gateway").__class__.__name__
+        == "OpenClawGatewayRuntimeAdapter"
+    )
     assert registry.get_runtime_adapter("gemini_local").type == "gemini_local"
+
+
+async def test_openclaw_gateway_runtime_metadata_reports_environment_support() -> None:
+    from packages.runtimes.registry import get_runtime_metadata
+
+    metadata = await get_runtime_metadata("openclaw_gateway")
+
+    assert metadata["type"] == "openclaw_gateway"
+    assert metadata["capabilities"]["environmentTest"] is True
+    assert metadata["capabilities"]["models"] is False
+    assert metadata["capabilities"]["skills"] is False
+    assert metadata["agentConfigurationDoc"] == (
+        "Configure url, authToken, headers, payloadTemplate, sessionKeyStrategy, "
+        "timeoutSec and waitTimeoutMs for the OpenClaw Gateway WebSocket endpoint."
+    )
 
 
 def test_opencode_extra_args_are_run_subcommand_options() -> None:

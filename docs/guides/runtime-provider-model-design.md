@@ -195,7 +195,8 @@ provider/model 注入逻辑。`opencode_local` 会生成 managed OpenCode 配置
 `OPENAI_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`；
 `claude_local` 会把 provider `apiKey/baseUrl` 注入为 `ANTHROPIC_API_KEY` /
 `ANTHROPIC_BASE_URL`，并把 CLI model 转为 provider 内部 `modelId`。
-`openclaw_gateway` 当前仍是未实现 runtime，占位在 registry 中，没有 runner 可接入。
+`openclaw_gateway` 是 WebSocket Gateway runtime；provider/model 表只保存配置，不做
+模型自动发现。真实执行由 `packages/runtimes/openclaw_gateway` runner 接入 Gateway。
 
 `opencode_local` 的 managed `.config/opencode` 必须是独立副本，不能 symlink 到
 宿主机 `%USERPROFILE%/.config/opencode`。这样 DB provider/model materialization

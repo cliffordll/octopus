@@ -1,6 +1,6 @@
 # Step 28: Budget / Governance
 
-状态：待开发
+状态：已完成
 
 ## 已提前完成
 
@@ -55,7 +55,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 
 ## 开发计划
 
-### 25A: Budget contract 与迁移基线
+### 28A: Budget contract 与迁移基线
 
 作用：把预算治理的上游数据模型落到 Python 版本，给 budget enforcement 提供稳定边界。
 
@@ -65,7 +65,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 - `packages/shared/types/`：新增或扩展 budget response 类型。
 - `packages/shared/validators/`：新增 budget update、budget policy upsert、incident resolve validator。
 - `packages/database/schema/`：新增 `BudgetPolicy`、`BudgetIncident`。
-- `packages/database/migrations/versions/20260528_000009_budget_governance.py`：新增上游对齐表、索引和外键。
+- `packages/database/migrations/versions/20260608_000020_budget_governance.py`：新增上游对齐表、索引和外键。
 - `tests/contract/test_step28_budget_contract.py`：覆盖 migration、validator、enum 和 schema 默认值。
 
 验收：
@@ -74,7 +74,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 - `budget_policies`、`budget_incidents` 字段、索引和默认值与上游已纳入范围一致。
 - validator 拒绝负数金额、非法 budget scope/window/incident action。
 
-### 25B: Budget policy、incident 与 hard-stop enforcement
+### 28B: Budget policy、incident 与 hard-stop enforcement
 
 作用：实现上游预算策略、软阈值、硬停止、incident 和审批副作用，真正让 budget 影响新 work 的启动。
 
@@ -100,7 +100,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 - hard stop 会暂停 organization/agent/project 并阻止后续 run 创建或启动。
 - `raise_budget_and_resume` 必须要求新 amount 大于当前 observed spend。
 
-### 25C: Quota windows 真实归集入口
+### 28C: Quota windows 真实归集入口
 
 作用：把 Step 14 的 adapter quota probe 从单 adapter 兼容响应升级为 organization 级 provider quota 聚合，但 provider 失败不能阻断普通 run。
 
@@ -117,7 +117,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 - 单个 provider 失败或超时返回错误项，不影响其他 provider。
 - 不把 quota windows 写成 budget，不把 quota 当作 cost；三者关系仅在 response 和文档中解释清楚。
 
-### 25D: Skills analytics 真实归集
+### 28D: Skills analytics 真实归集
 
 作用：替换 Step 14 的空兼容响应，用 run/event/activity 证据计算 agent skill loaded/requested/used 统计。
 
@@ -137,12 +137,12 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 
 ## 执行顺序
 
-1. 先执行 25A，提交 budget schema/contract/migration。
-2. 执行 25B，提交 budget policy、incident 和 hard-stop。
-3. 执行 25C，提交 quota windows 聚合。
-4. 执行 25D，提交 skills analytics 真实归集。
+1. 先执行 28A，提交 budget schema/contract/migration。
+2. 执行 28B，提交 budget policy、incident 和 hard-stop。
+3. 执行 28C，提交 quota windows 聚合。
+4. 执行 28D，提交 skills analytics 真实归集。
 
-每一段完成后先停下说明“做了什么、作用是什么、验证结果是什么”，再按用户确认进入下一段。
+每一段完成后说明“做了什么、作用是什么、验证结果是什么”。本分支按用户确认开始执行，代码改动分批验证，提交动作仅在用户明确要求时执行。
 
 ## 验证命令
 
@@ -162,3 +162,12 @@ uv run pytest tests/contract/test_step28_budget_routes.py -q
 uv run pytest tests/workflows/test_step28_budget_workflow.py -q
 uv run pytest tests/contract/test_step28_quota_windows.py -q
 ```
+
+## 本地验证记录
+
+- `uv run pytest tests/contract/test_step28_budget_contract.py tests/contract/test_step28_budget_routes.py tests/contract/test_step28_quota_windows.py tests/contract/test_step28_skills_analytics.py -q`：9 passed。
+- `uv run pytest tests/contract/test_step14_runtime_adapters.py::test_agent_skills_enable_private_and_analytics_routes -q`：1 passed。
+- `uv run ruff format --check .`：361 files already formatted。
+- `uv run ruff check .`：All checks passed。
+- `uv run pyright .`：0 errors。
+- `uv run alembic upgrade head` 使用临时 SQLite 数据库升级到 `20260608_000020` 成功。

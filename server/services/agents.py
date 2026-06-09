@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 import re
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from packages.database.queries.agent_skills import (
     add_enabled_skill_keys,
     list_enabled_skill_keys,
     list_enabled_skill_keys_by_agent_ids,
+    list_skill_usage_sources,
     replace_enabled_skill_keys,
 )
 from packages.database.queries.agent_state import (
@@ -98,6 +99,8 @@ _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "metadata",
 )
 _AGENT_WORKSPACE_HOME_DIRS = ("instructions", "skills", "life", "memory")
+_SKILL_EVIDENCE_KINDS = ("used", "requested", "loaded")
+SkillEvidenceKind = Literal["used", "requested", "loaded"]
 
 
 class AgentConflictError(ValueError):
@@ -239,6 +242,60 @@ def _skill_description_from_markdown(markdown: str) -> str | None:
             description = value.split(":", 1)[1].strip().strip("\"'")
             return description or None
     return None
+
+
+def _skill_evidence_from_payload(
+    payload: dict[str, Any],
+) -> list[tuple[str, SkillEvidenceKind]]:
+    evidence: list[tuple[str, SkillEvidenceKind]] = []
+
+    for section_name in ("context", "result", "usage"):
+        section = payload.get(section_name)
+        if isinstance(section, dict):
+            evidence.extend(_skill_evidence_from_payload(section))
+
+    for key, kind in (
+        ("desiredSkills", "requested"),
+        ("requestedSkills", "requested"),
+        ("loadedSkills", "loaded"),
+        ("usedSkills", "used"),
+    ):
+        evidence.extend(
+            (skill, cast(SkillEvidenceKind, kind))
+            for skill in _string_list(payload.get(key))
+        )
+
+    skills = payload.get("skills")
+    if isinstance(skills, dict):
+        for kind in _SKILL_EVIDENCE_KINDS:
+            evidence.extend((skill, kind) for skill in _string_list(skills.get(kind)))
+
+    raw_evidence = payload.get("skillEvidence")
+    if isinstance(raw_evidence, list):
+        for item in raw_evidence:
+            if not isinstance(item, dict):
+                continue
+            skill = item.get("skill") or item.get("skillKey") or item.get("key")
+            kind = item.get("kind") or item.get("evidence")
+            if isinstance(skill, str) and kind in _SKILL_EVIDENCE_KINDS:
+                normalized = skill.strip()
+                if normalized:
+                    evidence.append((normalized, cast(SkillEvidenceKind, kind)))
+
+    return evidence
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip()
+        if normalized:
+            result.append(normalized)
+    return result
 
 
 def _apply_desired_skills_to_entries(
@@ -947,17 +1004,65 @@ class AgentService:
             return None
         end_date = datetime.now(UTC).date()
         start_date = end_date - timedelta(days=max(window_days, 1) - 1)
+        start_time = datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+        sources = await list_skill_usage_sources(
+            self._session,
+            org_id=existing.org_id,
+            agent_id=existing.id,
+            start_time=start_time,
+        )
+        skill_counts: dict[str, dict[str, int]] = {}
+        day_counts: dict[str, dict[str, int]] = {}
+        evidence_counts = {"used": 0, "requested": 0, "loaded": 0}
+        run_ids: set[str] = set()
+
+        for source in sources:
+            source_evidence = list(_skill_evidence_from_payload(source.payload))
+            if not source_evidence:
+                continue
+            if source.run_id is not None:
+                run_ids.add(source.run_id)
+            day = source.created_at.date().isoformat()
+            day_bucket = day_counts.setdefault(
+                day, {"used": 0, "requested": 0, "loaded": 0}
+            )
+            for skill_key, kind in source_evidence:
+                evidence_counts[kind] += 1
+                day_bucket[kind] += 1
+                skill_bucket = skill_counts.setdefault(
+                    skill_key,
+                    {
+                        "used": 0,
+                        "requested": 0,
+                        "loaded": 0,
+                        "totalCount": 0,
+                    },
+                )
+                skill_bucket[kind] += 1
+                skill_bucket["totalCount"] += 1
+
+        skills = [
+            {"skill": skill_key, **counts}
+            for skill_key, counts in sorted(
+                skill_counts.items(),
+                key=lambda item: (-item[1]["totalCount"], item[0]),
+            )
+        ]
+        days = [
+            {"date": day, **counts}
+            for day, counts in sorted(day_counts.items(), reverse=True)
+        ]
         return {
             "agentId": existing.id,
             "orgId": existing.org_id,
             "windowDays": window_days,
             "startDate": start_date.isoformat(),
             "endDate": end_date.isoformat(),
-            "totalCount": 0,
-            "totalRunsWithSkills": 0,
-            "evidenceCounts": {"used": 0, "requested": 0, "loaded": 0},
-            "skills": [],
-            "days": [],
+            "totalCount": sum(evidence_counts.values()),
+            "totalRunsWithSkills": len(run_ids),
+            "evidenceCounts": evidence_counts,
+            "skills": skills,
+            "days": days,
         }
 
     async def get_configuration(self, agent_id: str) -> AgentConfiguration | None:
