@@ -6214,15 +6214,6 @@ pre {
   overflow: hidden;
 }
 
-.agent-skill-tag-note {
-  background: rgba(56, 134, 232, 0.08);
-  border: 1px solid rgba(56, 134, 232, 0.22);
-  border-radius: 10px;
-  color: #bfd7ff;
-  line-height: 1.45;
-  padding: 8px 9px;
-}
-
 .agent-skill-enabled-pill {
   align-items: center;
   background: rgba(148, 163, 184, 0.12);
@@ -6243,6 +6234,65 @@ pre {
   background: rgba(34, 197, 94, 0.12);
   border-color: rgba(34, 197, 94, 0.36);
   color: #86efac;
+}
+
+.agent-skill-switch {
+  align-items: center;
+  background: #0a0f17;
+  border: 1px solid #2b3548;
+  border-radius: 999px;
+  color: #8792a6;
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: repeat(2, minmax(46px, 1fr));
+  height: 28px;
+  min-width: 102px;
+  overflow: hidden;
+  padding: 2px;
+  position: relative;
+}
+
+.agent-skill-switch::before {
+  background: rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  bottom: 2px;
+  content: "";
+  left: calc(50% + 1px);
+  position: absolute;
+  top: 2px;
+  transition: left 120ms ease, background 120ms ease;
+  width: calc(50% - 3px);
+}
+
+.agent-skill-switch.enabled::before {
+  background: rgba(34, 197, 94, 0.16);
+  left: 2px;
+}
+
+.agent-skill-switch span {
+  color: #8792a6;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  position: relative;
+  text-align: center;
+  z-index: 1;
+}
+
+.agent-skill-switch.enabled span:first-child {
+  color: #86efac;
+}
+
+.agent-skill-switch:not(.enabled) span:last-child {
+  color: #cbd5e1;
+}
+
+.agent-skill-switch:hover:not(:disabled) {
+  border-color: #3a465a;
+}
+
+.agent-skill-switch.pending {
+  opacity: 0.72;
 }
 
 .agent-skill-tag-facts {
