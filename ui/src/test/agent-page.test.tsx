@@ -471,6 +471,32 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
+it("fills built-in process demo config from the runtime form", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, agentRuntimeConfig: JSON.parse(String(init?.body ?? "{}")).agentRuntimeConfig ?? {} });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  expect(screen.getByText("内置 process demo")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "使用内置 demo" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  const updateCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/agents/agent-1" && init?.method === "PATCH");
+  expect(updateCall).toBeDefined();
+  expect(JSON.parse(String(updateCall?.[1]?.body)).agentRuntimeConfig).toEqual({
+    command: "uv",
+    args: ["run", "--no-sync", "python", "-m", "packages.runtimes.process.demo"],
+    timeoutSec: 10,
+  });
+});
+
 it("validates opencode local model before saving agent configuration", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

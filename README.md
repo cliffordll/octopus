@@ -293,7 +293,36 @@ curl.exe -s "http://127.0.0.1:8000/api/orgs/$env:ORG_ID"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 ```
 
-## 8. 运行目录说明
+## 8. Process runtime demo
+
+项目内置了一个最小 process runtime demo，用来验证 Octopus server 可以启动外部进程、等待退出并收集 stdout。
+
+先在项目根目录确认 demo 命令可执行：
+
+```powershell
+uv run --no-sync python -m packages.runtimes.process.demo
+```
+
+输出会是 JSON，包含 `message`、当前 `cwd`、时间戳和安全的 Octopus 环境变量摘录。
+
+在 UI 创建或编辑 Agent 时：
+
+- Runtime 选择 `process`
+- Command 填 `uv`
+- Args 填 `run, --no-sync, python, -m, packages.runtimes.process.demo`
+- CWD 留空
+
+CWD 留空时，process runtime 使用 server 当前工作目录。只要 server 从项目根目录启动，项目迁移到其他目录后也不需要修改 demo 配置。
+
+该 demo 只证明 process runtime 的最小执行链路：
+
+```text
+Octopus -> process runtime -> octopus-process-demo -> stdout -> run result
+```
+
+它不是完整 AI agent 对话运行时，也不会从 stdin 读取任务 prompt。
+
+## 9. 运行目录说明
 
 默认运行数据不会写入仓库根目录。未显式设置 `OCTOPUS_HOME` 时，Octopus home 默认是用户目录下的 `.octopus`。
 
@@ -373,7 +402,7 @@ dev      step-29 或正在开发的下一步功能实例
 step28   step-28-bug-fix 等旧分支验证实例
 ```
 
-## 9. 常用验证命令
+## 10. 常用验证命令
 
 提交前执行四步验证：
 
@@ -390,7 +419,7 @@ uv run pyright .
 uv run --no-sync pyright .
 ```
 
-## 10. 清理本地数据
+## 11. 清理本地数据
 
 开发阶段如果可以丢弃本地数据，可以删除：
 
@@ -408,7 +437,7 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 uv run server
 ```
 
-## 11. 常用环境变量
+## 12. 常用环境变量
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -433,7 +462,7 @@ uv run server
 | `OCTOPUS_STORAGE_REGION` | `us-east-1` | MinIO/S3 region |
 | `OCTOPUS_STORAGE_FORCE_PATH_STYLE` | MinIO 默认为 `true` | 是否使用 path-style S3 地址 |
 
-## 12. 延伸文档
+## 13. 延伸文档
 
 按问题类型继续阅读：
 
