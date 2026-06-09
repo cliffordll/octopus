@@ -953,6 +953,10 @@ small {
   font-size: 12px;
 }
 
+.runtime-model-pricing-summary {
+  display: block;
+}
+
 .runtime-provider-list small,
 .runtime-provider-list em {
   color: #8b99ad;
@@ -965,6 +969,32 @@ small {
   display: grid;
   gap: 10px;
   padding-top: 12px;
+}
+
+.runtime-model-pricing {
+  border: 1px solid #273244;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+}
+
+.runtime-model-pricing legend {
+  color: #e6edf7;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.runtime-model-pricing p {
+  margin: 0;
+}
+
+.runtime-model-pricing-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .runtime-provider-dialog {
