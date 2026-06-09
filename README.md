@@ -344,6 +344,7 @@ $env:OCTOPUS_HOME = "C:/Users/lianaipeng/.octopus"
 例如启动一个 `dev` 实例：
 
 ```powershell
+$env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
@@ -361,6 +362,16 @@ uv run server
 ```
 
 这些目录是本地运行产物，不应提交到 Git。
+
+开发不同 step 或功能分支时，不要复用同一个 SQLite instance。迁移版本会写入
+`alembic_version`，较新的分支升级过 `default` 后，较旧分支可能因为缺少后续
+migration 文件而无法自动迁移。建议约定：
+
+```text
+default  稳定分支或主线本地实例
+dev      step-29 或正在开发的下一步功能实例
+step28   step-28-bug-fix 等旧分支验证实例
+```
 
 ## 9. 常用验证命令
 
