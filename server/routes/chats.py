@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 from typing import Any
 
 from anyio import CancelScope
@@ -58,6 +59,11 @@ from ..services.chats import ChatAvailabilityError, ChatService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["chats"])
+
+# 对话回复生成的总超时:当模型/runtime 卡住、迟迟不产出回复时,趁连接还在主动收尾并发
+# error 终态帧,避免前端 NDJSON 流只有 ack、永远停在“生成中”。设为略小于 epaichat 网关
+# 的 stream 超时(默认 300s),确保 octopus 先超时、把 error 帧透传给前端,而不是网关先断连。
+_CHAT_REPLY_TIMEOUT_SECONDS = float(os.environ.get("OCTOPUS_CHAT_REPLY_TIMEOUT", "240"))
 
 
 async def _get_conversation_or_404(
@@ -491,10 +497,24 @@ async def add_chat_message_stream_route(
                 await task
 
         task = asyncio.create_task(run_reply())
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _CHAT_REPLY_TIMEOUT_SECONDS
         try:
             while True:
                 if task.done() and queue.empty():
                     break
+                # 看门狗:回复迟迟未生成完(模型/runtime 卡住)且已超时,趁连接还在主动取消并收尾,
+                # 发 error 终态帧,避免前端只收到 ack、永远停在“生成中/发送中”。
+                if not task.done() and loop.time() > deadline:
+                    await cancel_reply_task()
+                    yield _stream_line(
+                        {
+                            "type": "error",
+                            "error": "Reply generation timed out",
+                            "messageId": None,
+                        }
+                    )
+                    return
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.05)
                 except TimeoutError:
