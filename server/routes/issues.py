@@ -350,13 +350,19 @@ async def execute_issue_route(
             },
         },
     }
-    run = await heartbeat.wakeup(
-        assignee_agent_id,
-        payload,
-        actor_type="agent" if actor.actor_type == "agent" else "user",
-        actor_id=actor.actor_id,
-        execute_immediately=False,
-    )
+    try:
+        run = await heartbeat.wakeup(
+            assignee_agent_id,
+            payload,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+            execute_immediately=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if run is None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
