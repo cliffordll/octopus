@@ -144,6 +144,8 @@ class FakeBridgeWorker:
             return {"activated": True}
         if method == "deactivate":
             return {"deactivated": True}
+        if method == "validateConfig":
+            return {"valid": True}
         if method == "getData":
             return {"items": [{"id": "LIN-1"}], "key": params["key"]}
         if method == "performAction":
@@ -353,6 +355,79 @@ async def test_step29_plugin_management_routes_save_config(
     assert status_code == 200
     assert config["pluginId"] == installed["id"]
     assert config["configJson"] == {"apiTokenSecretRef": "secret:linear"}
+
+
+async def test_step29_plugin_detail_config_health_and_dashboard_routes(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    worker = FakeBridgeWorker()
+    worker_manager = PluginWorkerManager()
+    application.state.plugin_worker_manager = worker_manager
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": {
+                **_manifest(),
+                "instanceConfigSchema": {
+                    "type": "object",
+                    "required": ["apiTokenSecretRef"],
+                },
+            },
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-linear",
+        },
+    )
+
+    detail_code, detail = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}"
+    )
+    config_code, config = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/config"
+    )
+    invalid_config_code, invalid_config = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/config/test",
+        json_body={"configJson": {}},
+    )
+    await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/config",
+        json_body={"configJson": {"apiTokenSecretRef": "secret:linear"}},
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+    worker_manager.register_worker(installed["id"], worker)
+    valid_config_code, valid_config = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/config/test",
+        json_body={"configJson": {"apiTokenSecretRef": "secret:linear"}},
+    )
+    health_code, health = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/health"
+    )
+    dashboard_code, dashboard = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/dashboard"
+    )
+
+    assert detail_code == 200
+    assert detail["id"] == installed["id"]
+    assert config_code == 200
+    assert config["configJson"] == {}
+    assert invalid_config_code == 200
+    assert invalid_config["valid"] is False
+    assert invalid_config["missing"] == ["apiTokenSecretRef"]
+    assert valid_config_code == 200
+    assert valid_config["valid"] is True
+    assert health_code == 200
+    assert health["workerRunning"] is True
+    assert dashboard_code == 200
+    assert dashboard["counts"]["jobs"] == 1
+    assert dashboard["health"]["workerRunning"] is True
 
 
 async def test_step29_plugin_registry_jobs_logs_and_webhook_delivery(
