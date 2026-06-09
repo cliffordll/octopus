@@ -281,6 +281,44 @@ export interface PluginLog {
   createdAt: string;
 }
 
+export interface PluginConfig {
+  pluginId: string;
+  configJson: Record<string, unknown>;
+  updatedAt: string | null;
+}
+
+export interface PluginConfigTestResult {
+  valid: boolean;
+  missing?: string[];
+  source?: string;
+  message?: string;
+}
+
+export interface PluginHealth {
+  pluginId: string;
+  pluginKey: string;
+  status: PluginStatus;
+  workerRunning: boolean;
+  healthy: boolean;
+}
+
+export interface PluginDashboard {
+  plugin?: PluginSummary;
+  counts: {
+    jobs: number;
+    logs: number;
+    uiSlots: number;
+    tools: number;
+    webhooks: number;
+  };
+  health: {
+    status: PluginStatus;
+    workerRunning: boolean;
+  };
+  recentLogs: PluginLog[];
+  jobs: PluginJob[];
+}
+
 export interface IssueDetail extends IssueListItem {
   description: string | null;
   reviewerAgentId: string | null;

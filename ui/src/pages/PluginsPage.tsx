@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { pluginsApi } from "../api/plugins";
 import type { AvailablePluginItem, PluginSummary } from "../api/types";
 import { Badge } from "../components/Badge";
@@ -34,9 +34,16 @@ function sortPlugins(items: AvailablePluginItem[]): AvailablePluginItem[] {
   return [...items].sort((left, right) => left.displayName.localeCompare(right.displayName));
 }
 
+function formatConfig(config: Record<string, unknown> | undefined): string {
+  return JSON.stringify(config ?? {}, null, 2);
+}
+
 export function PluginsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
+  const [configDraft, setConfigDraft] = useState("{}");
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
+  const [configParseError, setConfigParseError] = useState<string | null>(null);
   const available = useQuery({ queryKey: ["plugins", "available"], queryFn: pluginsApi.available });
   const installed = useQuery({ queryKey: ["plugins", "installed"], queryFn: pluginsApi.list });
   const installedByKey = useMemo(() => {
@@ -57,20 +64,108 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean } = {}) {
     queryKey: ["plugins", selectedPluginId, "logs"],
     queryFn: () => pluginsApi.logs(selectedInstalled!.id),
   });
+  const config = useQuery({
+    enabled: selectedInstalled !== null,
+    queryKey: ["plugins", selectedPluginId, "config"],
+    queryFn: () => pluginsApi.config(selectedInstalled!.id),
+  });
+  const health = useQuery({
+    enabled: selectedInstalled !== null,
+    queryKey: ["plugins", selectedPluginId, "health"],
+    queryFn: () => pluginsApi.health(selectedInstalled!.id),
+  });
+  const dashboard = useQuery({
+    enabled: selectedInstalled !== null,
+    queryKey: ["plugins", selectedPluginId, "dashboard"],
+    queryFn: () => pluginsApi.dashboard(selectedInstalled!.id),
+  });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["plugins"] });
   };
   const install = useMutation({ mutationFn: pluginsApi.install, onSuccess: refresh });
   const enable = useMutation({ mutationFn: pluginsApi.enable, onSuccess: refresh });
   const disable = useMutation({ mutationFn: pluginsApi.disable, onSuccess: refresh });
+  const testConfig = useMutation({
+    mutationFn: ({ pluginId, configJson }: { pluginId: string; configJson: Record<string, unknown> }) =>
+      pluginsApi.testConfig(pluginId, configJson),
+    onSuccess: (result) => {
+      setConfigMessage(result.valid ? "配置测试通过" : `配置缺少: ${(result.missing ?? []).join(", ")}`);
+    },
+  });
+  const saveConfig = useMutation({
+    mutationFn: ({ pluginId, configJson }: { pluginId: string; configJson: Record<string, unknown> }) =>
+      pluginsApi.saveConfig(pluginId, configJson),
+    onSuccess: (saved) => {
+      setConfigMessage("配置已保存");
+      setConfigDraft(formatConfig(saved.configJson));
+      void queryClient.invalidateQueries({ queryKey: ["plugins", saved.pluginId, "config"] });
+    },
+  });
   const plugins = sortPlugins(available.data?.items ?? []);
+
+  useEffect(() => {
+    if (config.data) {
+      setConfigDraft(formatConfig(config.data.configJson ?? {}));
+      setConfigMessage(null);
+      setConfigParseError(null);
+    }
+  }, [config.data]);
+
+  const parseConfigDraft = (): Record<string, unknown> | null => {
+    try {
+      const parsed: unknown = JSON.parse(configDraft);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setConfigParseError("配置必须是 JSON object");
+        return null;
+      }
+      setConfigParseError(null);
+      return parsed as Record<string, unknown>;
+    } catch {
+      setConfigParseError("配置 JSON 格式无效");
+      return null;
+    }
+  };
+
+  const submitConfigTest = () => {
+    if (!selectedInstalled) return;
+    const parsed = parseConfigDraft();
+    if (parsed) testConfig.mutate({ pluginId: selectedInstalled.id, configJson: parsed });
+  };
+
+  const submitConfigSave = () => {
+    if (!selectedInstalled) return;
+    const parsed = parseConfigDraft();
+    if (parsed) saveConfig.mutate({ pluginId: selectedInstalled.id, configJson: parsed });
+  };
 
   const listPanelClass = embedded ? "plugins-list-panel" : "panel plugins-list-panel";
   const detailPanelClass = embedded ? "plugins-detail-panel" : "panel plugins-detail-panel";
   const content = (
     <>
-      {(available.error || installed.error || install.error || enable.error || disable.error) && (
-        <ErrorNotice error={available.error ?? installed.error ?? install.error ?? enable.error ?? disable.error} />
+      {(available.error ||
+        installed.error ||
+        install.error ||
+        enable.error ||
+        disable.error ||
+        config.error ||
+        health.error ||
+        dashboard.error ||
+        testConfig.error ||
+        saveConfig.error) && (
+        <ErrorNotice
+          error={
+            available.error ??
+            installed.error ??
+            install.error ??
+            enable.error ??
+            disable.error ??
+            config.error ??
+            health.error ??
+            dashboard.error ??
+            testConfig.error ??
+            saveConfig.error
+          }
+        />
       )}
       <div className="plugins-layout">
         <section className={listPanelClass}>
@@ -149,6 +244,43 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 </div>
                 <Badge>{statusText(selectedInstalled.status)}</Badge>
               </div>
+              <div className="plugin-health-strip">
+                <span>{health.data?.workerRunning ? "Worker 运行中" : "Worker 未运行"}</span>
+                <span>Jobs {dashboard.data?.counts?.jobs ?? 0}</span>
+                <span>Tools {dashboard.data?.counts?.tools ?? 0}</span>
+                <span>Webhooks {dashboard.data?.counts?.webhooks ?? 0}</span>
+              </div>
+              <section>
+                <h3>配置</h3>
+                {config.isLoading && <p className="muted">载入中...</p>}
+                <label className="plugin-config-editor">
+                  <span>插件配置 JSON</span>
+                  <textarea
+                    aria-label="插件配置 JSON"
+                    onChange={(event) => {
+                      setConfigDraft(event.target.value);
+                      setConfigMessage(null);
+                      setConfigParseError(null);
+                    }}
+                    rows={7}
+                    spellCheck={false}
+                    value={configDraft}
+                  />
+                </label>
+                {(configParseError || configMessage) && (
+                  <p className={configParseError ? "plugin-config-error" : "plugin-config-message"}>
+                    {configParseError ?? configMessage}
+                  </p>
+                )}
+                <div className="plugin-config-actions">
+                  <button disabled={testConfig.isPending || config.isLoading} onClick={submitConfigTest} type="button">
+                    测试配置
+                  </button>
+                  <button disabled={saveConfig.isPending || config.isLoading} onClick={submitConfigSave} type="button">
+                    保存配置
+                  </button>
+                </div>
+              </section>
               <section>
                 <h3>Jobs</h3>
                 {jobs.isLoading && <p className="muted">载入中...</p>}
