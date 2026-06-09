@@ -14,6 +14,11 @@ const UNSUPPORTED_RUNTIMES = new Set<AgentRuntimeType>([
   "hermes_local",
 ]);
 const OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions";
+const PROCESS_DEMO_CONFIG = {
+  command: "uv",
+  args: ["run", "--no-sync", "python", "-m", "packages.runtimes.process.demo"],
+  timeoutSec: 10,
+};
 
 function stringValue(config: Record<string, unknown>, key: string): string {
   const value = config[key];
@@ -193,6 +198,15 @@ export function RuntimeConfigFields({ runtime, value, onChange }: RuntimeConfigF
   if (runtime === "process") {
     return renderShell(
       <>
+        <div className="runtime-config-check-row">
+          <span>
+            <strong>内置 process demo</strong>
+            <small>验证 server 可以启动外部进程并收集 stdout；CWD 留空即可。</small>
+          </span>
+          <button className="secondary small-button" type="button" onClick={() => onChange(PROCESS_DEMO_CONFIG)}>
+            使用内置 demo
+          </button>
+        </div>
         <label>
           Command
           <input placeholder="默认使用 server 侧命令" value={stringValue(value, "command")} onChange={(event) => setField("command", event.target.value)} />
