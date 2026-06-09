@@ -17,6 +17,7 @@ dependencies = [
     "jsonschema>=4.20",
     "python-multipart>=0.0.20",
     "boto3>=1.34",
+    "websockets>=16.0",
 ]
 
 [project.scripts]

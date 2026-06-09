@@ -2,11 +2,24 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.schema import AgentEnabledSkill
+from packages.database.schema import (
+    ActivityLog,
+    AgentEnabledSkill,
+    HeartbeatRun,
+    HeartbeatRunEvent,
+)
+
+
+class SkillUsageSource(NamedTuple):
+    source_type: str
+    created_at: datetime
+    payload: dict
+    run_id: str | None
 
 
 def _normalize_skill_keys(skill_keys: Iterable[str]) -> list[str]:
@@ -82,3 +95,56 @@ async def add_enabled_skill_keys(
         agent_id=agent_id,
         skill_keys=[*current, *_normalize_skill_keys(skill_keys)],
     )
+
+
+async def list_skill_usage_sources(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    agent_id: str,
+    start_time: datetime,
+) -> list[SkillUsageSource]:
+    sources: list[SkillUsageSource] = []
+    run_rows = await session.execute(
+        select(HeartbeatRun).where(
+            HeartbeatRun.org_id == org_id,
+            HeartbeatRun.agent_id == agent_id,
+            HeartbeatRun.created_at >= start_time,
+        )
+    )
+    for row in run_rows.scalars().all():
+        payload: dict = {}
+        if isinstance(row.context_snapshot, dict):
+            payload["context"] = row.context_snapshot
+        if isinstance(row.result_json, dict):
+            payload["result"] = row.result_json
+        if isinstance(row.usage_json, dict):
+            payload["usage"] = row.usage_json
+        sources.append(SkillUsageSource("run", row.created_at, payload, row.id))
+
+    event_rows = await session.execute(
+        select(HeartbeatRunEvent).where(
+            HeartbeatRunEvent.org_id == org_id,
+            HeartbeatRunEvent.agent_id == agent_id,
+            HeartbeatRunEvent.created_at >= start_time,
+        )
+    )
+    for row in event_rows.scalars().all():
+        if isinstance(row.payload, dict):
+            sources.append(
+                SkillUsageSource("run_event", row.created_at, row.payload, row.run_id)
+            )
+
+    activity_rows = await session.execute(
+        select(ActivityLog).where(
+            ActivityLog.org_id == org_id,
+            ActivityLog.agent_id == agent_id,
+            ActivityLog.created_at >= start_time,
+        )
+    )
+    for row in activity_rows.scalars().all():
+        if isinstance(row.details, dict):
+            sources.append(
+                SkillUsageSource("activity", row.created_at, row.details, row.run_id)
+            )
+    return sources

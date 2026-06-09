@@ -139,6 +139,45 @@ def test_agent_hire_can_let_server_assign_role_sequence_name() -> None:
     )
 
 
+def test_agent_create_accepts_openclaw_gateway_runtime_config() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"id": "agent-openclaw", "status": "idle"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "OpenClaw Operator",
+                "--role",
+                "engineer",
+                "--runtime",
+                "openclaw_gateway",
+                "--runtime-config",
+                '{"url":"wss://gateway.example.test/openclaw","authToken":"secret","sessionKeyStrategy":"run"}',
+            ],
+            client=client,
+            stdout=io.StringIO(),
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/orgs/org-1/agents"
+    assert requests[0].read() == (
+        b'{"name":"OpenClaw Operator","role":"engineer",'
+        b'"agentRuntimeType":"openclaw_gateway","agentRuntimeConfig":{'
+        b'"url":"wss://gateway.example.test/openclaw",'
+        b'"authToken":"secret","sessionKeyStrategy":"run"}}'
+    )
+
+
 def test_agent_create_rejects_implicit_empty_process_runtime_config() -> None:
     requests: list[httpx.Request] = []
 
@@ -574,7 +613,10 @@ def test_agent_adapter_test_environment_accepts_live_probe_options() -> None:
         == 0
     )
 
-    assert requests[0].url.path == "/api/orgs/org-1/adapters/opencode_local/test-environment"
+    assert (
+        requests[0].url.path
+        == "/api/orgs/org-1/adapters/opencode_local/test-environment"
+    )
     assert requests[0].read() == (
         b'{"agentRuntimeConfig":{"model":"openai/gpt-5","liveProbe":true,'
         b'"probeTimeoutSec":2.5,"probeArgs":["--version"],"probeModels":true}}'
@@ -589,8 +631,36 @@ def test_agent_memory_commands_cover_memory_file_routes() -> None:
         return httpx.Response(200, json={})
 
     client = ApiClient(transport=httpx.MockTransport(handler))
-    assert main(["agent", "memory-list", "agent-1", "--layer", "life", "--path", "projects"], client=client) == 0
-    assert main(["agent", "memory-read", "agent-1", "--layer", "memory", "--path", "2026-06-08.md"], client=client) == 0
+    assert (
+        main(
+            [
+                "agent",
+                "memory-list",
+                "agent-1",
+                "--layer",
+                "life",
+                "--path",
+                "projects",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "agent",
+                "memory-read",
+                "agent-1",
+                "--layer",
+                "memory",
+                "--path",
+                "2026-06-08.md",
+            ],
+            client=client,
+        )
+        == 0
+    )
     assert (
         main(
             [
@@ -608,7 +678,21 @@ def test_agent_memory_commands_cover_memory_file_routes() -> None:
         )
         == 0
     )
-    assert main(["agent", "memory-delete", "agent-1", "--layer", "life", "--path", "projects/context.md"], client=client) == 0
+    assert (
+        main(
+            [
+                "agent",
+                "memory-delete",
+                "agent-1",
+                "--layer",
+                "life",
+                "--path",
+                "projects/context.md",
+            ],
+            client=client,
+        )
+        == 0
+    )
 
     assert [request.url.path for request in requests] == [
         "/api/agents/agent-1/memory/files",

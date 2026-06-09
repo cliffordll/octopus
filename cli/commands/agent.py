@@ -141,23 +141,31 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     instructions_update_parser.set_defaults(handler=update_instructions_bundle)
     memory_list_parser = actions.add_parser("memory-list")
     memory_list_parser.add_argument("agent_id")
-    memory_list_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_list_parser.add_argument(
+        "--layer", choices=("memory", "life"), default="memory"
+    )
     memory_list_parser.add_argument("--path", default="")
     memory_list_parser.set_defaults(handler=list_memory_files)
     memory_read_parser = actions.add_parser("memory-read")
     memory_read_parser.add_argument("agent_id")
-    memory_read_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_read_parser.add_argument(
+        "--layer", choices=("memory", "life"), default="memory"
+    )
     memory_read_parser.add_argument("--path", required=True)
     memory_read_parser.set_defaults(handler=read_memory_file)
     memory_write_parser = actions.add_parser("memory-write")
     memory_write_parser.add_argument("agent_id")
-    memory_write_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_write_parser.add_argument(
+        "--layer", choices=("memory", "life"), default="memory"
+    )
     memory_write_parser.add_argument("--path", required=True)
     memory_write_parser.add_argument("--content", required=True)
     memory_write_parser.set_defaults(handler=write_memory_file)
     memory_delete_parser = actions.add_parser("memory-delete")
     memory_delete_parser.add_argument("agent_id")
-    memory_delete_parser.add_argument("--layer", choices=("memory", "life"), default="memory")
+    memory_delete_parser.add_argument(
+        "--layer", choices=("memory", "life"), default="memory"
+    )
     memory_delete_parser.add_argument("--path", required=True)
     memory_delete_parser.set_defaults(handler=delete_memory_file)
     create_parser = actions.add_parser("create")
