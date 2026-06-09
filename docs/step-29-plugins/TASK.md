@@ -11,7 +11,7 @@
 
 ## 上游证据
 
-上游 `D:\coding\rudder` 已有独立 plugin framework，不是简单扩展点。开发前必须优先核对：
+上游参考实现已有独立 plugin framework，不是简单扩展点。开发前必须优先核对：
 
 - `doc/plugins/PLUGIN_SPEC.md`
 - `server/src/routes/plugins.ts`
@@ -28,7 +28,7 @@
 - `packages/db/src/schema/plugins.ts`
 - `packages/db/src/schema/plugin_*.ts`
 - `packages/plugins/sdk/`
-- `packages/plugins/create-rudder-plugin/`
+- plugin authoring scaffold package
 - `packages/plugins/examples/plugin-linear/`
 
 ## 目标
@@ -50,6 +50,82 @@
 - 实现 plugin UI 静态资源路由、UI contributions、bridge data/action 和 SSE stream。
 - 规划 Python 版本 SDK/脚手架兼容边界；优先保证 server 能加载已约定结构的插件，再考虑作者工具。
 - 补齐一方插件目录约定，Linear 插件作为上游对照目标，不在无证据情况下改成 Octopus 私有插件模型。
+
+## 开发任务拆分
+
+### 29A: Contract、manifest 与 catalog
+
+- 对齐上游 `PaperclipPluginManifestV1`、capability、UI slot、job、webhook、tool 和 config schema 结构。
+- 增加 shared type、validator、错误结构和 API path 常量。
+- 建立 bundled plugin catalog，能从本地约定目录读取 manifest、entrypoints、README/metadata 和 example 标记。
+- 管理 API 先支持只读列表、available/examples、manifest detail 和基础 validation error。
+- 验收：contract tests 覆盖 manifest 解析、capability 枚举、UI slot/job/webhook/tool schema 和 catalog response。
+
+### 29B: Database、registry 与 lifecycle
+
+- 增加 plugin 迁移和 schema：`plugins`、`plugin_config`、`plugin_state`、`plugin_entities`、`plugin_jobs`、`plugin_job_runs`、`plugin_logs`、`plugin_webhook_deliveries`、`plugin_organization_settings`。
+- 实现 registry service：安装记录、列表、按状态过滤、配置读写、实体映射、job/webhook/log 查询。
+- 实现 lifecycle service：`installed`、`ready`、`disabled`、`error`、`upgrade_pending`、`uninstalled` 状态流转。
+- 管理 API 覆盖 install、enable、disable、uninstall/purge、upgrade、health、config、logs、dashboard。
+- 验收：migration tests、registry tests 和 workflow tests 覆盖 install -> enable -> ready -> disable -> enable -> uninstall/purge。
+
+### 29C: Worker、host services 与 tools
+
+- 实现 worker manager 和 JSON-RPC 边界：activation/deactivation、`getData`、`performAction`、`validateConfig`、`handleWebhook`、tool execution、graceful shutdown。
+- 实现 plugin host services：config、state、entities、activity/log、organization/project/issue/workspace 只读或受控写入能力。
+- 实现 capability gating，插件只允许调用 manifest 声明的 host capability。
+- 实现 plugin tools registry/dispatcher，使 agent 能发现并调用 plugin-contributed tools。
+- 验收：worker RPC、capability denied、tool discovery/execution 和错误映射有 contract/workflow tests。
+
+### 29D: Jobs、webhooks、state 和 logs
+
+- 实现 plugin state store、job store、job scheduler/coordinator 和 job run 持久化。
+- 实现 webhook ingress：记录 delivery、校验 ready 状态和 declared endpoint，再转发给 worker。
+- 实现 plugin logs 聚合、dashboard 统计和 stream/event 更新。
+- 验收：job trigger/run record、webhook delivery success/failure、state read/write/delete、logs/dashboard tests。
+
+### 29E: UI bridge 与静态资源
+
+- 实现 plugin UI 静态资源路由和 same-origin trusted JS 加载边界。
+- 实现 UI contributions registry，覆盖 page、settingsPage、detailTab、dashboardWidget、sidebar/projectSidebarItem、commentAnnotation/action 等上游已声明 slot。
+- 实现 bridge data/action API、UI stream/SSE 和基础 host context 注入。
+- 验收：UI contribution metadata、bridge `getData`/`performAction`、stream 基础响应和 slot filtering tests。
+
+### 29F: Bundled plugins、SDK 兼容和文档
+
+- 添加 bundled examples 的本地目录约定、安装来源和构建/加载说明。
+- 优先让 server 加载已构建的上游插件结构；Python 版 SDK/脚手架只定义兼容边界，不在首轮承诺完整作者体验。
+- 补齐开发文档：安装插件、配置插件、调试 worker、查看日志、使用插件 tool、插件 UI bridge 限制。
+- 验收：Linear 和三个 example 插件能作为本地 fixture 通过 catalog、install、enable、config、worker/UI smoke。
+
+## 需要添加的插件
+
+Step 29 只添加有上游目录或 manifest 证据的插件。GitHub、Slack、Jira、Notion 等第三方插件暂不列入本步骤，除非后续在上游发现对应插件或正式补充契约。
+
+### 必须添加
+
+- Linear：第一方业务插件，对照 `packages/plugins/examples/plugin-linear/`。用途是从 Linear 浏览 issue、批量导入到 Octopus project、保存 Octopus issue 与 Linear issue 的一对一关联，并在 issue 详情中展示 linked Linear issue。首轮不做双向同步、评论同步、webhook 或状态回写。插件 ID 以实际 manifest 为准，不在规划文档中重命名。
+
+### 必须添加为 bundled example / 验收 fixture
+
+- Plugin Authoring Smoke Example：最小作者体验 smoke 插件，对照 `packages/plugins/examples/plugin-authoring-smoke-example/`。用途是验证 SDK authoring、worker、state read/write、events subscribe 和 dashboard widget 的最小链路。插件 ID 以实际 manifest 为准。
+- File Browser Example：workspace/UI 示例插件，对照 `packages/plugins/examples/plugin-file-browser-example/`。用途是验证 project sidebar item、project detail tab、workspace file list/read/write、comment annotation 和 comment context menu。插件 ID 以实际 manifest 为准。
+- Kitchen Sink Example：综合回归插件，对照 `packages/plugins/examples/plugin-kitchen-sink-example/`。用途是覆盖 page、settings、dashboard、sidebar、detail tabs、comment surfaces、bridge data/action、events、jobs、webhooks、tools、streams、state、entities、metrics、activity、workspace 和受控 process demo。插件 ID 以实际 manifest 为准。
+
+### 暂不添加
+
+- GitHub、Slack、Jira、Notion、Stripe 等外部系统插件：当前上游示例插件目录没有对应一方插件，Step 29 不凭空定义 manifest、capability、UI 或数据同步语义。
+- 生产级第三方插件 marketplace：本步骤只实现本地单实例 plugin framework 和 bundled/local plugin 管理，不承诺云端多实例 artifact 分发或 marketplace 审核/发布流程。
+
+### 后续候选插件 backlog
+
+这些插件适合在 Step 29 framework 验收通过后单独立项。进入开发前必须先补齐 manifest、capability、config schema、数据映射、UI surface、权限/secret 边界和验收用例。
+
+- GitHub：候选能力包括 repository/PR/issue 读取、PR 状态或 review 事件 webhook、把 GitHub issue/PR 关联到 Octopus issue，以及 agent tool 读取仓库上下文。需要先确认是否走 GitHub App、PAT 还是 fine-grained token。
+- Slack：候选能力包括消息通知、slash command、thread 关联、approval/incident 事件推送和 agent 对话入口。需要先确认 workspace 安装、bot token、signing secret 和 channel/org 映射。
+- Jira：候选能力包括 issue import、status mapping、project mapping、comment/status sync 和 webhook ingestion。需要先确认 Jira Cloud/Data Center 差异、字段 schema 和状态流转约束。
+- Notion：候选能力包括 database/page 读取、知识库检索、page-to-issue import 和 agent tool 查询。需要先确认 Notion database schema 映射和 workspace 授权边界。
+- Stripe：候选能力包括 billing/customer/subscription event ingestion、cost/budget 关联和 dashboard widget。需要先确认它是否属于 Octopus 当前 server 兼容范围，避免把 billing 产品模型塞进 plugin framework 首轮。
 
 ## 剩余待开发
 

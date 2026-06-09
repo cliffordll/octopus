@@ -360,7 +360,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 
 automation、calendar、secrets 等能力不预占主线步骤。只有在确认属于当前 server 兼容范围并取得上游契约证据后，才单独规划并插入依赖链。organization resources 与 organization skills 已作为服务端独立能力提前纳入 Step 17。
 
-Plugins 已确认属于上游 server 的独立子系统，纳入 Step 29，不再作为可选扩展悬置。其范围以 `D:\coding\rudder\doc\plugins\PLUGIN_SPEC.md`、`server/src/routes/plugins.ts`、`server/src/bootstrap/plugin-host-runtime.ts`、`server/src/services/plugin-*`、`packages/db/src/schema/plugin_*.ts` 和 `packages/plugins/*` 为证据来源。
+Plugins 已确认属于上游 server 的独立子系统，纳入 Step 29，不再作为可选扩展悬置。其范围以上游 plugin spec、plugin routes、plugin host runtime、plugin services、plugin schema 和 plugin packages 为证据来源。
 
 ### Skills 后续拆分边界
 
