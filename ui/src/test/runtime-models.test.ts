@@ -25,16 +25,15 @@ describe("runtime model references", () => {
     expect(runtimeModelLabel(model)).toBe("deepseek/deepseek-v4-flash");
   });
 
-  it("supports provider models for local and gateway runtimes", () => {
+  it("supports provider models only for runtimes with model catalogs", () => {
     expect(MODEL_PROVIDER_RUNTIMES).toEqual([
       "opencode_local",
       "codex_local",
       "claude_local",
-      "openclaw_gateway",
     ]);
     expect(supportsRuntimeModels("codex_local")).toBe(true);
     expect(supportsRuntimeModels("claude_local")).toBe(true);
-    expect(supportsRuntimeModels("openclaw_gateway")).toBe(true);
+    expect(supportsRuntimeModels("openclaw_gateway")).toBe(false);
     expect(supportsRuntimeModels("process")).toBe(false);
   });
 });

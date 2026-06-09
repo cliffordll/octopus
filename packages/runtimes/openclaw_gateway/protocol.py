@@ -55,9 +55,7 @@ def resolve_auth(config: dict[str, Any]) -> ResolvedAuth:
     )
 
 
-def build_connect_payload(
-    config: dict[str, Any], *, request_id: str
-) -> dict[str, Any]:
+def build_connect_payload(config: dict[str, Any], *, request_id: str) -> dict[str, Any]:
     auth = resolve_auth(config)
     payload: dict[str, Any] = {
         "protocol": DEFAULT_PROTOCOL_VERSION,

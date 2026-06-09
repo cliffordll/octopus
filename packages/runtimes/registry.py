@@ -5,6 +5,7 @@ from .codex_local import CodexLocalRuntimeAdapter
 from .common import UnavailableRuntimeAdapter
 from .http import HttpRuntimeAdapter
 from .opencode_local import OpenCodeLocalRuntimeAdapter
+from .openclaw_gateway import OpenClawGatewayRuntimeAdapter
 from .process import ProcessRuntimeAdapter
 from .types import RuntimeAdapter
 
@@ -13,12 +14,14 @@ _CODEX_LOCAL = CodexLocalRuntimeAdapter()
 _HTTP = HttpRuntimeAdapter()
 _CLAUDE_LOCAL = ClaudeLocalRuntimeAdapter()
 _OPENCODE_LOCAL = OpenCodeLocalRuntimeAdapter()
+_OPENCLAW_GATEWAY = OpenClawGatewayRuntimeAdapter()
 _ADAPTERS: dict[str, RuntimeAdapter] = {
     "process": _PROCESS,
     "codex_local": _CODEX_LOCAL,
     "http": _HTTP,
     "claude_local": _CLAUDE_LOCAL,
     "opencode_local": _OPENCODE_LOCAL,
+    "openclaw_gateway": _OPENCLAW_GATEWAY,
 }
 _KNOWN_RUNTIME_TYPES = {
     "process",

@@ -7,6 +7,9 @@ from packages.runtimes.openclaw_gateway.protocol import (
     resolve_session_key,
     validate_gateway_url,
 )
+from packages.runtimes.openclaw_gateway.environment import (
+    test_environment as run_environment_probe,
+)
 
 
 def test_openclaw_gateway_rejects_missing_and_non_websocket_urls() -> None:
@@ -76,7 +79,9 @@ def test_openclaw_gateway_session_key_strategies() -> None:
         == "stable"
     )
     assert (
-        resolve_session_key({"sessionKeyStrategy": "run"}, run_id="run-1", issue_id=None)
+        resolve_session_key(
+            {"sessionKeyStrategy": "run"}, run_id="run-1", issue_id=None
+        )
         == "octopus:run:run-1"
     )
 
@@ -127,6 +132,74 @@ def test_openclaw_gateway_builds_agent_payload_from_runtime_context() -> None:
         "agentName": "OpenClaw",
         "issueId": "ISSUE-123",
     }
-    assert payload["payload"]["workspaceRuntime"] == {
-        "services": [{"id": "preview"}]
-    }
+    assert payload["payload"]["workspaceRuntime"] == {"services": [{"id": "preview"}]}
+
+
+async def test_openclaw_gateway_environment_reports_missing_url() -> None:
+    result = await run_environment_probe({})
+
+    assert result.agent_runtime_type == "openclaw_gateway"
+    assert result.status == "failed"
+    assert _check(result.checks, "url")["code"] == "openclaw_gateway_url_missing"
+    assert _check(result.checks, "probe")["status"] == "skipped"
+
+
+async def test_openclaw_gateway_environment_rejects_http_url() -> None:
+    result = await run_environment_probe({"url": "https://example.test/gateway"})
+
+    assert result.status == "failed"
+    assert _check(result.checks, "url")["code"] == (
+        "openclaw_gateway_url_protocol_invalid"
+    )
+    assert _check(result.checks, "probe")["status"] == "skipped"
+
+
+async def test_openclaw_gateway_environment_warns_for_remote_plaintext_ws() -> None:
+    result = await run_environment_probe(
+        {"url": "ws://gateway.example.test/openclaw", "authToken": "secret"}
+    )
+
+    assert result.status == "warning"
+    assert _check(result.checks, "url")["code"] == "openclaw_gateway_url_valid"
+    assert _check(result.checks, "plaintext")["code"] == (
+        "openclaw_gateway_plaintext_remote_ws"
+    )
+    assert _check(result.checks, "auth")["code"] == "openclaw_gateway_auth_present"
+    assert _check(result.checks, "probe")["status"] == "skipped"
+
+
+async def test_openclaw_gateway_environment_reports_auth_missing() -> None:
+    result = await run_environment_probe({"url": "wss://gateway.example.test/openclaw"})
+
+    assert result.status == "warning"
+    assert _check(result.checks, "auth")["code"] == "openclaw_gateway_auth_missing"
+
+
+async def test_openclaw_gateway_environment_uses_injected_probe() -> None:
+    async def probe(url: str, config: dict) -> dict[str, str | None]:
+        assert url == "wss://gateway.example.test/openclaw"
+        assert config["authToken"] == "secret"
+        return {
+            "id": "probe",
+            "label": "OpenClaw Gateway probe",
+            "status": "ok",
+            "code": "openclaw_gateway_probe_ok",
+            "message": "OpenClaw Gateway probe completed.",
+            "hint": None,
+        }
+
+    result = await run_environment_probe(
+        {
+            "url": "wss://gateway.example.test/openclaw",
+            "authToken": "secret",
+            "liveProbe": True,
+        },
+        probe=probe,
+    )
+
+    assert result.status == "ok"
+    assert _check(result.checks, "probe")["code"] == "openclaw_gateway_probe_ok"
+
+
+def _check(checks: list[dict], check_id: str) -> dict:
+    return next(check for check in checks if check["id"] == check_id)

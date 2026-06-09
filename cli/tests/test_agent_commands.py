@@ -139,6 +139,45 @@ def test_agent_hire_can_let_server_assign_role_sequence_name() -> None:
     )
 
 
+def test_agent_create_accepts_openclaw_gateway_runtime_config() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"id": "agent-openclaw", "status": "idle"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "agent",
+                "create",
+                "--org-id",
+                "org-1",
+                "--name",
+                "OpenClaw Operator",
+                "--role",
+                "engineer",
+                "--runtime",
+                "openclaw_gateway",
+                "--runtime-config",
+                '{"url":"wss://gateway.example.test/openclaw","authToken":"secret","sessionKeyStrategy":"run"}',
+            ],
+            client=client,
+            stdout=io.StringIO(),
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/orgs/org-1/agents"
+    assert requests[0].read() == (
+        b'{"name":"OpenClaw Operator","role":"engineer",'
+        b'"agentRuntimeType":"openclaw_gateway","agentRuntimeConfig":{'
+        b'"url":"wss://gateway.example.test/openclaw",'
+        b'"authToken":"secret","sessionKeyStrategy":"run"}}'
+    )
+
+
 def test_agent_create_rejects_implicit_empty_process_runtime_config() -> None:
     requests: list[httpx.Request] = []
 
