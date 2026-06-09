@@ -41,6 +41,11 @@ function dollars(cents: number | null | undefined): string {
   return `$${((cents ?? 0) / 100).toFixed(2)}`;
 }
 
+function costDimensionLabel(value: string | null | undefined): string {
+  if (!value || value === "unattributed") return "未归属";
+  return value;
+}
+
 function CostRows({ rows, title, valueKey }: { rows: CostDimensionRow[]; title: string; valueKey: "agentId" | "biller" | "projectId" | "provider" }) {
   return (
     <div className="cost-settings-list">
@@ -50,7 +55,7 @@ function CostRows({ rows, title, valueKey }: { rows: CostDimensionRow[]; title: 
       ) : (
         rows.slice(0, 6).map((row) => (
           <div className="cost-settings-row" key={`${title}:${row[valueKey] ?? "unattributed"}`}>
-            <span>{row[valueKey] ?? "unattributed"}</span>
+            <span>{costDimensionLabel(row[valueKey])}</span>
             <strong>{dollars(row.costCents)}</strong>
           </div>
         ))
@@ -82,10 +87,10 @@ function CostSettingsSection({ current, orgId }: { current: (typeof SETTINGS_SEC
         <div><span>输出 tokens</span><strong>{summary.data?.outputTokens ?? 0}</strong></div>
       </div>
       <div className="cost-settings-grid">
-        <CostRows rows={byAgent.data ?? []} title="By Agent" valueKey="agentId" />
-        <CostRows rows={byProvider.data ?? []} title="By Provider" valueKey="provider" />
-        <CostRows rows={byBiller.data ?? []} title="By Biller" valueKey="biller" />
-        <CostRows rows={byProject.data ?? []} title="By Project" valueKey="projectId" />
+        <CostRows rows={byAgent.data ?? []} title="按智能体" valueKey="agentId" />
+        <CostRows rows={byProvider.data ?? []} title="按 Provider" valueKey="provider" />
+        <CostRows rows={byBiller.data ?? []} title="按计费方" valueKey="biller" />
+        <CostRows rows={byProject.data ?? []} title="按项目" valueKey="projectId" />
       </div>
     </section>
   );

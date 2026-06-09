@@ -8,6 +8,7 @@ import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
 const DEFAULT_PROTOCOL = "openai_chat_completions";
+const PRICING_KEYS = ["inputCostPer1M", "outputCostPer1M"] as const;
 
 export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const english = isEnglishLocale();
@@ -21,6 +22,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const [providerScope, setProviderScope] = useState<RuntimeProviderScope>("global");
   const [modelId, setModelId] = useState("");
   const [modelName, setModelName] = useState("");
+  const [inputCostPer1M, setInputCostPer1M] = useState("");
+  const [outputCostPer1M, setOutputCostPer1M] = useState("");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [modelDialogProviderId, setModelDialogProviderId] = useState("");
   const [editingProvider, setEditingProvider] = useState<RuntimeProvider | null>(null);
@@ -91,6 +94,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
         scope: providerRows.find((provider) => provider.providerId === modelDialogProviderId)?.scope ?? "global",
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
+        metadata: modelMetadataWithPricing({}),
         enabled: true,
       }),
     onSuccess: () => {
@@ -106,6 +110,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     mutationFn: () =>
       runtimeProvidersApi.updateModel(orgId, runtimeType, editingModel!.providerId, editingModel!.model.modelId, {
         displayName: modelName.trim() || editingModel!.model.modelId,
+        metadata: modelMetadataWithPricing(editingModel!.model.metadata ?? {}),
         enabled: editingModel!.model.enabled !== false,
       }),
     onSuccess: () => {
@@ -160,6 +165,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   function clearModelForm() {
     setModelId("");
     setModelName("");
+    setInputCostPer1M("");
+    setOutputCostPer1M("");
     setModelDialogProviderId("");
     setEditingModel(null);
   }
@@ -179,6 +186,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     setEditingModel(null);
     setModelId("");
     setModelName("");
+    setInputCostPer1M("");
+    setOutputCostPer1M("");
     setModelDialogProviderId(providerId);
   }
 
@@ -187,6 +196,9 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     setEditingModel({ providerId, model });
     setModelId(model.modelId);
     setModelName(model.displayName ?? "");
+    const pricing = modelPricing(model.metadata);
+    setInputCostPer1M(pricing.inputCostPer1M);
+    setOutputCostPer1M(pricing.outputCostPer1M);
   }
 
   function confirmDeleteProvider(provider: RuntimeProvider) {
@@ -229,6 +241,17 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     } else if (modelDialogProviderId && modelId.trim()) {
       createModel.mutate();
     }
+  }
+
+  function modelMetadataWithPricing(metadata: Record<string, unknown>) {
+    const next = { ...metadata };
+    const pricing = pricingPayload(inputCostPer1M, outputCostPer1M);
+    if (pricing) {
+      next.pricing = pricing;
+    } else {
+      delete next.pricing;
+    }
+    return next;
   }
 
   return (
@@ -430,6 +453,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
+              <ModelPricingFields
+                english={english}
+                inputCostPer1M={inputCostPer1M}
+                onInputCostPer1M={setInputCostPer1M}
+                onOutputCostPer1M={setOutputCostPer1M}
+                outputCostPer1M={outputCostPer1M}
+              />
               <div className="task-modal-actions">
               <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
                 <button disabled={createModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
@@ -468,6 +498,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
+              <ModelPricingFields
+                english={english}
+                inputCostPer1M={inputCostPer1M}
+                onInputCostPer1M={setInputCostPer1M}
+                onOutputCostPer1M={setOutputCostPer1M}
+                outputCostPer1M={outputCostPer1M}
+              />
               <div className="task-modal-actions">
                 <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
                 <button disabled={updateModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
@@ -478,6 +515,55 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ModelPricingFields({
+  english,
+  inputCostPer1M,
+  onInputCostPer1M,
+  onOutputCostPer1M,
+  outputCostPer1M,
+}: {
+  english: boolean;
+  inputCostPer1M: string;
+  onInputCostPer1M: (value: string) => void;
+  onOutputCostPer1M: (value: string) => void;
+  outputCostPer1M: string;
+}) {
+  return (
+    <fieldset className="runtime-model-pricing">
+      <legend>{english ? "Pricing fallback" : "价格估算"}</legend>
+      <p className="muted">
+        {english
+          ? "Used when the runtime returns tokens without cost. Leave blank to skip estimation, or enter 0 for free models."
+          : "运行时只返回 token、不返回成本时使用。留空表示不估算，免费模型填 0。"}
+      </p>
+      <div className="runtime-model-pricing-grid">
+        <label>
+          {english ? "Input / 1M tokens" : "输入 / 100 万 tokens"}
+          <input
+            min="0"
+            placeholder={english ? "e.g. 0.14" : "例如 0.14"}
+            step="0.000001"
+            type="number"
+            value={inputCostPer1M}
+            onChange={(event) => onInputCostPer1M(event.target.value)}
+          />
+        </label>
+        <label>
+          {english ? "Output / 1M tokens" : "输出 / 100 万 tokens"}
+          <input
+            min="0"
+            placeholder={english ? "e.g. 0.28" : "例如 0.28"}
+            step="0.000001"
+            type="number"
+            value={outputCostPer1M}
+            onChange={(event) => onOutputCostPer1M(event.target.value)}
+          />
+        </label>
+      </div>
+    </fieldset>
   );
 }
 
@@ -630,6 +716,7 @@ function ProviderModelGroup({
                 </div>
               </div>
               <span className="runtime-model-id">{model.modelId}</span>
+              <span className="runtime-model-pricing-summary">{pricingSummary(model.metadata, english)}</span>
             </div>
           </article>
         ))}
@@ -642,4 +729,48 @@ function ProviderModelGroup({
 function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) {
   if (scope === "global") return "Global";
   return "Organization";
+}
+
+function modelPricing(metadata: RuntimeModel["metadata"] | undefined) {
+  const pricing = metadata?.pricing;
+  if (!pricing || typeof pricing !== "object" || Array.isArray(pricing)) {
+    return { inputCostPer1M: "", outputCostPer1M: "" };
+  }
+  const record = pricing as Record<string, unknown>;
+  return {
+    inputCostPer1M: numericString(record.inputCostPer1M),
+    outputCostPer1M: numericString(record.outputCostPer1M),
+  };
+}
+
+function pricingPayload(inputCostPer1M: string, outputCostPer1M: string) {
+  const pairs = [
+    ["inputCostPer1M", inputCostPer1M],
+    ["outputCostPer1M", outputCostPer1M],
+  ] as const;
+  const pricing: Record<(typeof PRICING_KEYS)[number], number> = {} as Record<(typeof PRICING_KEYS)[number], number>;
+  for (const [key, value] of pairs) {
+    if (!value.trim()) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      pricing[key] = parsed;
+    }
+  }
+  return Object.keys(pricing).length ? pricing : null;
+}
+
+function numericString(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function pricingSummary(metadata: RuntimeModel["metadata"] | undefined, english: boolean) {
+  const pricing = modelPricing(metadata);
+  if (!pricing.inputCostPer1M && !pricing.outputCostPer1M) {
+    return english ? "Pricing not configured" : "未配置价格";
+  }
+  const input = pricing.inputCostPer1M || "0";
+  const output = pricing.outputCostPer1M || "0";
+  return english
+    ? `Pricing: input $${input} / output $${output} per 1M tokens`
+    : `价格：输入 $${input} / 输出 $${output} 每 100 万 tokens`;
 }

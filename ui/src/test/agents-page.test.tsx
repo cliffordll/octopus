@@ -371,7 +371,7 @@ it("manages runtime providers and models from settings", async () => {
       return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
-      return respond([{ scope: "global", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
+      return respond([{ scope: "global", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", metadata: { pricing: { inputCostPer1M: 0.12, outputCostPer1M: 0.24 } }, enabled: true }]);
     }
     if (path === "/api/orgs/org-1/runtime-providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ scope: "organization", modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
@@ -435,6 +435,7 @@ it("manages runtime providers and models from settings", async () => {
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
+  expect(kimiProvider.getByText("价格：输入 $0.12 / 输出 $0.24 每 100 万 tokens")).toBeInTheDocument();
   expect(kimiProvider.getAllByText("Global").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
   expect(openrouterProvider.getAllByText("Organization").length).toBeGreaterThanOrEqual(2);
@@ -514,14 +515,27 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "编辑" }));
   const modelEditDialog = within(screen.getByRole("dialog", { name: "编辑 Model" }));
+  expect(modelEditDialog.getByLabelText("输入 / 100 万 tokens")).toHaveValue(0.12);
+  expect(modelEditDialog.getByLabelText("输出 / 100 万 tokens")).toHaveValue(0.24);
   await userEvent.clear(modelEditDialog.getByLabelText("模型显示名称"));
   await userEvent.type(modelEditDialog.getByLabelText("模型显示名称"), "Kimi K2.5 Updated");
+  await userEvent.clear(modelEditDialog.getByLabelText("输入 / 100 万 tokens"));
+  await userEvent.type(modelEditDialog.getByLabelText("输入 / 100 万 tokens"), "0.14");
+  await userEvent.clear(modelEditDialog.getByLabelText("输出 / 100 万 tokens"));
+  await userEvent.type(modelEditDialog.getByLabelText("输出 / 100 万 tokens"), "0.28");
   await userEvent.click(modelEditDialog.getByRole("button", { name: "保存 Model" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"displayName":"Kimi K2.5 Updated"'),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"pricing":{"inputCostPer1M":0.14,"outputCostPer1M":0.28}'),
     }),
   );
 
