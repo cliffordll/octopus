@@ -1,4 +1,4 @@
-# Step 30: Plugin Framework
+# Step 29: Plugin Framework
 
 状态：待开发
 
@@ -63,7 +63,7 @@
 - 插件运行时默认按上游早期模型面向本地或自托管持久化部署，不提供多实例云端 artifact 分发。
 - 插件 UI 按上游 same-origin trusted JS 边界实现，不擅自宣称安全沙箱。
 - 插件不得覆盖核心路由、修改核心授权/预算、直接访问业务数据库或执行第三方 DB migrations。
-- 插件 secrets/env 解析依赖 Step 29 的 actor/access/secret 边界；未完成前只能提供明确的开发期兼容行为。
+- 插件 secrets/env 解析依赖 Step 30 的 actor/access/secret 边界；未完成前只能提供明确的开发期兼容行为。
 - 插件 cost/budget/activity 归集依赖 Step 20/25/27/28 已有 observability、activity、成本与治理记录，不在本步骤重新定义治理模型。
 
 ## 验收
