@@ -19,6 +19,7 @@ from packages.database.schema import (
     Base,
     BudgetIncident,
     HeartbeatRun,
+    Issue,
     Organization,
     Project,
 )
@@ -48,11 +49,12 @@ async def _request(
     path: str,
     *,
     json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.request(method, path, json=json)
+        response = await client.request(method, path, json=json, headers=headers)
     return response.status_code, response.json()
 
 
@@ -142,6 +144,33 @@ async def test_budget_policy_overview_and_budget_patch_routes(
     assert agent is not None and agent.budget_monthly_cents == 2500
 
 
+async def test_agent_budget_patch_rejects_cross_org_agent_actor(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    home_org_id, home_agent_id, _ = await _seed_scope(factory)
+    foreign_org_id, foreign_agent_id, _ = await _seed_scope(factory)
+
+    code, body = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{foreign_agent_id}/budgets",
+        json={"budgetMonthlyCents": 2500},
+        headers={
+            "x-test-agent-id": home_agent_id,
+            "x-test-org-id": home_org_id,
+        },
+    )
+
+    assert code == 403
+    assert "another organization" in body["detail"]
+    async with factory() as session:
+        foreign_agent = await session.get(Agent, foreign_agent_id)
+    assert foreign_agent is not None
+    assert foreign_agent.org_id == foreign_org_id
+    assert foreign_agent.budget_monthly_cents == 0
+
+
 async def test_cost_event_crosses_budget_thresholds_and_blocks_new_work(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -222,6 +251,42 @@ async def test_cost_event_crosses_budget_thresholds_and_blocks_new_work(
     assert len(approvals) == 1
     assert approvals[0].type == "budget_override_required"
     assert "budget.hard_threshold_crossed" in actions
+
+
+async def test_issue_execute_returns_explainable_budget_block(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id, agent_id, _ = await _seed_scope(factory)
+    issue_id = str(uuid.uuid4())
+    async with factory() as session:
+        agent = await session.get(Agent, agent_id)
+        assert agent is not None
+        agent.status = "paused"
+        agent.pause_reason = "budget"
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Budget blocked issue",
+                status="todo",
+                assignee_agent_id=agent_id,
+            )
+        )
+        await session.commit()
+
+    code, body = await _request(
+        application,
+        "POST",
+        f"/api/issues/{issue_id}/execute",
+        headers={
+            "x-test-agent-id": agent_id,
+            "x-test-org-id": org_id,
+        },
+    )
+
+    assert code == 422
+    assert "budget hard-stop" in body["detail"]
 
 
 async def test_budget_incident_resolve_raises_budget_and_resumes_scope(
