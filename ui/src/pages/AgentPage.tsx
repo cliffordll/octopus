@@ -284,14 +284,6 @@ function booleanSkillField(entry: Record<string, unknown>, key: string): boolean
   return entry[key] === true;
 }
 
-function skillLoadNote(entry: Record<string, unknown>, enabled: boolean): string {
-  const explicit = skillField(entry, ["loadNote", "loadingNote", "detail"], "");
-  if (explicit) return explicit;
-  if (booleanSkillField(entry, "alwaysEnabled")) return "每次智能体运行都会自动加载。";
-  if (enabled) return "当前智能体已使用该技能，后续运行可加载。";
-  return "";
-}
-
 function hasJsonObject(value: Record<string, unknown> | null | undefined): value is Record<string, unknown> {
   return Boolean(value && Object.keys(value).length > 0);
 }
@@ -358,7 +350,7 @@ function skillDisplaySourceText(value: string | null | undefined, bundled: boole
 
 function isBuiltInSkillEntry(entry: Record<string, unknown>): boolean {
   const sourceClass = skillSourceKind(entry);
-  return ["bundled", "built_in", "octopus_bundled", "system_bundled", "rudder_bundled"].includes(sourceClass);
+  return ["bundled", "built_in", "octopus_bundled", "system_bundled"].includes(sourceClass);
 }
 
 function visibleSkillWarning(warning: string): boolean {
@@ -553,13 +545,13 @@ export function AgentPage() {
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
   const [runtimeConfig, setRuntimeConfig] = useState("{}");
   const [desiredSkills, setDesiredSkills] = useState("");
-  const [skillsToEnable, setSkillsToEnable] = useState("");
   const [newSkillName, setNewSkillName] = useState("");
   const [newSkillSlug, setNewSkillSlug] = useState("");
   const [newSkillDescription, setNewSkillDescription] = useState("");
   const [newSkillMarkdown, setNewSkillMarkdown] = useState("");
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [selectedSkillKey, setSelectedSkillKey] = useState("");
+  const [pendingSkillActionKey, setPendingSkillActionKey] = useState("");
   const [runtimeTestResult, setRuntimeTestResult] = useState<AgentRuntimeEnvironmentTestResult | null>(null);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
@@ -705,14 +697,15 @@ export function AgentPage() {
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
     },
+    onSettled: () => setPendingSkillActionKey(""),
   });
   const enableSkills = useMutation({
-    mutationFn: (names?: string[]) => agentsApi.enableSkills(agentId, names ?? parseCsv(skillsToEnable)),
+    mutationFn: (names: string[]) => agentsApi.enableSkills(agentId, names),
     onSuccess: () => {
-      setSkillsToEnable("");
       void queryClient.invalidateQueries({ queryKey: ["agent-skills", agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
     },
+    onSettled: () => setPendingSkillActionKey(""),
   });
   const createPrivateSkill = useMutation({
     mutationFn: () => agentsApi.createPrivateSkill(agentId, {
@@ -995,8 +988,9 @@ export function AgentPage() {
     setMemoryDirectoryPath(parts.slice(0, -1).join("/"));
     setSelectedMemoryPath("");
   }
-  function enableSkill(name: string) {
+  function enableSkill(name: string, actionKey: string) {
     if (!name.trim()) return;
+    setPendingSkillActionKey(actionKey);
     enableSkills.mutate([name.trim()]);
   }
   function closeSkillDialog() {
@@ -1006,8 +1000,9 @@ export function AgentPage() {
     setNewSkillDescription("");
     setNewSkillMarkdown("");
   }
-  function disableSkill(name: string) {
+  function disableSkill(name: string, actionKey: string) {
     if (!name.trim()) return;
+    setPendingSkillActionKey(actionKey);
     const target = name.trim().toLowerCase();
     const entry = skillEntries.find((item) => skillAliases(item).includes(target));
     const targets = new Set(entry ? skillAliases(entry) : [target]);
@@ -1544,55 +1539,6 @@ export function AgentPage() {
             {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
             {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
             {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
-            <section className="agent-skill-install-card agent-skill-selection-card">
-              <div className="agent-skill-source-heading">
-                <h3>启用选择</h3>
-                <Badge>{desiredSkillRows.length}</Badge>
-              </div>
-              <div className="agent-skill-form-grid">
-                <label>
-                  追加启用
-                  <input
-                    aria-label="追加启用"
-                    placeholder="skills/control-plane, org:organization/demo/review"
-                    value={skillsToEnable}
-                    onChange={(event) => setSkillsToEnable(event.target.value)}
-                  />
-                </label>
-                <label>
-                  完整列表
-                  <input
-                    aria-label="完整列表"
-                    placeholder="skills/control-plane, agent:incident-response"
-                    value={desiredSkills}
-                    onChange={(event) => setDesiredSkills(event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="agent-skill-actions">
-                <button
-                  className="secondary"
-                  disabled={enableSkills.isPending || parseCsv(skillsToEnable).length === 0}
-                  onClick={() => enableSkills.mutate(parseCsv(skillsToEnable))}
-                  type="button"
-                >
-                  追加启用
-                </button>
-                <button
-                  className="secondary"
-                  disabled={syncSkills.isPending}
-                  onClick={() => syncSkills.mutate(parseCsv(desiredSkills))}
-                  type="button"
-                >
-                  替换列表
-                </button>
-              </div>
-              {desiredSkillRows.length > 0 && (
-                <div className="agent-skill-current-list" aria-label="当前启用技能">
-                  {desiredSkillRows.map((skill) => <code key={skill}>{skill}</code>)}
-                </div>
-              )}
-            </section>
             <div className="agent-skills-library">
               {skillsAnalytics.data && (
                 <section className="agent-skill-tags-card agent-skill-analytics-card">
@@ -1622,16 +1568,17 @@ export function AgentPage() {
                     {group.rows.map((entry, index) => {
                       const key = skillEntryKey(entry, index);
                       const selected = selectedSkillKey === key;
+                      const actionPending = pendingSkillActionKey === key;
                       const name = skillEntryName(entry);
                       const actionName = skillActionName(entry);
                       const enabled = skillEnabled(entry, desiredSkillRows);
                       const isBundled = isBuiltInSkillEntry(entry);
+                      const alwaysEnabled = booleanSkillField(entry, "alwaysEnabled");
                       const description = skillDescription(entry) || skillField(entry, ["detail"], "");
                       const version = skillField(entry, ["version"], "");
                       const sourceLabel = skillSourceLabel(entry);
                       const originLabel = skillField(entry, ["originLabel"], "");
                       const sourceText = skillDisplaySourceText(originLabel || sourceLabel, isBundled);
-                      const loadNote = skillLoadNote(entry, enabled);
                       const state = skillState(entry);
                       const toggleSelectedSkill = () => setSelectedSkillKey(selected ? "" : key);
                       const onSkillKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -1652,30 +1599,41 @@ export function AgentPage() {
                             <span className="agent-skill-tag-title-row">
                               <code>{name}</code>
                               <span className="agent-skill-title-actions">
-                                <span className={`agent-skill-enabled-pill ${enabled ? "enabled" : ""}`}>{enabled ? "使用中" : "未使用"}</span>
+                                {alwaysEnabled ? (
+                                  <span className="agent-skill-enabled-pill enabled">自动启用</span>
+                                ) : (
+                                  <button
+                                    aria-checked={enabled}
+                                    aria-label={`${name} 技能${enabled ? "已启用" : "未启用"}`}
+                                    className={`agent-skill-switch ${enabled ? "enabled" : ""} ${actionPending ? "pending" : ""}`}
+                                    disabled={actionPending}
+                                    onClick={(event) => {
+                                      stopSkillActionClick(event);
+                                      if (enabled) disableSkill(actionName, key);
+                                      else enableSkill(actionName, key);
+                                    }}
+                                    role="switch"
+                                    type="button"
+                                  >
+                                    <span>启用</span>
+                                    <span>禁用</span>
+                                  </button>
+                                )}
                                 {isBundled ? (
                                   <button className="secondary small-button" disabled={createPrivateSkill.isPending} onClick={(event) => { stopSkillActionClick(event); forkSkill(entry); }} type="button">派生</button>
                                 ) : (
-                                  <>
                                     <button
-                                      className="secondary small-button"
-                                      disabled={enableSkills.isPending || syncSkills.isPending}
-                                      onClick={(event) => {
-                                        stopSkillActionClick(event);
-                                        if (enabled) disableSkill(actionName);
-                                        else enableSkill(actionName);
-                                      }}
+                                      className="danger small-button"
+                                      disabled
+                                      onClick={stopSkillActionClick}
                                       type="button"
                                     >
-                                      {enabled ? "取消使用" : "使用"}
+                                      删除
                                     </button>
-                                    <button className="danger small-button" disabled onClick={stopSkillActionClick} type="button">删除</button>
-                                  </>
                                 )}
                               </span>
                             </span>
                             <span className="agent-skill-tag-description">{description || "未填写描述"}</span>
-                            {loadNote && <span className="agent-skill-tag-note">{loadNote}</span>}
                             <span className="agent-skill-tag-facts">
                               {!isCommunitySkillEntry(entry) && <span>{sourceText}</span>}
                               <span>{state}</span>

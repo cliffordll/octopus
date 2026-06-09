@@ -996,22 +996,22 @@ it("manages skills from agent configuration", async () => {
   expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
-  expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
   expect(screen.getByText("Deep Research")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("追加启用"), { target: { value: "org:organization/org-1/deep-research, external:debug" } });
-  await userEvent.click(screen.getByRole("button", { name: "追加启用" }));
-  fireEvent.change(screen.getByLabelText("完整列表"), { target: { value: "review, agent:deploy" } });
-  await userEvent.click(screen.getByRole("button", { name: "替换列表" }));
+  expect(screen.getByText("自动启用")).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "取消使用" }));
+  await userEvent.click(within(screen.getByText("Deploy").closest("article")!).getByRole("switch", { name: /Deploy 技能已启用/ }));
+  await userEvent.click(screen.getByText("deep-research"));
+  const orgSkill = screen.getByText("deep-research").closest("article");
+  expect(orgSkill).not.toBeNull();
+  await userEvent.click(within(orgSkill!).getByRole("switch", { name: /deep-research 技能未启用/ }));
   await userEvent.click(screen.getByText("Debug"));
   const debugSkill = screen.getByText("Debug").closest("article");
   expect(debugSkill).not.toBeNull();
-  await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
+  await userEvent.click(within(debugSkill!).getByRole("switch", { name: /Debug 技能未启用/ }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
   fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "Incident Response" } });
@@ -1021,24 +1021,17 @@ it("manages skills from agent configuration", async () => {
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1/skills/enable",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ skills: ["org:organization/org-1/deep-research", "external:debug"] }),
-    }),
-  );
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1/skills/sync",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ desiredSkills: ["review", "agent:deploy"] }),
-    }),
-  );
-  expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/skills/sync",
     expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ desiredSkills: ["review"] }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/skills/enable",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ skills: ["org:organization/org-1/deep-research"] }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
