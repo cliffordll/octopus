@@ -76,6 +76,8 @@ from packages.shared.types.chat import (
 from packages.shared.types.issue import CreateIssuePayload
 from ._time import ensure_aware
 from .agents import prepare_agent_runtime_config
+from .budgets import BudgetService
+from .costs import CostService
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
 from .workspaces import WorkspaceService
@@ -701,6 +703,18 @@ class ChatService:
             )
         if commit_after_user_message:
             await self._session.commit()
+        context_links = await list_context_links(self._session, [conversation.id])
+        primary_project_id = next(
+            (link.entity_id for link in context_links if link.entity_type == "project"),
+            None,
+        )
+        block = await BudgetService(self._session).get_invocation_block(
+            conversation.org_id,
+            agent.id,
+            project_id=primary_project_id,
+        )
+        if block is not None:
+            raise ValueError(block.reason)
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
         except ValueError as exc:
@@ -786,6 +800,16 @@ class ChatService:
             raise RuntimeError("Chat request timed out")
         if result.error_message or (result.exit_code or 0) != 0:
             raise RuntimeError(result.error_message or "Chat adapter execution failed")
+        await CostService(self._session).record_runtime_result_cost_if_present(
+            org_id=conversation.org_id,
+            agent_id=agent.id,
+            source_type="chat",
+            source_id=run_id,
+            runtime_type=agent.agent_runtime_type,
+            result_json=result.result_json,
+            usage_json=result.usage_json,
+            project_id=primary_project_id,
+        )
         result_json = _normalized_assistant_result(result.result_json or {})
         summary = str(result_json.get("summary") or "").strip()
         if not summary:
