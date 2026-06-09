@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -33,9 +34,11 @@ from ..plugins.catalog import (
     PluginCatalog,
     load_plugin_catalog,
 )
+from ..plugins.jobs import PluginJobCoordinator
 from ..plugins.registry import PluginRegistryService
 from ..plugins.ui_bridge import PluginUiBridge
-from ..plugins.worker_manager import PluginWorkerManager
+from ..plugins.webhooks import PluginWebhookDispatcher
+from ..plugins.worker_manager import PluginWorkerHandle, PluginWorkerManager
 
 router = APIRouter(tags=["plugins"])
 
@@ -70,10 +73,14 @@ async def install_plugin_route(
 
 @router.delete(PLUGIN_DETAIL_PATH)
 async def uninstall_plugin_route(
+    request: Request,
     pluginId: str,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
+        worker_manager = _worker_manager(request)
+        if worker_manager is not None:
+            await worker_manager.deactivate_plugin(pluginId)
         return await PluginRegistryService(session).uninstall_plugin(pluginId)
     except LookupError as exc:
         raise HTTPException(
@@ -95,11 +102,24 @@ async def list_example_plugins_route(request: Request) -> dict[str, Any]:
 
 @router.post(PLUGIN_ENABLE_PATH)
 async def enable_plugin_route(
+    request: Request,
     pluginId: str,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return await PluginRegistryService(session).enable_plugin(pluginId)
+        registry = PluginRegistryService(session)
+        plugin = await registry.enable_plugin(pluginId)
+        worker_manager = _worker_manager(request)
+        worker_factory = _worker_factory(request)
+        if worker_manager is not None and callable(worker_factory):
+            config = await registry.get_config(pluginId)
+            await worker_manager.activate_plugin(
+                pluginId,
+                worker_factory(pluginId),
+                manifest=plugin["manifest"],
+                config=config["configJson"],
+            )
+        return plugin
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
@@ -108,11 +128,15 @@ async def enable_plugin_route(
 
 @router.post(PLUGIN_DISABLE_PATH)
 async def disable_plugin_route(
+    request: Request,
     pluginId: str,
     body: dict[str, Any] | None = Body(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
+        worker_manager = _worker_manager(request)
+        if worker_manager is not None:
+            await worker_manager.deactivate_plugin(pluginId)
         reason = body.get("reason") if isinstance(body, dict) else None
         return await PluginRegistryService(session).disable_plugin(
             pluginId,
@@ -180,47 +204,65 @@ async def list_plugin_jobs_route(
 
 @router.post(PLUGIN_JOB_TRIGGER_PATH)
 async def trigger_plugin_job_route(
+    request: Request,
     pluginId: str,
     jobId: str,
+    body: dict[str, Any] | None = Body(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        return await PluginRegistryService(session).record_job_run(
+        context = body.get("context") if isinstance(body, dict) else {}
+        return await PluginJobCoordinator(
+            PluginRegistryService(session),
+            worker_manager=_worker_manager(request),
+        ).trigger(
             pluginId,
             jobId,
-            status="queued",
+            context=context if isinstance(context, dict) else {},
         )
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.post(PLUGIN_WEBHOOK_PATH)
 async def receive_plugin_webhook_route(
+    request: Request,
     pluginId: str,
     endpointKey: str,
     body: dict[str, Any] = Body(default={}),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    service = PluginRegistryService(session)
     try:
-        delivery = await service.record_webhook_delivery(
+        return await PluginWebhookDispatcher(
+            PluginRegistryService(session),
+            worker_manager=_worker_manager(request),
+        ).receive(
             pluginId,
             endpoint_key=endpointKey,
-            request_json=body,
-            status="received",
+            payload=body,
+            headers=dict(request.headers),
         )
-        await service.add_log(
-            pluginId,
-            level="info",
-            message="Webhook received",
-            details_json={"endpointKey": endpointKey},
-        )
-        return delivery
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
 
 
@@ -363,13 +405,22 @@ def _load_catalog(request: Request) -> PluginCatalog:
 
 
 def _ui_bridge(request: Request, session: AsyncSession) -> PluginUiBridge:
-    worker_manager = getattr(request.app.state, "plugin_worker_manager", None)
     return PluginUiBridge(
         PluginRegistryService(session),
-        worker_manager=worker_manager
-        if isinstance(worker_manager, PluginWorkerManager)
-        else None,
+        worker_manager=_worker_manager(request),
     )
+
+
+def _worker_manager(request: Request) -> PluginWorkerManager | None:
+    worker_manager = getattr(request.app.state, "plugin_worker_manager", None)
+    return worker_manager if isinstance(worker_manager, PluginWorkerManager) else None
+
+
+def _worker_factory(request: Request) -> Callable[[str], PluginWorkerHandle] | None:
+    worker_factory = getattr(request.app.state, "plugin_worker_factory", None)
+    if not callable(worker_factory):
+        return None
+    return cast(Callable[[str], PluginWorkerHandle], worker_factory)
 
 
 def _required_body_string(body: dict[str, Any], field: str) -> str:

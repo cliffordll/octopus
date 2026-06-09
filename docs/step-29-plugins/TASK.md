@@ -125,7 +125,8 @@ Step 29 的目标不是只做一个空框架。插件框架必须覆盖真实一
 
 - 已完成 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store 和基础 plugin UI bridge。
 - 已添加 bundled plugin fixtures 和 Step 29 authoring/operations 文档。
-- 仍需补齐生产级 worker activation/deactivation、scheduler/coordinator 常驻运行、完整 host services、UI stream 增量事件、SDK/脚手架包实现和一方集成插件生产级 provider 行为。
+- 已补齐 worker activation/deactivation 边界、job trigger coordinator、webhook ready/endpoint/capability 校验与 worker 转发、host services capability gating、config/state/log/entity mapping 受控调用面。
+- 仍需补齐 scheduler/coordinator 常驻运行、UI stream 增量事件、SDK/脚手架包实现和一方集成插件生产级 provider 行为。
 - 当前没有 Python 版 plugin SDK/authoring scaffold，仅有内置 `create-plugin` skill 文档可作后续参考。
 
 ## 边界
