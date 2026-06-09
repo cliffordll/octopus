@@ -423,6 +423,172 @@ small {
   padding: 14px;
 }
 
+.plugins-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.plugins-list-panel,
+.plugins-detail-panel {
+  min-width: 0;
+}
+
+.plugin-settings-section {
+  overflow: auto;
+}
+
+.plugins-settings-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.plugins-settings-header h3,
+.plugins-settings-header p {
+  margin: 0;
+}
+
+.plugin-settings-section .plugins-list-panel,
+.plugin-settings-section .plugins-detail-panel {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.plugin-settings-section .plugin-row,
+.plugin-settings-section .plugin-detail-row {
+  background: #0b1018;
+}
+
+.plugins-panel-heading {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.plugins-panel-heading h2,
+.plugins-panel-heading p {
+  margin: 0;
+}
+
+.plugins-panel-heading h2 {
+  margin-bottom: 4px;
+}
+
+.plugins-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plugin-row {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.plugin-row.selected {
+  border-color: #3b82f6;
+}
+
+.plugin-row-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  justify-content: space-between;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.plugin-row-main:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.plugin-row-main strong,
+.plugin-detail-header strong {
+  display: block;
+}
+
+.plugin-row-main small {
+  color: #8ea0b8;
+  display: block;
+  margin-top: 2px;
+}
+
+.plugin-row p {
+  margin: 0;
+}
+
+.plugin-row-meta {
+  color: #8ea0b8;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  gap: 8px;
+}
+
+.plugin-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.plugin-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.plugin-detail-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.plugin-detail-header h3,
+.plugin-detail-header p,
+.plugin-detail section h3 {
+  margin: 0;
+}
+
+.plugin-detail section {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-detail-list {
+  display: grid;
+  gap: 6px;
+}
+
+.plugin-detail-row {
+  align-items: center;
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.plugin-detail-row span {
+  color: #8ea0b8;
+  font-size: var(--text-xs);
+}
+
 .cost-settings-summary,
 .cost-settings-grid {
   display: grid;

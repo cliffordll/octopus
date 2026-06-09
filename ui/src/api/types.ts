@@ -203,6 +203,84 @@ export interface ServerHealth {
   storagePathStyle?: boolean | null;
 }
 
+export type PluginStatus =
+  | "installed"
+  | "ready"
+  | "disabled"
+  | "error"
+  | "upgrade_pending"
+  | "uninstalled";
+
+export interface PluginManifest {
+  id: string;
+  apiVersion: number;
+  version: string;
+  displayName: string;
+  description?: string;
+  author?: string;
+  categories?: string[];
+  capabilities: string[];
+  entrypoints: Record<string, string | undefined>;
+  instanceConfigSchema?: Record<string, unknown>;
+  ui?: {
+    slots?: Array<Record<string, unknown>>;
+  };
+  jobs?: Array<Record<string, unknown>>;
+  webhooks?: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+}
+
+export interface PluginSummary {
+  id: string;
+  pluginKey: string;
+  displayName: string;
+  version: string;
+  status: PluginStatus;
+  sourceType: string;
+  sourceLocator: string;
+  manifest: PluginManifest;
+  installedAt: string | null;
+  enabledAt: string | null;
+  disabledAt: string | null;
+  uninstalledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AvailablePluginItem {
+  id: string;
+  displayName: string;
+  version: string;
+  sourcePath: string;
+  example: boolean;
+  manifest: PluginManifest;
+}
+
+export interface PluginCatalogResponse {
+  items: AvailablePluginItem[];
+  errors: Array<{ id: string; manifestPath: string; message: string }>;
+}
+
+export interface PluginJob {
+  id: string;
+  pluginId: string;
+  jobKey: string;
+  displayName: string;
+  schedule: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginLog {
+  id: string;
+  pluginId: string;
+  level: string;
+  message: string;
+  detailsJson: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface IssueDetail extends IssueListItem {
   description: string | null;
   reviewerAgentId: string | null;
