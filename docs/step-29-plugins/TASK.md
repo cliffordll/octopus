@@ -1,6 +1,6 @@
 # Step 29: Plugin Framework
 
-状态：待开发
+状态：进行中
 
 ## 已提前完成
 
@@ -95,16 +95,20 @@
 
 - 添加 bundled examples 的本地目录约定、安装来源和构建/加载说明。
 - 优先让 server 加载已构建的上游插件结构；Python 版 SDK/脚手架只定义兼容边界，不在首轮承诺完整作者体验。
-- 补齐开发文档：安装插件、配置插件、调试 worker、查看日志、使用插件 tool、插件 UI bridge 限制。
+- 补齐开发文档：安装插件、配置插件、调试 worker、查看日志、使用插件 tool、插件 UI bridge 限制。当前文档入口：`docs/step-29-plugins/AUTHORING.md`。
 - 验收：Linear 和三个 example 插件能作为本地 fixture 通过 catalog、install、enable、config、worker/UI smoke。
 
 ## 需要添加的插件
 
-Step 29 只添加有上游目录或 manifest 证据的插件。GitHub、Slack、Jira、Notion 等第三方插件暂不列入本步骤，除非后续在上游发现对应插件或正式补充契约。
+Step 29 的目标不是只做一个空框架。插件框架必须覆盖真实一方集成会用到的安装、配置、secret 引用、worker、tool、job、webhook、entity mapping、UI bridge、日志和调试链路。Linear 与 bundled examples 用于对照和 smoke；GitHub、Slack、Jira、Notion 列为 Step 29 必做集成对象，但生产级外部系统语义必须先落 manifest、capability、config schema、数据映射、UI surface、权限/secret 边界和验收用例，不能凭空硬编码。
 
 ### 必须添加
 
 - Linear：第一方业务插件，对照 `packages/plugins/examples/plugin-linear/`。用途是从 Linear 浏览 issue、批量导入到 Octopus project、保存 Octopus issue 与 Linear issue 的一对一关联，并在 issue 详情中展示 linked Linear issue。首轮不做双向同步、评论同步、webhook 或状态回写。插件 ID 以实际 manifest 为准，不在规划文档中重命名。
+- GitHub：必做一方集成对象。首轮验收范围是 repository/PR/issue 读取能力边界、PR/issue webhook ingress 契约、GitHub issue/PR 与本地 issue 的 entity mapping、agent tool 查询仓库上下文、config/secret 引用和日志。进入生产级实现前必须确认 GitHub App、PAT 或 fine-grained token 的授权方式。
+- Slack：必做一方集成对象。首轮验收范围是 workspace 安装配置、bot token/signing secret 引用、消息通知或 command ingress 契约、channel/org 映射、approval/incident 事件推送边界和 agent 对话入口能力边界。
+- Jira：必做一方集成对象。首轮验收范围是 issue import、project/status mapping、comment/status sync 契约、webhook ingress、agent tool 查询 issue 和配置 schema。进入生产级实现前必须区分 Jira Cloud 与 Data Center 字段/权限差异。
+- Notion：必做一方集成对象。首轮验收范围是 database/page 读取、知识库检索、page-to-issue import、agent tool 查询和 workspace 授权边界。进入生产级实现前必须确认 Notion database schema 映射。
 
 ### 必须添加为 bundled example / 验收 fixture
 
@@ -114,23 +118,14 @@ Step 29 只添加有上游目录或 manifest 证据的插件。GitHub、Slack、
 
 ### 暂不添加
 
-- GitHub、Slack、Jira、Notion、Stripe 等外部系统插件：当前上游示例插件目录没有对应一方插件，Step 29 不凭空定义 manifest、capability、UI 或数据同步语义。
-- 生产级第三方插件 marketplace：本步骤只实现本地单实例 plugin framework 和 bundled/local plugin 管理，不承诺云端多实例 artifact 分发或 marketplace 审核/发布流程。
-
-### 后续候选插件 backlog
-
-这些插件适合在 Step 29 framework 验收通过后单独立项。进入开发前必须先补齐 manifest、capability、config schema、数据映射、UI surface、权限/secret 边界和验收用例。
-
-- GitHub：候选能力包括 repository/PR/issue 读取、PR 状态或 review 事件 webhook、把 GitHub issue/PR 关联到 Octopus issue，以及 agent tool 读取仓库上下文。需要先确认是否走 GitHub App、PAT 还是 fine-grained token。
-- Slack：候选能力包括消息通知、slash command、thread 关联、approval/incident 事件推送和 agent 对话入口。需要先确认 workspace 安装、bot token、signing secret 和 channel/org 映射。
-- Jira：候选能力包括 issue import、status mapping、project mapping、comment/status sync 和 webhook ingestion。需要先确认 Jira Cloud/Data Center 差异、字段 schema 和状态流转约束。
-- Notion：候选能力包括 database/page 读取、知识库检索、page-to-issue import 和 agent tool 查询。需要先确认 Notion database schema 映射和 workspace 授权边界。
-- Stripe：候选能力包括 billing/customer/subscription event ingestion、cost/budget 关联和 dashboard widget。需要先确认它是否属于 Octopus 当前 server 兼容范围，避免把 billing 产品模型塞进 plugin framework 首轮。
+- 生产级第三方插件 marketplace：本步骤只实现本地单实例 plugin framework、bundled/local plugin 管理和一方集成的基础能力边界，不承诺云端多实例 artifact 分发或 marketplace 审核/发布流程。
+- Stripe 等非当前核心工作流插件：除非后续明确进入 Octopus 当前产品范围，否则不把 billing 产品模型塞进 plugin framework 首轮。
 
 ## 剩余待开发
 
-- 当前没有 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store 或 plugin UI bridge。
-- 当前没有 `server/routes/plugins.py`、`plugin-ui-static`、plugin operations routes。
+- 已完成 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store 和基础 plugin UI bridge。
+- 已添加 bundled plugin fixtures 和 Step 29 authoring/operations 文档。
+- 仍需补齐生产级 worker activation/deactivation、scheduler/coordinator 常驻运行、完整 host services、UI stream 增量事件、SDK/脚手架包实现和一方集成插件生产级 provider 行为。
 - 当前没有 Python 版 plugin SDK/authoring scaffold，仅有内置 `create-plugin` skill 文档可作后续参考。
 
 ## 边界

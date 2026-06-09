@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.api_paths.plugins import (
+    PLUGIN_ACTION_PATH,
     PLUGIN_AVAILABLE_PATH,
     PLUGIN_CONFIG_PATH,
+    PLUGIN_DATA_PATH,
     PLUGIN_DISABLE_PATH,
     PLUGIN_ENABLE_PATH,
     PLUGIN_EXAMPLES_PATH,
@@ -18,12 +20,22 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_LOGS_PATH,
     PLUGIN_LIST_PATH,
     PLUGIN_DETAIL_PATH,
+    PLUGIN_STATIC_PATH,
+    PLUGIN_UI_CONTRIBUTIONS_PATH,
+    PLUGIN_UI_STREAM_PATH,
     PLUGIN_WEBHOOK_PATH,
 )
+from packages.shared.constants.plugins import PluginUiSlotType
 
 from ..dependencies.database import get_session
-from ..plugins.catalog import PluginCatalog, load_plugin_catalog
+from ..plugins.catalog import (
+    DEFAULT_PLUGIN_CATALOG_ROOT,
+    PluginCatalog,
+    load_plugin_catalog,
+)
 from ..plugins.registry import PluginRegistryService
+from ..plugins.ui_bridge import PluginUiBridge
+from ..plugins.worker_manager import PluginWorkerManager
 
 router = APIRouter(tags=["plugins"])
 
@@ -230,13 +242,134 @@ async def list_plugin_logs_route(
         ) from exc
 
 
+@router.get(PLUGIN_UI_CONTRIBUTIONS_PATH)
+async def list_plugin_ui_contributions_route(
+    request: Request,
+    slotType: PluginUiSlotType | None = None,
+    entityType: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    return await _ui_bridge(request, session).list_contributions(
+        slot_type=slotType,
+        entity_type=entityType,
+    )
+
+
+@router.post(PLUGIN_DATA_PATH)
+async def plugin_bridge_data_route(
+    request: Request,
+    pluginId: str,
+    key: str,
+    body: dict[str, Any] | None = Body(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        context = body.get("context") if isinstance(body, dict) else {}
+        return await _ui_bridge(request, session).get_data(
+            pluginId,
+            key=key,
+            context=context if isinstance(context, dict) else {},
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+
+@router.post(PLUGIN_ACTION_PATH)
+async def plugin_bridge_action_route(
+    request: Request,
+    pluginId: str,
+    key: str,
+    body: dict[str, Any] | None = Body(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        payload = body if isinstance(body, dict) else {}
+        input_json = payload.get("input", {})
+        context = payload.get("context", {})
+        return await _ui_bridge(request, session).perform_action(
+            pluginId,
+            key=key,
+            input_json=input_json if isinstance(input_json, dict) else {},
+            context=context if isinstance(context, dict) else {},
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+
+@router.get(PLUGIN_UI_STREAM_PATH)
+async def plugin_ui_stream_route(
+    request: Request,
+    pluginId: str,
+    session: AsyncSession = Depends(get_session),
+) -> StreamingResponse:
+    try:
+        return StreamingResponse(
+            _ui_bridge(request, session).stream_events(pluginId),
+            media_type="text/event-stream",
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+
+@router.get(PLUGIN_STATIC_PATH)
+async def plugin_static_asset_route(
+    request: Request,
+    pluginId: str,
+    assetPath: str,
+    session: AsyncSession = Depends(get_session),
+) -> FileResponse:
+    try:
+        path = await _ui_bridge(request, session).static_asset_path(
+            pluginId,
+            assetPath,
+        )
+        return FileResponse(path)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+
 def _load_catalog(request: Request) -> PluginCatalog:
     root = getattr(
         request.app.state,
         "plugin_catalog_root",
-        Path("packages") / "plugins" / "examples",
+        DEFAULT_PLUGIN_CATALOG_ROOT,
     )
     return load_plugin_catalog(root)
+
+
+def _ui_bridge(request: Request, session: AsyncSession) -> PluginUiBridge:
+    worker_manager = getattr(request.app.state, "plugin_worker_manager", None)
+    return PluginUiBridge(
+        PluginRegistryService(session),
+        worker_manager=worker_manager
+        if isinstance(worker_manager, PluginWorkerManager)
+        else None,
+    )
 
 
 def _required_body_string(body: dict[str, Any], field: str) -> str:
