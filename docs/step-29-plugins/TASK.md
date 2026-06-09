@@ -33,7 +33,7 @@
 
 ## 目标
 
-实现上游 server plugin framework 的 Python 兼容版本，使 Octopus 能在本地单实例部署中管理、加载和调用插件，同时明确不承诺上游尚未完成的云端多实例插件分发模型。
+实现上游 server plugin framework 的 Python 兼容版本，使 Octopus 能在本地单实例部署中完成最小插件管理闭环：发现 bundled/local 插件、安装、配置、启用/停用、调用基础 worker/tool/job/webhook/UI bridge 能力，并能在 Settings 中管理和观察插件状态。本步骤明确不承诺上游尚未完成的云端多实例插件分发模型，也不把第三方生产级同步能力塞进首轮闭环。
 
 ## 任务
 
@@ -44,12 +44,12 @@
 - 实现管理 API，覆盖列表、available/examples、安装、启用、禁用、卸载、升级、健康检查、配置、日志和 dashboard。
 - 实现 worker RPC 边界，支持 activation/deactivation、`getData`、`performAction`、`validateConfig`、`handleWebhook`、tool execution 和 graceful shutdown。
 - 实现 plugin tools registry/dispatcher，使 agent 能发现并调用 plugin-contributed tools。
-- 实现 plugin jobs 和 scheduler/coordinator，记录 job run 并支持手动触发。
+- 实现 plugin jobs 和 coordinator，记录 job run 并支持手动触发；常驻 schedule runner 移入 follow-up。
 - 实现 webhook ingress，记录 delivery 并转发给 plugin worker。
 - 实现 plugin state store、host services、secrets/config 能力边界和日志归集。
-- 实现 plugin UI 静态资源路由、UI contributions、bridge data/action 和 SSE stream。
-- 实现产品 UI 中的插件管理页，operator 必须能看到 available/installed 插件、安装、启用、停用、查看 jobs/logs，并能确认 bundled fixtures 已进入 catalog。
-- 规划 Python 版本 SDK/脚手架兼容边界；优先保证 server 能加载已约定结构的插件，再考虑作者工具。
+- 实现 plugin UI 静态资源路由、UI contributions、bridge data/action 和基础 SSE stream；增量事件推送移入 follow-up。
+- 实现产品 UI 中的插件管理页，operator 必须能看到 available/installed 插件、安装、启用、停用、查看和测试配置、查看 jobs/logs，并能确认 bundled fixtures 已进入 catalog。
+- 记录 Python 版本 SDK/脚手架兼容边界；首轮优先保证 server 能加载已约定结构的插件，作者工具移入 follow-up。
 - 补齐一方插件目录约定，Linear 插件作为上游对照目标，不在无证据情况下改成 Octopus 私有插件模型。
 
 ## 开发任务拆分
@@ -80,29 +80,29 @@
 
 ### 29D: Jobs、webhooks、state 和 logs
 
-- 实现 plugin state store、job store、job scheduler/coordinator 和 job run 持久化。
+- 实现 plugin state store、job store、手动 job coordinator 和 job run 持久化。
 - 实现 webhook ingress：记录 delivery、校验 ready 状态和 declared endpoint，再转发给 worker。
-- 实现 plugin logs 聚合、dashboard 统计和 stream/event 更新。
+- 实现 plugin logs 聚合和 dashboard 统计。
 - 验收：job trigger/run record、webhook delivery success/failure、state read/write/delete、logs/dashboard tests。
 
 ### 29E: UI bridge 与静态资源
 
 - 实现 plugin UI 静态资源路由和 same-origin trusted JS 加载边界。
 - 实现 UI contributions registry，覆盖 page、settingsPage、detailTab、dashboardWidget、sidebar/projectSidebarItem、commentAnnotation/action 等上游已声明 slot。
-- 实现 bridge data/action API、UI stream/SSE 和基础 host context 注入。
-- 实现插件管理 UI 入口，展示 available/installed、状态、capabilities、jobs/logs，并提供 install/enable/disable 操作。
+- 实现 bridge data/action API、基础 UI stream/SSE 和基础 host context 注入。
+- 实现插件管理 UI 入口，展示 available/installed、状态、capabilities、config、jobs/logs，并提供 install/enable/disable、test config/save config 操作。
 - 验收：UI contribution metadata、bridge `getData`/`performAction`、stream 基础响应、slot filtering tests 和插件管理页前端测试。
 
-### 29F: Bundled plugins、SDK 兼容和文档
+### 29F: Bundled plugins 和文档
 
 - 添加 bundled examples 的本地目录约定、安装来源和构建/加载说明。
-- 优先让 server 加载已构建的上游插件结构；Python 版 SDK/脚手架只定义兼容边界，不在首轮承诺完整作者体验。
+- 优先让 server 加载已构建的上游插件结构；Python 版 SDK/脚手架不纳入首轮最小闭环。
 - 补齐开发文档：安装插件、配置插件、调试 worker、查看日志、使用插件 tool、插件 UI bridge 限制。当前文档入口：`docs/step-29-plugins/AUTHORING.md`。
 - 验收：Linear 和三个 example 插件能作为本地 fixture 通过 catalog、install、enable、config、worker/UI smoke。
 
 ## 需要添加的插件
 
-Step 29 的目标不是只做一个空框架。插件框架必须覆盖真实一方集成会用到的安装、配置、secret 引用、worker、tool、job、webhook、entity mapping、UI bridge、日志和调试链路。Linear 与 bundled examples 用于对照和 smoke；GitHub、Slack、Jira、Notion 列为 Step 29 必做集成对象，但生产级外部系统语义必须先落 manifest、capability、config schema、数据映射、UI surface、权限/secret 边界和验收用例，不能凭空硬编码。
+Step 29 的目标不是只做一个空框架。最小闭环必须覆盖真实一方集成会用到的安装、配置、secret 引用、worker、tool、job、webhook、entity mapping、UI bridge、日志和调试链路。Linear、GitHub、Slack、Jira、Notion 与 bundled examples 在 Step 29 作为 manifest/fixture/契约对象进入 catalog；生产级外部系统语义移入后续 provider steps，不能凭空硬编码到框架首轮。
 
 ### 必须添加
 
@@ -123,13 +123,20 @@ Step 29 的目标不是只做一个空框架。插件框架必须覆盖真实一
 - 生产级第三方插件 marketplace：本步骤只实现本地单实例 plugin framework、bundled/local plugin 管理和一方集成的基础能力边界，不承诺云端多实例 artifact 分发或 marketplace 审核/发布流程。
 - Stripe 等非当前核心工作流插件：除非后续明确进入 Octopus 当前产品范围，否则不把 billing 产品模型塞进 plugin framework 首轮。
 
-## 剩余待开发
+## 最小闭环状态
 
-- 已完成 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store 和基础 plugin UI bridge。
+- 已完成 plugin schema、migration、registry/lifecycle service、worker manager、tool dispatcher、job/webhook/state/log store、基础 plugin UI bridge、管理 API detail/config/health/dashboard 和 Settings 插件管理 UI。
 - 已添加 bundled plugin fixtures 和 Step 29 authoring/operations 文档。
 - 已补齐 worker activation/deactivation 边界、job trigger coordinator、webhook ready/endpoint/capability 校验与 worker 转发、host services capability gating、config/state/log/entity mapping 受控调用面。
-- 仍需补齐 scheduler/coordinator 常驻运行、UI stream 增量事件、SDK/脚手架包实现和一方集成插件生产级 provider 行为。
-- 当前没有 Python 版 plugin SDK/authoring scaffold，仅有内置 `create-plugin` skill 文档可作后续参考。
+- 最小闭环以 Settings 中可见、可安装、可配置、可启停、可查看 health/dashboard/jobs/logs 为收口标准。
+- 常驻 scheduler、UI stream 增量事件、Python SDK/脚手架和一方集成插件生产级 provider 行为不再阻塞 Step 29 最小闭环。
+
+## 后期计划
+
+- 插件调度增强：常驻 scheduler runner、retry/backoff、job run retention 和 schedule observability。
+- 插件 UI 实时更新：UI stream 增量事件，包括 worker 状态、config 变更、job/log 更新推送。
+- 插件作者体验：Python plugin SDK 和 authoring scaffold。
+- 一方插件生产级 provider：Linear、GitHub、Slack、Jira、Notion 的生产级鉴权、webhook 签名校验、字段映射、同步恢复和真实外部 API 行为。
 
 ## 边界
 
@@ -148,4 +155,5 @@ Step 29 的目标不是只做一个空框架。插件框架必须覆盖真实一
 - Workflow tests 覆盖 plugin config 保存、schema 校验、configChanged/restart fallback 行为。
 - Workflow tests 覆盖 tool discovery/execution、job trigger/run record、webhook delivery 和 worker RPC 错误映射。
 - Workflow tests 覆盖 UI contributions、bridge data/action 和 stream 的基础响应。
-- 文档记录上游未完成或不纳入的能力：云端多实例插件分发、真正前端沙箱、插件资产上传/读取、第三方 DB migration。
+- UI tests 覆盖 Settings 插件管理入口、catalog/installed 状态、install/enable/disable、config test/save、health/dashboard/jobs/logs 展示。
+- 文档记录上游未完成或不纳入的能力：云端多实例插件分发、真正前端沙箱、插件资产上传/读取、第三方 DB migration、生产级 provider 同步、Python SDK/脚手架。

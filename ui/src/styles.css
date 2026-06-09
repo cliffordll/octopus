@@ -568,6 +568,22 @@ small {
   margin: 0;
 }
 
+.plugin-health-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  min-width: 0;
+}
+
+.plugin-health-strip span {
+  background: #0b1018;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  color: #cbd8ea;
+  font-size: var(--text-xs);
+  padding: 8px 10px;
+}
+
 .plugin-detail section {
   display: grid;
   gap: 8px;
@@ -593,6 +609,46 @@ small {
 .plugin-detail-row span {
   color: #8ea0b8;
   font-size: var(--text-xs);
+}
+
+.plugin-config-editor {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plugin-config-editor span,
+.plugin-config-error,
+.plugin-config-message {
+  font-size: var(--text-xs);
+}
+
+.plugin-config-editor textarea {
+  background: #070b11;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  color: #dce7f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  min-width: 0;
+  padding: 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.plugin-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plugin-config-error {
+  color: #fca5a5;
+}
+
+.plugin-config-message {
+  color: #86efac;
 }
 
 .cost-settings-summary,
