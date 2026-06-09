@@ -1,6 +1,6 @@
 # Step 25: Activity Query
 
-状态：待开发
+状态：已完成
 
 ## 已提前完成
 
@@ -34,10 +34,19 @@
 - 保持 details 脱敏，不把 token、apiKey、authorization、cookie、secret、password 等敏感字段返回给前端。
 - 复用已有 issue/run/workspace 记录补齐 issue runs 和 run issues 的聚合查询契约。
 
-## 剩余待开发
+## 已实现记录
 
-- 当前没有 `server/routes/activity.py`。
-- 当前 activity 只有写入，没有统一查询 API、过滤器、details 脱敏和 issue/run 聚合查询契约。
+- 已新增 `server/routes/activity.py` 并注册 activity route。
+- 已新增 organization activity 查询和写入入口，支持 entity、actor、action、时间窗口和 limit 过滤。
+- 已实现 issue activity、issue runs、heartbeat run issues 聚合查询。
+- Issue lookup 同时支持真实 issue id 和上游式 issue identifier，避免 UUID 被误判为 identifier 后导致 `/api/issues/{id}/runs` 返回 404。
+- 已实现 activity details 脱敏，递归隐藏 token、apiKey、authorization、cookie、secret、password 等敏感字段。
+- 已覆盖 organization scope 和跨 organization 拒绝行为。
+
+## 剩余边界
+
+- 本步骤只提供 activity query 和聚合视图，不创建 cost event，也不回写 monthly spend。
+- Run intelligence、workspace operation log 和 runtime observability 的完整恢复矩阵归 Step 26。
 
 ## 边界
 
@@ -52,3 +61,7 @@
 - Tests 覆盖 activity filters、issue activity、issue runs 和 run issues。
 - Tests 覆盖 details 脱敏和 organization scope。
 - Tests 覆盖跨 organization 拒绝。
+
+## 本地验证记录
+
+- `uv run pytest tests/contract/test_step25_activity_query.py -q`：5 passed。覆盖 activity paths、filters、details 脱敏、issue/run 聚合、issue id/identifier lookup 和跨组织拒绝。
