@@ -179,3 +179,11 @@ uv run pytest tests/contract/test_step28_quota_windows.py -q
 - `uv run ruff check .`：All checks passed。
 - `uv run pyright .`：0 errors。
 - `uv run alembic upgrade head` 使用临时 SQLite 数据库升级到 `20260608_000020` 成功。
+
+## 已验证但不覆盖已知边界
+
+- 预算全链路工作流测试（soft incident → hard incident → approval → resume）未编写。核心边界（policy upsert、overview、hard-stop 422、cross-org agent budget 拒绝）已由 contract tests 覆盖。
+- Skills analytics 工作流测试（loaded/requested/used evidence 计数）未编写。API response shape 和 org/agent scope 隔离已由 contract tests 覆盖。
+- Quota windows 工作流测试未编写。provider failure/timeout/success 聚合已由 contract tests 覆盖。
+
+上述工作流测试纳入后续 hardening 步骤。当前关闭的优先级是进入 Step 29 Auth/Access。
