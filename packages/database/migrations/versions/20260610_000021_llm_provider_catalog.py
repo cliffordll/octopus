@@ -155,7 +155,9 @@ def downgrade() -> None:
     op.drop_index("llm_models_provider_idx", table_name="llm_models")
     op.drop_index("llm_models_provider_model_idx", table_name="llm_models")
     op.drop_table("llm_models")
-    op.drop_index("llm_provider_bindings_provider_idx", table_name="llm_provider_bindings")
+    op.drop_index(
+        "llm_provider_bindings_provider_idx", table_name="llm_provider_bindings"
+    )
     op.drop_index(
         "llm_provider_bindings_scope_provider_idx",
         table_name="llm_provider_bindings",

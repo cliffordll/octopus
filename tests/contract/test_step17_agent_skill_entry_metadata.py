@@ -68,9 +68,7 @@ def test_org_selection_key_materializes_to_runtime_slug(tmp_path: Path) -> None:
     org_root = tmp_path / "org-skills"
     skill_dir = org_root / "deep-research"
     skill_dir.mkdir(parents=True)
-    skill_dir.joinpath("SKILL.md").write_text(
-        "Research deeply.", encoding="utf-8"
-    )
+    skill_dir.joinpath("SKILL.md").write_text("Research deeply.", encoding="utf-8")
     codex_home = tmp_path / "codex-home"
 
     snapshot = skill_snapshot(

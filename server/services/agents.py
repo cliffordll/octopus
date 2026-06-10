@@ -148,7 +148,9 @@ def _parse_scheduler_heartbeat_policy(
     )
     return {
         "enabled": enabled if isinstance(enabled, bool) else True,
-        "intervalSec": interval_sec if interval_sec > 0 else _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+        "intervalSec": interval_sec
+        if interval_sec > 0
+        else _DEFAULT_HEARTBEAT_INTERVAL_SEC,
     }
 
 
@@ -1297,7 +1299,9 @@ class AgentService:
             ),
             "runtimeConfig": cast(
                 dict[str, Any],
-                _sanitize_value(_materialize_heartbeat_runtime_config(row.runtime_config)),
+                _sanitize_value(
+                    _materialize_heartbeat_runtime_config(row.runtime_config)
+                ),
             ),
             "permissions": cast(
                 Any, _normalized_permissions(row.permissions, row.role)

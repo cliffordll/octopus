@@ -103,9 +103,7 @@ async def update_llm_provider_binding(
     )
 
 
-async def delete_llm_provider_bindings(
-    session: AsyncSession, provider_id: str
-) -> None:
+async def delete_llm_provider_bindings(session: AsyncSession, provider_id: str) -> None:
     await session.execute(
         delete(LlmProviderBinding).where(LlmProviderBinding.provider_id == provider_id)
     )
@@ -339,7 +337,8 @@ async def create_runtime_model(
     model_fields = {
         key: value
         for key, value in fields.items()
-        if key in {"id", "provider_id", "model_id", "display_name", "metadata_json", "enabled"}
+        if key
+        in {"id", "provider_id", "model_id", "display_name", "metadata_json", "enabled"}
     }
     return await create_llm_model(session, model_fields)
 

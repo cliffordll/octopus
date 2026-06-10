@@ -883,9 +883,7 @@ class ChatService:
             payload = {
                 "chatConversationId": conversation.id,
                 "proposedByAgentId": replying_agent_id,
-                "proposedIssue": _proposal_payload(
-                    structured_payload, "issueProposal"
-                ),
+                "proposedIssue": _proposal_payload(structured_payload, "issueProposal"),
             }
             if manual_reason:
                 payload["manualReason"] = manual_reason

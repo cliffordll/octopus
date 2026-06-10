@@ -628,7 +628,9 @@ async def test_external_runtime_skill_does_not_hide_organization_skill_entry(
                 "warnings": [],
             }
 
-    monkeypatch.setattr("server.services.agents.get_runtime_adapter", lambda _: FakeAdapter())
+    monkeypatch.setattr(
+        "server.services.agents.get_runtime_adapter", lambda _: FakeAdapter()
+    )
 
     snapshot_code, snapshot = await _request(
         application, "GET", f"/api/agents/{agent_id}/skills"

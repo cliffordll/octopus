@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,9 +22,7 @@ from ._base import Base, new_uuid
 
 class LlmProvider(Base):
     __tablename__ = "llm_providers"
-    __table_args__ = (
-        Index("llm_providers_provider_idx", "provider_id", unique=True),
-    )
+    __table_args__ = (Index("llm_providers_provider_idx", "provider_id", unique=True),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     provider_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -44,7 +52,9 @@ class LlmModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     provider_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("llm_providers.provider_id", ondelete="CASCADE"), nullable=False
+        Text,
+        ForeignKey("llm_providers.provider_id", ondelete="CASCADE"),
+        nullable=False,
     )
     model_id: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -80,7 +90,9 @@ class LlmProviderBinding(Base):
     scope_type: Mapped[str] = mapped_column(Text, nullable=False)
     scope_id: Mapped[str] = mapped_column(String(36), nullable=False, default="")
     provider_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("llm_providers.provider_id", ondelete="CASCADE"), nullable=False
+        Text,
+        ForeignKey("llm_providers.provider_id", ondelete="CASCADE"),
+        nullable=False,
     )
     base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
