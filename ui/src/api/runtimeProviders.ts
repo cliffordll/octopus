@@ -10,6 +10,11 @@ import type {
 } from "./types";
 
 function root(orgId: string) {
+  void orgId;
+  return "/api/llm/providers";
+}
+
+function legacyRoot(orgId: string) {
   return `/api/orgs/${encodeURIComponent(orgId)}/runtime-providers`;
 }
 
@@ -18,20 +23,25 @@ function runtimeQuery(runtimeType: AgentRuntimeType) {
 }
 
 function providerRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string) {
-  return `${root(orgId)}/${encodeURIComponent(providerId)}?${runtimeQuery(runtimeType)}`;
+  void runtimeType;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}`;
 }
 
 function modelRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string) {
-  return `${root(orgId)}/${encodeURIComponent(providerId)}/models?${runtimeQuery(runtimeType)}`;
+  void runtimeType;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}/models`;
 }
 
 function modelDetailRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string, modelId: string) {
-  return `${root(orgId)}/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}?${runtimeQuery(runtimeType)}`;
+  void runtimeType;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}`;
 }
 
 export const runtimeProvidersApi = {
-  listProviders: (orgId: string, runtimeType: AgentRuntimeType): Promise<RuntimeProvider[]> =>
-    request<RuntimeProvider[]>(`${root(orgId)}?${runtimeQuery(runtimeType)}`, { method: "GET" }),
+  listProviders: (orgId: string, runtimeType: AgentRuntimeType): Promise<RuntimeProvider[]> => {
+    void runtimeType;
+    return request<RuntimeProvider[]>(root(orgId), { method: "GET" });
+  },
   createProvider: (orgId: string, payload: CreateRuntimeProviderPayload): Promise<RuntimeProvider> =>
     jsonRequest<RuntimeProvider>(root(orgId), "POST", payload),
   updateProvider: (
@@ -60,3 +70,6 @@ export const runtimeProvidersApi = {
   deleteModel: (orgId: string, runtimeType: AgentRuntimeType, providerId: string, modelId: string): Promise<RuntimeModel> =>
     request<RuntimeModel>(modelDetailRoot(orgId, runtimeType, providerId, modelId), { method: "DELETE" }),
 };
+
+export const legacyRuntimeProvidersRoot = (orgId: string, runtimeType: AgentRuntimeType) =>
+  `${legacyRoot(orgId)}?${runtimeQuery(runtimeType)}`;

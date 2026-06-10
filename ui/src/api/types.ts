@@ -975,7 +975,7 @@ export interface RuntimeModel {
   updatedAt?: string;
 }
 
-export type RuntimeProviderScope = "global" | "organization";
+export type RuntimeProviderScope = "instance" | "global" | "organization";
 
 export interface CreateRuntimeProviderPayload {
   scope?: RuntimeProviderScope;

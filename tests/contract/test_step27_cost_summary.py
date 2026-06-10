@@ -17,15 +17,41 @@ from packages.database.schema import (
     Base,
     ChatConversation,
     CostEvent,
+    LlmModel,
+    LlmProvider,
     Organization,
     Project,
-    RuntimeGlobalModel,
-    RuntimeGlobalProvider,
 )
 from packages.database.schema import HeartbeatRun
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
 import server.services.chats as chat_service_module
+
+
+def _llm_provider_model(
+    *,
+    provider_id: str,
+    model_id: str,
+    display_name: str,
+    metadata: dict[str, Any],
+) -> list[object]:
+    return [
+        LlmProvider(
+            id=str(uuid.uuid4()),
+            provider_id=provider_id,
+            name=provider_id.title(),
+            protocol="openai_chat_completions",
+            enabled=True,
+        ),
+        LlmModel(
+            id=str(uuid.uuid4()),
+            provider_id=provider_id,
+            model_id=model_id,
+            display_name=display_name,
+            metadata_json=metadata,
+            enabled=True,
+        ),
+    ]
 
 
 @pytest.fixture
@@ -376,25 +402,13 @@ async def test_runtime_cost_is_estimated_from_model_pricing_when_runtime_reports
         factory, prefix="estimated-cost"
     )
     async with factory() as session:
-        session.add(
-            RuntimeGlobalProvider(
-                runtime_type="opencode_local",
-                provider_id="global",
-                name="Global",
-                protocol="openai_chat_completions",
-            )
-        )
-        session.add(
-            RuntimeGlobalModel(
-                runtime_type="opencode_local",
+        session.add_all(
+            _llm_provider_model(
                 provider_id="global",
                 model_id="deepseek-v4-flash",
                 display_name="DeepSeek V4 Flash",
-                metadata_json={
-                    "pricing": {
-                        "inputCostPer1M": 0.14,
-                        "outputCostPer1M": 0.28,
-                    }
+                metadata={
+                    "pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}
                 },
             )
         )
@@ -435,26 +449,12 @@ async def test_zero_model_pricing_keeps_runtime_cost_unrecorded(
     _, factory = app
     org_id, agent_id, _ = await _seed_org_agent_project(factory, prefix="free-cost")
     async with factory() as session:
-        session.add(
-            RuntimeGlobalProvider(
-                runtime_type="opencode_local",
-                provider_id="global",
-                name="Global",
-                protocol="openai_chat_completions",
-            )
-        )
-        session.add(
-            RuntimeGlobalModel(
-                runtime_type="opencode_local",
+        session.add_all(
+            _llm_provider_model(
                 provider_id="global",
                 model_id="free-model",
                 display_name="Free Model",
-                metadata_json={
-                    "pricing": {
-                        "inputCostPer1M": 0,
-                        "outputCostPer1M": 0,
-                    }
-                },
+                metadata={"pricing": {"inputCostPer1M": 0, "outputCostPer1M": 0}},
             )
         )
         await session.commit()
@@ -487,25 +487,13 @@ async def test_subcent_model_pricing_records_minimum_budget_cent(
     _, factory = app
     org_id, agent_id, _ = await _seed_org_agent_project(factory, prefix="subcent-cost")
     async with factory() as session:
-        session.add(
-            RuntimeGlobalProvider(
-                runtime_type="opencode_local",
-                provider_id="global",
-                name="Global",
-                protocol="openai_chat_completions",
-            )
-        )
-        session.add(
-            RuntimeGlobalModel(
-                runtime_type="opencode_local",
+        session.add_all(
+            _llm_provider_model(
                 provider_id="global",
                 model_id="deepseek-v4-flash",
                 display_name="DeepSeek V4 Flash",
-                metadata_json={
-                    "pricing": {
-                        "inputCostPer1M": 0.14,
-                        "outputCostPer1M": 0.28,
-                    }
+                metadata={
+                    "pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}
                 },
             )
         )
