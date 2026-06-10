@@ -472,10 +472,13 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
-  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
   expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
-  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
   expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
+  expect(within(detail).queryByText("raw run log")).not.toBeInTheDocument();
+  expect(within(detail).queryByText(/executionWorkspaceId/)).not.toBeInTheDocument();
+  await userEvent.click(within(detail).getByRole("button", { name: "Raw" }));
+  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
+  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
   expect(within(detail).getByText("raw run log")).toBeInTheDocument();
   expect(within(detail).getByText("npm test")).toBeInTheDocument();
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
