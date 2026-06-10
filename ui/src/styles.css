@@ -5965,10 +5965,16 @@ pre {
   padding: 12px 14px;
 }
 
-.organization-skills-sidebar-header .row-actions,
-.organization-skill-pane-header .row-actions {
+.organization-skills-sidebar-header .row-actions {
   flex-wrap: nowrap;
   margin-top: 20px;
+  min-width: max-content;
+}
+
+.organization-skill-pane-header .row-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  margin-top: 0;
   min-width: max-content;
 }
 
@@ -6159,6 +6165,7 @@ pre {
 }
 
 .organization-skill-list-card {
+  align-items: stretch;
   background: #111722;
   border: 1px solid #202a3b;
   border-radius: 12px;
@@ -6181,12 +6188,17 @@ pre {
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  min-width: 0;
+  width: 100%;
 }
 
 .organization-skill-list-card-title strong {
   color: #edf4ff;
+  flex: 1 1 auto;
   font-size: 13px;
+  min-width: 0;
   overflow: hidden;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6195,8 +6207,11 @@ pre {
   border: 1px solid #2b384d;
   border-radius: 6px;
   color: #9aa8bd;
+  flex: 0 0 auto;
   font-size: 10px;
+  margin-left: auto;
   padding: 2px 5px;
+  white-space: nowrap;
 }
 
 .organization-skill-list-card-meta {
@@ -6214,7 +6229,7 @@ pre {
 }
 
 .organization-skill-pane-header {
-  align-items: flex-start;
+  align-items: center;
   border-bottom: 1px solid #202a3b;
   display: flex;
   gap: 16px;
@@ -6222,17 +6237,32 @@ pre {
   padding: 14px 18px;
 }
 
+.organization-skill-pane-header > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .organization-skill-title-row {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .organization-skill-title-row h2 {
   color: #edf4ff;
+  flex: 0 1 auto;
   font-size: var(--text-xl);
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-skill-title-row .badge {
+  flex: 0 0 auto;
 }
 
 .organization-skill-pane-header p {
@@ -6271,7 +6301,7 @@ pre {
   border-bottom: 1px solid #202a3b;
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 12px 18px;
 }
 
@@ -6305,19 +6335,55 @@ pre {
   padding: 10px;
 }
 
+.organization-skill-info-grid .organization-skill-info-grid-full {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  grid-column: 1 / -1;
+}
+
+.organization-skill-info-grid div:not(.organization-skill-info-grid-full) {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
 .organization-skill-info-grid span {
   color: #778397;
   display: block;
   font-size: 11px;
   margin-bottom: 5px;
+  white-space: nowrap;
+  width: 86px;
+}
+
+.organization-skill-info-grid div:not(.organization-skill-info-grid-full) span {
+  flex: 0 0 86px;
+  margin-bottom: 0;
+}
+
+.organization-skill-info-grid .organization-skill-info-grid-full span {
+  flex: 0 0 86px;
+  margin-bottom: 0;
 }
 
 .organization-skill-info-grid strong {
   color: #dbe7f7;
   display: block;
   font-size: 12px;
+  min-width: 0;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.organization-skill-info-grid div:not(.organization-skill-info-grid-full) strong {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.organization-skill-info-grid .organization-skill-info-grid-full strong {
+  flex: 1 1 auto;
+  text-align: left;
 }
 
 .organization-skill-usage {
