@@ -702,7 +702,25 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
             .scalars()
             .all()
         )
+        activity_rows = (
+            (
+                await verify.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.org_id == org_id,
+                        ActivityLog.entity_type == "issue",
+                        ActivityLog.entity_id == issue_id,
+                        ActivityLog.run_id == run["id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     assert len(rows) == 1
+    assert len(activity_rows) == 1
+    assert activity_rows[0].action == "issue.executed"
+    assert activity_rows[0].details["runId"] == run["id"]
+    assert activity_rows[0].details["agentId"] == agent_id
 
 
 async def test_agent_cannot_mark_issue_done_without_checkout_ownership(
@@ -769,6 +787,67 @@ async def test_issue_comment_routes_create_and_list(
         )
         rows = result.scalars().all()
     assert len(rows) == 1
+
+
+async def test_issue_comment_queues_assignee_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Comment Assignee",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_progress",
+        assignee_agent_id=agent_id,
+    )
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "请根据反馈更新状态"},
+    )
+
+    assert create_code == 200
+    async with session_factory() as verify:
+        wakeup = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_added",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == wakeup.id)
+            )
+        ).scalar_one()
+    assert wakeup.source == "assignment"
+    assert wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "comment",
+        "commentId": create_body["id"],
+    }
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["commentId"] == create_body["id"]
+    assert run.context_snapshot["wakeReason"] == "issue_comment_added"
 
 
 async def test_review_decision_route_applies_status_mapping(
