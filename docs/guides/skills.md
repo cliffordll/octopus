@@ -178,7 +178,6 @@ runtime 能用 deep-research
 ```text
 catalog 不存放 SKILL.md 文件。
 catalog 存放 Octopus 已知/已纳入管理的技能记录、索引和元数据。
-这些记录可以指向内置、社区预置、组织、agent 私有等不同来源。
 ```
 
 也就是说：
@@ -189,7 +188,29 @@ source directories = 技能文件来源
 RUNTIME_SKILL_HOME = 当前 agent 已启用技能的运行时落点
 ```
 
-catalog 可以记录四层技能的信息，但不应该把四层技能文件都复制进去。
+概念上，catalog 可以记录内置、社区预置、组织、agent 私有等来源的信息，但不应该把四层技能文件都复制进去。
+
+当前实现要更具体：
+
+```text
+组织技能 catalog
+= 数据库里的 organization_skills 记录
+= 覆盖内置、社区预置、组织本地/导入技能
+= `GET /api/orgs/{orgId}/skills`
+
+agent 私有技能索引
+= 没有单独的数据库 catalog 表
+= 由 agent workspace 文件系统动态派生
+= `workspaces/agents/<agentId>/skills/<slug>/SKILL.md`
+= `GET /api/agents/{agentId}/skills` runtime snapshot 中的 `sourceClass=agent_home`
+
+外部发现技能
+= 没有 catalog 记录
+= 由 runtime home 扫描得到
+= `GET /api/agents/{agentId}/skills` runtime snapshot 中的 `sourceClass=adapter_home` 或 external
+```
+
+因此，在当前代码里，组织技能页不会显示 agent 私有技能；agent 私有技能只出现在对应 agent 的技能 snapshot / 技能页里。
 
 ## 外部技能和 catalog
 
