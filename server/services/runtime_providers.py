@@ -113,7 +113,9 @@ class RuntimeProviderService:
         if binding is None:
             binding = await create_llm_provider_binding(
                 self._session,
-                _binding_fields(provider_id, {}, scope_type=INSTANCE_SCOPE, scope_id=""),
+                _binding_fields(
+                    provider_id, {}, scope_type=INSTANCE_SCOPE, scope_id=""
+                ),
             )
         if binding_values:
             binding = await update_llm_provider_binding(
@@ -182,9 +184,7 @@ class RuntimeProviderService:
         runtime_type = _required_text(runtime_type, "runtimeType")
         await self._require_provider(provider_id)
         fields = _model_create_fields(provider_id, payload)
-        existing = await get_llm_model(
-            self._session, provider_id, fields["model_id"]
-        )
+        existing = await get_llm_model(self._session, provider_id, fields["model_id"])
         if existing:
             raise ValueError("Runtime model already exists")
         row = await create_llm_model(self._session, fields)

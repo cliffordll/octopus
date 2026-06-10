@@ -359,9 +359,9 @@ async def test_llm_provider_and_model_are_visible_across_runtime_switches(
             params={"runtimeType": runtime_type},
         )
         assert providers_code == 200
-        assert [(provider["scope"], provider["providerId"]) for provider in providers] == [
-            ("instance", "deepseek")
-        ]
+        assert [
+            (provider["scope"], provider["providerId"]) for provider in providers
+        ] == [("instance", "deepseek")]
 
         models_code, models = await _request(
             application,

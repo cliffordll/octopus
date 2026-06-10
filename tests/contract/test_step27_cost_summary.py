@@ -407,9 +407,7 @@ async def test_runtime_cost_is_estimated_from_model_pricing_when_runtime_reports
                 provider_id="global",
                 model_id="deepseek-v4-flash",
                 display_name="DeepSeek V4 Flash",
-                metadata={
-                    "pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}
-                },
+                metadata={"pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}},
             )
         )
         await session.commit()
@@ -492,9 +490,7 @@ async def test_subcent_model_pricing_records_minimum_budget_cent(
                 provider_id="global",
                 model_id="deepseek-v4-flash",
                 display_name="DeepSeek V4 Flash",
-                metadata={
-                    "pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}
-                },
+                metadata={"pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}},
             )
         )
         await session.commit()

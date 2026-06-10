@@ -464,7 +464,9 @@ async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
     async with session_factory() as session:
         persisted = await session.get(Agent, created["id"])
     assert persisted is not None
-    assert persisted.runtime_config["heartbeat"] == created["runtimeConfig"]["heartbeat"]
+    assert (
+        persisted.runtime_config["heartbeat"] == created["runtimeConfig"]["heartbeat"]
+    )
 
     detail_code, detail = await _request(app, "GET", f"/api/agents/{created['id']}")
     assert detail_code == 200

@@ -1588,7 +1588,9 @@ class HeartbeatService:
         )
         return {
             "enabled": enabled if isinstance(enabled, bool) else True,
-            "intervalSec": interval_sec if interval_sec > 0 else float(HEARTBEAT_INTERVAL_DEFAULT_SEC),
+            "intervalSec": interval_sec
+            if interval_sec > 0
+            else float(HEARTBEAT_INTERVAL_DEFAULT_SEC),
             "wakeOnDemand": (
                 wake_on_demand if isinstance(wake_on_demand, bool) else True
             ),

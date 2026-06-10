@@ -112,9 +112,8 @@ def _explicit_desired_skill_sources(
             isinstance(key, str)
             and (
                 key in desired
-                or _desired_runtime_name(key) in {
-                    _desired_runtime_name(value) for value in desired
-                }
+                or _desired_runtime_name(key)
+                in {_desired_runtime_name(value) for value in desired}
             )
             for key in keys
         ):
@@ -183,7 +182,9 @@ def _skill_entries(
     entries: list[dict[str, Any]] = []
     available_by_key = {skill_dir.name: skill_dir for skill_dir in available}
     agent_home_by_key = {skill_dir.name: skill_dir for skill_dir in agent_home}
-    available_names = set(available_by_key) | set(agent_home_by_key) | hidden_available_names
+    available_names = (
+        set(available_by_key) | set(agent_home_by_key) | hidden_available_names
+    )
     bundled_root = _bundled_skills_root()
     for skill_dir in available:
         is_bundled = skill_dir.parent == bundled_root
