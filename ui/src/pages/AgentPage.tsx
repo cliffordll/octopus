@@ -219,19 +219,6 @@ function normalizeSkillSource(value: string): string {
   return value.trim().toLowerCase().replaceAll("-", "_");
 }
 
-function skillComparableSlug(entry: Record<string, unknown>): string {
-  const candidates = [entry.key, entry.selectionKey, entry.runtimeName, entry.name]
-    .map((item) => (typeof item === "string" ? item.trim().toLowerCase() : ""))
-    .filter(Boolean);
-  for (const candidate of candidates) {
-    const normalized = candidate.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) ?? candidate;
-    const withoutPrefix = normalized.includes(":") ? normalized.split(":").at(-1) ?? normalized : normalized;
-    const slug = withoutPrefix.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    if (slug) return slug;
-  }
-  return "";
-}
-
 function skillSourceCandidates(entry: Record<string, unknown>): string[] {
   const keys = ["sourceClass", "source", "origin", "sourceBadge", "scope", "kind", "sourceKind", "sourceLocator", "sourcePath", "locationLabel", "selectionKey"];
   return [
@@ -332,11 +319,12 @@ function skillIdentityKeys(entry: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
-type SkillSourceGroup = "内置技能" | "组织技能" | "智能体私有技能" | "外部发现";
+type SkillSourceGroup = "内置技能" | "社区技能" | "组织技能" | "智能体私有技能" | "外部发现";
 
 function skillSourceGroup(entry: Record<string, unknown>): SkillSourceGroup {
   const sourceClass = skillSourceKind(entry);
   if (isBuiltInSkillEntry(entry)) return "内置技能";
+  if (isCommunitySkillEntry(entry)) return "社区技能";
   if (sourceClass === "organization") return "组织技能";
   if (["agent", "agent_home", "agent_private", "private"].includes(sourceClass)) return "智能体私有技能";
   return "外部发现";
@@ -877,18 +865,10 @@ export function AgentPage() {
   const skillEntries = Array.isArray(skills.data?.entries) ? skills.data.entries : [];
   const desiredSkillRows = Array.isArray(skills.data?.desiredSkills) ? skills.data.desiredSkills : parseCsv(desiredSkills);
   const builtInSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "内置技能");
+  const communitySkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "社区技能");
   const organizationSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "组织技能");
   const agentPrivateSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "智能体私有技能");
-  const managedSkillSlugs = new Set(
-    [...builtInSkillEntries, ...organizationSkillEntries, ...agentPrivateSkillEntries]
-      .map(skillComparableSlug)
-      .filter(Boolean),
-  );
-  const externalSkillEntries = skillEntries.filter((entry) => {
-    if (skillSourceGroup(entry) !== "外部发现") return false;
-    const slug = skillComparableSlug(entry);
-    return !slug || !managedSkillSlugs.has(slug);
-  });
+  const externalSkillEntries = skillEntries.filter((entry) => skillSourceGroup(entry) === "外部发现");
   const skillWarnings = (skills.data?.warnings ?? []).filter(visibleSkillWarning);
   const bundleFiles = Array.isArray(instructionsBundle.data?.files) ? instructionsBundle.data.files : [];
   const instructionDocs: InstructionDoc[] = instructionsBundle.data
@@ -1576,6 +1556,7 @@ export function AgentPage() {
               )}
               {[
                 { label: "内置技能", rows: builtInSkillEntries },
+                ...(communitySkillEntries.length > 0 ? [{ label: "社区技能", rows: communitySkillEntries }] : []),
                 { label: "组织技能", rows: organizationSkillEntries },
                 { label: "智能体私有技能", rows: agentPrivateSkillEntries },
                 { label: "外部发现", rows: externalSkillEntries },

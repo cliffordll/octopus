@@ -958,6 +958,20 @@ it("manages skills from agent configuration", async () => {
             desired: false,
             description: "Research deeply",
           },
+          {
+            key: "external-deep-research",
+            selectionKey: "external:deep-research",
+            runtimeName: "Deep Research",
+            sourceClass: "adapter_home",
+            origin: "user_installed",
+            originLabel: "User-installed",
+            locationLabel: "managed CODEX_HOME/skills",
+            state: "external",
+            managed: false,
+            sourcePath: null,
+            targetPath: "D:/codex-home/skills/deep-research",
+            description: "Runtime already has a same-name skill.",
+          },
         ],
         warnings: [
           "skillsRootPath does not exist: D:\\coding\\octopus\\.octopus\\organizations\\16793a83-0fdd-4e35-84d7-7204f7f23663\\workspaces\\skills",
@@ -983,9 +997,9 @@ it("manages skills from agent configuration", async () => {
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "智能体私有技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "社区技能" })).not.toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
   expect(await screen.findByText("deep-research")).toBeInTheDocument();
@@ -1001,10 +1015,18 @@ it("manages skills from agent configuration", async () => {
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.queryByText("Deep Research")).not.toBeInTheDocument();
+  const communityGroup = screen.getByRole("heading", { name: "社区技能" }).closest("section");
+  expect(communityGroup).not.toBeNull();
+  expect(within(communityGroup!).getByText("Deep Research")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
   expect(screen.getByText("自动启用")).toBeInTheDocument();
+  const externalGroup = screen.getByRole("heading", { name: "外部发现" }).closest("section");
+  expect(externalGroup).not.toBeNull();
+  const externalConflictDescription = within(externalGroup!).getByText("Runtime already has a same-name skill.");
+  const externalConflictSkill = externalConflictDescription.closest("article");
+  expect(externalConflictSkill).not.toBeNull();
+  expect(within(externalConflictSkill!).getByText("Deep Research")).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
   await userEvent.click(within(screen.getByText("Deploy").closest("article")!).getByRole("switch", { name: /Deploy 技能已启用/ }));

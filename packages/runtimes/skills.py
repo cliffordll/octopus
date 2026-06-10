@@ -43,9 +43,15 @@ def skill_snapshot_from_root(
     agent_home: list[Path] = []
     if agent_skills_root is not None:
         agent_home = _skill_dirs(agent_skills_root)
+    explicit_desired_sources = _explicit_desired_skill_sources(config, desired)
+    hidden_available_names = {skill_dir.name for skill_dir in explicit_desired_sources}
     if materialize and skills_home is not None:
         _materialize_desired_skills(
-            skills_home, [*available, *agent_home], desired, warnings
+            skills_home,
+            [*available, *agent_home],
+            desired,
+            warnings,
+            explicit_sources=explicit_desired_sources,
         )
     entries = _skill_entries(
         available,
@@ -59,6 +65,7 @@ def skill_snapshot_from_root(
         external_detail=external_detail,
         persistent_materialization=persistent_materialization,
         warnings=warnings,
+        hidden_available_names=hidden_available_names,
     )
     return {
         "agentRuntimeType": runtime_type,
@@ -78,6 +85,48 @@ def _agent_skills_root(config: dict[str, Any]) -> Path | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return Path(value).expanduser().resolve()
+
+
+def _explicit_desired_skill_sources(
+    config: dict[str, Any], desired: set[str]
+) -> list[Path]:
+    context = config.get("_octopus")
+    if not isinstance(context, dict):
+        return []
+    sources = context.get("desiredSkillSources")
+    if not isinstance(sources, list):
+        return []
+    output: list[Path] = []
+    seen: set[Path] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_path = source.get("sourcePath")
+        runtime_name = source.get("runtimeName")
+        keys = [source.get("selectionKey"), source.get("key"), runtime_name]
+        if not isinstance(source_path, str) or not source_path.strip():
+            continue
+        if not isinstance(runtime_name, str) or not runtime_name.strip():
+            continue
+        if not any(
+            isinstance(key, str)
+            and (
+                key in desired
+                or _desired_runtime_name(key) in {
+                    _desired_runtime_name(value) for value in desired
+                }
+            )
+            for key in keys
+        ):
+            continue
+        skill_dir = Path(source_path).expanduser().resolve()
+        if not skill_dir.is_dir() or not skill_dir.joinpath("SKILL.md").is_file():
+            continue
+        if skill_dir in seen:
+            continue
+        seen.add(skill_dir)
+        output.append(skill_dir)
+    return output
 
 
 def _skill_root_values(config: dict[str, Any]) -> list[str]:
@@ -128,12 +177,13 @@ def _skill_entries(
     external_detail: str | None,
     persistent_materialization: bool,
     warnings: list[str],
+    hidden_available_names: set[str],
 ) -> list[dict[str, Any]]:
     installed = _read_installed_skill_targets(skills_home) if skills_home else {}
     entries: list[dict[str, Any]] = []
     available_by_key = {skill_dir.name: skill_dir for skill_dir in available}
     agent_home_by_key = {skill_dir.name: skill_dir for skill_dir in agent_home}
-    available_names = set(available_by_key) | set(agent_home_by_key)
+    available_names = set(available_by_key) | set(agent_home_by_key) | hidden_available_names
     bundled_root = _bundled_skills_root()
     for skill_dir in available:
         is_bundled = skill_dir.parent == bundled_root
@@ -192,6 +242,7 @@ def _skill_entries(
             and desired_skill.removeprefix("agent:") in agent_home_by_key
             or desired_runtime_name in available_by_key
             or desired_runtime_name in agent_home_by_key
+            or desired_runtime_name in hidden_available_names
         ):
             continue
         warnings.append(f'Desired skill "{desired_skill}" is not available.')
@@ -363,30 +414,39 @@ def _materialize_desired_skills(
     available: list[Path],
     desired: set[str],
     warnings: list[str],
+    *,
+    explicit_sources: list[Path],
 ) -> None:
     by_key = {skill_dir.name: skill_dir for skill_dir in available}
+    explicit_by_key = {skill_dir.name: skill_dir for skill_dir in explicit_sources}
     for key in sorted(desired):
-        source = by_key.get(_desired_runtime_name(key))
+        runtime_name = _desired_runtime_name(key)
+        source = by_key.get(runtime_name) or explicit_by_key.get(runtime_name)
         if source is None:
             continue
         target = skills_home / source.name
         try:
-            _ensure_skill_link_or_copy(source, target)
+            if not _ensure_skill_link_or_copy(source, target):
+                warnings.append(
+                    f'Skill "{source.name}" was not materialized because the runtime '
+                    "target is occupied by a different source."
+                )
         except OSError as exc:
             warnings.append(f'Could not materialize skill "{key}": {exc}')
 
 
-def _ensure_skill_link_or_copy(source: Path, target: Path) -> None:
+def _ensure_skill_link_or_copy(source: Path, target: Path) -> bool:
     if target.exists() or target.is_symlink():
         if _same_path(_resolve_installed_target(target), source):
-            return
-        return
+            return True
+        return False
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         target.symlink_to(source, target_is_directory=True)
     except OSError:
         shutil.copytree(source, target)
         (target / _SOURCE_MARKER).write_text(str(source), encoding="utf-8")
+    return True
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -407,6 +467,8 @@ def _desired_runtime_name(value: str) -> str:
     normalized = value.strip()
     if normalized.startswith("agent:"):
         return _desired_runtime_name(normalized.removeprefix("agent:"))
+    if normalized.startswith("org:"):
+        return _desired_runtime_name(normalized.removeprefix("org:"))
     if normalized.startswith("skills/"):
         return normalized.removeprefix("skills/")
     if normalized.startswith("organization/"):

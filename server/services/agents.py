@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 from pathlib import Path
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 import uuid
 
@@ -318,6 +318,69 @@ def _apply_desired_skills_to_entries(
 
 def _organization_skill_selection_key(key: str) -> str:
     return key if key.startswith("org:") else f"org:{key}"
+
+
+def _organization_skill_is_desired(
+    skill: Mapping[str, Any], desired_skills: list[str]
+) -> bool:
+    key = skill.get("key")
+    slug = skill.get("slug")
+    candidates = {
+        value
+        for value in (
+            key,
+            slug,
+            f"org:{key}" if isinstance(key, str) else None,
+        )
+        if isinstance(value, str) and value
+    }
+    return not candidates.isdisjoint(desired_skills)
+
+
+def _is_external_skill_entry(entry: dict[str, Any]) -> bool:
+    source_class = entry.get("sourceClass")
+    return entry.get("managed") is False or source_class in {
+        "adapter_home",
+        "external",
+    }
+
+
+def _namespace_external_skill_conflicts(
+    entries: list[Any], org_skills: Sequence[Mapping[str, Any]]
+) -> None:
+    managed_names = {
+        value
+        for skill in org_skills
+        for value in (skill.get("key"), skill.get("slug"))
+        if isinstance(value, str) and value
+    }
+    if not managed_names:
+        return
+    for entry in entries:
+        if not isinstance(entry, dict) or not _is_external_skill_entry(entry):
+            continue
+        runtime_name = entry.get("runtimeName")
+        key = entry.get("key")
+        selection_key = entry.get("selectionKey")
+        names = {
+            value
+            for value in (runtime_name, key, selection_key)
+            if isinstance(value, str) and value
+        }
+        if managed_names.isdisjoint(names):
+            continue
+        runtime_slug = (
+            runtime_name
+            if isinstance(runtime_name, str) and runtime_name
+            else key
+            if isinstance(key, str) and key
+            else selection_key
+        )
+        if not isinstance(runtime_slug, str) or runtime_slug.startswith("external:"):
+            continue
+        external_key = f"external:{runtime_slug}"
+        entry["key"] = external_key
+        entry["selectionKey"] = external_key
 
 
 def _runtime_config_with_context(
@@ -782,8 +845,11 @@ class AgentService:
         if row is None:
             return None
         desired_skills = await list_enabled_skill_keys(self._session, row.id)
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            row, desired_skills
+        )
         snapshot = await get_runtime_adapter(row.agent_runtime_type).list_skills(
-            _runtime_config_with_context(row), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(row, snapshot, desired_skills)
@@ -817,8 +883,11 @@ class AgentService:
             entity_id=existing.id,
             details={"desiredSkills": desired_skills},
         )
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            existing, desired_skills
+        )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            _runtime_config_with_context(existing), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
@@ -842,8 +911,11 @@ class AgentService:
             agent_id=existing.id,
             skill_keys=skills,
         )
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            existing, desired_skills
+        )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            _runtime_config_with_context(existing), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
@@ -867,16 +939,45 @@ class AgentService:
         )
         return cast(AgentSkillSnapshot, snapshot)
 
+    async def _runtime_config_with_desired_skill_sources(
+        self, row: AgentRow, desired_skills: list[str]
+    ) -> dict[str, Any]:
+        config = _runtime_config_with_context(row)
+        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
+        desired_sources = [
+            {
+                "key": skill["key"],
+                "selectionKey": _organization_skill_selection_key(str(skill["key"])),
+                "runtimeName": skill["slug"],
+                "sourcePath": skill["sourcePath"],
+            }
+            for skill in org_skills
+            if _organization_skill_is_desired(skill, desired_skills)
+            and isinstance(skill.get("sourcePath"), str)
+            and skill.get("sourcePath")
+        ]
+        if not desired_sources:
+            return config
+        runtime_context = config.get("_octopus")
+        config["_octopus"] = {
+            **(runtime_context if isinstance(runtime_context, dict) else {}),
+            "desiredSkillSources": desired_sources,
+        }
+        return config
+
     async def _merge_organization_skill_entries(
         self, row: AgentRow, snapshot: dict[str, Any], desired_skills: list[str]
     ) -> None:
         entries = snapshot.get("entries")
         if not isinstance(entries, list):
             return
+        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
+        _namespace_external_skill_conflicts(entries, org_skills)
         existing_refs = {
             value
             for entry in entries
             if isinstance(entry, dict)
+            and not _is_external_skill_entry(entry)
             for value in (
                 entry.get("key"),
                 entry.get("selectionKey"),
@@ -885,7 +986,6 @@ class AgentService:
             if isinstance(value, str) and value
         }
         desired = set(desired_skills)
-        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
         for skill in org_skills:
             key = str(skill["key"])
             slug = str(skill["slug"])
