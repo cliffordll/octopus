@@ -3637,6 +3637,22 @@ small {
   margin-bottom: 18px;
 }
 
+.panel-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.panel-heading h2 {
+  margin-bottom: 0;
+}
+
+.panel-heading > button {
+  flex: 0 0 auto;
+}
+
 .list .row, .issue-row {
   align-items: center;
   border-bottom: 1px solid #202938;
@@ -6055,14 +6071,14 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: calc(100vh - 224px);
+  height: calc(100vh - 224px);
+  min-height: 520px;
 }
 
 .agent-instructions-grid {
   align-items: stretch;
-  display: grid;
+  display: flex;
   gap: 14px;
-  grid-template-columns: 180px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -6077,11 +6093,16 @@ pre {
 
 .instruction-files-card {
   display: flex;
+  flex: 0 0 220px;
   flex-direction: column;
   gap: 8px;
   height: 100%;
+  max-width: min(520px, 50vw);
   min-height: 0;
-  min-width: 0;
+  min-width: 180px;
+  overflow: auto;
+  resize: horizontal;
+  width: 220px;
 }
 
 .instruction-card-header {
@@ -6121,6 +6142,7 @@ pre {
 
 .instruction-file-tree {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 4px;
   min-height: 0;
@@ -6226,6 +6248,66 @@ pre {
   gap: 6px;
 }
 
+.memory-files-card .instruction-file-tree button {
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.memory-files-card .instruction-file-tree .instruction-file-icon,
+.memory-files-card .instruction-file-tree .instruction-directory-icon {
+  flex-basis: 18px;
+  font-family: var(--font-mono);
+  width: 18px;
+}
+
+.memory-files-card .instruction-file-label {
+  flex: 1 1 auto;
+}
+
+.memory-files-card .instruction-file-label > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-files-card .instruction-file-tree button small {
+  flex: 0 0 auto;
+  max-width: 112px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-root-path {
+  align-items: start;
+  background: #0a0f17;
+  border: 1px solid #1b2433;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  margin-bottom: 10px;
+  padding: 8px 10px;
+}
+
+.memory-root-path span {
+  color: #8792a6;
+  font-size: 11px;
+}
+
+.memory-root-path strong {
+  color: #dce5f2;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .segmented-control {
   background: #0a0f17;
   border: 1px solid #1b2433;
@@ -6257,6 +6339,7 @@ pre {
 
 .instruction-content-card {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
@@ -6298,10 +6381,17 @@ pre {
 }
 
 .instruction-empty-content {
-  min-height: 488px;
+  flex: 1;
+  min-height: 0;
 }
 
 .agent-skills-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.agent-skills-card {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -7027,11 +7117,48 @@ pre {
   border-color: #3886e8;
 }
 
-.agent-run-list-button span {
+.agent-run-list-button > span {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.agent-run-status-pill {
+  border: 1px solid #2a3950;
+  border-radius: 12px;
+  color: #aeb9c9;
+  flex: 0 0 58px;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  line-height: 1;
+  margin-left: auto;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.agent-run-status-pill.succeeded,
+.agent-run-status-pill.success {
+  background: rgba(47, 133, 90, .2);
+  border-color: rgba(77, 183, 122, .45);
+  color: #8ee6b0;
+}
+
+.agent-run-status-pill.failed,
+.agent-run-status-pill.error,
+.agent-run-status-pill.cancelled,
+.agent-run-status-pill.canceled {
+  background: rgba(164, 48, 62, .18);
+  border-color: rgba(239, 88, 104, .45);
+  color: #ff9aa6;
+}
+
+.agent-run-status-pill.running,
+.agent-run-status-pill.started,
+.agent-run-status-pill.in_progress {
+  background: rgba(47, 123, 214, .18);
+  border-color: rgba(96, 165, 250, .45);
+  color: #9dccff;
 }
 
 .agent-run-list-button strong {
@@ -7683,6 +7810,19 @@ pre {
   .agent-run-session,
   .agent-summary-grid {
     grid-template-columns: 1fr;
+  }
+  .agent-instructions-page {
+    height: auto;
+  }
+  .agent-instructions-grid {
+    flex-direction: column;
+  }
+  .instruction-files-card {
+    flex: 0 0 auto;
+    max-width: none;
+    min-width: 0;
+    resize: none;
+    width: auto;
   }
   .agent-skill-analytics-card {
     align-items: stretch;

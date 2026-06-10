@@ -231,6 +231,16 @@ it("controls an agent from its overview and shows runtime status", async () => {
   await userEvent.click(within(tabs).getByRole("link", { name: "记忆" }));
   const memoryPanel = screen.getByRole("region", { name: "Agent Memory" });
   expect(await within(memoryPanel).findByRole("heading", { name: "记忆" })).toBeInTheDocument();
+  await userEvent.type(within(memoryPanel).getByLabelText("文件路径"), "2026-06-08.md");
+  await userEvent.click(within(memoryPanel).getByRole("button", { name: "新建" }));
+  expect(await within(memoryPanel).findByText("文件已存在：2026-06-08.md")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/agents/agent-1/memory/file",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ layer: "memory", path: "2026-06-08.md", content: "" }),
+    }),
+  );
   await userEvent.click(within(memoryPanel).getByRole("button", { name: /2026-06-08\.md/ }));
   const memoryContent = screen.getByRole("article", { name: "记忆文件内容" });
   expect(await within(memoryContent).findByDisplayValue(/Daily memory note/)).toBeInTheDocument();

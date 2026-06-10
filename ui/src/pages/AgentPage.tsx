@@ -676,6 +676,7 @@ export function AgentPage() {
   const [memoryDirectoryPath, setMemoryDirectoryPath] = useState("");
   const [selectedMemoryPath, setSelectedMemoryPath] = useState("");
   const [newMemoryFilePath, setNewMemoryFilePath] = useState("");
+  const [memoryCreateError, setMemoryCreateError] = useState("");
   const [memoryDraft, setMemoryDraft] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -1005,6 +1006,8 @@ export function AgentPage() {
   const selectedFileContent = selectedBundleFile.data?.content;
   const selectedInstructionContent = selectedFileContent?.trim() ? selectedFileContent : (selectedInstruction?.content ?? selectedFileContent ?? "");
   const memoryEntries = memoryFiles.data?.entries ?? [];
+  const memoryRootPath = memoryFiles.data?.rootPath ?? "未返回";
+  const memoryCurrentDirectory = memoryFiles.data?.directoryPath || "/";
   const sortedMemoryEntries = useMemo(
     () => [...memoryEntries].sort((left, right) => {
       if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
@@ -1037,6 +1040,7 @@ export function AgentPage() {
     setSelectedMemoryPath("");
     setMemoryDraft("");
     setMemoryDirectoryPath("");
+    setMemoryCreateError("");
   }, [memoryLayer]);
   function toggleInstructionDir(path: string) {
     setExpandedInstructionDirs((current) => {
@@ -1084,6 +1088,12 @@ export function AgentPage() {
   function createMemoryFile(event: FormEvent) {
     event.preventDefault();
     const path = resolveNewMemoryFilePath(newMemoryFilePath);
+    const alreadyExists = memoryEntries.some((entry) => entry.path === path) || selectedMemoryPath === path;
+    if (alreadyExists) {
+      setMemoryCreateError(`文件已存在：${path}`);
+      return;
+    }
+    setMemoryCreateError("");
     upsertMemoryFile.mutate({ path, content: "" });
     setNewMemoryFilePath("");
   }
@@ -1092,15 +1102,18 @@ export function AgentPage() {
       setMemoryDirectoryPath(entry.path);
       setSelectedMemoryPath("");
       setMemoryDraft("");
+      setMemoryCreateError("");
       return;
     }
     setSelectedMemoryPath(entry.path);
+    setMemoryCreateError("");
   }
   function goMemoryDirectoryUp() {
     if (!memoryDirectoryPath) return;
     const parts = memoryDirectoryPath.split("/").filter(Boolean);
     setMemoryDirectoryPath(parts.slice(0, -1).join("/"));
     setSelectedMemoryPath("");
+    setMemoryCreateError("");
   }
   function enableSkill(name: string, actionKey: string) {
     if (!name.trim()) return;
@@ -1245,7 +1258,10 @@ export function AgentPage() {
             <div className="agent-instructions-grid">
               <aside aria-label="说明文件列表" className="instruction-files-card">
                 <div className="instruction-card-header">
-                  <h2>文件</h2>
+                  <div>
+                    <p className="eyebrow">FILES</p>
+                    <h2>文件</h2>
+                  </div>
                   <button
                     aria-expanded={showInstructionForm}
                     aria-label="新增文件"
@@ -1312,17 +1328,17 @@ export function AgentPage() {
               </article>
             </div>
           </section>}
-          {activeTab === "memory" && <section aria-label="Agent Memory" className="agent-instructions-page">
+          {activeTab === "memory" && <section aria-label="Agent Memory" className="agent-instructions-page agent-memory-page">
             {memoryFiles.error && <ErrorNotice error={memoryFiles.error} />}
             {selectedMemoryFile.error && <ErrorNotice error={selectedMemoryFile.error} />}
             {upsertMemoryFile.error && <ErrorNotice error={upsertMemoryFile.error} />}
             {deleteMemoryFile.error && <ErrorNotice error={deleteMemoryFile.error} />}
             <div className="agent-instructions-grid">
-              <aside aria-label="记忆文件列表" className="instruction-files-card">
+              <aside aria-label="记忆文件列表" className="instruction-files-card memory-files-card">
                 <div className="instruction-card-header">
                   <div>
+                    <p className="eyebrow">{memoryLayer === "memory" ? "DAILY NOTES" : "LIFE MEMORY"}</p>
                     <h2>记忆</h2>
-                    <p className="muted">{memoryLayer === "memory" ? "daily notes" : "life"}</p>
                   </div>
                 </div>
                 <div className="segmented-control">
@@ -1340,20 +1356,21 @@ export function AgentPage() {
                   </label>
                   <button className="small-button" disabled={upsertMemoryFile.isPending} type="submit">新建</button>
                 </form>
-                <div className="instruction-directory">
-                  <button
-                    className="instruction-directory-button"
-                    disabled={!memoryDirectoryPath}
-                    onClick={goMemoryDirectoryUp}
-                    type="button"
-                  >
-                    <span className="instruction-file-label">
-                      <span className="instruction-directory-icon" aria-hidden="true">D</span>
-                      <span>{memoryDirectoryPath || "/"}</span>
-                    </span>
-                    <span className="instruction-directory-toggle" aria-hidden="true">..</span>
-                  </button>
-                </div>
+                {memoryCreateError && <p className="field-warning">{memoryCreateError}</p>}
+                {memoryDirectoryPath && (
+                  <div className="instruction-directory">
+                    <button
+                      className="instruction-directory-button"
+                      onClick={goMemoryDirectoryUp}
+                      type="button"
+                    >
+                      <span className="instruction-file-label">
+                        <span>{memoryCurrentDirectory}</span>
+                      </span>
+                      <span className="instruction-directory-toggle" aria-hidden="true">上级</span>
+                    </button>
+                  </div>
+                )}
                 <div className="instruction-file-tree">
                   {memoryFiles.isLoading && <p className="muted">加载中...</p>}
                   {memoryFiles.data?.message && <p className="muted">{memoryFiles.data.message}</p>}
@@ -1366,15 +1383,19 @@ export function AgentPage() {
                       type="button"
                     >
                       <span className="instruction-file-label">
-                        <span className="instruction-file-icon" aria-hidden="true">{entry.isDirectory ? "D" : "F"}</span>
+                        <span className={entry.isDirectory ? "instruction-directory-icon" : "instruction-file-icon"} aria-hidden="true">{entry.isDirectory ? "D" : "F"}</span>
                         <span>{entry.name}</span>
                       </span>
-                      {!entry.isDirectory && <small>{entry.size ?? 0}</small>}
+                      <small>{entry.updatedAt ? formatDateTime(entry.updatedAt) : "未记录时间"}</small>
                     </button>
                   ))}
                 </div>
               </aside>
               <article aria-label="记忆文件内容" className="instruction-content-card">
+                <div className="memory-root-path">
+                  <span>根目录</span>
+                  <strong title={memoryRootPath}>{memoryRootPath}</strong>
+                </div>
                 {selectedMemoryPath ? (
                   <>
                     <div className="instruction-card-header">
@@ -1681,46 +1702,47 @@ export function AgentPage() {
             </div>
           )}
           {activeTab === "skills" && <section className="agent-skills-page">
-            <div className="agent-skills-page-header">
-              <div>
-                <h2>技能管理</h2>
-                <p className="muted">管理当前智能体的技能列表、使用状态和私有技能安装。</p>
+            <div className="panel agent-skills-card">
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">SKILLS</p>
+                  <h2>技能管理</h2>
+                </div>
+                <button onClick={() => setSkillDialogOpen(true)} type="button">创建技能</button>
               </div>
-              <button onClick={() => setSkillDialogOpen(true)} type="button">创建技能</button>
-            </div>
-            {skills.error && <ErrorNotice error={skills.error} />}
-            {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
-            {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
-            {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
-            {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
-            <div className="agent-skills-library">
-              {skillsAnalytics.data && (
-                <section className="agent-skill-tags-card agent-skill-analytics-card">
-                  <div className="agent-skill-source-heading">
-                    <h3>使用分析</h3>
-                    <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
-                  </div>
-                  <div className="agent-summary-grid">
-                    <div className="summary-metric"><span>总次数</span><strong>{skillsAnalytics.data.totalCount ?? 0}</strong></div>
-                    <div className="summary-metric"><span>运行次数</span><strong>{skillsAnalytics.data.totalRunsWithSkills ?? 0}</strong></div>
-                    <div className="summary-metric"><span>技能数</span><strong>{skillsAnalytics.data.skills.length}</strong></div>
-                  </div>
-                </section>
-              )}
-              {[
-                { label: "内置技能", rows: builtInSkillEntries },
-                ...(communitySkillEntries.length > 0 ? [{ label: "社区技能", rows: communitySkillEntries }] : []),
-                { label: "组织技能", rows: organizationSkillEntries },
-                { label: "智能体私有技能", rows: agentPrivateSkillEntries },
-                { label: "外部发现", rows: externalSkillEntries },
-              ].map((group) => (
-                <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>
-                  <div className="agent-skill-source-heading">
-                    <h3>{group.label}</h3>
-                    <Badge>{group.rows.length}</Badge>
-                  </div>
-                  <div className="agent-skill-tag-list">
-                    {group.rows.map((entry, index) => {
+              {skills.error && <ErrorNotice error={skills.error} />}
+              {skillsAnalytics.error && <ErrorNotice error={skillsAnalytics.error} />}
+              {syncSkills.error && <ErrorNotice error={syncSkills.error} />}
+              {enableSkills.error && <ErrorNotice error={enableSkills.error} />}
+              {createPrivateSkill.error && <ErrorNotice error={createPrivateSkill.error} />}
+              <div className="agent-skills-library">
+                {skillsAnalytics.data && (
+                  <section className="agent-skill-tags-card agent-skill-analytics-card">
+                    <div className="agent-skill-source-heading">
+                      <h3>使用分析</h3>
+                      <Badge>{skillsAnalytics.data.windowDays ?? 30} 天</Badge>
+                    </div>
+                    <div className="agent-summary-grid">
+                      <div className="summary-metric"><span>总次数</span><strong>{skillsAnalytics.data.totalCount ?? 0}</strong></div>
+                      <div className="summary-metric"><span>运行次数</span><strong>{skillsAnalytics.data.totalRunsWithSkills ?? 0}</strong></div>
+                      <div className="summary-metric"><span>技能数</span><strong>{skillsAnalytics.data.skills.length}</strong></div>
+                    </div>
+                  </section>
+                )}
+                {[
+                  { label: "内置技能", rows: builtInSkillEntries },
+                  ...(communitySkillEntries.length > 0 ? [{ label: "社区技能", rows: communitySkillEntries }] : []),
+                  { label: "组织技能", rows: organizationSkillEntries },
+                  { label: "智能体私有技能", rows: agentPrivateSkillEntries },
+                  { label: "外部发现", rows: externalSkillEntries },
+                ].map((group) => (
+                  <section className="agent-skill-tags-card agent-skill-source-group" key={group.label}>
+                    <div className="agent-skill-source-heading">
+                      <h3>{group.label}</h3>
+                      <Badge>{group.rows.length}</Badge>
+                    </div>
+                    <div className="agent-skill-tag-list">
+                      {group.rows.map((entry, index) => {
                       const key = skillEntryKey(entry, index);
                       const selected = selectedSkillKey === key;
                       const actionPending = pendingSkillActionKey === key;
@@ -1797,12 +1819,13 @@ export function AgentPage() {
                           </div>
                         </article>
                       );
-                    })}
-                  </div>
-                </section>
-              ))}
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+              {skillWarnings.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             </div>
-            {skillWarnings.map((warning) => <p className="error-notice" key={warning}>{warning}</p>)}
             {skillDialogOpen && (
               <div aria-modal="true" className="modal-backdrop" role="dialog">
                 <section className="panel task-modal skill-create-dialog">
@@ -1875,7 +1898,7 @@ export function AgentPage() {
                     <strong>{run.id.slice(0, 8)}</strong>
                     <small>{summarizeRun(run)}</small>
                   </span>
-                    <Badge>{statusLabel(run.status)}</Badge>
+                    <span className={`agent-run-status-pill ${run.status}`}>{statusLabel(run.status)}</span>
                 </button>
               ))}
             </aside>
