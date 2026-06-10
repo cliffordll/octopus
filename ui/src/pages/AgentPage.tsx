@@ -486,6 +486,10 @@ function AgentRunDetail({
   operationsLoading?: boolean;
   run: HeartbeatRun | null;
 }) {
+  const [viewMode, setViewMode] = useState<"nice" | "raw">("nice");
+  useEffect(() => {
+    setViewMode("nice");
+  }, [run?.id]);
   if (!run) {
     return (
       <section className="panel agent-run-detail-card">
@@ -513,7 +517,13 @@ function AgentRunDetail({
           <h2>{run.id.slice(0, 8)}</h2>
           <p className="muted">{summarizeRun(run)}</p>
         </div>
-        {run.processPid && <Badge>PID {run.processPid}</Badge>}
+        <div className="agent-run-detail-actions">
+          {run.processPid && <Badge>PID {run.processPid}</Badge>}
+          <div className="agent-run-view-toggle" aria-label="运行详情视图">
+            <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
+            <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
+          </div>
+        </div>
       </div>
       <dl className="detail-grid compact">
         <div><dt>Run ID</dt><dd>{run.id}</dd></div>
@@ -539,7 +549,54 @@ function AgentRunDetail({
         </dl>
       )}
       {run.error && <p className="error-notice">{run.error}</p>}
-      {(run.stdoutExcerpt || run.stderrExcerpt) && (
+      {viewMode === "nice" && (
+        <section className="agent-run-debug-section">
+          <h3>关键事件</h3>
+          {Boolean(eventsError) && <ErrorNotice error={eventsError} />}
+          {eventsLoading && <p className="muted">加载事件中...</p>}
+          {!eventsLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
+          {events.length > 0 && (
+            <div className="agent-run-events compact">
+              {events.slice(0, 6).map((event) => (
+                <article className="agent-run-event compact" key={event.id}>
+                  <div className="agent-run-event-header">
+                    <span>#{event.seq}</span>
+                    <strong>{event.eventType}</strong>
+                    {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                    {event.stream && <Badge>{event.stream}</Badge>}
+                  </div>
+                  {event.message && <p>{event.message}</p>}
+                  <small className="muted">{formatDateTime(event.createdAt)}</small>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+      {viewMode === "nice" && (
+        <section className="agent-run-debug-section">
+          <h3>工作区操作</h3>
+          {Boolean(operationsError) && <ErrorNotice error={operationsError} />}
+          {operationsLoading && <p className="muted">加载工作区操作中...</p>}
+          {!operationsLoading && operations.length === 0 && <p className="muted">暂无工作区操作。</p>}
+          {operations.length > 0 && (
+            <div className="agent-run-events compact">
+              {operations.slice(0, 6).map((operation) => (
+                <article className="agent-run-event compact" key={operation.id}>
+                  <div className="agent-run-event-header">
+                    <strong>{operation.phase}</strong>
+                    <Badge>{statusLabel(operation.status)}</Badge>
+                    {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
+                  </div>
+                  {operation.command && <p>{operation.command}</p>}
+                  <small className="muted">{operation.cwd ?? operation.id}</small>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+      {viewMode === "raw" && (run.stdoutExcerpt || run.stderrExcerpt) && (
         <section className="agent-run-debug-section">
           <h3>运行输出</h3>
           {run.stdoutExcerpt && (
@@ -556,7 +613,7 @@ function AgentRunDetail({
           )}
         </section>
       )}
-      {(hasContext || hasResult || hasUsageJson) && (
+      {viewMode === "raw" && (hasContext || hasResult || hasUsageJson) && (
         <section className="agent-run-debug-section">
           <h3>调试快照</h3>
           <div className="agent-run-json-grid">
@@ -581,7 +638,7 @@ function AgentRunDetail({
           </div>
         </section>
       )}
-      <section className="agent-run-debug-section">
+      {viewMode === "raw" && <section className="agent-run-debug-section">
         <h3>事件</h3>
         {Boolean(eventsError) && <ErrorNotice error={eventsError} />}
         {eventsLoading && <p className="muted">加载事件中...</p>}
@@ -603,8 +660,8 @@ function AgentRunDetail({
             ))}
           </div>
         )}
-      </section>
-      <section className="agent-run-debug-section">
+      </section>}
+      {viewMode === "raw" && <section className="agent-run-debug-section">
         <h3>原始日志</h3>
         {Boolean(logError) && <ErrorNotice error={logError} />}
         {log?.content ? (
@@ -612,8 +669,8 @@ function AgentRunDetail({
         ) : (
           <p className="muted">暂无日志。</p>
         )}
-      </section>
-      <section className="agent-run-debug-section">
+      </section>}
+      {viewMode === "raw" && <section className="agent-run-debug-section">
         <h3>工作区操作</h3>
         {Boolean(operationsError) && <ErrorNotice error={operationsError} />}
         {operationsLoading && <p className="muted">加载工作区操作中...</p>}
@@ -635,7 +692,7 @@ function AgentRunDetail({
             ))}
           </div>
         )}
-      </section>
+      </section>}
     </section>
   );
 }

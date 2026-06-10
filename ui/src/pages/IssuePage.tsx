@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
@@ -232,6 +232,42 @@ function activitySummary(event: ActivityEvent): string {
   return event.entityId;
 }
 
+function activityTitle(event: ActivityEvent): string {
+  switch (event.action) {
+    case "issue.executed":
+      return "执行任务";
+    case "issue.status_changed":
+      return "状态变更";
+    case "issue.created":
+      return "创建任务";
+    case "issue.updated":
+      return "更新任务";
+    case "issue.reviewed":
+      return "评审任务";
+    case "heartbeat.invoked":
+      return "唤醒智能体";
+    case "heartbeat.retried":
+      return "重试运行";
+    default:
+      return statusLabel(event.action);
+  }
+}
+
+function activityIcon(event: ActivityEvent): string {
+  if (event.action.includes("executed") || event.action.includes("heartbeat")) return "R";
+  if (event.action.includes("status")) return "S";
+  if (event.action.includes("review")) return "V";
+  return event.actorType === "agent" ? "A" : "U";
+}
+
+function activityMeta(event: ActivityEvent): string {
+  const parts = [formatIssueTime(event.createdAt)];
+  if (event.runId) parts.push(`Run ${event.runId}`);
+  const agentId = typeof event.details?.agentId === "string" ? event.details.agentId : event.agentId;
+  if (agentId) parts.push(`Agent ${agentId}`);
+  return parts.join(" · ");
+}
+
 function workProductSize(product: IssueWorkProduct): string {
   const metadataByteSize = product.metadata?.byteSize;
   const byteSize = typeof metadataByteSize === "number" ? metadataByteSize : product.byteSize;
@@ -266,6 +302,34 @@ function runSummary(run: HeartbeatRun | null): string {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return statusLabel(run.status);
+}
+
+function sourceReasonLabel(source: string | null | undefined): string {
+  switch (source) {
+    case "assignment":
+      return "任务执行";
+    case "scheduler":
+      return "心跳调度";
+    case "on_demand":
+      return "按需唤醒";
+    case "manual":
+      return "手动触发";
+    case "recovery":
+      return "恢复重试";
+    default:
+      return source ? statusLabel(source) : "未知来源";
+  }
+}
+
+function runReasonLabel(run: HeartbeatRun, orderedRuns: HeartbeatRun[]): string {
+  if (run.retryOfRunId) return `重试 ${run.retryOfRunId}`;
+  if ((run.processLossRetryCount ?? 0) > 0) return "进程恢复重试";
+  const sameSourceRuns = orderedRuns.filter((item) => item.invocationSource === run.invocationSource);
+  const runId = heartbeatRunId(run);
+  const sourceIndex = sameSourceRuns.findIndex((item) => heartbeatRunId(item) === runId);
+  if (run.invocationSource === "assignment") return sourceIndex <= 0 ? "首次执行" : "再次执行";
+  if (run.triggerDetail?.trim()) return statusLabel(run.triggerDetail);
+  return sourceReasonLabel(run.invocationSource);
 }
 
 function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
@@ -505,8 +569,9 @@ function IssuePropertiesPanel({
   );
 }
 
-function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"] }) {
+function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus, selectedRunId }: { embedded?: boolean; issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"]; selectedRunId?: string }) {
   const queryClient = useQueryClient();
+  const [workProductsHidden, setWorkProductsHidden] = useState(true);
   const workProductsQuery = useQuery({
     queryKey: ["issue-work-products", issue.id],
     queryFn: () => issuesApi.listWorkProducts(issue.id),
@@ -521,24 +586,37 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
     },
   });
   return (
-    <section aria-label="运行产物" className="issue-section-card">
+    <section aria-label="运行产物" className={embedded ? "issue-run-output-block" : "issue-section-card"}>
       <div className="issue-section-heading">
-        <h2>运行产物</h2>
-        <span className="muted">{workProducts.length}</span>
+        <div>
+          <p className="eyebrow">ARTIFACTS</p>
+          <h2>{embedded ? "任务产物" : "运行产物"}{embedded && selectedRunId ? ` · 当前运行 ${selectedRunId}` : ""}</h2>
+        </div>
+        <div className="issue-section-heading-actions">
+          <span className="muted">{workProducts.length}</span>
+          <button
+            aria-label={workProductsHidden ? "展开运行产物" : "折叠运行产物"}
+            className="secondary small-button"
+            onClick={() => setWorkProductsHidden((hidden) => !hidden)}
+            type="button"
+          >
+            {workProductsHidden ? "展开" : "折叠"}
+          </button>
+        </div>
       </div>
-      <p className="muted issue-work-product-hint">
-        运行产物是智能体执行后生成并由 server 记录的交付文件。下载只读取 contentPath，不会写入本地工作区。
+      <p className="muted issue-work-product-hint" hidden={workProductsHidden}>
+            这里展示当前任务下 server 记录的产物；每个产物会标出来源运行。下载只读取 contentPath，不会写入本地工作区。
       </p>
-      {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
-      {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
-      {!workProductsQuery.isLoading && workProducts.length === 0 && (
+      {!workProductsHidden && workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
+      {!workProductsHidden && workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
+      {!workProductsHidden && !workProductsQuery.isLoading && workProducts.length === 0 && (
         <p className="muted">
           {latestRunStatus === "succeeded"
             ? "最新运行已成功，但 server 没有登记受管产物。可能没有生成文件，或文件写到了工作区 / artifacts 之外的路径。"
             : "暂无运行产物。任务执行成功后，server 会把受管工作区或 artifacts 中的产物登记到这里。"}
         </p>
       )}
-      {workProducts.length > 0 && (
+      {!workProductsHidden && workProducts.length > 0 && (
         <div className="issue-work-product-list">
           {workProducts.map((product) => {
             const workspaceBrowserPath = metadataString(product.metadata, "workspaceBrowserPath");
@@ -611,14 +689,14 @@ function IssueWorkProductsPanel({ issue, latestRunStatus }: { issue: IssueDetail
           })}
         </div>
       )}
-      {deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
+      {!workProductsHidden && deleteWorkProduct.error && <ErrorNotice error={deleteWorkProduct.error} />}
     </section>
   );
 }
 
-function IssueDocumentsPanel({ issueId }: { issueId: string }) {
+function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean; issueId: string }) {
   const queryClient = useQueryClient();
-  const [documentsHidden, setDocumentsHidden] = useState(false);
+  const [documentsHidden, setDocumentsHidden] = useState(true);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [draftKey, setDraftKey] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
@@ -686,17 +764,21 @@ function IssueDocumentsPanel({ issueId }: { issueId: string }) {
   }
   const canSave = Boolean(draftKey.trim() && draftBody.trim());
   return (
-    <section aria-label="任务文档" className="issue-section-card">
+    <section aria-label="任务文档" className={embedded ? "issue-run-output-block" : "issue-section-card"}>
       <div className="issue-section-heading">
-        <h2>任务文档</h2>
+        <div>
+          <p className="eyebrow">DOCUMENTS</p>
+          <h2>任务文档</h2>
+        </div>
         <div className="issue-section-heading-actions">
           <span className="muted">{documents.data?.length ?? 0}</span>
           <button
+            aria-label={documentsHidden ? "展开任务文档" : "折叠任务文档"}
             className="secondary small-button"
             onClick={() => setDocumentsHidden((value) => !value)}
             type="button"
           >
-            {documentsHidden ? "显示" : "隐藏"}
+            {documentsHidden ? "展开" : "折叠"}
           </button>
         </div>
       </div>
@@ -792,57 +874,99 @@ function IssueRunsPanel({
   agentsById,
   currentRun,
   currentRunId,
+  embedded = false,
+  expandedRunId,
   onSelect,
+  onToggle,
+  renderSelectedRunDetails,
   runs,
 }: {
   agentsById: Map<string, Agent>;
   currentRun: HeartbeatRun | null;
   currentRunId: string;
+  embedded?: boolean;
+  expandedRunId: string;
   onSelect: (runId: string) => void;
+  onToggle: (runId: string) => void;
+  renderSelectedRunDetails?: () => ReactNode;
   runs: HeartbeatRun[];
 }) {
   const displayRuns = [...runs].sort((left, right) => runSortTime(left) - runSortTime(right));
+  const content = runs.length === 0 ? (
+    <p className="muted">暂无运行记录。</p>
+  ) : (
+    <div className="issue-run-record-list">
+      {displayRuns.map((run, index) => {
+        const runId = heartbeatRunId(run);
+        const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
+        const reasonRun = {
+          ...displayRun,
+          invocationSource: run.invocationSource ?? displayRun.invocationSource,
+          processLossRetryCount: run.processLossRetryCount ?? displayRun.processLossRetryCount,
+          retryOfRunId: run.retryOfRunId ?? displayRun.retryOfRunId,
+          triggerDetail: run.triggerDetail ?? displayRun.triggerDetail,
+        };
+        const summary = runSummary(displayRun);
+        const isSelected = runId === currentRunId;
+        const isExpanded = runId === expandedRunId;
+        return (
+          <div className={`issue-run-record-group${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
+            <button
+              className={`issue-run-record${isSelected ? " active" : ""}`}
+              onClick={() => onSelect(runId)}
+              type="button"
+            >
+              <div className="issue-run-record-header">
+                <div className="issue-run-record-title">
+                  <Badge>第 {index + 1} 次</Badge>
+                  <strong>{runId}</strong>
+                </div>
+                <span className="issue-run-record-badges">
+                  <Badge>{runReasonLabel(reasonRun, displayRuns)}</Badge>
+                  <Badge>{statusLabel(displayRun.status)}</Badge>
+                </span>
+              </div>
+              <dl className="issue-run-record-meta">
+                <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
+                <div><dt>创建时间</dt><dd>{formatIssueTime(displayRun.createdAt)}</dd></div>
+                <div><dt>开始时间</dt><dd>{formatIssueTime(displayRun.startedAt)}</dd></div>
+              </dl>
+              {summary && (
+                <p className="issue-run-record-summary">
+                  <span>运行输出摘要</span>
+                  {summary}
+                </p>
+              )}
+            </button>
+            <button
+              aria-label={isExpanded ? `折叠运行 ${runId}` : `展开运行 ${runId}`}
+              className="secondary small-button issue-run-record-toggle"
+              onClick={() => onToggle(runId)}
+              type="button"
+            >
+              {isExpanded ? "折叠" : "展开"}
+            </button>
+            {isExpanded && renderSelectedRunDetails && (
+              <div className="issue-run-record-details">
+                {renderSelectedRunDetails()}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+  if (embedded) return content;
   return (
     <section aria-label="运行记录" className="issue-section-card">
       <div className="issue-section-heading">
-        <h2>运行记录</h2>
+        <div>
+          <p className="eyebrow">RUNS</p>
+          <h2>运行记录</h2>
+        </div>
         <span className="muted">{runs.length} 次运行</span>
       </div>
-      {runs.length === 0 ? (
-        <p className="muted">暂无运行记录。</p>
-      ) : (
-        <div className="issue-run-record-list">
-          {displayRuns.map((run) => {
-            const runId = heartbeatRunId(run);
-            const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
-            const summary = runSummary(displayRun);
-            return (
-              <button
-                className={`issue-run-record${runId === currentRunId ? " active" : ""}`}
-                key={runId}
-                onClick={() => onSelect(runId)}
-                type="button"
-              >
-                <div className="issue-run-record-header">
-                  <strong>{runId}</strong>
-                  <Badge>{statusLabel(displayRun.status)}</Badge>
-                </div>
-                <dl className="issue-run-record-meta">
-                  <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
-                  <div><dt>创建时间</dt><dd>{formatIssueTime(displayRun.createdAt)}</dd></div>
-                  <div><dt>开始时间</dt><dd>{formatIssueTime(displayRun.startedAt)}</dd></div>
-                </dl>
-                {summary && (
-                  <p className="issue-run-record-summary">
-                    <span>运行输出摘要</span>
-                    {summary}
-                  </p>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {content}
     </section>
   );
 }
@@ -928,6 +1052,7 @@ function PaginatedLogView({
 
 function IssueRunOutputPanel({
   data,
+  embedded = false,
   onCancel,
   onRetry,
   runId,
@@ -936,6 +1061,7 @@ function IssueRunOutputPanel({
   streamLog,
 }: {
   data: IssueRunPanelData;
+  embedded?: boolean;
   onCancel: () => void;
   onRetry: () => void;
   runId: string;
@@ -946,8 +1072,8 @@ function IssueRunOutputPanel({
   const [selectedOperationLogId, setSelectedOperationLogId] = useState("");
   const [showEvents, setShowEvents] = useState(true);
   const [showRunLog, setShowRunLog] = useState(true);
-  const [showDebugOutput, setShowDebugOutput] = useState(false);
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
+  const [viewMode, setViewMode] = useState<"nice" | "raw">("nice");
   const run = data.run.data ?? null;
   const events = data.events.data ?? [];
   const operations = data.operations.data ?? [];
@@ -970,19 +1096,27 @@ function IssueRunOutputPanel({
   const canRetry = run?.status === "failed" || run?.status === "timed_out" || run?.status === "cancelled";
   const liveRun = isLiveRun(run?.status);
   const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
+  useEffect(() => {
+    setViewMode("nice");
+  }, [runId]);
   return (
-    <section aria-label="执行输出" className="issue-section-card issue-run-output">
+    <section aria-label="执行输出" className={embedded ? "issue-run-output-block issue-run-output" : "issue-section-card issue-run-output"}>
       <div className="issue-section-heading">
         <div>
-          <h2>执行输出</h2>
+          <p className="eyebrow">EXECUTION</p>
+          <h2>执行输出 · {runId}</h2>
           <p className="muted">
-            本面板展示当前任务最近一次由本页面触发的运行。{liveRun ? "运行中会通过 stream 动态刷新事件和输出。" : ""}
+            本面板展示当前选中运行的输出。{liveRun ? "运行中会通过 stream 动态刷新事件和输出。" : ""}
           </p>
         </div>
         <div className="issue-run-actions">
           {streamActive && <Badge>stream 连接中</Badge>}
           {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
           {run && <Badge>{statusLabel(run.status)}</Badge>}
+          <div className="agent-run-view-toggle" aria-label="任务执行视图">
+            <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
+            <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
+          </div>
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
           <button className="secondary small-button" disabled={!canCancel} onClick={onCancel} type="button">取消运行</button>
           <button className="secondary small-button" disabled={!canRetry} onClick={onRetry} type="button">重试运行</button>
@@ -1003,9 +1137,9 @@ function IssueRunOutputPanel({
         </dl>
         <div className="issue-run-summary-text">
           <span>最新执行摘要</span>
-          <p>{runSummary(run)}</p>
+          <p title={runSummary(run)}>{runSummary(run)}</p>
         </div>
-        {run && (
+        {viewMode === "raw" && run && (
           <details className="issue-run-inline-details">
             <summary>查看 result/context/usage</summary>
             <div className="issue-run-output-grid">
@@ -1031,7 +1165,7 @@ function IssueRunOutputPanel({
           </details>
         )}
       </section>
-      {liveLogDelta && (
+      {viewMode === "nice" && liveLogDelta && (
         <section className="issue-run-output-block">
           <div className="issue-run-output-heading">
             <h3>实时日志增量</h3>
@@ -1040,18 +1174,18 @@ function IssueRunOutputPanel({
           <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
         </section>
       )}
-      <section className="issue-run-output-block">
+      {viewMode === "raw" && <section className="issue-run-output-block">
         <div className="issue-run-output-heading">
           <h3>运行日志</h3>
           <div className="issue-run-operation-actions">
             {showRunLog && runLog.data?.eof === false && <Badge>可继续读取</Badge>}
-            <button className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
-              {showRunLog ? "隐藏运行日志" : "显示运行日志"}
+            <button aria-label={showRunLog ? "折叠运行日志" : "展开运行日志"} className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
+              {showRunLog ? "折叠" : "展开"}
             </button>
           </div>
         </div>
         {!showRunLog ? (
-          <p className="muted">运行日志已隐藏。</p>
+          <p className="muted">运行日志已折叠。</p>
         ) : (
           <PaginatedLogView
             emptyText="暂无运行日志。"
@@ -1061,31 +1195,33 @@ function IssueRunOutputPanel({
             preClassName="run-excerpt inline"
           />
         )}
-      </section>
+      </section>}
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
-          <h3>事件</h3>
+          <h3>{viewMode === "nice" ? "关键事件" : "事件"}</h3>
           <div className="issue-run-operation-actions">
-            <button className="secondary small-button" type="button" onClick={() => setShowEvents((value) => !value)}>
-              {showEvents ? "隐藏事件" : `显示事件 ${events.length}`}
-            </button>
-            {showEvents && lowValueEvents.length > 0 && (
-              <button className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
-                {showLowValueEvents ? "隐藏低价值事件" : `显示低价值事件 ${lowValueEvents.length}`}
+            {viewMode === "raw" && (
+              <button aria-label={showEvents ? "折叠事件" : `展开事件 ${events.length}`} className="secondary small-button" type="button" onClick={() => setShowEvents((value) => !value)}>
+                {showEvents ? "折叠" : `展开 ${events.length}`}
+              </button>
+            )}
+            {viewMode === "raw" && showEvents && lowValueEvents.length > 0 && (
+              <button aria-label={showLowValueEvents ? "折叠低价值事件" : `展开低价值事件 ${lowValueEvents.length}`} className="secondary small-button" type="button" onClick={() => setShowLowValueEvents((value) => !value)}>
+                {showLowValueEvents ? "折叠低价值事件" : `展开低价值事件 ${lowValueEvents.length}`}
               </button>
             )}
           </div>
         </div>
         {!showEvents ? (
-          <p className="muted">事件已隐藏。</p>
+          <p className="muted">事件已折叠。</p>
         ) : (
           <>
             {data.events.isLoading && <p className="muted">加载事件中...</p>}
             {!data.events.isLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
             {visibleEvents.length > 0 && (
-              <div className="agent-run-events">
-                {visibleEvents.map((event) => (
-                  <article className={`agent-run-event issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
+              <div className={viewMode === "nice" ? "agent-run-events compact" : "agent-run-events"}>
+                {(viewMode === "nice" ? visibleEvents.slice(0, 6) : visibleEvents).map((event) => (
+                  <article className={`agent-run-event${viewMode === "nice" ? " compact" : ""} issue-run-timeline-event${isErrorRunEvent(event) ? " error" : ""}${isTextRunEvent(event) ? " agent-reply" : ""}`} key={event.id}>
                     <div className="agent-run-event-header">
                       <span>#{event.seq}</span>
                       <strong>{runEventLabel(event)}</strong>
@@ -1093,23 +1229,24 @@ function IssueRunOutputPanel({
                       {event.level && <Badge>{statusLabel(event.level)}</Badge>}
                       {event.stream && <Badge>{event.stream}</Badge>}
                     </div>
-                    {runEventBody(event) && (
+                    {viewMode === "raw" && runEventBody(event) && (
                       isTextRunEvent(event) && !isErrorRunEvent(event)
                         ? <AgentReplyBody body={runEventBody(event)} />
                         : <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{runEventBody(event)}</pre>
                     )}
-                    {hasJsonObject(event.payload) && (
+                    {viewMode === "raw" && hasJsonObject(event.payload) && (
                       <details className="issue-run-inline-details">
                         <summary>事件详情</summary>
                         <pre className="agent-run-json issue-run-event-payload">{formattedJson(event.payload)}</pre>
                       </details>
                     )}
+                    {viewMode === "nice" && event.message && <p className="muted">{event.message}</p>}
                     <small className="muted">{formatDateTime(event.createdAt)}</small>
                   </article>
                 ))}
               </div>
             )}
-            {showLowValueEvents && lowValueEvents.length > 0 && (
+            {viewMode === "raw" && showLowValueEvents && lowValueEvents.length > 0 && (
               <div className="issue-run-low-value-events">
                 {lowValueEvents.map((event) => (
                   <article className="agent-run-event compact" key={event.id}>
@@ -1130,30 +1267,30 @@ function IssueRunOutputPanel({
         {data.operations.isLoading && <p className="muted">加载工作区操作中...</p>}
         {!data.operations.isLoading && operations.length === 0 && <p className="muted">暂无工作区操作。</p>}
         {operations.length > 0 && (
-          <div className="agent-run-events">
-            {operations.map((operation) => (
-              <article className="agent-run-event" key={operation.id}>
+          <div className={viewMode === "nice" ? "agent-run-events compact" : "agent-run-events"}>
+            {(viewMode === "nice" ? operations.slice(0, 6) : operations).map((operation) => (
+              <article className={`agent-run-event${viewMode === "nice" ? " compact" : ""}`} key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
                   <Badge>{statusLabel(operation.status)}</Badge>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p className="muted">{operation.command}</p>}
-                {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
+                {viewMode === "raw" && operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
                 <small className="muted">{operation.cwd ?? operation.id}</small>
-                <div className="issue-run-operation-actions">
-                  <button
-                    className="secondary small-button"
-                    type="button"
-                    onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
-                  >
-                    {selectedOperationLogId === operation.id ? "收起步骤日志" : "查看该步骤日志"}
-                  </button>
-                  {operation.logBytes !== undefined && operation.logBytes !== null && (
-                    <span className="muted">{formatBytes(operation.logBytes)}</span>
-                  )}
-                </div>
-                {selectedOperationLogId === operation.id && (
+                {viewMode === "raw" && <div className="issue-run-operation-actions">
+                    <button
+                      className="secondary small-button"
+                      type="button"
+                      onClick={() => setSelectedOperationLogId((current) => current === operation.id ? "" : operation.id)}
+                    >
+                      {selectedOperationLogId === operation.id ? "收起步骤日志" : "查看该步骤日志"}
+                    </button>
+                    {operation.logBytes !== undefined && operation.logBytes !== null && (
+                      <span className="muted">{formatBytes(operation.logBytes)}</span>
+                    )}
+                  </div>}
+                {viewMode === "raw" && selectedOperationLogId === operation.id && (
                   <div className="issue-run-operation-log">
                     {isWorkspaceProvisionOperation(operation) && (
                       <p className="muted">该日志为运行日志中的 workspace_provision 片段。</p>
@@ -1173,15 +1310,13 @@ function IssueRunOutputPanel({
           </div>
         )}
       </section>
-      <section className="issue-run-output-block issue-run-debug-output">
+      {viewMode === "raw" && <section className="issue-run-output-block issue-run-debug-output">
         <div className="issue-run-output-heading">
-          <h3>调试 / Raw output</h3>
-          <button className="secondary small-button" disabled={!hasRawOutput} type="button" onClick={() => setShowDebugOutput((value) => !value)}>
-            {showDebugOutput ? "收起" : "展开"}
-          </button>
+          <h3>原始输出</h3>
+          {hasRawOutput && <Badge>Raw</Badge>}
         </div>
         {!hasRawOutput && <p className="muted">暂无原始输出。</p>}
-        {showDebugOutput && hasRawOutput && (
+        {hasRawOutput && (
           <div className="issue-run-stream-list">
             {run?.stdoutExcerpt && (
               <article className="agent-run-event">
@@ -1228,7 +1363,7 @@ function IssueRunOutputPanel({
             ))}
           </div>
         )}
-      </section>
+      </section>}
     </section>
   );
 }
@@ -1242,7 +1377,13 @@ export function IssuePage() {
   const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
+  const [runsHidden, setRunsHidden] = useState(true);
+  const [heartbeatContextHidden, setHeartbeatContextHidden] = useState(true);
   const [currentRunId, setCurrentRunId] = useState(() => {
+    if (!orgId || !issueId) return "";
+    return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
+  });
+  const [expandedRunId, setExpandedRunId] = useState(() => {
     if (!orgId || !issueId) return "";
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
@@ -1287,7 +1428,9 @@ export function IssuePage() {
   });
   useEffect(() => {
     if (!orgId || !issueId) return;
-    setCurrentRunId(localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "");
+    const storedRunId = localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
+    setCurrentRunId(storedRunId);
+    setExpandedRunId(storedRunId);
   }, [orgId, issueId]);
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
@@ -1296,6 +1439,7 @@ export function IssuePage() {
     if (!latestRunId) return;
     localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
     setCurrentRunId(latestRunId);
+    setExpandedRunId(latestRunId);
   }, [currentRunId, issueRuns.data, issueId, orgId]);
   useEffect(() => {
     if (!reviewNotice) return;
@@ -1368,6 +1512,7 @@ export function IssuePage() {
         localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
         resetRunStreamState(runId);
         setCurrentRunId(runId);
+        setExpandedRunId(runId);
         queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
           ...current,
           ...run,
@@ -1510,6 +1655,7 @@ export function IssuePage() {
       localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
       resetRunStreamState(runId);
       setCurrentRunId(runId);
+      setExpandedRunId(runId);
       queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
         ...current,
         ...run,
@@ -1693,19 +1839,12 @@ export function IssuePage() {
               </p>
             )}
 
-            <section aria-label="心跳上下文" className="issue-section-card">
-              <div className="issue-section-heading">
-                <h2>心跳上下文</h2>
-                <span className="muted">任务执行时传给运行时的上下文</span>
-              </div>
-              {heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
-              {heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
-              {heartbeatContext.data && <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>}
-            </section>
-
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">
-                <h2>子任务</h2>
+                <div>
+                  <p className="eyebrow">SUBTASKS</p>
+                  <h2>子任务</h2>
+                </div>
                 <span className="muted">{subIssueList.length}</span>
               </div>
               <form className="issue-subtask-form" onSubmit={submitSubIssue}>
@@ -1739,7 +1878,10 @@ export function IssuePage() {
 
             <section aria-label="评审" className="issue-section-card">
               <div className="issue-section-heading">
-                <h2>评审</h2>
+                <div>
+                  <p className="eyebrow">REVIEW</p>
+                  <h2>评审</h2>
+                </div>
                 <span className="muted">当前阶段：{statusLabel(issue.data.status)}</span>
               </div>
               <div className="issue-review-status">
@@ -1783,42 +1925,112 @@ export function IssuePage() {
               {updateIssue.error && <ErrorNotice error={updateIssue.error} />}
             </section>
 
-            <IssueRunsPanel
-              agentsById={agentsById}
-              currentRun={runDetail.data ?? null}
-              currentRunId={currentRunId}
-              runs={issueRuns.data ?? []}
-              onSelect={(runId) => {
-                localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-                setCurrentRunId(runId);
-              }}
-            />
+            <section aria-label="运行记录" className="issue-section-card">
+              <div className="issue-section-heading">
+                <div>
+                  <p className="eyebrow">RUNS</p>
+                  <h2>运行记录</h2>
+                </div>
+                <div className="issue-section-heading-actions">
+                  <span className="muted">{issueRuns.data?.length ?? 0} 次运行</span>
+                  <button
+                    aria-label={runsHidden ? "展开运行记录" : "折叠运行记录"}
+                    className="secondary small-button"
+                    onClick={() => setRunsHidden((hidden) => !hidden)}
+                    type="button"
+                  >
+                    {runsHidden ? "展开" : "折叠"}
+                  </button>
+                </div>
+              </div>
 
-            {currentRunId && (
-              <IssueRunOutputPanel
-                data={{
-                  events: runEvents,
-                  operations: runWorkspaceOperations,
-                  run: runDetail,
-                }}
-                onCancel={() => cancelRun.mutate()}
-                onRetry={() => retryRun.mutate()}
-                runId={currentRunId}
-                streamActive={streamActiveRunId === currentRunId}
-                streamError={streamErrorsByRun[currentRunId] ?? null}
-                streamLog={streamLogsByRun[currentRunId] ?? ""}
-              />
-            )}
-            {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
-            {retryRun.error && <ErrorNotice error={retryRun.error} />}
+              {!runsHidden && (
+                <>
+                  <IssueRunsPanel
+                    agentsById={agentsById}
+                    currentRun={runDetail.data ?? null}
+                    currentRunId={currentRunId}
+                    embedded
+                    expandedRunId={expandedRunId}
+                    onSelect={(runId) => {
+                      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+                      setCurrentRunId(runId);
+                      setExpandedRunId(runId);
+                    }}
+                    onToggle={(runId) => {
+                      if (expandedRunId === runId) {
+                        setExpandedRunId("");
+                        return;
+                      }
+                      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+                      setCurrentRunId(runId);
+                      setExpandedRunId(runId);
+                    }}
+                    renderSelectedRunDetails={() => (
+                      <>
+                        {currentRunId && (
+                          <IssueRunOutputPanel
+                            data={{
+                              events: runEvents,
+                              operations: runWorkspaceOperations,
+                              run: runDetail,
+                            }}
+                            onCancel={() => cancelRun.mutate()}
+                            onRetry={() => retryRun.mutate()}
+                            runId={currentRunId}
+                            streamActive={streamActiveRunId === currentRunId}
+                            streamError={streamErrorsByRun[currentRunId] ?? null}
+                            streamLog={streamLogsByRun[currentRunId] ?? ""}
+                          />
+                        )}
+                        {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
+                        {retryRun.error && <ErrorNotice error={retryRun.error} />}
+
+                        <section aria-label="心跳上下文" className="issue-run-output-block">
+                          <div className="issue-section-heading">
+                            <div>
+                              <p className="eyebrow">HEARTBEAT CONTEXT</p>
+                              <h2>心跳上下文 · {currentRunId || "未选择运行"}</h2>
+                            </div>
+                            <div className="issue-section-heading-actions">
+                              <span className="muted">运行输入</span>
+                              <button
+                                aria-label={heartbeatContextHidden ? "展开心跳上下文" : "折叠心跳上下文"}
+                                className="secondary small-button"
+                                onClick={() => setHeartbeatContextHidden((hidden) => !hidden)}
+                                type="button"
+                              >
+                                {heartbeatContextHidden ? "展开" : "折叠"}
+                              </button>
+                            </div>
+                          </div>
+                          {!heartbeatContextHidden && heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
+                          {!heartbeatContextHidden && heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
+                          {!heartbeatContextHidden && heartbeatContext.data && (
+                            <details className="issue-run-inline-details">
+                              <summary>查看心跳上下文 JSON</summary>
+                              <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
+                            </details>
+                          )}
+                        </section>
+
+                        <IssueWorkProductsPanel embedded issue={issue.data} latestRunStatus={latestRun?.status} selectedRunId={currentRunId} />
+                      </>
+                    )}
+                    runs={issueRuns.data ?? []}
+                  />
+                </>
+              )}
+            </section>
 
             <IssueDocumentsPanel issueId={issueId} />
 
-            <IssueWorkProductsPanel issue={issue.data} latestRunStatus={latestRun?.status} />
-
             <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
-                <h2>动态</h2>
+                <div>
+                  <p className="eyebrow">ACTIVITY</p>
+                  <h2>动态</h2>
+                </div>
                 <span className="muted">
                   {comments.data?.length ?? 0} 条评论 · {attachments.data?.length ?? 0} 个文件
                 </span>
@@ -1884,17 +2096,25 @@ export function IssuePage() {
               <div className="issue-activity-list">
                 {Array.isArray(issueActivity.data) && issueActivity.data.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
-                    <div className="issue-activity-avatar">A</div>
-                    <p>
-                      <strong>{item.action}</strong>
-                      <span>{activitySummary(item)}</span>
-                    </p>
+                    <div className="issue-activity-avatar">{activityIcon(item)}</div>
+                    <div className="issue-activity-content">
+                      <div className="issue-activity-title-row">
+                        <strong>{activityTitle(item)}</strong>
+                        <span className="muted">{activityMeta(item)}</span>
+                      </div>
+                      <p>{activitySummary(item)}</p>
+                    </div>
                   </article>
                 ))}
                 {comments.data?.map((item) => (
                   <article className="issue-activity-item" key={item.id}>
                     <div className="issue-activity-avatar">C</div>
-                    <p>{item.body}</p>
+                    <div className="issue-activity-content">
+                      <div className="issue-activity-title-row">
+                        <strong>评论</strong>
+                      </div>
+                      <p>{item.body}</p>
+                    </div>
                   </article>
                 ))}
                 {comments.isSuccess && comments.data.length === 0 && (!Array.isArray(issueActivity.data) || issueActivity.data.length === 0) && (
