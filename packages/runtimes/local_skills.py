@@ -112,6 +112,8 @@ def _desired_runtime_name(value: str) -> str:
     normalized = value.strip()
     if normalized.startswith("agent:"):
         return _desired_runtime_name(normalized.removeprefix("agent:"))
+    if normalized.startswith("org:"):
+        return _desired_runtime_name(normalized.removeprefix("org:"))
     if normalized.startswith("skills/"):
         return normalized.removeprefix("skills/")
     if normalized.startswith("organization/"):

@@ -557,6 +557,101 @@ async def test_org_skill_is_available_to_agent_skill_snapshot(
     assert community["originLabel"] == "Community preset"
     assert community["description"] == "Research deeply."
 
+    community_sync_code, community_snapshot = await _request(
+        application,
+        "POST",
+        f"/api/agents/{agent_id}/skills/sync",
+        json_body={"desiredSkills": [community["selectionKey"]]},
+    )
+
+    assert community_sync_code == 200
+    assert community_snapshot["warnings"] == []
+    community_entries = {entry["key"]: entry for entry in community_snapshot["entries"]}
+    synced_community = community_entries[f"organization/{org_id}/deep-research"]
+    assert synced_community["desired"] is True
+    assert synced_community["state"] == "configured"
+    assert not [
+        entry
+        for entry in community_snapshot["entries"]
+        if entry["sourceClass"] == "adapter_home"
+        and entry["runtimeName"] == "deep-research"
+    ]
+
+
+async def test_external_runtime_skill_does_not_hide_organization_skill_entry(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory, "Step 17 External Conflict")
+    agent_id = await _seed_agent(factory, org_id)
+    create_code, created = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/skills",
+        json_body={"name": "Review", "slug": "review", "markdown": "Review code."},
+    )
+    assert create_code == 201
+
+    class FakeAdapter:
+        async def list_skills(
+            self, config: dict[str, Any], desired_skills: list[str] | None = None
+        ) -> dict[str, Any]:
+            return {
+                "agentRuntimeType": "codex_local",
+                "supported": True,
+                "mode": "persistent",
+                "desiredSkills": desired_skills or [],
+                "entries": [
+                    {
+                        "key": "review",
+                        "selectionKey": "review",
+                        "runtimeName": "review",
+                        "sourceRole": "review",
+                        "description": "Runtime home review skill.",
+                        "desired": False,
+                        "configurable": True,
+                        "alwaysEnabled": False,
+                        "managed": False,
+                        "state": "external",
+                        "sourceClass": "adapter_home",
+                        "origin": "user_installed",
+                        "originLabel": "User-installed",
+                        "locationLabel": "managed CODEX_HOME/skills",
+                        "readOnly": True,
+                        "sourcePath": None,
+                        "targetPath": "D:/codex-home/skills/review",
+                        "workspaceEditPath": None,
+                        "detail": "Installed outside this project's management.",
+                    }
+                ],
+                "warnings": [],
+            }
+
+    monkeypatch.setattr("server.services.agents.get_runtime_adapter", lambda _: FakeAdapter())
+
+    snapshot_code, snapshot = await _request(
+        application, "GET", f"/api/agents/{agent_id}/skills"
+    )
+
+    assert snapshot_code == 200
+    organization_entries = [
+        entry
+        for entry in snapshot["entries"]
+        if entry["sourceClass"] == "organization" and entry["runtimeName"] == "review"
+    ]
+    external_entries = [
+        entry
+        for entry in snapshot["entries"]
+        if entry["sourceClass"] == "adapter_home" and entry["runtimeName"] == "review"
+    ]
+    assert len(organization_entries) == 1
+    assert organization_entries[0]["key"] == created["key"]
+    assert organization_entries[0]["selectionKey"] == f"org:{created['key']}"
+    assert len(external_entries) == 1
+    assert external_entries[0]["key"] == "external:review"
+    assert external_entries[0]["selectionKey"] == "external:review"
+
 
 async def test_org_skill_scope_and_path_guard(
     app: tuple[FastAPI, async_sessionmaker],
