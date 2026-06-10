@@ -6917,10 +6917,11 @@ pre {
   display: grid;
   gap: 10px;
   grid-template-columns:
-    minmax(130px, 1fr)
-    minmax(170px, 1.15fr)
-    minmax(120px, .75fr)
-    minmax(110px, .65fr)
+    minmax(140px, 1fr)
+    minmax(140px, 1fr)
+    minmax(140px, 1fr)
+    minmax(140px, 1fr)
+    minmax(140px, 1fr)
     auto;
 }
 
@@ -6936,7 +6937,7 @@ pre {
   position: relative;
 }
 
-.chat-context-controls-readonly label::after {
+.chat-context-controls-readonly label:not(.chat-plan-mode-toggle)::after {
   color: #66748a;
   content: "只读";
   font-size: 9px;
@@ -6962,6 +6963,47 @@ pre {
 
 .chat-context-controls select {
   width: 100%;
+}
+
+.chat-plan-mode-toggle {
+  align-items: center;
+  background: #0a0f17;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  color: #cbd7e8;
+  display: inline-flex;
+  flex-direction: row !important;
+  gap: 8px !important;
+  min-height: 38px;
+  padding: 0 11px;
+}
+
+.chat-plan-mode-toggle input {
+  margin: 0;
+}
+
+.chat-context-help {
+  color: #7d899b;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.chat-context-help summary {
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  list-style-position: inside;
+}
+
+.chat-context-help div {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.chat-context-help p {
+  margin: 0;
 }
 
 .chat-skill-dropdown {

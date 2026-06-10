@@ -25,6 +25,7 @@ export function ChatsPage() {
   const requestedAgentId = searchParams.get("agentId") ?? "";
   const [agentId, setAgentId] = useState("");
   const [issueCreationMode, setIssueCreationMode] = useState<"manual_approval" | "auto_create">("manual_approval");
+  const [planMode, setPlanMode] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [body, setBody] = useState("");
   const [skillDropdownOpen, setSkillDropdownOpen] = useState(false);
@@ -79,6 +80,7 @@ export function ChatsPage() {
       const chat = await chatsApi.create(orgId, {
         title: draft.slice(0, 40) || "新对话",
         issueCreationMode,
+        ...(planMode ? { planMode: true } : {}),
         preferredAgentId: agentId,
         ...(projectId
           ? { contextLinks: [{ entityType: "project", entityId: projectId }] }
@@ -180,6 +182,15 @@ export function ChatsPage() {
                 <option value="auto_create">自动创建</option>
               </select>
             </label>
+            <label className="chat-plan-mode-toggle">
+              <input
+                aria-label="计划模式"
+                checked={planMode}
+                onChange={(event) => setPlanMode(event.target.checked)}
+                type="checkbox"
+              />
+              计划模式
+            </label>
             <details
               className="chat-skill-dropdown"
               onBlur={(event) => {
@@ -209,9 +220,22 @@ export function ChatsPage() {
           </div>
           <div className="chat-compose-actions">
             <span className="muted">项目和技能作为上下文展示，消息会发送给所选智能体。</span>
+            <ChatIssueCreationHelp />
           </div>
         </form>
       </section>
     </ChatsWorkspace>
+  );
+}
+
+function ChatIssueCreationHelp() {
+  return (
+    <details className="chat-context-help">
+      <summary>任务创建规则</summary>
+      <div>
+        <p>计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。</p>
+        <p>任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。</p>
+      </div>
+    </details>
   );
 }

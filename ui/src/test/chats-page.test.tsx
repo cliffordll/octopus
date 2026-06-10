@@ -64,12 +64,20 @@ it("shows a composer and sends a first message through a selected agent", async 
   expect(within(screen.getByRole("navigation", { name: "消息导航" })).queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.getByLabelText("项目")).toBeInTheDocument();
   expect(screen.getByLabelText("任务创建模式")).toHaveValue("manual_approval");
+  expect(screen.getByLabelText("计划模式")).not.toBeChecked();
+  expect(screen.getByText("任务创建规则")).toBeInTheDocument();
+  expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).not.toBeVisible();
+  expect(screen.getByText("任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。")).not.toBeVisible();
+  await userEvent.click(screen.getByText("任务创建规则"));
+  expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).toBeVisible();
+  expect(screen.getByText("任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。")).toBeVisible();
   expect(screen.getByRole("button", { name: "发送并创建对话" })).toBeInTheDocument();
 
   expect(await screen.findByRole("option", { name: "平台项目" })).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText("项目"), "project-1");
   await userEvent.selectOptions(screen.getByLabelText("对话智能体"), "agent-1");
   await userEvent.selectOptions(screen.getByLabelText("任务创建模式"), "auto_create");
+  await userEvent.click(screen.getByLabelText("计划模式"));
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
   await userEvent.click(skillSummary);
@@ -88,6 +96,7 @@ it("shows a composer and sends a first message through a selected agent", async 
       body: JSON.stringify({
         title: "请规划部署",
         issueCreationMode: "auto_create",
+        planMode: true,
         preferredAgentId: "agent-1",
         contextLinks: [{ entityType: "project", entityId: "project-1" }],
       }),
@@ -531,7 +540,9 @@ it("shows the selected conversation and agent identity while sending messages", 
 });
 
 it("shows existing conversation context as readonly controls with a skill dropdown", async () => {
+  const requests: Array<{ path: string; body?: string }> = [];
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    requests.push({ path, body: typeof init?.body === "string" ? init.body : undefined });
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
       return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1" }]);
     }
@@ -552,6 +563,7 @@ it("shows existing conversation context as readonly controls with a skill dropdo
         status: "active",
         preferredAgentId: "agent-1",
         issueCreationMode: "auto_create",
+        planMode: true,
         contextLinks: [{
           id: "link-1",
           orgId: "org-1",
@@ -569,6 +581,9 @@ it("shows existing conversation context as readonly controls with a skill dropdo
     if (path === "/api/agents/agent-1/skills" && init?.method === "GET") {
       return respond({ desiredSkills: ["review"], entries: [{ name: "deploy" }] });
     }
+    if (path === "/api/chats/chat-1" && init?.method === "PATCH") {
+      return respond({ id: "chat-1", orgId: "org-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "auto_create", planMode: false });
+    }
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -580,6 +595,11 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(screen.getByLabelText("对话智能体")).toBeDisabled();
   expect(screen.getByLabelText("任务创建模式")).toBeDisabled();
   expect(screen.getByLabelText("任务创建模式")).toHaveTextContent("自动创建");
+  expect(screen.getByLabelText("计划模式")).toBeChecked();
+  expect(screen.getByText("任务创建规则")).toBeInTheDocument();
+  expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).not.toBeVisible();
+  await userEvent.click(screen.getByText("任务创建规则"));
+  expect(screen.getByText("计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。")).toBeVisible();
   expect(screen.queryByRole("option", { name: "Reviewer (评审)" })).not.toBeInTheDocument();
   const skillSummary = screen.getByText("技能列表");
   const skillDropdown = skillSummary.closest("details");
@@ -589,6 +609,11 @@ it("shows existing conversation context as readonly controls with a skill dropdo
   expect(await screen.findByText("deploy")).toBeInTheDocument();
   await userEvent.click(screen.getByLabelText("消息"));
   expect(skillDropdown).not.toHaveAttribute("open");
+  await userEvent.click(screen.getByLabelText("计划模式"));
+  expect(requests).toContainEqual({
+    path: "/api/chats/chat-1",
+    body: JSON.stringify({ planMode: false }),
+  });
 });
 
 it("creates an issue from a chat issue proposal", async () => {
@@ -658,6 +683,48 @@ it("creates an issue from a chat issue proposal", async () => {
   expect(await screen.findByText("任务创建成功")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /OCT-1 · 任务已创建/ })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   expect(screen.queryByText("Created issue OCT-1 from this chat conversation.")).not.toBeInTheDocument();
+});
+
+it("explains when an issue proposal needs human label selection", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "auto_create" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({ id: "chat-1", orgId: "org-1", title: "支持会话", status: "active", preferredAgentId: "agent-1", issueCreationMode: "auto_create" });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      return respond([{
+        id: "message-1",
+        role: "assistant",
+        kind: "issue_proposal",
+        body: "请确认是否创建该任务？",
+        status: "completed",
+        structuredPayload: {
+          issueProposal: {
+            title: "为任务选择标签",
+            description: "需要先选定合适标签。",
+            priority: "medium",
+            requiresLabelSelection: true,
+          },
+        },
+      }]);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+
+  expect(await screen.findByText("任务提案")).toBeInTheDocument();
+  expect(screen.getByText("需要人工选择标签，审批后创建任务。")).toBeInTheDocument();
 });
 
 it("approves a chat issue proposal through the approval API and shows the created issue event", async () => {

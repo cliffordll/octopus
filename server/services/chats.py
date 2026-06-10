@@ -818,20 +818,18 @@ class ChatService:
         structured_payload = _with_persisted_transcript(
             _assistant_structured_payload(result_json), transcript
         )
-        should_auto_create_issue = (
-            assistant_kind == "issue_proposal"
-            and _chat_issue_creation_mode(conversation.issue_creation_mode)
-            == "auto_create"
-            and not conversation.plan_mode
+        auto_create_issue, manual_issue_reason = _issue_auto_create_decision(
+            conversation, assistant_kind, structured_payload
         )
         approval_id = None
-        if not should_auto_create_issue:
+        if not auto_create_issue:
             approval_id = await self._create_proposal_approval(
                 conversation,
                 kind=assistant_kind,
                 structured_payload=structured_payload,
                 requested_by_user_id=conversation.created_by_user_id,
                 replying_agent_id=agent.id,
+                manual_reason=manual_issue_reason,
             )
         assistant_message_at = max(
             datetime.now(UTC), user_message_at + timedelta(microseconds=1)
@@ -858,7 +856,7 @@ class ChatService:
             self._session, conversation.id, assistant_message.created_at
         )
         messages = [self._to_message(user_message), self._to_message(assistant_message)]
-        if should_auto_create_issue:
+        if auto_create_issue:
             converted = await self.convert_to_issue(
                 conversation.id,
                 {"messageId": assistant_message.id},
@@ -879,21 +877,28 @@ class ChatService:
         structured_payload: dict[str, Any] | None,
         requested_by_user_id: str | None,
         replying_agent_id: str | None,
+        manual_reason: str | None = None,
     ) -> str | None:
         if kind == "issue_proposal":
+            payload = {
+                "chatConversationId": conversation.id,
+                "proposedByAgentId": replying_agent_id,
+                "proposedIssue": _proposal_payload(
+                    structured_payload, "issueProposal"
+                ),
+            }
+            if manual_reason:
+                payload["manualReason"] = manual_reason
+                payload["requiresHumanSelection"] = manual_reason in {
+                    "label_selection_required"
+                }
             approval = await create_approval(
                 self._session,
                 {
                     "org_id": conversation.org_id,
                     "type": "chat_issue_creation",
                     "requested_by_user_id": requested_by_user_id,
-                    "payload": {
-                        "chatConversationId": conversation.id,
-                        "proposedByAgentId": replying_agent_id,
-                        "proposedIssue": _proposal_payload(
-                            structured_payload, "issueProposal"
-                        ),
-                    },
+                    "payload": payload,
                 },
             )
             return approval.id
@@ -1263,6 +1268,34 @@ def _assistant_kind(value: object) -> str:
     if isinstance(value, str) and value in CHAT_MESSAGE_KINDS:
         return value
     return "message"
+
+
+def _issue_auto_create_decision(
+    conversation: ChatConversationRow,
+    assistant_kind: str,
+    structured_payload: dict[str, Any] | None,
+) -> tuple[bool, str | None]:
+    if assistant_kind != "issue_proposal":
+        return False, None
+    if _chat_issue_creation_mode(conversation.issue_creation_mode) != "auto_create":
+        return False, "manual_approval"
+    if conversation.plan_mode:
+        return False, "plan_mode"
+    if _issue_proposal_requires_label_selection(structured_payload):
+        return False, "label_selection_required"
+    return True, None
+
+
+def _issue_proposal_requires_label_selection(
+    structured_payload: dict[str, Any] | None,
+) -> bool:
+    proposal = _proposal_payload(structured_payload, "issueProposal")
+    if proposal is None:
+        return False
+    if proposal.get("requiresLabelSelection") is True:
+        return True
+    label_ids = proposal.get("labelIds")
+    return isinstance(label_ids, list) and len(label_ids) == 0
 
 
 def _assistant_structured_payload(
