@@ -9,6 +9,7 @@ import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
+import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
@@ -298,6 +299,12 @@ function summarizeRun(run: HeartbeatRun | null): string {
   return typeof summary === "string" && summary.trim() ? summary.trim() : run.id;
 }
 
+function compactRunSummary(run: HeartbeatRun | null): string {
+  const summary = summarizeRun(run);
+  if (!run) return summary;
+  return summary === run.id ? "暂无摘要" : summary;
+}
+
 function runMetric(run: HeartbeatRun | null, key: string): string {
   const value = run?.usageJson?.[key];
   if (typeof value === "number") return String(value);
@@ -510,7 +517,7 @@ function AgentRunDetail({
       <div className="agent-run-detail-header">
         <div>
           <div className="meta-line">
-            <Badge>{statusLabel(run.status)}</Badge>
+            <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
             <Badge>{sourceLabel(run.invocationSource)}</Badge>
             {run.triggerDetail && <Badge>{run.triggerDetail}</Badge>}
           </div>
@@ -562,7 +569,7 @@ function AgentRunDetail({
                   <div className="agent-run-event-header">
                     <span>#{event.seq}</span>
                     <strong>{event.eventType}</strong>
-                    {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                    {event.level && <StatusPill status={event.level}>{statusLabel(event.level)}</StatusPill>}
                     {event.stream && <Badge>{event.stream}</Badge>}
                   </div>
                   {event.message && <p>{event.message}</p>}
@@ -585,7 +592,7 @@ function AgentRunDetail({
                 <article className="agent-run-event compact" key={operation.id}>
                   <div className="agent-run-event-header">
                     <strong>{operation.phase}</strong>
-                    <Badge>{statusLabel(operation.status)}</Badge>
+                    <StatusPill status={operation.status}>{statusLabel(operation.status)}</StatusPill>
                     {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                   </div>
                   {operation.command && <p>{operation.command}</p>}
@@ -650,7 +657,7 @@ function AgentRunDetail({
                 <div className="agent-run-event-header">
                   <span>#{event.seq}</span>
                   <strong>{event.eventType}</strong>
-                  {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                  {event.level && <StatusPill status={event.level}>{statusLabel(event.level)}</StatusPill>}
                   {event.stream && <Badge>{event.stream}</Badge>}
                 </div>
                 {event.message && <p>{event.message}</p>}
@@ -681,7 +688,7 @@ function AgentRunDetail({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{statusLabel(operation.status)}</Badge>
+                  <StatusPill status={operation.status}>{statusLabel(operation.status)}</StatusPill>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p>{operation.command}</p>}
@@ -1259,14 +1266,20 @@ export function AgentPage() {
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
             <section className="panel agent-latest-run-card">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Latest Run</p>
-                  <h2>{selectedRun ? selectedRun.id.slice(0, 8) : "暂无运行记录"}</h2>
-                  <p className="muted">{summarizeRun(selectedRun)}</p>
-                </div>
-                {selectedRun && <Badge>{statusLabel(selectedRun.status)}</Badge>}
+              <div className="agent-latest-run-header">
+                <p className="eyebrow">Latest Run</p>
               </div>
+              <div className="agent-latest-run-title-row">
+                {selectedRun ? (
+                  <>
+                    <h2>运行 {selectedRun.id.slice(0, 8)}</h2>
+                    <StatusPill status={selectedRun.status}>{statusLabel(selectedRun.status)}</StatusPill>
+                  </>
+                ) : (
+                  <h2 className="agent-latest-run-empty">暂无运行记录</h2>
+                )}
+              </div>
+              <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
               <dl className="detail-grid compact">
                 <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
                 <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
@@ -1592,7 +1605,7 @@ export function AgentPage() {
                               {runtimeTestResult.checks.map((check) => (
                                 <li key={check.id ?? check.label ?? check.message}>
                                   <span>{check.label ?? check.id ?? "检查项"}</span>
-                                  <Badge>{check.status ? statusLabel(check.status) : "未知"}</Badge>
+                                  <StatusPill status={check.status}>{check.status ? statusLabel(check.status) : "未知"}</StatusPill>
                                   {check.message && <span>{check.message}</span>}
                                   {check.hint && <small>{check.hint}</small>}
                                 </li>
@@ -1722,7 +1735,7 @@ export function AgentPage() {
                             <strong>{session.taskKey}</strong>
                             <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {formatDateTime(session.updatedAt)}</p>
                           </div>
-                          <Badge>{statusLabel(session.status)}</Badge>
+                          <StatusPill status={session.status}>{statusLabel(session.status)}</StatusPill>
                         </article>
                       ))}
                     </div>
@@ -1955,7 +1968,7 @@ export function AgentPage() {
                     <strong>{run.id.slice(0, 8)}</strong>
                     <small>{summarizeRun(run)}</small>
                   </span>
-                    <span className={`agent-run-status-pill ${run.status}`}>{statusLabel(run.status)}</span>
+                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
                 </button>
               ))}
             </aside>
