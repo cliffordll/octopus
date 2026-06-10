@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from packages.shared.api_paths.issue_attachments import (
@@ -53,6 +54,7 @@ from packages.shared.validators.work_product import (
     validate_create_issue_work_product,
     validate_update_issue_work_product,
 )
+from packages.database.queries.activity_log import insert_activity_log
 
 from ..dependencies.access import (
     assert_organization_access,
@@ -63,6 +65,7 @@ from ..dependencies.access import (
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
 from ..dependencies.documents import get_document_service
+from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
@@ -311,6 +314,7 @@ async def execute_issue_route(
     request: Request,
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    session: AsyncSession = Depends(get_session),
 ) -> HeartbeatRun | JSONResponse:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -370,6 +374,23 @@ async def execute_issue_route(
         )
     enriched = await heartbeat.get(run["id"])
     assert enriched is not None
+    await insert_activity_log(
+        session,
+        org_id=detail["orgId"],
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        action="issue.executed",
+        entity_type="issue",
+        entity_id=id,
+        agent_id=assignee_agent_id,
+        run_id=enriched["id"],
+        details={
+            "agentId": assignee_agent_id,
+            "runId": enriched["id"],
+            "reason": "issue_execute",
+            "status": enriched["status"],
+        },
+    )
     if enriched["status"] == "queued":
         _schedule_dispatch(request, enriched["agentId"])
     return JSONResponse(enriched, status_code=http_status.HTTP_202_ACCEPTED)
@@ -538,6 +559,7 @@ async def create_issue_comment_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     detail = await service.get_by_id(id)
@@ -562,6 +584,20 @@ async def create_issue_comment_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
+    if not (
+        actor.actor_type == "agent" and actor.actor_id == detail.get("assigneeAgentId")
+    ):
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            detail,
+            reason="issue_comment_added",
+            mutation="comment",
+            context_source="issue.comment",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+            extra_payload={"commentId": comment.id},
+            extra_context={"commentId": comment.id, "commentBody": comment.body},
+        )
     return {
         "id": comment.id,
         "issueId": comment.issue_id,
