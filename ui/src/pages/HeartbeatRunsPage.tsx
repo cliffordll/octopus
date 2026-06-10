@@ -5,6 +5,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { StatusPill } from "../components/StatusPill";
 import { roleLabel, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -121,15 +122,8 @@ function schedulerState(agent: Agent): { className: string; label: string } {
   return { className: "heartbeat-state-muted", label: "未启用" };
 }
 
-function latestRunState(run: HeartbeatRun | null): { className: string; label: string } {
-  if (!run) return { className: "heartbeat-state-muted", label: "暂无运行" };
-  if (run.status === "failed" || run.status === "timed_out") {
-    return { className: "heartbeat-state-danger", label: statusLabel(run.status) };
-  }
-  if (run.status === "succeeded") return { className: "heartbeat-state-success", label: statusLabel(run.status) };
-  if (run.status === "running") return { className: "heartbeat-state-live", label: statusLabel(run.status) };
-  if (run.status === "queued") return { className: "heartbeat-state-warning", label: statusLabel(run.status) };
-  return { className: "heartbeat-state-muted", label: humanize(run.status) };
+function latestRunState(run: HeartbeatRun | null): string {
+  return run ? statusLabel(run.status) : "暂无运行";
 }
 
 function latestRunByAgent(runs: HeartbeatRun[]): Map<string, HeartbeatRun> {
@@ -138,12 +132,6 @@ function latestRunByAgent(runs: HeartbeatRun[]): Map<string, HeartbeatRun> {
     if (!map.has(run.agentId)) map.set(run.agentId, run);
   }
   return map;
-}
-
-function statusClass(status: HeartbeatRun["status"]): string {
-  if (status === "failed" || status === "timed_out") return "heartbeat-activity-failed";
-  if (status === "succeeded") return "heartbeat-activity-succeeded";
-  return "heartbeat-activity-active";
 }
 
 export function HeartbeatRunsPage() {
@@ -222,10 +210,11 @@ export function HeartbeatRunsPage() {
         <section className="panel heartbeat-upstream-card">
           <div className="heartbeat-card-header">
             <div>
+              <p className="eyebrow">Timer Heartbeats</p>
               <h1>智能体</h1>
               <p>每个智能体一行。这里用于控制定时心跳策略，并在需要深入检查时跳转到最近运行。</p>
             </div>
-            <Link className="button secondary small-button" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
+            <Link className="button org-primary-action" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
           </div>
           {rows.length === 0 ? (
             <div className="heartbeat-empty-state">暂无活跃智能体。创建智能体后再管理组织心跳。</div>
@@ -257,7 +246,7 @@ export function HeartbeatRunsPage() {
                       <p title={formatDateTime(agent.lastHeartbeatAt)}>最近心跳 {relativeTime(agent.lastHeartbeatAt)}</p>
                     </div>
                     <div className="heartbeat-run-cell">
-                      <strong className={runState.className}>{runState.label}</strong>
+                      {latestRun ? <StatusPill status={latestRun.status}>{runState}</StatusPill> : <strong className="heartbeat-state-muted">{runState}</strong>}
                       {summary && <p title={summary}>{summary}</p>}
                       <div>
                         {latestRun?.createdAt && <span title={formatDateTime(latestRun.createdAt)}>运行 {relativeTime(latestRun.createdAt)}</span>}
@@ -315,6 +304,7 @@ export function HeartbeatRunsPage() {
         <section className="panel heartbeat-upstream-card">
           <div className="heartbeat-card-header">
             <div>
+              <p className="eyebrow">Recent Activity</p>
               <h2>最近活动</h2>
               <p>这里保持摘要优先。需要 transcript、日志和工作区操作时，打开关联运行。</p>
             </div>
@@ -332,7 +322,7 @@ export function HeartbeatRunsPage() {
                     to={`/orgs/${run.orgId}/agents/${run.agentId}/runs/${run.id}`}
                   >
                     <div className="heartbeat-activity-heading">
-                      <span className={statusClass(run.status)}>{humanize(run.status)}</span>
+                      <StatusPill status={run.status}>{humanize(run.status)}</StatusPill>
                       <small>{agentNameById.get(run.agentId) ?? "未知智能体"}</small>
                     </div>
                     {summary && <p>{summary}</p>}

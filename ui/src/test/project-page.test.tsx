@@ -191,7 +191,7 @@ it("updates a project and manages its resource attachments", async () => {
   expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
   expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByText("console-main")).toBeInTheDocument();
+  expect(screen.getAllByText("console-main").length).toBeGreaterThanOrEqual(1);
 
   await userEvent.clear(screen.getByLabelText("描述"));
   await userEvent.type(screen.getByLabelText("描述"), "更新后的描述");
@@ -200,7 +200,7 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
   await userEvent.click(screen.getByLabelText(/独立工作区/));
-  expect(screen.getByText("isolated_workspace")).toBeInTheDocument();
+  expect(screen.getByLabelText(/独立工作区/)).toBeChecked();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -337,7 +337,16 @@ it("saves the selected workspace policy when the project has no existing policy"
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
-  expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
+  expect(await screen.findByLabelText(/共享工作区/)).toBeChecked();
+  expect(screen.queryByText("shared_workspace")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByText("高级配置 JSON"));
+  expect(screen.getByLabelText("execution_workspace_policy JSON")).toHaveValue(
+    JSON.stringify({
+      enabled: true,
+      defaultMode: "shared_workspace",
+      workspaceStrategy: { mode: "shared_workspace" },
+    }, null, 2),
+  );
   expect(screen.getByText("将使用组织共享工作区")).toBeInTheDocument();
   expect(screen.getByText("organizations/org-1/workspaces")).toBeInTheDocument();
   expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();

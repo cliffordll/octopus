@@ -27,6 +27,7 @@ import type {
 import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, priorityLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
@@ -632,8 +633,8 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus, sele
               </div>
               <div className="issue-work-product-meta">
                 <Badge>{product.type}</Badge>
-                <Badge>{statusLabel(product.status)}</Badge>
-                <Badge>{statusLabel(product.reviewState)}</Badge>
+                <StatusPill status={product.status}>{statusLabel(product.status)}</StatusPill>
+                <StatusPill status={product.reviewState}>{statusLabel(product.reviewState)}</StatusPill>
                 {product.isPrimary && <Badge>primary</Badge>}
               </div>
               <dl className="issue-work-product-details">
@@ -923,7 +924,7 @@ function IssueRunsPanel({
                 </div>
                 <span className="issue-run-record-badges">
                   <Badge>{runReasonLabel(reasonRun, displayRuns)}</Badge>
-                  <Badge>{statusLabel(displayRun.status)}</Badge>
+                  <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
                 </span>
               </div>
               <dl className="issue-run-record-meta">
@@ -1112,7 +1113,7 @@ function IssueRunOutputPanel({
         <div className="issue-run-actions">
           {streamActive && <Badge>stream 连接中</Badge>}
           {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
-          {run && <Badge>{statusLabel(run.status)}</Badge>}
+          {run && <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>}
           <div className="agent-run-view-toggle" aria-label="任务执行视图">
             <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
             <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
@@ -1226,7 +1227,7 @@ function IssueRunOutputPanel({
                       <span>#{event.seq}</span>
                       <strong>{runEventLabel(event)}</strong>
                       <Badge>{event.eventType}</Badge>
-                      {event.level && <Badge>{statusLabel(event.level)}</Badge>}
+                      {event.level && <StatusPill status={event.level}>{statusLabel(event.level)}</StatusPill>}
                       {event.stream && <Badge>{event.stream}</Badge>}
                     </div>
                     {viewMode === "raw" && runEventBody(event) && (
@@ -1272,7 +1273,7 @@ function IssueRunOutputPanel({
               <article className={`agent-run-event${viewMode === "nice" ? " compact" : ""}`} key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{statusLabel(operation.status)}</Badge>
+                  <StatusPill status={operation.status}>{statusLabel(operation.status)}</StatusPill>
                   {operation.exitCode !== undefined && operation.exitCode !== null && <Badge>Exit {operation.exitCode}</Badge>}
                 </div>
                 {operation.command && <p className="muted">{operation.command}</p>}
@@ -1340,7 +1341,7 @@ function IssueRunOutputPanel({
               <article className="agent-run-event" key={operation.id}>
                 <div className="agent-run-event-header">
                   <strong>{operation.phase}</strong>
-                  <Badge>{statusLabel(operation.status)}</Badge>
+                  <StatusPill status={operation.status}>{statusLabel(operation.status)}</StatusPill>
                 </div>
                 {operation.command && <pre className="issue-run-event-log">{operation.command}</pre>}
                 {operation.stderrExcerpt && <pre className="run-excerpt error inline">{operation.stderrExcerpt}</pre>}
@@ -1798,7 +1799,7 @@ export function IssuePage() {
                 <Badge>{issueDisplayId(issue.data)}</Badge>
                 <Badge>{statusLabel(issue.data.status)}</Badge>
                 <Badge>{priorityLabel(issue.data.priority)}</Badge>
-                {latestRun && <Badge>运行：{statusLabel(latestRun.status)}</Badge>}
+                {latestRun && <StatusPill status={latestRun.status}>运行：{statusLabel(latestRun.status)}</StatusPill>}
               </div>
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
