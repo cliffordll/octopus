@@ -725,10 +725,10 @@ function organizationSkillReadableSummary(skill: OrganizationSkillListItem, cont
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
-    { label: "内置技能", rows: skills.filter(isBuiltInOrganizationSkill), title: "built-in" },
-    { label: "社区技能", rows: skills.filter(isCommunityOrganizationSkill), title: "community" },
+    { label: "内置技能列表", rows: skills.filter(isBuiltInOrganizationSkill), title: "built-in" },
+    { label: "社区技能列表", rows: skills.filter(isCommunityOrganizationSkill), title: "community" },
     {
-      label: "本地技能",
+      label: "本地技能列表",
       title: "local",
       rows: skills.filter((skill) => !isBuiltInOrganizationSkill(skill) && !isCommunityOrganizationSkill(skill)),
     },
@@ -945,7 +945,6 @@ export function OrganizationSkillsPage() {
               <p className="eyebrow">Skills</p>
               <h1>技能</h1>
               <p>{skillRows.length} 个可用</p>
-              <p>当前组织的内置、社区和导入技能。</p>
             </div>
             <div className="row-actions">
               <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button">创建</button>
@@ -1001,9 +1000,6 @@ export function OrganizationSkillsPage() {
                     <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
                     <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                   </div>
-                  {!selectedSkill.editable && selectedSkill.editableReason && (
-                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBuiltInOrganizationSkill(selectedSkill))}</p>
-                  )}
                 </div>
                 <div className="row-actions">
                   <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
@@ -1036,11 +1032,7 @@ export function OrganizationSkillsPage() {
                 </section>
               )}
               <div className="organization-skill-info-grid">
-                <div>
-                  <span>来源</span>
-                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</strong>
-                </div>
-                <div>
+                <div className="organization-skill-info-grid-full">
                   <span>来源路径</span>
                   <strong title={selectedSkill.sourcePath ?? "未设置"}>{selectedSkill.sourcePath ?? "未设置"}</strong>
                 </div>
