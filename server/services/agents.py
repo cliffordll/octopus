@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -40,6 +41,7 @@ from packages.database.schema import (
     AgentConfigRevision as AgentConfigRevisionRow,
     AgentRuntimeState as AgentRuntimeStateRow,
     AgentTaskSession as AgentTaskSessionRow,
+    Organization as OrganizationRow,
 )
 from packages.shared.constants.agent import (
     AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX,
@@ -50,6 +52,10 @@ from packages.shared.constants.agent import (
     AgentRuntimeType,
     AgentStatus,
     PauseReason,
+)
+from packages.shared.constants.heartbeat import (
+    AGENT_RUN_CONCURRENCY_DEFAULT,
+    HEARTBEAT_INTERVAL_DEFAULT_SEC,
 )
 from packages.shared.types.agent import (
     Agent,
@@ -69,6 +75,7 @@ from packages.shared.types.agent import (
     ResetAgentSessionResult,
     UpdateAgentPayload,
 )
+from packages.shared.types.heartbeat import InstanceSchedulerHeartbeatAgent
 from packages.shared.types.approval import CreateApprovalPayload
 from packages.runtimes import get_runtime_adapter
 
@@ -100,7 +107,16 @@ _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
 )
 _AGENT_WORKSPACE_HOME_DIRS = ("instructions", "skills", "life", "memory")
 _SKILL_EVIDENCE_KINDS = ("used", "requested", "loaded")
+_SCHEDULER_INELIGIBLE_STATUSES = {"paused", "terminated", "pending_approval"}
 SkillEvidenceKind = Literal["used", "requested", "loaded"]
+_DEFAULT_HEARTBEAT_INTERVAL_SEC = HEARTBEAT_INTERVAL_DEFAULT_SEC
+_DEFAULT_HEARTBEAT_POLICY: dict[str, Any] = {
+    "enabled": True,
+    "intervalSec": _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    "wakeOnDemand": True,
+    "preflightEnabled": True,
+    "maxConcurrentRuns": AGENT_RUN_CONCURRENCY_DEFAULT,
+}
 
 
 class AgentConflictError(ValueError):
@@ -116,6 +132,53 @@ def _normalize_url_key(value: str | None) -> str | None:
 
 def _derive_url_key(name: str | None, fallback: str | None = None) -> str:
     return _normalize_url_key(name) or _normalize_url_key(fallback) or "agent"
+
+
+def _parse_scheduler_heartbeat_policy(
+    runtime_config: dict[str, Any],
+) -> dict[str, float | bool]:
+    heartbeat = runtime_config.get("heartbeat", {})
+    config = heartbeat if isinstance(heartbeat, dict) else {}
+    enabled = config.get("enabled", True)
+    interval = config.get("intervalSec", 0)
+    interval_sec = (
+        max(0.0, float(interval))
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool)
+        else 0.0
+    )
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else True,
+        "intervalSec": interval_sec if interval_sec > 0 else _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    }
+
+
+def _materialize_heartbeat_runtime_config(
+    runtime_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = dict(runtime_config or {})
+    heartbeat = config.get("heartbeat")
+    if heartbeat is None:
+        config["heartbeat"] = dict(_DEFAULT_HEARTBEAT_POLICY)
+    elif isinstance(heartbeat, dict):
+        materialized = {**_DEFAULT_HEARTBEAT_POLICY, **heartbeat}
+        interval = materialized.get("intervalSec")
+        if (
+            not isinstance(interval, (int, float))
+            or isinstance(interval, bool)
+            or interval <= 0
+        ):
+            materialized["intervalSec"] = _DEFAULT_HEARTBEAT_INTERVAL_SEC
+        config["heartbeat"] = materialized
+    return config
+
+
+def _is_hidden_system_agent_metadata(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("hidden") is True
+        or metadata.get("systemManaged") == "rudder_copilot"
+    )
 
 
 def _source_issue_ids(payload: HireAgentPayload) -> list[str]:
@@ -458,6 +521,54 @@ class AgentService:
         )
         return [self._to_agent(row, skills_by_agent.get(row.id, [])) for row in visible]
 
+    async def list_instance_scheduler_heartbeats(
+        self,
+    ) -> list[InstanceSchedulerHeartbeatAgent]:
+        result = await self._session.execute(
+            select(AgentRow, OrganizationRow)
+            .join(OrganizationRow, AgentRow.org_id == OrganizationRow.id)
+            .order_by(OrganizationRow.name, AgentRow.name)
+        )
+        items: list[InstanceSchedulerHeartbeatAgent] = []
+        for row, org in result.all():
+            if row.status in _SCHEDULER_INELIGIBLE_STATUSES:
+                continue
+            if _is_hidden_system_agent_metadata(row.metadata_json):
+                continue
+            policy = _parse_scheduler_heartbeat_policy(row.runtime_config)
+            heartbeat_enabled = cast(bool, policy["enabled"])
+            interval_sec = cast(float, policy["intervalSec"])
+            items.append(
+                {
+                    "id": row.id,
+                    "orgId": row.org_id,
+                    "organizationName": org.name,
+                    "organizationIssuePrefix": org.issue_prefix,
+                    "agentName": row.name,
+                    "agentUrlKey": _derive_url_key(row.name, row.id),
+                    "role": cast(AgentRole, row.role),
+                    "title": row.title,
+                    "status": cast(AgentStatus, row.status),
+                    "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
+                    "intervalSec": interval_sec,
+                    "heartbeatEnabled": heartbeat_enabled,
+                    "schedulerActive": heartbeat_enabled and interval_sec > 0,
+                    "lastHeartbeatAt": (
+                        row.last_heartbeat_at.isoformat()
+                        if row.last_heartbeat_at is not None
+                        else None
+                    ),
+                }
+            )
+        return sorted(
+            items,
+            key=lambda item: (
+                not item["schedulerActive"],
+                item["organizationName"],
+                item["agentName"],
+            ),
+        )
+
     async def get(self, agent_id: str) -> Agent | None:
         row = await get_agent_by_id(self._session, agent_id)
         if row is None:
@@ -612,7 +723,9 @@ class AgentService:
             "capabilities": payload.get("capabilities"),
             "agent_runtime_type": agent_runtime_type,
             "agent_runtime_config": agent_runtime_config,
-            "runtime_config": dict(payload.get("runtimeConfig", {})),
+            "runtime_config": _materialize_heartbeat_runtime_config(
+                dict(payload.get("runtimeConfig", {}))
+            ),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
             "permissions": _normalized_permissions(payload.get("permissions"), role),
@@ -976,8 +1089,7 @@ class AgentService:
         existing_refs = {
             value
             for entry in entries
-            if isinstance(entry, dict)
-            and not _is_external_skill_entry(entry)
+            if isinstance(entry, dict) and not _is_external_skill_entry(entry)
             for value in (
                 entry.get("key"),
                 entry.get("selectionKey"),
@@ -1183,7 +1295,10 @@ class AgentService:
             "agentRuntimeConfig": cast(
                 dict[str, Any], _sanitize_value(row.agent_runtime_config)
             ),
-            "runtimeConfig": cast(dict[str, Any], _sanitize_value(row.runtime_config)),
+            "runtimeConfig": cast(
+                dict[str, Any],
+                _sanitize_value(_materialize_heartbeat_runtime_config(row.runtime_config)),
+            ),
             "permissions": cast(
                 Any, _normalized_permissions(row.permissions, row.role)
             ),
@@ -1493,7 +1608,7 @@ class AgentService:
             "desiredSkills": list(desired_skills or []),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": row.agent_runtime_config,
-            "runtimeConfig": row.runtime_config,
+            "runtimeConfig": _materialize_heartbeat_runtime_config(row.runtime_config),
             "budgetMonthlyCents": row.budget_monthly_cents,
             "spentMonthlyCents": row.spent_monthly_cents,
             "pauseReason": cast(PauseReason | None, row.pause_reason),

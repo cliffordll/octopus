@@ -6,11 +6,13 @@ import type { CostDimensionRow, ServerHealth, StorageHealthConfig } from "../api
 import { getLocalePreference, setLocalePreference, type AppLocale } from "../utils/locale";
 import { ErrorNotice } from "./ErrorNotice";
 import { RuntimeProviderSettings } from "./RuntimeProviderSettings";
+import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
 
-type SettingsSection = "general" | "providers" | "costs" | "storage" | "about";
+type SettingsSection = "general" | "providers" | "heartbeats" | "costs" | "storage" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
   { id: "providers", eyebrow: "Runtime Providers", label: "供应商", description: "运行时 provider 和 model。" },
+  { id: "heartbeats", eyebrow: "Timer Heartbeats", label: "心跳", description: "智能体定时心跳。" },
   { id: "costs", eyebrow: "Costs", label: "成本", description: "运行时成本归集和摘要。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
   { id: "general", eyebrow: "General", label: "通用", description: "组织级基础设置。" },
@@ -154,6 +156,8 @@ export function OrganizationSettingsPanel({ orgId }: { orgId: string }) {
       <div className="settings-section-content">
         {activeSection === "providers" ? (
           <RuntimeProviderSettings orgId={orgId} />
+        ) : activeSection === "heartbeats" ? (
+          <InstanceHeartbeatsPanel />
         ) : activeSection === "costs" ? (
           <CostSettingsSection current={current} orgId={orgId} />
         ) : activeSection === "storage" ? (

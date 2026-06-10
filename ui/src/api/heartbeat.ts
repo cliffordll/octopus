@@ -1,5 +1,12 @@
 import { jsonRequest, request } from "./client";
-import type { HeartbeatRun, HeartbeatRunEvent, LogReadResult, WakeAgentPayload, WorkspaceOperation } from "./types";
+import type {
+  HeartbeatRun,
+  HeartbeatRunEvent,
+  InstanceSchedulerHeartbeatAgent,
+  LogReadResult,
+  WakeAgentPayload,
+  WorkspaceOperation,
+} from "./types";
 
 interface EventOptions {
   afterSeq?: number;
@@ -65,6 +72,8 @@ export const heartbeatApi = {
       { method: "GET" },
     );
   },
+  listInstanceSchedulerAgents: (): Promise<InstanceSchedulerHeartbeatAgent[]> =>
+    request<InstanceSchedulerHeartbeatAgent[]>("/api/instance/scheduler-heartbeats", { method: "GET" }),
   get: (runId: string): Promise<HeartbeatRun> =>
     request<HeartbeatRun>(`/api/heartbeat-runs/${encodeURIComponent(runId)}`, { method: "GET" }),
   listEvents: (runId: string, options: EventOptions = {}): Promise<HeartbeatRunEvent[]> => {

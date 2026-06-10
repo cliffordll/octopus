@@ -20,7 +20,7 @@ from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import _build_config, upgrade_to_head
-from packages.database.schema import AgentWakeupRequest, Base, Organization
+from packages.database.schema import Agent, AgentWakeupRequest, Base, Organization
 from server.app import create_app
 
 
@@ -438,6 +438,43 @@ async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     list_code, listed = await _request(app, "GET", f"/api/orgs/{org_id}/agents")
     assert list_code == 200
     assert listed == []
+
+
+async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="heartbeat-defaults")
+
+    create_code, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "Defaults", "role": "engineer"},
+    )
+    assert create_code == 201
+    assert created["runtimeConfig"]["heartbeat"] == {
+        "enabled": True,
+        "intervalSec": 300,
+        "wakeOnDemand": True,
+        "preflightEnabled": True,
+        "maxConcurrentRuns": 3,
+    }
+
+    async with session_factory() as session:
+        persisted = await session.get(Agent, created["id"])
+    assert persisted is not None
+    assert persisted.runtime_config["heartbeat"] == created["runtimeConfig"]["heartbeat"]
+
+    detail_code, detail = await _request(app, "GET", f"/api/agents/{created['id']}")
+    assert detail_code == 200
+    assert detail["runtimeConfig"]["heartbeat"] == created["runtimeConfig"]["heartbeat"]
+
+    config_code, config = await _request(
+        app, "GET", f"/api/agents/{created['id']}/configuration"
+    )
+    assert config_code == 200
+    assert config["runtimeConfig"]["heartbeat"] == created["runtimeConfig"]["heartbeat"]
 
 
 async def test_agent_archive_route_terminates_and_hides_agent(

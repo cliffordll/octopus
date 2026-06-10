@@ -471,6 +471,96 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
 });
 
+it("saves heartbeat policy from the agent configuration form", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: { heartbeat: { enabled: true, intervalSec: 120, wakeOnDemand: true, preflightEnabled: true, maxConcurrentRuns: 1 } },
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, ...(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  const interval = screen.getByLabelText("心跳间隔秒数");
+  expect(interval).toHaveValue(120);
+  expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
+  const maxConcurrentRuns = screen.getByLabelText("最大并发运行数");
+  expect(maxConcurrentRuns).toHaveValue(1);
+  await userEvent.clear(interval);
+  await userEvent.type(interval, "450");
+  await userEvent.selectOptions(screen.getByLabelText("空跑预检查"), "disabled");
+  await userEvent.clear(maxConcurrentRuns);
+  await userEvent.type(maxConcurrentRuns, "3");
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":450,"wakeOnDemand":true,"preflightEnabled":false,"maxConcurrentRuns":3}'),
+    }),
+  );
+});
+
+it("materializes the default heartbeat policy from the agent configuration form", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, ...(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  expect(screen.getByLabelText("定时心跳")).toHaveValue("enabled");
+  expect(screen.getByLabelText("心跳间隔秒数")).toHaveValue(300);
+  expect(screen.getByLabelText("按需唤醒")).toHaveValue("enabled");
+  expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
+  expect(screen.getByLabelText("最大并发运行数")).toHaveValue(3);
+  const runtimeConfigJson = String((screen.getByLabelText("Runtime config") as HTMLTextAreaElement).value);
+  expect(runtimeConfigJson).toContain('"enabled": true');
+  expect(runtimeConfigJson).toContain('"intervalSec": 300');
+  expect(runtimeConfigJson).toContain('"wakeOnDemand": true');
+
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":300,"wakeOnDemand":true,"preflightEnabled":true,"maxConcurrentRuns":3}'),
+    }),
+  );
+});
+
 it("fills built-in process demo config from the runtime form", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

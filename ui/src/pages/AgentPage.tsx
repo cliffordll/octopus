@@ -21,6 +21,15 @@ const RUNTIMES: AgentRuntimeType[] = [
   "opencode_local",
   "openclaw_gateway",
 ];
+const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
+const DEFAULT_HEARTBEAT_POLICY = {
+  enabled: true,
+  intervalSec: DEFAULT_HEARTBEAT_INTERVAL_SEC,
+  wakeOnDemand: true,
+  preflightEnabled: true,
+  maxConcurrentRuns: 3,
+};
+
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
@@ -35,6 +44,105 @@ function readJsonObjectSafe(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function heartbeatConfigFromRuntimeConfig(runtimeConfig: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(runtimeConfig.heartbeat) ?? {};
+}
+
+function booleanConfigValue(config: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = config[key];
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function numberConfigValue(config: Record<string, unknown>, key: string): string {
+  const value = config[key];
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function numberConfigValueWithFallback(config: Record<string, unknown>, key: string, fallback: number): string {
+  return Object.hasOwn(config, key) ? numberConfigValue(config, key) : String(fallback);
+}
+
+function applyHeartbeatConfig(
+  runtimeConfig: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(runtimeConfig), ...patch };
+  return { ...runtimeConfig, heartbeat };
+}
+
+function materializeHeartbeatRuntimeConfig(runtimeConfig: Record<string, unknown>): Record<string, unknown> {
+  return applyHeartbeatConfig(runtimeConfig, {});
+}
+
+type HeartbeatConfigFieldsProps = {
+  value: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
+};
+
+function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) {
+  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(value) };
+  const enabled = booleanConfigValue(heartbeat, "enabled", true);
+  const wakeOnDemand = booleanConfigValue(heartbeat, "wakeOnDemand", true);
+  const preflightEnabled = booleanConfigValue(heartbeat, "preflightEnabled", true);
+
+  function setHeartbeatField(key: string, nextValue: unknown) {
+    onChange(applyHeartbeatConfig(value, { [key]: nextValue }));
+  }
+
+  return (
+    <div className="agent-property-list">
+      <label className="agent-property-row">
+        <span>定时心跳</span>
+        <select value={enabled ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("enabled", event.target.value === "enabled")}>
+          <option value="enabled">启用</option>
+          <option value="disabled">关闭</option>
+        </select>
+      </label>
+      <label className="agent-property-row">
+        <span>心跳间隔秒数</span>
+        <input
+          aria-label="心跳间隔秒数"
+          min="0"
+          placeholder={String(DEFAULT_HEARTBEAT_INTERVAL_SEC)}
+          type="number"
+          value={numberConfigValueWithFallback(heartbeat, "intervalSec", DEFAULT_HEARTBEAT_INTERVAL_SEC)}
+          onChange={(event) => setHeartbeatField("intervalSec", event.target.value ? Number(event.target.value) : 0)}
+        />
+      </label>
+      <label className="agent-property-row">
+        <span>按需唤醒</span>
+        <select value={wakeOnDemand ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("wakeOnDemand", event.target.value === "enabled")}>
+          <option value="enabled">启用</option>
+          <option value="disabled">关闭</option>
+        </select>
+      </label>
+      <label className="agent-property-row">
+        <span>空跑预检查</span>
+        <select aria-label="空跑预检查" value={preflightEnabled ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("preflightEnabled", event.target.value === "enabled")}>
+          <option value="enabled">启用</option>
+          <option value="disabled">关闭</option>
+        </select>
+      </label>
+      <label className="agent-property-row">
+        <span>最大并发运行数</span>
+        <input
+          aria-label="最大并发运行数"
+          min="1"
+          placeholder="3"
+          type="number"
+          value={numberConfigValueWithFallback(heartbeat, "maxConcurrentRuns", 3)}
+          onChange={(event) => setHeartbeatField("maxConcurrentRuns", event.target.value ? Number(event.target.value) : "")}
+        />
+      </label>
+    </div>
+  );
 }
 
 function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
@@ -635,7 +743,7 @@ export function AgentPage() {
     setRuntime(agent.data.agentRuntimeType);
     setBudgetMonthlyDollars(String(((agent.data.budgetMonthlyCents ?? 0) / 100).toFixed(2)));
     setAgentRuntimeConfig(JSON.stringify(agent.data.agentRuntimeConfig ?? {}, null, 2));
-    setRuntimeConfig(JSON.stringify(agent.data.runtimeConfig ?? {}, null, 2));
+    setRuntimeConfig(JSON.stringify(materializeHeartbeatRuntimeConfig(agent.data.runtimeConfig ?? {}), null, 2));
     setDesiredSkills((agent.data.desiredSkills ?? []).join(","));
   }, [agent.data]);
   useEffect(() => {
@@ -785,7 +893,7 @@ export function AgentPage() {
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
-        runtimeConfig: readJsonObject(runtimeConfig, "Runtime config"),
+        runtimeConfig: materializeHeartbeatRuntimeConfig(readJsonObject(runtimeConfig, "Runtime config")),
         budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars || 0) * 100),
       });
     } catch (error) {
@@ -820,6 +928,10 @@ export function AgentPage() {
   }
   function updateAgentRuntimeConfig(next: Record<string, unknown>) {
     setAgentRuntimeConfig(JSON.stringify(next, null, 2));
+    setConfigurationError(null);
+  }
+  function updateRuntimeConfig(next: Record<string, unknown>) {
+    setRuntimeConfig(JSON.stringify(next, null, 2));
     setConfigurationError(null);
   }
   const isPendingApproval = agent.data?.status === "pending_approval";
@@ -1418,6 +1530,16 @@ export function AgentPage() {
                       <label className="agent-property-row"><span>期望技能</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
                       <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
                     </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>心跳策略</h2>
+                      <p className="muted">配置 timer heartbeat 间隔和按需唤醒策略。</p>
+                    </div>
+                    <HeartbeatConfigFields
+                      value={readJsonObjectSafe(runtimeConfig)}
+                      onChange={updateRuntimeConfig}
+                    />
                   </section>
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
