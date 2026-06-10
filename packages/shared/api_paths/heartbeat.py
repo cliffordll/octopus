@@ -1,6 +1,7 @@
 AGENT_WAKEUP_PATH = "/api/agents/{id}/wakeup"
 AGENT_HEARTBEAT_INVOKE_PATH = "/api/agents/{id}/heartbeat/invoke"
 ORG_HEARTBEAT_RUNS_PATH = "/api/orgs/{orgId}/heartbeat-runs"
+INSTANCE_SCHEDULER_HEARTBEATS_PATH = "/api/instance/scheduler-heartbeats"
 ISSUE_HEARTBEAT_RUNS_PATH = "/api/issues/{issueId}/heartbeat-runs"
 HEARTBEAT_RUN_PATH = "/api/heartbeat-runs/{runId}"
 HEARTBEAT_RUN_EVENTS_PATH = "/api/heartbeat-runs/{runId}/events"

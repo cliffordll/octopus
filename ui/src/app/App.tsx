@@ -11,6 +11,7 @@ import { GoalPage } from "../pages/GoalPage";
 import { GoalsPage } from "../pages/GoalsPage";
 import { HomePage } from "../pages/HomePage";
 import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
+import { InstanceHeartbeatsPage } from "../pages/InstanceHeartbeatsPage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
 import { MessengerPage } from "../pages/MessengerPage";
@@ -32,6 +33,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
+        <Route path="instance/settings/heartbeats" element={<InstanceHeartbeatsPage />} />
         <Route path="organizations" element={<OrganizationsPage />} />
         <Route path="orgs/:orgId" element={<OrganizationIndexPage />} />
         <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />

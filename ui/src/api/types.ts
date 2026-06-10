@@ -1252,6 +1252,23 @@ export interface HeartbeatRunEvent {
   createdAt: string;
 }
 
+export interface InstanceSchedulerHeartbeatAgent {
+  id: string;
+  orgId: string;
+  organizationName: string;
+  organizationIssuePrefix: string;
+  agentName: string;
+  agentUrlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+  agentRuntimeType: AgentRuntimeType;
+  intervalSec: number;
+  heartbeatEnabled: boolean;
+  schedulerActive: boolean;
+  lastHeartbeatAt: string | null;
+}
+
 export interface LogReadResult {
   content: string;
   endOffset?: number;

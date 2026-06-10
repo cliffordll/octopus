@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
@@ -7,6 +7,8 @@ import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { roleLabel, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
+
+const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -51,32 +53,59 @@ function latestRunSummary(run: HeartbeatRun | null): string | null {
 }
 
 function heartbeatConfig(agent: Agent): Record<string, unknown> {
-  const runtimeConfig = asRecord(agent.runtimeConfig) ?? asRecord(agent.agentRuntimeConfig) ?? {};
+  const runtimeConfig = asRecord(agent.runtimeConfig) ?? {};
   return asRecord(runtimeConfig.heartbeat) ?? {};
 }
 
 function heartbeatEnabled(agent: Agent): boolean {
   const heartbeat = heartbeatConfig(agent);
-  return heartbeat.enabled === true || heartbeat.timerEnabled === true || heartbeat.enabled === "true";
+  return heartbeat.enabled !== false && heartbeat.timerEnabled !== false;
 }
 
 function heartbeatIntervalSec(agent: Agent): number {
   const heartbeat = heartbeatConfig(agent);
   const raw = heartbeat.intervalSec ?? heartbeat.intervalSeconds ?? heartbeat.interval;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string" && raw.trim()) return Number(raw) || 0;
-  return 0;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_HEARTBEAT_INTERVAL_SEC;
 }
 
-function buildHeartbeatPatch(agent: Agent, enabled: boolean): { agentRuntimeConfig: Record<string, unknown> } {
-  const runtimeConfig = { ...(asRecord(agent.agentRuntimeConfig) ?? {}) };
+function formatInterval(intervalSec: number): string {
+  return intervalSec > 0 ? `每 ${intervalSec}s` : "未设置间隔";
+}
+
+function buildHeartbeatPatch(agent: Agent, enabled: boolean): { runtimeConfig: Record<string, unknown> } {
+  const runtimeConfig = { ...(asRecord(agent.runtimeConfig) ?? {}) };
   const heartbeat = { ...(asRecord(runtimeConfig.heartbeat) ?? {}) };
+  const currentInterval = heartbeat.intervalSec;
+  const intervalSec =
+    enabled && (typeof currentInterval !== "number" || currentInterval <= 0)
+      ? DEFAULT_HEARTBEAT_INTERVAL_SEC
+      : currentInterval;
   return {
-    agentRuntimeConfig: {
+    runtimeConfig: {
       ...runtimeConfig,
       heartbeat: {
         ...heartbeat,
         enabled,
+        ...(intervalSec === undefined ? {} : { intervalSec }),
+      },
+    },
+  };
+}
+
+function buildHeartbeatIntervalPatch(agent: Agent, intervalSec: number): { runtimeConfig: Record<string, unknown> } {
+  const runtimeConfig = { ...(asRecord(agent.runtimeConfig) ?? {}) };
+  const heartbeat = { ...(asRecord(runtimeConfig.heartbeat) ?? {}) };
+  return {
+    runtimeConfig: {
+      ...runtimeConfig,
+      heartbeat: {
+        ...heartbeat,
+        intervalSec,
       },
     },
   };
@@ -120,6 +149,7 @@ function statusClass(status: HeartbeatRun["status"]): string {
 export function HeartbeatRunsPage() {
   const { orgId = "" } = useParams();
   const queryClient = useQueryClient();
+  const [intervalDrafts, setIntervalDrafts] = useState<Record<string, string>>({});
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId],
@@ -130,6 +160,21 @@ export function HeartbeatRunsPage() {
     mutationFn: ({ agent, enabled }: { agent: Agent; enabled: boolean }) =>
       agentsApi.update(agent.id, buildHeartbeatPatch(agent, enabled)),
     onSuccess: async (_, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["agents", variables.agent.orgId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", variables.agent.orgId] }),
+      ]);
+    },
+  });
+  const setHeartbeatInterval = useMutation({
+    mutationFn: ({ agent, intervalSec }: { agent: Agent; intervalSec: number }) =>
+      agentsApi.update(agent.id, buildHeartbeatIntervalPatch(agent, intervalSec)),
+    onSuccess: async (_, variables) => {
+      setIntervalDrafts((current) => {
+        const next = { ...current };
+        delete next[variables.agent.id];
+        return next;
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["agents", variables.agent.orgId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", variables.agent.orgId] }),
@@ -170,6 +215,7 @@ export function HeartbeatRunsPage() {
       {agents.error && <ErrorNotice error={agents.error} />}
       {runs.error && <ErrorNotice error={runs.error} />}
       {setHeartbeatEnabled.error && <ErrorNotice error={setHeartbeatEnabled.error} />}
+      {setHeartbeatInterval.error && <ErrorNotice error={setHeartbeatInterval.error} />}
       {invokeRun.error && <ErrorNotice error={invokeRun.error} />}
 
       <div className="heartbeat-upstream-page">
@@ -192,7 +238,10 @@ export function HeartbeatRunsPage() {
                 const summary = latestRunSummary(latestRun);
                 const toggleOn = heartbeatEnabled(agent);
                 const saving = setHeartbeatEnabled.isPending && setHeartbeatEnabled.variables?.agent.id === agent.id;
+                const savingInterval = setHeartbeatInterval.isPending && setHeartbeatInterval.variables?.agent.id === agent.id;
                 const starting = invokeRun.isPending && invokeRun.variables?.id === agent.id;
+                const intervalValue = intervalDrafts[agent.id] ?? String(heartbeatIntervalSec(agent));
+                const nextInterval = Number(intervalValue);
                 return (
                   <article className="heartbeat-upstream-row" data-testid="org-heartbeat-row" key={agent.id}>
                     <div className="heartbeat-agent-cell">
@@ -204,7 +253,7 @@ export function HeartbeatRunsPage() {
                     </div>
                     <div className="heartbeat-scheduler-cell">
                       <strong className={scheduler.className}>{scheduler.label}</strong>
-                      <p>每 {heartbeatIntervalSec(agent)}s</p>
+                      <p>{formatInterval(heartbeatIntervalSec(agent))}</p>
                       <p title={formatDateTime(agent.lastHeartbeatAt)}>最近心跳 {relativeTime(agent.lastHeartbeatAt)}</p>
                     </div>
                     <div className="heartbeat-run-cell">
@@ -234,6 +283,24 @@ export function HeartbeatRunsPage() {
                           关闭
                         </button>
                       </div>
+                      <label className="heartbeat-interval-control">
+                        <span>间隔</span>
+                        <input
+                          aria-label={`${agent.name} 心跳间隔秒数`}
+                          min="1"
+                          type="number"
+                          value={intervalValue}
+                          onChange={(event) => setIntervalDrafts((current) => ({ ...current, [agent.id]: event.target.value }))}
+                        />
+                      </label>
+                      <button
+                        className="secondary small-button"
+                        disabled={savingInterval || !Number.isFinite(nextInterval) || nextInterval <= 0}
+                        onClick={() => setHeartbeatInterval.mutate({ agent, intervalSec: nextInterval })}
+                        type="button"
+                      >
+                        保存间隔
+                      </button>
                       <button className="secondary" disabled={starting} onClick={() => invokeRun.mutate(agent)} type="button">
                         {starting ? "启动中..." : "立即运行"}
                       </button>

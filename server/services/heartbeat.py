@@ -50,6 +50,7 @@ from packages.shared.constants.heartbeat import (
     AGENT_RUN_CONCURRENCY_DEFAULT,
     AGENT_RUN_CONCURRENCY_MAX,
     AGENT_RUN_CONCURRENCY_MIN,
+    HEARTBEAT_INTERVAL_DEFAULT_SEC,
     HeartbeatInvocationSource,
     HeartbeatRunStatus,
     WakeupTriggerDetail,
@@ -124,6 +125,16 @@ class HeartbeatService:
             return None
         if agent.status in ("terminated", "pending_approval"):
             raise AgentConflictError("Agent is not invokable in its current state")
+        policy = self._heartbeat_policy(agent)
+        if payload.get("source", "on_demand") != "timer" and not policy["wakeOnDemand"]:
+            await self._create_skipped_wakeup(
+                agent,
+                payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                error="heartbeat.wakeOnDemand.disabled",
+            )
+            return None
         from .budgets import BudgetService
 
         context = {
@@ -679,6 +690,30 @@ class HeartbeatService:
                 )
             )
         return resumed
+
+    async def _create_skipped_wakeup(
+        self,
+        agent: AgentRow,
+        payload: WakeAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        error: str,
+    ) -> None:
+        await create_wakeup_request(
+            self._session,
+            {
+                **self._wakeup_values(
+                    agent,
+                    payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    status="skipped",
+                ),
+                "error": error,
+                "finished_at": datetime.now(UTC),
+            },
+        )
 
     async def tick_timers(
         self, org_id: str, *, now: datetime | None = None
@@ -1537,12 +1572,25 @@ class HeartbeatService:
         config = heartbeat if isinstance(heartbeat, dict) else {}
         enabled = config.get("enabled", True)
         interval = config.get("intervalSec", 0)
+        interval_sec = (
+            max(0.0, float(interval))
+            if isinstance(interval, (int, float)) and not isinstance(interval, bool)
+            else 0.0
+        )
+        wake_on_demand = (
+            config.get("wakeOnDemand")
+            if "wakeOnDemand" in config
+            else config.get("wakeOnAssignment")
+            if "wakeOnAssignment" in config
+            else config.get("wakeOnOnDemand")
+            if "wakeOnOnDemand" in config
+            else config.get("wakeOnAutomation", True)
+        )
         return {
             "enabled": enabled if isinstance(enabled, bool) else True,
-            "intervalSec": (
-                max(0.0, float(interval))
-                if isinstance(interval, (int, float)) and not isinstance(interval, bool)
-                else 0.0
+            "intervalSec": interval_sec if interval_sec > 0 else float(HEARTBEAT_INTERVAL_DEFAULT_SEC),
+            "wakeOnDemand": (
+                wake_on_demand if isinstance(wake_on_demand, bool) else True
             ),
         }
 

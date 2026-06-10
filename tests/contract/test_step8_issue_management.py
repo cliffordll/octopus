@@ -254,6 +254,69 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     ]
 
 
+async def test_create_assigned_issue_skips_wakeup_when_on_demand_disabled(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="No Demand Owner",
+                role="engineer",
+                status="idle",
+                runtime_config={
+                    "heartbeat": {
+                        "enabled": True,
+                        "intervalSec": 300,
+                        "wakeOnDemand": False,
+                    }
+                },
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Assigned but demand disabled",
+            "status": "todo",
+            "assigneeAgentId": agent_id,
+        },
+    )
+
+    assert code == 200
+    assert body["assigneeAgentId"] == agent_id
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent_id
+                )
+            )
+        ).scalar_one()
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert wakeup.source == "assignment"
+    assert wakeup.status == "skipped"
+    assert wakeup.reason == "issue_assigned"
+    assert wakeup.error == "heartbeat.wakeOnDemand.disabled"
+    assert runs == []
+
+
 async def test_create_in_review_issue_queues_reviewer_wakeup(
     app: FastAPI,
     session: AsyncSession,

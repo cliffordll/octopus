@@ -2756,6 +2756,21 @@ small {
   margin: 6px 8px;
 }
 
+.heartbeat-instance-summary {
+  align-items: center;
+  color: #8792a6;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 14px;
+  padding: 0;
+}
+
+.heartbeat-instance-summary strong {
+  color: #eef4ff;
+  font-size: 13px;
+}
+
 .heartbeat-upstream-list {
   background: #101722;
   border: 1px solid #202a3b;
@@ -2775,6 +2790,64 @@ small {
 
 .heartbeat-upstream-row:last-child {
   border-bottom: 0;
+}
+
+.heartbeat-settings-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.heartbeat-scheduler-section {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.heartbeat-provider-list {
+  max-height: none;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.heartbeat-instance-group {
+  border-bottom: 0;
+}
+
+.heartbeat-instance-group-title {
+  align-items: baseline;
+  color: #eef4ff;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  min-width: 0;
+}
+
+.heartbeat-instance-group-title a {
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heartbeat-instance-group-title span {
+  color: #8792a6;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.heartbeat-settings-row {
+  align-items: center;
+  background: #0b1018;
+  border: 1px solid #202a3b;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, .9fr) auto;
+  padding: 9px 10px;
+}
+
+.heartbeat-instance-group .heartbeat-settings-row + .heartbeat-settings-row {
+  margin-top: 8px;
 }
 
 .heartbeat-agent-cell,
@@ -2891,6 +2964,28 @@ small {
 .heartbeat-row-actions > button {
   font-size: 12px;
   padding: 7px 10px;
+}
+
+.heartbeat-interval-control {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.heartbeat-interval-control span {
+  color: #8792a6;
+  font-size: 12px;
+}
+
+.heartbeat-interval-control input {
+  background: #0a1018;
+  border: 1px solid #202a3b;
+  border-radius: 6px;
+  color: #eef4ff;
+  font-size: 12px;
+  height: 30px;
+  padding: 0 8px;
+  width: 76px;
 }
 
 .heartbeat-toggle-actions button.active {
