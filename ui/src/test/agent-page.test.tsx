@@ -446,6 +446,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
   await userEvent.clear(screen.getByLabelText("月度预算（美元）"));
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
@@ -495,6 +496,7 @@ it("saves heartbeat policy from the agent configuration form", async () => {
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
   expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
   const interval = screen.getByLabelText("心跳间隔秒数");
   expect(interval).toHaveValue(120);
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
@@ -540,11 +542,13 @@ it("materializes the default heartbeat policy from the agent configuration form"
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
   expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
   expect(screen.getByLabelText("定时心跳")).toHaveValue("enabled");
   expect(screen.getByLabelText("心跳间隔秒数")).toHaveValue(300);
   expect(screen.getByLabelText("按需唤醒")).toHaveValue("enabled");
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
   expect(screen.getByLabelText("最大并发运行数")).toHaveValue(3);
+  await userEvent.click(screen.getByText("高级 JSON"));
   const runtimeConfigJson = String((screen.getByLabelText("Runtime config") as HTMLTextAreaElement).value);
   expect(runtimeConfigJson).toContain('"enabled": true');
   expect(runtimeConfigJson).toContain('"intervalSec": 300');
@@ -605,6 +609,7 @@ it("validates opencode local model before saving agent configuration", async () 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
   expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();

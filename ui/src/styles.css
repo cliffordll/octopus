@@ -5005,16 +5005,105 @@ pre {
   padding: 12px 0;
 }
 
+.agent-config-revision-row {
+  justify-content: space-between;
+}
+
+.agent-config-revision-meta {
+  align-items: center;
+  display: grid;
+  flex: 1 1 auto;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.agent-config-revision-meta strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-config-revision-meta span {
+  white-space: nowrap;
+}
+
+.agent-policy-subsection {
+  border-bottom: 1px solid #202a3b;
+  padding: 14px 0;
+}
+
+.agent-policy-subsection .agent-property-list {
+  border-top: 0;
+}
+
+.agent-policy-expanded-panel {
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  display: block;
+  width: 100%;
+}
+
+.agent-policy-expanded-panel .agent-property-row:first-child {
+  padding-top: 0;
+}
+
+.agent-policy-expanded-panel .agent-property-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  width: 100%;
+}
+
+.agent-policy-expanded-panel .agent-property-row input,
+.agent-policy-expanded-panel .agent-property-row select,
+.agent-policy-expanded-panel .agent-property-row textarea {
+  box-sizing: border-box;
+  justify-self: stretch;
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+}
+
+.agent-policy-expanded-panel label.agent-property-row > input,
+.agent-policy-expanded-panel label.agent-property-row > select,
+.agent-policy-expanded-panel label.agent-property-row > textarea {
+  width: 100%;
+}
+
+.agent-policy-expanded-panel .agent-policy-json {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.agent-policy-json {
+  border-bottom: 1px solid #202a3b;
+  margin: 0;
+  padding: 12px 0;
+}
+
+.agent-policy-json .agent-property-row {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .runtime-config-panel {
-  background: #0b111b;
-  border: 1px solid #202a3b;
-  border-radius: 8px;
-  margin: 10px 0;
-  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 12px 0;
+}
+
+.agent-property-list > .runtime-config-panel {
+  border-bottom: 1px solid #202a3b;
 }
 
 .runtime-config-summary {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -5022,54 +5111,77 @@ pre {
 }
 
 .runtime-config-summary-text {
-  align-items: baseline;
+  align-items: flex-start;
   display: flex;
+  flex-wrap: wrap;
   flex: 1 1 auto;
-  gap: 10px;
+  gap: 4px 10px;
   min-width: 0;
 }
 
-.runtime-config-summary-text strong {
+.runtime-config-summary-text strong,
+.runtime-config-summary-text h3 {
   color: #e8edf5;
   flex: 0 0 auto;
   font-size: 13px;
+  line-height: var(--line-normal);
+  margin: 0;
 }
 
 .runtime-config-summary-text span,
 .runtime-config-summary-text small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .runtime-config-summary-text small {
   color: #7f8a9e;
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
 }
 
 .runtime-config-fields {
   border-top: 1px solid #202a3b;
   display: grid;
   gap: 10px 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   margin-top: 10px;
   padding-top: 10px;
 }
 
 .runtime-config-fields label {
+  align-items: center;
   display: grid;
   gap: 6px;
+  grid-column: 1 / -1;
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.runtime-config-fields input,
+.runtime-config-fields select,
+.runtime-config-fields textarea {
+  min-width: 0;
 }
 
 .runtime-config-fields textarea {
   min-height: 88px;
 }
 
+.runtime-config-fields.agent-policy-expanded-panel {
+  display: block;
+  gap: 0;
+  grid-template-columns: none;
+}
+
+.runtime-config-fields.agent-policy-expanded-panel > .agent-property-list {
+  width: 100%;
+}
+
 .runtime-config-fields label:has(textarea) {
-  grid-column: 1 / -1;
+  align-items: start;
 }
 
 .runtime-config-check-row {
-  align-items: center;
+  align-items: flex-start;
   background: #0f141d;
   border: 1px solid #202a3b;
   border-radius: 8px;
@@ -5094,15 +5206,53 @@ pre {
 
 .runtime-config-check-row small {
   color: #8f9bad;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .runtime-config-check-row input[type="checkbox"] {
   flex: 0 0 auto;
+  margin-top: 2px;
   width: auto;
+}
+
+.runtime-config-check-row:has(input[type="checkbox"]) {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: grid !important;
+  gap: 8px 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: 120px auto minmax(0, 1fr);
+  min-width: 0;
+  padding: 0;
+}
+
+.runtime-config-check-row:has(input[type="checkbox"]) > strong {
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.runtime-config-check-row:has(input[type="checkbox"]) > input[type="checkbox"] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.runtime-config-check-row:has(input[type="checkbox"]) > small {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .runtime-config-advanced {
   margin: 4px 0 10px;
+}
+
+.runtime-config-fields > .runtime-config-advanced {
+  grid-column: 1 / -1;
 }
 
 .runtime-config-advanced summary {

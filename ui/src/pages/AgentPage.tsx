@@ -662,6 +662,7 @@ export function AgentPage() {
   const [pendingSkillActionKey, setPendingSkillActionKey] = useState("");
   const [runtimeTestResult, setRuntimeTestResult] = useState<AgentRuntimeEnvironmentTestResult | null>(null);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
+  const [heartbeatPolicyExpanded, setHeartbeatPolicyExpanded] = useState(false);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [resetSessionDialogOpen, setResetSessionDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
@@ -1487,14 +1488,19 @@ export function AgentPage() {
                         </label>
                       )}
                       <RuntimeConfigFields
+                        advancedEditor={(
+                          <details className="runtime-config-advanced">
+                            <summary>高级 JSON</summary>
+                            <label>
+                              Agent runtime config
+                              <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
+                            </label>
+                          </details>
+                        )}
                         runtime={runtime}
                         value={readJsonObjectSafe(agentRuntimeConfig)}
                         onChange={updateAgentRuntimeConfig}
                       />
-                      <details className="runtime-config-advanced agent-property-row-wide">
-                        <summary>高级 JSON</summary>
-                        <label className="agent-property-row agent-property-row-start"><span>Agent runtime config</span><textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} /></label>
-                      </details>
                     </div>
                     <div className="agent-runtime-test-row">
                       <button className="secondary" disabled={testRuntime.isPending} onClick={runRuntimeTest} type="button">
@@ -1528,18 +1534,39 @@ export function AgentPage() {
                     <div className="agent-property-list">
                       <label className="agent-property-row"><span>月度预算（美元）</span><input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} required /></label>
                       <label className="agent-property-row"><span>期望技能</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
-                      <label className="agent-property-row agent-property-row-start"><span>Runtime config</span><textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} /></label>
+                      <div className="runtime-config-panel agent-policy-subsection">
+                        <div className="runtime-config-summary">
+                          <div className="runtime-config-summary-text">
+                            <h3>心跳策略</h3>
+                            <span className="muted">配置 timer heartbeat 间隔、按需唤醒和并发限制</span>
+                            <small>默认启用，300s 间隔，按需唤醒开启</small>
+                          </div>
+                          <button
+                            aria-label={heartbeatPolicyExpanded ? "收起心跳策略" : "展开心跳策略"}
+                            className="secondary small-button"
+                            onClick={() => setHeartbeatPolicyExpanded((current) => !current)}
+                            type="button"
+                          >
+                            {heartbeatPolicyExpanded ? "收起配置" : "个性化配置"}
+                          </button>
+                        </div>
+                        {heartbeatPolicyExpanded && (
+                          <div className="runtime-config-fields agent-policy-expanded-panel">
+                            <HeartbeatConfigFields
+                              value={readJsonObjectSafe(runtimeConfig)}
+                              onChange={updateRuntimeConfig}
+                            />
+                            <details className="runtime-config-advanced agent-policy-json">
+                              <summary>高级 JSON</summary>
+                              <label className="agent-property-row agent-property-row-start">
+                                <span>Runtime config</span>
+                                <textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} />
+                              </label>
+                            </details>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </section>
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>心跳策略</h2>
-                      <p className="muted">配置 timer heartbeat 间隔和按需唤醒策略。</p>
-                    </div>
-                    <HeartbeatConfigFields
-                      value={readJsonObjectSafe(runtimeConfig)}
-                      onChange={updateRuntimeConfig}
-                    />
                   </section>
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
@@ -1573,80 +1600,84 @@ export function AgentPage() {
                   <button disabled={save.isPending} type="submit">保存配置</button>
                 </div>
               </form>
-              <section className="panel agent-config-revisions-card">
+              <div className="panel agent-config-card">
                 <div className="panel-heading">
                   <div>
-                    <p className="eyebrow">Snapshot</p>
-                    <h2>配置快照</h2>
+                    <p className="eyebrow">Snapshot Runtime History</p>
+                    <h2>运行快照</h2>
                   </div>
                 </div>
-                {configuration.error && <ErrorNotice error={configuration.error} />}
-                {configuration.data && (
-                  <div className="agent-summary-grid">
-                    <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ? statusLabel(configuration.data.status) : "未知"}</strong></div>
-                    <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ? roleLabel(configuration.data.role) : "未知"}</strong></div>
-                    <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
-                    <div className="summary-metric"><span>更新时间</span><strong>{formatDateTime(configuration.data.updatedAt)}</strong></div>
-                  </div>
-                )}
-              </section>
-              <section className="panel agent-config-revisions-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Runtime</p>
-                    <h2>Runtime State</h2>
-                  </div>
-                </div>
-                {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-                {resetSession.error && <ErrorNotice error={resetSession.error} />}
-                {taskSessions.error && <ErrorNotice error={taskSessions.error} />}
-                {runtimeState.data && (
-                  <div className="agent-summary-grid">
-                    <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
-                  </div>
-                )}
-                <div className="list">
-                  {taskSessionRows.map((session) => (
-                    <article className="row" key={session.id}>
-                      <div>
-                        <strong>{session.taskKey}</strong>
-                        <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {formatDateTime(session.updatedAt)}</p>
+                <div className="agent-config-sections">
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>配置快照</h2>
+                      <p className="muted">当前智能体配置的服务端快照。</p>
+                    </div>
+                    {configuration.error && <ErrorNotice error={configuration.error} />}
+                    {configuration.data && (
+                      <div className="agent-summary-grid">
+                        <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ? statusLabel(configuration.data.status) : "未知"}</strong></div>
+                        <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ? roleLabel(configuration.data.role) : "未知"}</strong></div>
+                        <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
+                        <div className="summary-metric"><span>更新时间</span><strong>{formatDateTime(configuration.data.updatedAt)}</strong></div>
                       </div>
-                      <Badge>{statusLabel(session.status)}</Badge>
-                    </article>
-                  ))}
-                </div>
-              </section>
-              <section className="panel agent-config-revisions-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">History</p>
-                    <h2>Config Revisions</h2>
-                  </div>
-                </div>
-                {configRevisions.error && <ErrorNotice error={configRevisions.error} />}
-                {rollbackRevision.error && <ErrorNotice error={rollbackRevision.error} />}
-                {configRevisions.isSuccess && revisionRows.length === 0 && <p className="muted">暂无配置版本。</p>}
-                <div className="list">
-                  {revisionRows.map((revision) => (
-                    <article className="row" key={revision.id}>
-                      <div>
-                        <strong>{revision.id}</strong>
-                        <p className="muted">{revision.createdAt || "未记录创建时间"}</p>
+                    )}
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>Runtime State</h2>
+                      <p className="muted">当前运行会话和最近一次运行状态。</p>
+                    </div>
+                    {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+                    {resetSession.error && <ErrorNotice error={resetSession.error} />}
+                    {taskSessions.error && <ErrorNotice error={taskSessions.error} />}
+                    {runtimeState.data && (
+                      <div className="agent-summary-grid">
+                        <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
+                        <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
                       </div>
-                      <button
-                        className="secondary"
-                        disabled={rollbackRevision.isPending}
-                        onClick={() => rollbackRevision.mutate(revision.id)}
-                        type="button"
-                      >
-                        回滚
-                      </button>
-                    </article>
-                  ))}
+                    )}
+                    <div className="list">
+                      {taskSessionRows.map((session) => (
+                        <article className="row" key={session.id}>
+                          <div>
+                            <strong>{session.taskKey}</strong>
+                            <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {formatDateTime(session.updatedAt)}</p>
+                          </div>
+                          <Badge>{statusLabel(session.status)}</Badge>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                  <section className="agent-config-section">
+                    <div className="agent-config-section-heading">
+                      <h2>Config Revisions</h2>
+                      <p className="muted">可回滚的配置版本历史。</p>
+                    </div>
+                    {configRevisions.error && <ErrorNotice error={configRevisions.error} />}
+                    {rollbackRevision.error && <ErrorNotice error={rollbackRevision.error} />}
+                    {configRevisions.isSuccess && revisionRows.length === 0 && <p className="muted">暂无配置版本。</p>}
+                    <div className="list">
+                      {revisionRows.map((revision) => (
+                        <article className="row agent-config-revision-row" key={revision.id}>
+                          <div className="agent-config-revision-meta">
+                            <strong>{revision.id}</strong>
+                            <span className="muted">{revision.createdAt || "未记录创建时间"}</span>
+                          </div>
+                          <button
+                            className="secondary"
+                            disabled={rollbackRevision.isPending}
+                            onClick={() => rollbackRevision.mutate(revision.id)}
+                            type="button"
+                          >
+                            回滚
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
                 </div>
-              </section>
+              </div>
             </div>
           )}
           {activeTab === "skills" && <section className="agent-skills-page">

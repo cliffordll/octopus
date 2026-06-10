@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { AgentRuntimeType } from "../api/types";
 
 type RuntimeConfigFieldsProps = {
+  advancedEditor?: ReactNode;
   runtime: AgentRuntimeType;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
@@ -93,7 +94,7 @@ function runtimeDefaultHint(runtime: AgentRuntimeType): string {
   return "使用 server 推荐默认配置";
 }
 
-export function RuntimeConfigFields({ runtime, value, onChange }: RuntimeConfigFieldsProps) {
+export function RuntimeConfigFields({ advancedEditor, runtime, value, onChange }: RuntimeConfigFieldsProps) {
   const [expanded, setExpanded] = useState(false);
   function setField(key: string, nextValue: unknown) {
     onChange(withoutEmpty({ ...value, [key]: nextValue }));
@@ -113,7 +114,12 @@ export function RuntimeConfigFields({ runtime, value, onChange }: RuntimeConfigF
             {expanded ? "收起配置" : "个性化配置"}
           </button>
         </div>
-        {expanded && <div className="runtime-config-fields">{children}</div>}
+        {expanded && (
+          <div className="runtime-config-fields">
+            {children}
+            {advancedEditor}
+          </div>
+        )}
       </div>
     );
   }
@@ -239,24 +245,20 @@ export function RuntimeConfigFields({ runtime, value, onChange }: RuntimeConfigF
       </label>
       {runtime === "opencode_local" && (
         <label className="runtime-config-check-row">
-          <span>
-            <strong>跳过 OpenCode 权限确认</strong>
-            <small>使用 --dangerously-skip-permissions，自动批准未显式拒绝的本地工具权限请求；仅适用于本地可信开发环境。</small>
-          </span>
+          <strong>跳过确认</strong>
           <input
             aria-label="跳过 OpenCode 权限确认"
             checked={hasOpenCodeSkipPermissions(value)}
             type="checkbox"
             onChange={(event) => onChange(setOpenCodeSkipPermissions(value, event.target.checked))}
           />
+          <small>使用 --dangerously-skip-permissions，自动批准未显式拒绝的本地工具权限请求；仅适用于本地可信开发环境。</small>
         </label>
       )}
       <label className="runtime-config-check-row">
-        <span>
-          <strong>实时探测运行时</strong>
-          <small>保存或测试时真实检查本地 CLI / 适配器是否可用；默认关闭。</small>
-        </span>
+        <strong>实时探测</strong>
         <input aria-label="实时探测运行时" checked={value.liveProbe === true} type="checkbox" onChange={(event) => setField("liveProbe", event.target.checked ? true : "")} />
+        <small>保存或测试时真实检查本地 CLI / 适配器是否可用；默认关闭。</small>
       </label>
       <label>
         探测超时秒数

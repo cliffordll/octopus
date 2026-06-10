@@ -87,6 +87,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
   fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
   await userEvent.type(screen.getByLabelText("期望技能"), "review,debug");

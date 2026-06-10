@@ -192,17 +192,19 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
         </label>
         <RuntimeConfigFields
+          advancedEditor={(
+            <details className="runtime-config-advanced">
+              <summary>高级 JSON</summary>
+              <label>
+                Agent runtime config
+                <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
+              </label>
+            </details>
+          )}
           runtime={runtime}
           value={readJsonObjectSafe(agentRuntimeConfig)}
           onChange={updateAgentRuntimeConfig}
         />
-        <details className="runtime-config-advanced">
-          <summary>高级 JSON</summary>
-          <label>
-            Agent runtime config
-            <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
-          </label>
-        </details>
         <label>
           Metadata
           <textarea className="config-editor" value={metadata} onChange={(event) => setMetadata(event.target.value)} />
