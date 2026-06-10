@@ -719,6 +719,7 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
     assert len(rows) == 1
     assert len(activity_rows) == 1
     assert activity_rows[0].action == "issue.executed"
+    assert activity_rows[0].details is not None
     assert activity_rows[0].details["runId"] == run["id"]
     assert activity_rows[0].details["agentId"] == agent_id
 
