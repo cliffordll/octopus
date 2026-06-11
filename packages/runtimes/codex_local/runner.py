@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
@@ -153,6 +154,7 @@ async def _run_attempt(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **runtime_subprocess_kwargs(),
         )
     except PermissionError as exc:
         if _should_retry_with_blocking_subprocess(exc):
@@ -334,6 +336,7 @@ async def _run_blocking_subprocess_attempt(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout_sec if timeout_sec > 0 else None,
+            **runtime_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or b""

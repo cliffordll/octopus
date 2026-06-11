@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .common import runtime_subprocess_kwargs
+
 
 _PROXY_ENV_KEYS = (
     "HTTP_PROXY",
@@ -150,6 +152,7 @@ async def cli_hello_probe_check(
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **runtime_subprocess_kwargs(),
         )
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=timeout_sec
