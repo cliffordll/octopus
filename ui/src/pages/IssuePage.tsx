@@ -298,6 +298,7 @@ function formattedJson(value: unknown): string {
 function runSummary(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录";
   if (run.error?.trim()) return run.error.trim();
+  if (run.summary?.trim()) return run.summary.trim();
   const result = hasJsonObject(run.resultJson) ? run.resultJson : null;
   for (const key of ["summary", "result", "message"]) {
     const value = result?.[key];
@@ -935,23 +936,21 @@ function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean
 
 function IssueRunsPanel({
   agentsById,
-  currentRun,
   currentRunId,
   embedded = false,
-  expandedRunId,
+  expandedRunIds,
   onSelect,
   onToggle,
-  renderSelectedRunDetails,
+  renderRunDetails,
   runs,
 }: {
   agentsById: Map<string, Agent>;
-  currentRun: HeartbeatRun | null;
   currentRunId: string;
   embedded?: boolean;
-  expandedRunId: string;
+  expandedRunIds: Set<string>;
   onSelect: (runId: string) => void;
   onToggle: (runId: string) => void;
-  renderSelectedRunDetails?: () => ReactNode;
+  renderRunDetails?: (runId: string) => ReactNode;
   runs: HeartbeatRun[];
 }) {
   const displayRuns = [...runs].sort((left, right) => runSortTime(left) - runSortTime(right));
@@ -962,7 +961,7 @@ function IssueRunsPanel({
     <div className="issue-run-record-list">
       {displayRuns.map((run, index) => {
         const runId = heartbeatRunId(run);
-        const displayRun = heartbeatRunId(currentRun) === runId ? { ...run, ...currentRun } : run;
+        const displayRun = run;
         const reasonRun = {
           ...displayRun,
           invocationSource: run.invocationSource ?? displayRun.invocationSource,
@@ -975,7 +974,7 @@ function IssueRunsPanel({
         const summaryExpandable = summary.length > RUN_SUMMARY_PREVIEW_CHARS;
         const visibleSummary = summaryExpanded || !summaryExpandable ? summary : previewRunSummary(summary);
         const isSelected = runId === currentRunId;
-        const isExpanded = runId === expandedRunId;
+        const isExpanded = expandedRunIds.has(runId);
         return (
           <article className={`issue-run-record-group${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
             <div className={`issue-run-record-main-row${isSelected ? " active" : ""}`}>
@@ -1044,9 +1043,9 @@ function IssueRunsPanel({
                 {isExpanded ? "折叠" : "展开"}
               </button>
             </div>
-            {isExpanded && renderSelectedRunDetails && (
+            {isExpanded && renderRunDetails && (
               <div className="issue-run-record-details">
-                {renderSelectedRunDetails()}
+                {renderRunDetails(runId)}
               </div>
             )}
           </article>
@@ -1466,6 +1465,183 @@ function IssueRunOutputPanel({
   );
 }
 
+function IssueRunDetailsPanel({
+  issue,
+  issueId,
+  latestRunStatus,
+  orgId,
+  runId,
+}: {
+  issue: IssueDetail;
+  issueId: string;
+  latestRunStatus?: HeartbeatRun["status"];
+  orgId: string;
+  runId: string;
+}) {
+  const queryClient = useQueryClient();
+  const streamCursorRef = useRef<RunStreamCursor>({ lastSeq: 0, nextOffset: 0 });
+  const [heartbeatContextHidden, setHeartbeatContextHidden] = useState(true);
+  const [streamActive, setStreamActive] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamLog, setStreamLog] = useState("");
+  const runDetail = useQuery({
+    queryKey: ["heartbeat-run", runId],
+    queryFn: () => heartbeatApi.get(runId),
+    enabled: Boolean(runId),
+    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const runEvents = useQuery({
+    queryKey: ["heartbeat-run-events", runId],
+    queryFn: async () => {
+      const fetched = await heartbeatApi.listEvents(runId);
+      const cached = queryClient.getQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", runId]) ?? [];
+      return mergeRunEvents(cached, fetched);
+    },
+    enabled: Boolean(runId),
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const runWorkspaceOperations = useQuery({
+    queryKey: ["heartbeat-run-workspace-operations", runId],
+    queryFn: () => heartbeatApi.listWorkspaceOperations(runId),
+    enabled: Boolean(runId),
+    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
+  });
+  const heartbeatContext = useQuery({
+    queryKey: ["issue-heartbeat-context", issueId],
+    queryFn: () => issuesApi.heartbeatContext(issueId),
+    enabled: Boolean(issueId),
+  });
+  const cancelRun = useMutation({
+    mutationFn: () => heartbeatApi.cancel(runId),
+    onSuccess: (run) => {
+      queryClient.setQueryData(["heartbeat-run", runId], run);
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+    },
+  });
+  const retryRun = useMutation({
+    mutationFn: () => heartbeatApi.retry(runId),
+    onSuccess: (run) => {
+      const nextRunId = heartbeatRunId(run);
+      if (nextRunId) {
+        streamCursorRef.current = { lastSeq: 0, nextOffset: 0 };
+        setStreamError(null);
+        setStreamLog("");
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", nextRunId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      }
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+    },
+  });
+
+  useEffect(() => {
+    if (!runId || !isLiveRun(runDetail.data?.status)) return;
+    const cursor = streamCursorRef.current;
+    const controller = new AbortController();
+    setStreamActive(true);
+    setStreamError(null);
+    void heartbeatApi.streamRun(runId, {
+      afterSeq: cursor.lastSeq,
+      offset: cursor.nextOffset,
+      pollMs: LIVE_RUN_REFETCH_MS,
+      signal: controller.signal,
+      onRun: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+          ...current,
+          ...run,
+        }));
+      },
+      onEvent: (event) => {
+        cursor.lastSeq = Math.max(cursor.lastSeq, event.seq);
+        queryClient.setQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", runId], (current = []) => mergeRunEvents(current, [event]));
+      },
+      onLog: (payload) => {
+        if (typeof payload.nextOffset === "number") cursor.nextOffset = payload.nextOffset;
+        if (payload.content) setStreamLog((current) => `${current}${payload.content}`);
+      },
+      onFinal: (run) => {
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+          ...current,
+          ...run,
+        }));
+        setStreamActive(false);
+        void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
+        void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
+      },
+      onError: (error) => {
+        setStreamError(error);
+        setStreamActive(false);
+      },
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setStreamError(error instanceof Error ? error.message : "Run stream failed");
+    }).finally(() => {
+      if (!controller.signal.aborted) setStreamActive(false);
+    });
+    return () => {
+      controller.abort();
+      setStreamActive(false);
+    };
+  }, [issueId, orgId, queryClient, runDetail.data?.status, runId]);
+
+  return (
+    <>
+      <IssueRunOutputPanel
+        data={{
+          events: runEvents,
+          operations: runWorkspaceOperations,
+          run: runDetail,
+        }}
+        onCancel={() => cancelRun.mutate()}
+        onRetry={() => retryRun.mutate()}
+        runId={runId}
+        streamActive={streamActive}
+        streamError={streamError}
+        streamLog={streamLog}
+      />
+      {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
+      {retryRun.error && <ErrorNotice error={retryRun.error} />}
+
+      <section aria-label="心跳上下文" className="issue-run-output-block">
+        <div className="issue-section-heading">
+          <div>
+            <p className="eyebrow">HEARTBEAT CONTEXT</p>
+            <h2>心跳上下文 · {runId || "未选择运行"}</h2>
+          </div>
+          <div className="issue-section-heading-actions">
+            <span className="muted">运行输入</span>
+            <button
+              aria-label={heartbeatContextHidden ? "展开心跳上下文" : "折叠心跳上下文"}
+              className="secondary small-button"
+              onClick={() => setHeartbeatContextHidden((hidden) => !hidden)}
+              type="button"
+            >
+              {heartbeatContextHidden ? "展开" : "折叠"}
+            </button>
+          </div>
+        </div>
+        {!heartbeatContextHidden && heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
+        {!heartbeatContextHidden && heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
+        {!heartbeatContextHidden && heartbeatContext.data && (
+          <details className="issue-run-inline-details">
+            <summary>查看心跳上下文 JSON</summary>
+            <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
+          </details>
+        )}
+      </section>
+
+      <IssueWorkProductsPanel embedded issue={issue} latestRunStatus={latestRunStatus} selectedRunId={runId} />
+    </>
+  );
+}
+
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
   const [comment, setComment] = useState("");
@@ -1475,29 +1651,16 @@ export function IssuePage() {
   const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
-  const [heartbeatContextHidden, setHeartbeatContextHidden] = useState(true);
   const [currentRunId, setCurrentRunId] = useState(() => {
     if (!orgId || !issueId) return "";
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
-  const [expandedRunId, setExpandedRunId] = useState(() => {
-    if (!orgId || !issueId) return "";
-    return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
-  });
-  const streamCursorRef = useRef<Record<string, RunStreamCursor>>({});
+  const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(() => new Set());
   const refreshedTerminalRunRef = useRef("");
-  const [streamActiveRunId, setStreamActiveRunId] = useState("");
-  const [streamErrorsByRun, setStreamErrorsByRun] = useState<Record<string, string | null>>({});
-  const [streamLogsByRun, setStreamLogsByRun] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
   const issue = useQuery({ queryKey: ["issue", issueId], queryFn: () => issuesApi.get(issueId) });
-  const heartbeatContext = useQuery({
-    queryKey: ["issue-heartbeat-context", issueId],
-    queryFn: () => issuesApi.heartbeatContext(issueId),
-    enabled: Boolean(issueId),
-  });
   const projects = useQuery({ queryKey: ["projects", orgId], queryFn: () => projectsApi.list(orgId) });
   const comments = useQuery({
     queryKey: ["comments", issueId],
@@ -1527,7 +1690,7 @@ export function IssuePage() {
     if (!orgId || !issueId) return;
     const storedRunId = localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
     setCurrentRunId(storedRunId);
-    setExpandedRunId(storedRunId);
+    setExpandedRunIds(new Set());
   }, [orgId, issueId]);
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
@@ -1536,7 +1699,6 @@ export function IssuePage() {
     if (!latestRunId) return;
     localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
     setCurrentRunId(latestRunId);
-    setExpandedRunId(latestRunId);
   }, [currentRunId, issueRuns.data, issueId, orgId]);
   useEffect(() => {
     if (!reviewNotice) return;
@@ -1589,11 +1751,6 @@ export function IssuePage() {
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
-  function resetRunStreamState(runId: string) {
-    streamCursorRef.current[runId] = { lastSeq: 0, nextOffset: 0 };
-    setStreamErrorsByRun((current) => ({ ...current, [runId]: null }));
-    setStreamLogsByRun((current) => ({ ...current, [runId]: "" }));
-  }
   const executeIssue = useMutation({
     mutationFn: async () => {
       if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
@@ -1607,20 +1764,22 @@ export function IssuePage() {
       if (runId) {
         setExecuteNotice(isLiveRun(run.status) ? `已连接到运行 ${runId}` : `已创建运行 ${runId}`);
         localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-        resetRunStreamState(runId);
         setCurrentRunId(runId);
-        setExpandedRunId(runId);
+        setExpandedRunIds(new Set());
         queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
           ...current,
           ...run,
         }));
+        queryClient.setQueryData<HeartbeatRun[]>(["issue-heartbeat-runs", issueId], (current = []) => [
+          run,
+          ...current.filter((item) => heartbeatRunId(item) !== runId),
+        ]);
       } else {
         setExecuteNotice("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["issues", orgId] }),
-        queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-run", currentRunId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-run-events", currentRunId] }),
@@ -1640,94 +1799,8 @@ export function IssuePage() {
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
-  const runDetail = useQuery({
-    queryKey: ["heartbeat-run", currentRunId],
-    queryFn: () => heartbeatApi.get(currentRunId),
-    enabled: Boolean(currentRunId),
-    refetchInterval: (query) => isLiveRun(query.state.data?.status) ? LIVE_RUN_REFETCH_MS : false,
-  });
-  const runEvents = useQuery({
-    queryKey: ["heartbeat-run-events", currentRunId],
-    queryFn: async () => {
-      const fetched = await heartbeatApi.listEvents(currentRunId);
-      const cached = queryClient.getQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId]) ?? [];
-      return mergeRunEvents(cached, fetched);
-    },
-    enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
-  });
-  const runWorkspaceOperations = useQuery({
-    queryKey: ["heartbeat-run-workspace-operations", currentRunId],
-    queryFn: () => heartbeatApi.listWorkspaceOperations(currentRunId),
-    enabled: Boolean(currentRunId),
-    refetchInterval: () => isLiveRun(runDetail.data?.status) ? LIVE_RUN_REFETCH_MS : false,
-  });
   useEffect(() => {
-    if (!currentRunId || !isLiveRun(runDetail.data?.status)) return;
-    const cursor = streamCursorRef.current[currentRunId] ?? { lastSeq: 0, nextOffset: 0 };
-    streamCursorRef.current[currentRunId] = cursor;
-    const controller = new AbortController();
-    setStreamActiveRunId(currentRunId);
-    setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: null }));
-    void heartbeatApi.streamRun(currentRunId, {
-      afterSeq: cursor.lastSeq,
-      offset: cursor.nextOffset,
-      pollMs: LIVE_RUN_REFETCH_MS,
-      signal: controller.signal,
-      onRun: (run) => {
-        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
-          ...current,
-          ...run,
-        }));
-      },
-      onEvent: (event) => {
-        cursor.lastSeq = Math.max(cursor.lastSeq, event.seq);
-        queryClient.setQueryData<HeartbeatRunEvent[]>(["heartbeat-run-events", currentRunId], (current = []) => {
-          return mergeRunEvents(current, [event]);
-        });
-      },
-      onLog: (payload) => {
-        if (typeof payload.nextOffset === "number") cursor.nextOffset = payload.nextOffset;
-        if (!payload.content) return;
-        setStreamLogsByRun((current) => ({
-          ...current,
-          [currentRunId]: `${current[currentRunId] ?? ""}${payload.content}`,
-        }));
-      },
-      onFinal: (run) => {
-        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", currentRunId], (current) => ({
-          ...current,
-          ...run,
-        }));
-        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
-        void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
-        void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
-        void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
-        void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
-        void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
-        void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
-      },
-      onError: (error) => {
-        setStreamErrorsByRun((current) => ({ ...current, [currentRunId]: error }));
-        setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
-      },
-    }).catch((error: unknown) => {
-      if (controller.signal.aborted) return;
-      setStreamErrorsByRun((current) => ({
-        ...current,
-        [currentRunId]: error instanceof Error ? error.message : "Run stream failed",
-      }));
-    }).finally(() => {
-      if (controller.signal.aborted) return;
-      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
-    });
-    return () => {
-      controller.abort();
-      setStreamActiveRunId((activeRunId) => activeRunId === currentRunId ? "" : activeRunId);
-    };
-  }, [currentRunId, issueId, orgId, queryClient, runDetail.data?.status]);
-  useEffect(() => {
-    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
+    const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
     const latestRunId = heartbeatRunId(latestRun);
     if (!latestRunId || !isTerminalRun(latestRun?.status)) return;
     const refreshKey = `${latestRunId}:${latestRun?.status}`;
@@ -1736,31 +1809,7 @@ export function IssuePage() {
     void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
     void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
     void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
-  }, [issueId, issueRuns.data, queryClient, runDetail.data]);
-  const cancelRun = useMutation({
-    mutationFn: () => heartbeatApi.cancel(currentRunId),
-    onSuccess: (run) => {
-      queryClient.setQueryData(["heartbeat-run", currentRunId], run);
-      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
-      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
-    },
-  });
-  const retryRun = useMutation({
-    mutationFn: () => heartbeatApi.retry(currentRunId),
-    onSuccess: (run) => {
-      const runId = heartbeatRunId(run);
-      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-      resetRunStreamState(runId);
-      setCurrentRunId(runId);
-      setExpandedRunId(runId);
-      queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
-        ...current,
-        ...run,
-      }));
-      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
-      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
-    },
-  });
+  }, [issueId, issueRuns.data, queryClient]);
   const review = useMutation({
     mutationFn: (decision: IssueReviewDecision) => issuesApi.review(issueId, { decision }),
     onSuccess: () => {
@@ -1836,7 +1885,7 @@ export function IssuePage() {
     updateIssue.mutate({ status: "in_review" });
   }
   function executeCurrentIssue() {
-    const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
+    const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
     if (uploadAttachment.isPending) {
       setExecuteNotice("附件上传中，上传完成后再启动执行。");
       return;
@@ -1858,7 +1907,7 @@ export function IssuePage() {
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
-  const latestRun = latestIssueRun(issueRuns.data ?? [], runDetail.data ?? null, issueId);
+  const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
@@ -2038,74 +2087,32 @@ export function IssuePage() {
 
               <IssueRunsPanel
                 agentsById={agentsById}
-                currentRun={runDetail.data ?? null}
                 currentRunId={currentRunId}
                 embedded
-                expandedRunId={expandedRunId}
+                expandedRunIds={expandedRunIds}
                 onSelect={(runId) => {
                   localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
                   setCurrentRunId(runId);
-                  setExpandedRunId(runId);
                 }}
                 onToggle={(runId) => {
-                  if (expandedRunId === runId) {
-                    setExpandedRunId("");
-                    return;
-                  }
-                  localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-                  setCurrentRunId(runId);
-                  setExpandedRunId(runId);
+                  setExpandedRunIds((current) => {
+                    const next = new Set(current);
+                    if (next.has(runId)) {
+                      next.delete(runId);
+                    } else {
+                      next.add(runId);
+                    }
+                    return next;
+                  });
                 }}
-                renderSelectedRunDetails={() => (
-                  <>
-                    {currentRunId && (
-                      <IssueRunOutputPanel
-                        data={{
-                          events: runEvents,
-                          operations: runWorkspaceOperations,
-                          run: runDetail,
-                        }}
-                        onCancel={() => cancelRun.mutate()}
-                        onRetry={() => retryRun.mutate()}
-                        runId={currentRunId}
-                        streamActive={streamActiveRunId === currentRunId}
-                        streamError={streamErrorsByRun[currentRunId] ?? null}
-                        streamLog={streamLogsByRun[currentRunId] ?? ""}
-                      />
-                    )}
-                    {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
-                    {retryRun.error && <ErrorNotice error={retryRun.error} />}
-
-                    <section aria-label="心跳上下文" className="issue-run-output-block">
-                      <div className="issue-section-heading">
-                        <div>
-                          <p className="eyebrow">HEARTBEAT CONTEXT</p>
-                          <h2>心跳上下文 · {currentRunId || "未选择运行"}</h2>
-                        </div>
-                        <div className="issue-section-heading-actions">
-                          <span className="muted">运行输入</span>
-                          <button
-                            aria-label={heartbeatContextHidden ? "展开心跳上下文" : "折叠心跳上下文"}
-                            className="secondary small-button"
-                            onClick={() => setHeartbeatContextHidden((hidden) => !hidden)}
-                            type="button"
-                          >
-                            {heartbeatContextHidden ? "展开" : "折叠"}
-                          </button>
-                        </div>
-                      </div>
-                      {!heartbeatContextHidden && heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
-                      {!heartbeatContextHidden && heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
-                      {!heartbeatContextHidden && heartbeatContext.data && (
-                        <details className="issue-run-inline-details">
-                          <summary>查看心跳上下文 JSON</summary>
-                          <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
-                        </details>
-                      )}
-                    </section>
-
-                    <IssueWorkProductsPanel embedded issue={issue.data} latestRunStatus={latestRun?.status} selectedRunId={currentRunId} />
-                  </>
+                renderRunDetails={(runId) => (
+                  <IssueRunDetailsPanel
+                    issue={issue.data}
+                    issueId={issueId}
+                    latestRunStatus={latestRun?.status}
+                    orgId={orgId}
+                    runId={runId}
+                  />
                 )}
                 runs={issueRuns.data ?? []}
               />
