@@ -5036,6 +5036,17 @@ button.danger {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.issue-run-raw-stack {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.issue-run-raw-stack > div,
+.issue-run-raw-stack > details {
+  min-width: 0;
+}
+
 .issue-run-output-block {
   background: #0b111b;
   border: 1px solid #202a3b;
@@ -7885,6 +7896,10 @@ pre {
 .issue-run-agent-reply-block {
   display: grid;
   gap: 6px;
+}
+
+.issue-run-agent-reply-json {
+  max-width: 100%;
 }
 
 .issue-run-agent-reply.collapsed {
