@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import sqlite3
@@ -20,8 +21,15 @@ from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import _build_config, upgrade_to_head
-from packages.database.schema import Agent, AgentWakeupRequest, Base, Organization
+from packages.database.schema import (
+    Agent,
+    AgentWakeupRequest,
+    Base,
+    HeartbeatRun,
+    Organization,
+)
 from server.app import create_app
+from server.services.heartbeat import dispatch_queued_agent
 
 
 def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
@@ -1100,9 +1108,42 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert rows[0].payload == {
         "issueId": issue["id"],
         "originRunId": run["id"],
-        "mutation": "passive_followup",
+        "previousRunId": run["id"],
+        "attempt": 1,
+        "reason": "missing_closure",
     }
+    assert rows[0].source == "automation"
     assert rows[0].status == "queued"
+    assert rows[0].idempotency_key == f"issue_passive_followup:{run['id']}"
+    requested_at = rows[0].requested_at
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=UTC)
+    assert requested_at > datetime.now(UTC) + timedelta(seconds=30)
+
+    async with session_factory() as session:
+        followup_run = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == rows[0].id)
+            )
+        ).scalar_one()
+        assert followup_run.invocation_source == "automation"
+        assert followup_run.status == "queued"
+        assert followup_run.context_snapshot is not None
+        assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
+        assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
+        assert followup_run.context_snapshot["passiveFollowup"]["attempt"] == 1
+        assert followup_run.context_snapshot["passiveFollowup"]["maxAttempts"] == 2
+        assert (
+            followup_run.context_snapshot["passiveFollowup"]["reason"]
+            == "missing_closure"
+        )
+
+    await dispatch_queued_agent(app.state.session_factory, agent["id"])
+
+    async with session_factory() as session:
+        still_queued = await session.get(HeartbeatRun, followup_run.id)
+        assert still_queued is not None
+        assert still_queued.status == "queued"
 
 
 async def test_successful_issue_run_with_closeout_comment_skips_passive_followup(

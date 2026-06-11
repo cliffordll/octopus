@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
 import server
+import server.__main__ as server_module
 from server.app import app
 
 
@@ -56,3 +57,18 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
         / "logs"
         / "octopus.log"
     ).exists()
+
+
+def test_python_module_entrypoint_delegates_to_server_main(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    called: list[str] = []
+
+    def fake_main() -> None:
+        called.append("main")
+
+    monkeypatch.setattr(server_module, "main", fake_main)
+
+    server_module.run()
+
+    assert called == ["main"]

@@ -73,7 +73,7 @@ PowerShell：
 ```powershell
 Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
 uv run alembic upgrade head
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 macOS / Linux：
@@ -81,7 +81,7 @@ macOS / Linux：
 ```bash
 unset OCTOPUS_DATABASE_URL
 uv run alembic upgrade head
-uv run server
+.venv/bin/python -m server
 ```
 
 ### PostgreSQL
@@ -105,7 +105,7 @@ $env:OCTOPUS_INSTANCE_ID = "local-pg"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 macOS / Linux：
@@ -116,7 +116,7 @@ export OCTOPUS_INSTANCE_ID="local-pg"
 export OCTOPUS_LOCAL_TRUSTED=1
 export OCTOPUS_AUTO_MIGRATE=1
 export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
-uv run server
+.venv/bin/python -m server
 ```
 
 使用 PostgreSQL 后不会使用本地 SQLite 文件 `octopus.db`；但 `OCTOPUS_HOME` 仍负责文件侧 instance 数据，例如 workspace、storage、run logs、server logs 和 runtime homes。
@@ -165,7 +165,7 @@ export OCTOPUS_AUTO_MIGRATE=1
 
 ```powershell
 uv run alembic upgrade head
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 ## 4. 本地调试 Actor
@@ -238,13 +238,23 @@ bucket 需要提前创建；当前 server 不负责自动创建 bucket。
 
 ## 6. 启动服务
 
+Windows 本地开发优先使用统一 dev 脚本：
+
+```powershell
+.\scripts\dev.ps1
+```
+
+脚本会先检查 server/UI 端口是否已被其他进程占用；如果端口被占用，会打印 PID 和命令行并退出，避免误连到其他 checkout 或残留 server。正常启动后，按 `Ctrl+C` 会同时清理由脚本启动的 server 和 UI 子进程树。server/UI 输出会写入 `.octopus/dev-logs/`。
+
+手动启动 server 时也建议直接使用 venv Python。不要优先使用 `uv run server` 或 `uv run python -m server` 做 Windows 本地长期 server 入口；前者会经过 `.venv\Scripts\server.exe` console-script shim，后者仍多一层 `uv.exe` 父进程，Ctrl+C 在某些终端里可能只停外层进程，留下内层 Python server。
+
 最小本地启动流程：
 
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 服务默认监听：
@@ -267,7 +277,7 @@ $env:OCTOPUS_LOG_LEVEL = "info"
 curl.exe http://127.0.0.1:8000/api/health
 ```
 
-### 启动 UI
+### 手动启动 UI
 
 前端在 `ui/` 目录运行，Vite 默认将 `/api` 代理到 `http://127.0.0.1:8000`：
 
@@ -415,7 +425,7 @@ $env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 此时本地文件会写入：
@@ -472,7 +482,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.octopus\instances\default"
 ```powershell
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
-uv run server
+.\.venv\Scripts\python.exe -m server
 ```
 
 ## 13. 常用环境变量

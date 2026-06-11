@@ -66,9 +66,10 @@ it("shows existing run records without collapsing the section by default", async
     orgId: "org-1",
     agentId: "agent-1",
     issueId: "issue-1",
-    invocationSource: "manual",
+    invocationSource: "automation",
     status: "failed",
     summary: "第二次运行失败",
+    contextSnapshot: { wakeReason: "issue_passive_followup" },
     createdAt: "2026-06-02T11:00:00Z",
     startedAt: "2026-06-02T11:01:00Z",
   };
@@ -130,6 +131,8 @@ it("shows existing run records without collapsing the section by default", async
   expect(await within(runRecordsRegion).findByRole("heading", { name: "心跳上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*运行中/ })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*成功/ })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*补充关闭信号.*失败/ })).toBeInTheDocument();
+  expect(runRecordsRegion).not.toHaveTextContent("未知来源");
   await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-second" }));
   expect((await within(runRecordsRegion).findAllByRole("heading", { name: "心跳上下文" })).length).toBeGreaterThanOrEqual(2);
 });
