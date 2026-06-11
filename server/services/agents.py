@@ -4,10 +4,11 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 from pathlib import Path
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -40,6 +41,7 @@ from packages.database.schema import (
     AgentConfigRevision as AgentConfigRevisionRow,
     AgentRuntimeState as AgentRuntimeStateRow,
     AgentTaskSession as AgentTaskSessionRow,
+    Organization as OrganizationRow,
 )
 from packages.shared.constants.agent import (
     AGENT_DICEBEAR_NOTIONISTS_ICON_PREFIX,
@@ -50,6 +52,10 @@ from packages.shared.constants.agent import (
     AgentRuntimeType,
     AgentStatus,
     PauseReason,
+)
+from packages.shared.constants.heartbeat import (
+    AGENT_RUN_CONCURRENCY_DEFAULT,
+    HEARTBEAT_INTERVAL_DEFAULT_SEC,
 )
 from packages.shared.types.agent import (
     Agent,
@@ -69,6 +75,7 @@ from packages.shared.types.agent import (
     ResetAgentSessionResult,
     UpdateAgentPayload,
 )
+from packages.shared.types.heartbeat import InstanceSchedulerHeartbeatAgent
 from packages.shared.types.approval import CreateApprovalPayload
 from packages.runtimes import get_runtime_adapter
 
@@ -100,7 +107,16 @@ _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
 )
 _AGENT_WORKSPACE_HOME_DIRS = ("instructions", "skills", "life", "memory")
 _SKILL_EVIDENCE_KINDS = ("used", "requested", "loaded")
+_SCHEDULER_INELIGIBLE_STATUSES = {"paused", "terminated", "pending_approval"}
 SkillEvidenceKind = Literal["used", "requested", "loaded"]
+_DEFAULT_HEARTBEAT_INTERVAL_SEC = HEARTBEAT_INTERVAL_DEFAULT_SEC
+_DEFAULT_HEARTBEAT_POLICY: dict[str, Any] = {
+    "enabled": True,
+    "intervalSec": _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    "wakeOnDemand": True,
+    "preflightEnabled": True,
+    "maxConcurrentRuns": AGENT_RUN_CONCURRENCY_DEFAULT,
+}
 
 
 class AgentConflictError(ValueError):
@@ -116,6 +132,55 @@ def _normalize_url_key(value: str | None) -> str | None:
 
 def _derive_url_key(name: str | None, fallback: str | None = None) -> str:
     return _normalize_url_key(name) or _normalize_url_key(fallback) or "agent"
+
+
+def _parse_scheduler_heartbeat_policy(
+    runtime_config: dict[str, Any],
+) -> dict[str, float | bool]:
+    heartbeat = runtime_config.get("heartbeat", {})
+    config = heartbeat if isinstance(heartbeat, dict) else {}
+    enabled = config.get("enabled", True)
+    interval = config.get("intervalSec", 0)
+    interval_sec = (
+        max(0.0, float(interval))
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool)
+        else 0.0
+    )
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else True,
+        "intervalSec": interval_sec
+        if interval_sec > 0
+        else _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    }
+
+
+def _materialize_heartbeat_runtime_config(
+    runtime_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = dict(runtime_config or {})
+    heartbeat = config.get("heartbeat")
+    if heartbeat is None:
+        config["heartbeat"] = dict(_DEFAULT_HEARTBEAT_POLICY)
+    elif isinstance(heartbeat, dict):
+        materialized = {**_DEFAULT_HEARTBEAT_POLICY, **heartbeat}
+        interval = materialized.get("intervalSec")
+        if (
+            not isinstance(interval, (int, float))
+            or isinstance(interval, bool)
+            or interval <= 0
+        ):
+            materialized["intervalSec"] = _DEFAULT_HEARTBEAT_INTERVAL_SEC
+        config["heartbeat"] = materialized
+    return config
+
+
+def _is_hidden_system_agent_metadata(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("hidden") is True
+        or metadata.get("systemManaged") == "rudder_copilot"
+    )
 
 
 def _source_issue_ids(payload: HireAgentPayload) -> list[str]:
@@ -320,6 +385,69 @@ def _organization_skill_selection_key(key: str) -> str:
     return key if key.startswith("org:") else f"org:{key}"
 
 
+def _organization_skill_is_desired(
+    skill: Mapping[str, Any], desired_skills: list[str]
+) -> bool:
+    key = skill.get("key")
+    slug = skill.get("slug")
+    candidates = {
+        value
+        for value in (
+            key,
+            slug,
+            f"org:{key}" if isinstance(key, str) else None,
+        )
+        if isinstance(value, str) and value
+    }
+    return not candidates.isdisjoint(desired_skills)
+
+
+def _is_external_skill_entry(entry: dict[str, Any]) -> bool:
+    source_class = entry.get("sourceClass")
+    return entry.get("managed") is False or source_class in {
+        "adapter_home",
+        "external",
+    }
+
+
+def _namespace_external_skill_conflicts(
+    entries: list[Any], org_skills: Sequence[Mapping[str, Any]]
+) -> None:
+    managed_names = {
+        value
+        for skill in org_skills
+        for value in (skill.get("key"), skill.get("slug"))
+        if isinstance(value, str) and value
+    }
+    if not managed_names:
+        return
+    for entry in entries:
+        if not isinstance(entry, dict) or not _is_external_skill_entry(entry):
+            continue
+        runtime_name = entry.get("runtimeName")
+        key = entry.get("key")
+        selection_key = entry.get("selectionKey")
+        names = {
+            value
+            for value in (runtime_name, key, selection_key)
+            if isinstance(value, str) and value
+        }
+        if managed_names.isdisjoint(names):
+            continue
+        runtime_slug = (
+            runtime_name
+            if isinstance(runtime_name, str) and runtime_name
+            else key
+            if isinstance(key, str) and key
+            else selection_key
+        )
+        if not isinstance(runtime_slug, str) or runtime_slug.startswith("external:"):
+            continue
+        external_key = f"external:{runtime_slug}"
+        entry["key"] = external_key
+        entry["selectionKey"] = external_key
+
+
 def _runtime_config_with_context(
     row: AgentRow, base_config: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -394,6 +522,54 @@ class AgentService:
             self._session, [row.id for row in visible]
         )
         return [self._to_agent(row, skills_by_agent.get(row.id, [])) for row in visible]
+
+    async def list_instance_scheduler_heartbeats(
+        self,
+    ) -> list[InstanceSchedulerHeartbeatAgent]:
+        result = await self._session.execute(
+            select(AgentRow, OrganizationRow)
+            .join(OrganizationRow, AgentRow.org_id == OrganizationRow.id)
+            .order_by(OrganizationRow.name, AgentRow.name)
+        )
+        items: list[InstanceSchedulerHeartbeatAgent] = []
+        for row, org in result.all():
+            if row.status in _SCHEDULER_INELIGIBLE_STATUSES:
+                continue
+            if _is_hidden_system_agent_metadata(row.metadata_json):
+                continue
+            policy = _parse_scheduler_heartbeat_policy(row.runtime_config)
+            heartbeat_enabled = cast(bool, policy["enabled"])
+            interval_sec = cast(float, policy["intervalSec"])
+            items.append(
+                {
+                    "id": row.id,
+                    "orgId": row.org_id,
+                    "organizationName": org.name,
+                    "organizationIssuePrefix": org.issue_prefix,
+                    "agentName": row.name,
+                    "agentUrlKey": _derive_url_key(row.name, row.id),
+                    "role": cast(AgentRole, row.role),
+                    "title": row.title,
+                    "status": cast(AgentStatus, row.status),
+                    "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
+                    "intervalSec": interval_sec,
+                    "heartbeatEnabled": heartbeat_enabled,
+                    "schedulerActive": heartbeat_enabled and interval_sec > 0,
+                    "lastHeartbeatAt": (
+                        row.last_heartbeat_at.isoformat()
+                        if row.last_heartbeat_at is not None
+                        else None
+                    ),
+                }
+            )
+        return sorted(
+            items,
+            key=lambda item: (
+                not item["schedulerActive"],
+                item["organizationName"],
+                item["agentName"],
+            ),
+        )
 
     async def get(self, agent_id: str) -> Agent | None:
         row = await get_agent_by_id(self._session, agent_id)
@@ -549,7 +725,9 @@ class AgentService:
             "capabilities": payload.get("capabilities"),
             "agent_runtime_type": agent_runtime_type,
             "agent_runtime_config": agent_runtime_config,
-            "runtime_config": dict(payload.get("runtimeConfig", {})),
+            "runtime_config": _materialize_heartbeat_runtime_config(
+                dict(payload.get("runtimeConfig", {}))
+            ),
             "budget_monthly_cents": payload.get("budgetMonthlyCents", 0),
             "spent_monthly_cents": 0,
             "permissions": _normalized_permissions(payload.get("permissions"), role),
@@ -782,8 +960,11 @@ class AgentService:
         if row is None:
             return None
         desired_skills = await list_enabled_skill_keys(self._session, row.id)
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            row, desired_skills
+        )
         snapshot = await get_runtime_adapter(row.agent_runtime_type).list_skills(
-            _runtime_config_with_context(row), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(row, snapshot, desired_skills)
@@ -817,8 +998,11 @@ class AgentService:
             entity_id=existing.id,
             details={"desiredSkills": desired_skills},
         )
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            existing, desired_skills
+        )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            _runtime_config_with_context(existing), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
@@ -842,8 +1026,11 @@ class AgentService:
             agent_id=existing.id,
             skill_keys=skills,
         )
+        runtime_config = await self._runtime_config_with_desired_skill_sources(
+            existing, desired_skills
+        )
         snapshot = await get_runtime_adapter(existing.agent_runtime_type).sync_skills(
-            _runtime_config_with_context(existing), desired_skills
+            runtime_config, desired_skills
         )
         snapshot["desiredSkills"] = desired_skills
         await self._merge_organization_skill_entries(existing, snapshot, desired_skills)
@@ -867,16 +1054,44 @@ class AgentService:
         )
         return cast(AgentSkillSnapshot, snapshot)
 
+    async def _runtime_config_with_desired_skill_sources(
+        self, row: AgentRow, desired_skills: list[str]
+    ) -> dict[str, Any]:
+        config = _runtime_config_with_context(row)
+        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
+        desired_sources = [
+            {
+                "key": skill["key"],
+                "selectionKey": _organization_skill_selection_key(str(skill["key"])),
+                "runtimeName": skill["slug"],
+                "sourcePath": skill["sourcePath"],
+            }
+            for skill in org_skills
+            if _organization_skill_is_desired(skill, desired_skills)
+            and isinstance(skill.get("sourcePath"), str)
+            and skill.get("sourcePath")
+        ]
+        if not desired_sources:
+            return config
+        runtime_context = config.get("_octopus")
+        config["_octopus"] = {
+            **(runtime_context if isinstance(runtime_context, dict) else {}),
+            "desiredSkillSources": desired_sources,
+        }
+        return config
+
     async def _merge_organization_skill_entries(
         self, row: AgentRow, snapshot: dict[str, Any], desired_skills: list[str]
     ) -> None:
         entries = snapshot.get("entries")
         if not isinstance(entries, list):
             return
+        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
+        _namespace_external_skill_conflicts(entries, org_skills)
         existing_refs = {
             value
             for entry in entries
-            if isinstance(entry, dict)
+            if isinstance(entry, dict) and not _is_external_skill_entry(entry)
             for value in (
                 entry.get("key"),
                 entry.get("selectionKey"),
@@ -885,7 +1100,6 @@ class AgentService:
             if isinstance(value, str) and value
         }
         desired = set(desired_skills)
-        org_skills = await OrganizationSkillService(self._session).list(row.org_id)
         for skill in org_skills:
             key = str(skill["key"])
             slug = str(skill["slug"])
@@ -1083,7 +1297,12 @@ class AgentService:
             "agentRuntimeConfig": cast(
                 dict[str, Any], _sanitize_value(row.agent_runtime_config)
             ),
-            "runtimeConfig": cast(dict[str, Any], _sanitize_value(row.runtime_config)),
+            "runtimeConfig": cast(
+                dict[str, Any],
+                _sanitize_value(
+                    _materialize_heartbeat_runtime_config(row.runtime_config)
+                ),
+            ),
             "permissions": cast(
                 Any, _normalized_permissions(row.permissions, row.role)
             ),
@@ -1393,7 +1612,7 @@ class AgentService:
             "desiredSkills": list(desired_skills or []),
             "agentRuntimeType": cast(AgentRuntimeType, row.agent_runtime_type),
             "agentRuntimeConfig": row.agent_runtime_config,
-            "runtimeConfig": row.runtime_config,
+            "runtimeConfig": _materialize_heartbeat_runtime_config(row.runtime_config),
             "budgetMonthlyCents": row.budget_monthly_cents,
             "spentMonthlyCents": row.spent_monthly_cents,
             "pauseReason": cast(PauseReason | None, row.pause_reason),

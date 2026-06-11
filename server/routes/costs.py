@@ -44,7 +44,11 @@ from packages.shared.validators.cost import (
     validate_create_cost_event,
 )
 
-from ..dependencies.access import require_actor_identity, require_organization_access
+from ..dependencies.access import (
+    assert_organization_access,
+    require_actor_identity,
+    require_organization_access,
+)
 from ..dependencies.budgets import get_budget_service
 from ..dependencies.costs import get_cost_service
 from ..services.budgets import BudgetService
@@ -290,11 +294,14 @@ async def patch_org_budget_route(
 @router.patch(AGENT_BUDGET_PATCH_PATH)
 async def patch_agent_budget_route(
     agentId: str,
+    request: Request,
     body: dict[str, Any] = Body(...),
     service: BudgetService = Depends(get_budget_service),
 ) -> dict[str, int]:
     try:
         amount = validate_budget_amount_patch(body)
+        org_id = await service.get_agent_org_id(agentId)
+        assert_organization_access(request, org_id)
         return await service.update_agent_budget(agentId, amount)
     except LookupError as exc:
         raise HTTPException(

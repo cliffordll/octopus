@@ -637,6 +637,8 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
     env["USERPROFILE"] = str(managed_home)
     configure_managed_profile_env(env, managed_home)
     env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
+    env.pop("AGENT_HOME", None)
+    env.pop("RUDDER_AGENT_ROOT", None)
     if linked:
         await on_log(
             "stdout",

@@ -19,7 +19,7 @@ export function AgentsPage() {
 
   return (
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <header className="page-header agents-list-header">
         <div><p className="eyebrow">Agents</p><h1>智能体</h1></div>
       </header>
       <nav aria-label="智能体详情导航" className="detail-tabs">

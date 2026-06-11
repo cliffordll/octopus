@@ -975,7 +975,7 @@ export interface RuntimeModel {
   updatedAt?: string;
 }
 
-export type RuntimeProviderScope = "global" | "organization";
+export type RuntimeProviderScope = "instance" | "global" | "organization";
 
 export interface CreateRuntimeProviderPayload {
   scope?: RuntimeProviderScope;
@@ -1223,6 +1223,7 @@ export interface HeartbeatRun {
   signal?: string | null;
   usageJson?: Record<string, unknown> | null;
   resultJson?: Record<string, unknown> | null;
+  summary?: string | null;
   sessionIdBefore?: string | null;
   sessionIdAfter?: string | null;
   stdoutExcerpt?: string | null;
@@ -1250,6 +1251,23 @@ export interface HeartbeatRunEvent {
   message: string | null;
   payload?: Record<string, unknown> | null;
   createdAt: string;
+}
+
+export interface InstanceSchedulerHeartbeatAgent {
+  id: string;
+  orgId: string;
+  organizationName: string;
+  organizationIssuePrefix: string;
+  agentName: string;
+  agentUrlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+  agentRuntimeType: AgentRuntimeType;
+  intervalSec: number;
+  heartbeatEnabled: boolean;
+  schedulerActive: boolean;
+  lastHeartbeatAt: string | null;
 }
 
 export interface LogReadResult {

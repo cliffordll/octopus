@@ -180,21 +180,21 @@ it("shows organization skills and edits the selected skill file", async () => {
 
   renderApp("/orgs/org-1/skills");
   expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "本地技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "内置技能列表" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "社区技能列表" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "本地技能列表" })).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: /Deep Research/ })).toBeInTheDocument();
-  expect((await screen.findAllByText("Create durable agent skills")).length).toBeGreaterThanOrEqual(2);
+  expect(screen.queryByText("Create durable agent skills")).not.toBeInTheDocument();
   expect(screen.getAllByText("内置").length).toBeGreaterThanOrEqual(2);
   expect(screen.getByText("2 智能体")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Skill Creator/ })).toHaveClass("selected");
-  expect(screen.getByText("只读：内置")).toBeInTheDocument();
+  expect(screen.queryByText("只读：内置")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("Reviewer")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: /Review/ }));
-  expect((await screen.findAllByText("Review code changes")).length).toBeGreaterThanOrEqual(1);
+  expect(screen.queryByText("Review code changes")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Review/ })).toHaveClass("selected");
   await userEvent.click(screen.getByRole("button", { name: "安装更新" }));
   expect(fetchMock).toHaveBeenCalledWith(

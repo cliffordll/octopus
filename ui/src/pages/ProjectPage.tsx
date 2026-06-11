@@ -153,58 +153,69 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
     ? codebase?.effectiveLocalFolder ?? codebase?.localFolder
     : orgWorkspaceRoot;
   return (
-    <section className="project-workspace-grid" aria-label="项目工作区">
-      <article className="project-workspace-card">
-        <div className="project-workspace-card-heading">
-          <h3>代码库</h3>
-          {codebase?.configured ? <Badge>已配置</Badge> : <Badge>未配置</Badge>}
+    <section className="project-runtime-section" aria-label="项目运行环境">
+      <div className="project-section-heading">
+        <div>
+          <p className="eyebrow">PROJECT RUNTIME</p>
+          <h2>项目运行环境</h2>
+          <p className="muted">代码库、执行目录和任务产物目录会影响智能体运行时读取和写入的位置。</p>
         </div>
-        <dl className="project-workspace-properties">
-          <div><dt>来源</dt><dd>{codebase?.origin ?? "未设置"}</dd></div>
-          <div><dt>仓库</dt><dd>{nullableText(codebase?.repoUrl)}</dd></div>
-          <div><dt>分支</dt><dd>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
-          <div><dt>执行目录</dt><dd>{nullableText(effectiveCwd)}</dd></div>
-          <div><dt>产物目录</dt><dd>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
-        </dl>
-        {usesOrgWorkspaceFallback && (
-          <div className="project-workspace-fallback">
-            <strong>将使用组织共享工作区</strong>
-            <span>当前项目没有可用的本地项目工作区。任务运行时会 fallback 到组织共享工作区，持久报告、截图和文档应写入 artifacts。</span>
+      </div>
+      <div className="project-runtime-grid">
+        <article className="project-runtime-card">
+          <div className="project-workspace-card-heading">
+            <h3>代码库</h3>
+            {codebase?.configured ? <Badge>已配置</Badge> : <Badge>未配置</Badge>}
           </div>
-        )}
-      </article>
-      <article className="project-workspace-card">
-        <div className="project-workspace-card-heading">
-          <h3>工作区</h3>
-          <Badge>{workspaces.length}</Badge>
-        </div>
-        <div className="project-workspace-list">
-          {workspaces.length === 0 && (
-            <p className="project-workspace-empty">暂无项目工作区。任务运行时会使用组织共享工作区。</p>
-          )}
-          {workspaces.map((workspace) => (
-            <div className="project-workspace-item" key={workspace.id}>
-              <div>
-                <strong>{workspace.name}</strong>
-                <span>{workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}</span>
-              </div>
-              <div className="project-workspace-badges">
-                {workspace.isPrimary && <Badge>主工作区</Badge>}
-                <Badge>{workspace.sourceType}</Badge>
-                {!workspace.cwd?.trim() && <Badge>组织工作区 fallback</Badge>}
-                {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
-              </div>
+          <dl className="project-workspace-properties project-runtime-properties">
+            <div><dt>来源</dt><dd title={codebase?.origin ?? "未设置"}>{codebase?.origin ?? "未设置"}</dd></div>
+            <div><dt>仓库</dt><dd title={nullableText(codebase?.repoUrl)}>{nullableText(codebase?.repoUrl)}</dd></div>
+            <div><dt>分支</dt><dd title={nullableText(codebase?.repoRef ?? codebase?.defaultRef)}>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
+            <div><dt>执行目录</dt><dd title={nullableText(effectiveCwd)}>{nullableText(effectiveCwd)}</dd></div>
+            <div><dt>产物目录</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "artifacts")}>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
+          </dl>
+          {usesOrgWorkspaceFallback && (
+            <div className="project-workspace-fallback compact">
+              <strong>将使用组织共享工作区</strong>
+              <span>当前项目没有可用的本地项目工作区；任务运行会 fallback 到组织共享工作区。</span>
             </div>
-          ))}
-        </div>
-      </article>
+          )}
+        </article>
+        <article className="project-runtime-card">
+          <div className="project-workspace-card-heading">
+            <h3>工作区</h3>
+            <Badge>{workspaces.length}</Badge>
+          </div>
+          <div className="project-workspace-list compact">
+            {workspaces.length === 0 && (
+              <p className="project-workspace-empty">暂无项目工作区。任务运行时会使用组织共享工作区。</p>
+            )}
+            {workspaces.map((workspace) => {
+              const workspaceCwdValue = workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区";
+              return (
+                <div className="project-workspace-item compact" key={workspace.id}>
+                  <div>
+                    <strong>{workspace.name}</strong>
+                    <span title={workspaceCwdValue}>{workspaceCwdValue}</span>
+                  </div>
+                  <div className="project-workspace-badges">
+                    {workspace.isPrimary && <Badge>主工作区</Badge>}
+                    <Badge>{workspace.sourceType}</Badge>
+                    {!workspace.cwd?.trim() && <Badge>组织工作区 fallback</Badge>}
+                    {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </div>
     </section>
   );
 }
-
 export function ProjectPage() {
   const { orgId = "", projectId = "", tab = "configuration" } = useParams();
-  const activeTab = ["configuration", "resources", "issues"].includes(tab) ? tab : "configuration";
+  const activeTab = ["configuration", "resources", "issues", "budget"].includes(tab) ? tab : "configuration";
   const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
@@ -460,74 +471,109 @@ export function ProjectPage() {
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</NavLink>
           </nav>
-          {activeTab === "configuration" && <form className="panel project-properties-card project-tab-panel" onSubmit={save}>
-            <div className="panel-heading">
-              <div>
-                <h2>配置</h2>
-                <p className="muted">配置项目属性、负责人、目标日期和关联目标。</p>
+          {activeTab === "budget" && (
+            <section className="project-properties-card project-tab-panel" aria-label="项目预算">
+              <div className="project-config-sections">
+                <section className="project-config-section">
+                  <div className="project-section-heading">
+                    <p className="eyebrow">Budget</p>
+                    <h2>预算</h2>
+                    <p className="muted">项目预算由组织成本治理和预算策略驱动；当前页面展示项目级治理状态。</p>
+                  </div>
+                  <div className="project-property-list">
+                    <div className="project-property-row">
+                      <span>预算状态</span>
+                      <strong>{project.data.pauseReason === "budget" ? "已触发硬限制" : "未触发硬限制"}</strong>
+                    </div>
+                    <div className="project-property-row">
+                      <span>暂停原因</span>
+                      <strong>{project.data.pauseReason ?? "无"}</strong>
+                    </div>
+                    <div className="project-property-row">
+                      <span>暂停时间</span>
+                      <strong>{formatDateTime(project.data.pausedAt)}</strong>
+                    </div>
+                  </div>
+                </section>
               </div>
-            </div>
-            <div className="project-property-list">
-              <label className="project-property-row">
-                <span>项目名称</span>
-                <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
-              </label>
-              <label className="project-property-row project-property-row-start">
-                <span>描述</span>
-                <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-              </label>
-              <label className="project-property-row">
-                <span>状态</span>
-                <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
-                  {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
-                </select>
-              </label>
-              <label className="project-property-row">
-                <span>负责人</span>
-                <select value={leadAgentId} onChange={(event) => setLeadAgentId(event.target.value)}>
-                  <option value="">未设置</option>
-                  {agentList.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="project-property-row">
-                <span>目标日期</span>
-                <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
-              </label>
-              <label className="project-property-row">
-                <span>目标 ID</span>
-                <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
-              </label>
-              <div className="project-property-row">
-                <span>URL 标识</span>
-                <strong>{project.data.urlKey}</strong>
-              </div>
-              <div className="project-property-row">
-                <span>负责人</span>
-                <strong>{project.data.leadAgentId ?? "未设置"}</strong>
-              </div>
-              <div className="project-property-row">
-                <span>目标</span>
-                <div className="project-goal-chips">
-                  {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
-                  {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
-                  {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">暂无关联目标</span>}
+            </section>
+          )}
+          {activeTab === "configuration" && <form className="project-properties-card project-tab-panel" onSubmit={save}>
+            <div className="project-config-sections">
+              <section className="project-config-section">
+                <div className="project-section-heading">
+                  <p className="eyebrow">BASIC INFORMATION</p>
+                  <h2>基础信息</h2>
+                  <p className="muted">项目名称、状态、负责人、目标日期和关联目标。</p>
                 </div>
-              </div>
-              <div className="project-property-row">
-                <span>创建时间</span>
-                <strong>{formatDateTime(project.data.createdAt)}</strong>
-              </div>
-              <div className="project-property-row">
-                <span>更新时间</span>
-                <strong>{formatDateTime(project.data.updatedAt)}</strong>
-              </div>
-              <div className="project-property-row project-property-row-start">
-                <span>执行工作区策略</span>
+                <div className="project-property-list">
+                  <label className="project-property-row">
+                    <span>项目名称</span>
+                    <input value={projectName} onChange={(event) => setProjectName(event.target.value)} required />
+                  </label>
+                  <label className="project-property-row project-property-row-start">
+                    <span>描述</span>
+                    <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+                  </label>
+                  <label className="project-property-row">
+                    <span>状态</span>
+                    <select value={status} onChange={(event) => setStatus(event.target.value as ProjectStatus)}>
+                      {STATUSES.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
+                    </select>
+                  </label>
+                  <label className="project-property-row">
+                    <span>负责人</span>
+                    <select value={leadAgentId} onChange={(event) => setLeadAgentId(event.target.value)}>
+                      <option value="">未设置</option>
+                      {agentList.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="project-property-row">
+                    <span>目标日期</span>
+                    <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+                  </label>
+                  <label className="project-property-row">
+                    <span>目标 ID</span>
+                    <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
+                  </label>
+                  <div className="project-property-row project-property-row-readonly-start">
+                    <span>URL 标识</span>
+                    <strong>{project.data.urlKey}</strong>
+                  </div>
+                  <div className="project-property-row">
+                    <span>当前负责人</span>
+                    <strong>{project.data.leadAgentId ?? "未设置"}</strong>
+                  </div>
+                  <div className="project-property-row">
+                    <span>目标</span>
+                    <div className="project-goal-chips">
+                      {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
+                      {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
+                      {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">暂无关联目标</span>}
+                    </div>
+                  </div>
+                  <div className="project-property-row">
+                    <span>创建时间</span>
+                    <strong>{formatDateTime(project.data.createdAt)}</strong>
+                  </div>
+                  <div className="project-property-row">
+                    <span>更新时间</span>
+                    <strong>{formatDateTime(project.data.updatedAt)}</strong>
+                  </div>
+                </div>
+              </section>
+              <section className="project-config-section">
+                <div className="project-section-heading">
+                  <p className="eyebrow">WORKSPACE POLICY</p>
+                  <h2>执行工作区策略</h2>
+                  <p className="muted">选择任务执行时使用共享工作区、独立工作区或操作分支。</p>
+                </div>
                 <div className="workspace-policy-config">
                   <fieldset className="workspace-policy-options">
                     <legend>选择任务执行时使用的工作区方式</legend>
@@ -550,35 +596,31 @@ export function ProjectPage() {
                       </label>
                     ))}
                   </fieldset>
-                  <div className="workspace-policy-preview">
-                    <div className="workspace-policy-preview-heading">
-                      <strong>提交参数</strong>
-                      <Badge>{workspacePolicyMode}</Badge>
-                    </div>
-                    <pre>{workspacePolicy || workspacePolicyForMode("", workspacePolicyMode)}</pre>
-                  </div>
                   <details className="workspace-policy-advanced">
                     <summary>高级配置 JSON</summary>
-                    <textarea
-                      aria-label="高级执行工作区策略 JSON"
-                      className="config-editor"
-                      value={workspacePolicy}
-                      onChange={(event) => editWorkspacePolicy(event.target.value)}
-                      placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
-                    />
+                    <label>
+                      execution_workspace_policy
+                      <textarea
+                        aria-label="execution_workspace_policy JSON"
+                        className="config-editor"
+                        value={workspacePolicy}
+                        onChange={(event) => editWorkspacePolicy(event.target.value)}
+                        placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
+                      />
+                    </label>
                   </details>
                 </div>
-              </div>
-            </div>
-            <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
-            <section className="project-workspace-manager" aria-label="项目工作区管理">
-              <div className="panel-heading">
+              </section>
+              <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
+              <section className="project-config-section project-workspace-manager" aria-label="项目工作区管理">
+              <div className="project-section-heading">
                 <div>
+                  <p className="eyebrow">PROJECT WORKSPACES</p>
                   <h2>项目工作区</h2>
-                  <p className="muted">可选绑定项目专属 cwd。任务执行时会优先使用可用的主工作区；未配置或不可用时 fallback 到组织共享工作区。</p>
+                  <p className="muted">项目专属 cwd 会优先用于任务执行；未配置或不可用时 fallback 到组织共享工作区。</p>
                 </div>
               </div>
-              <div className="project-resource-grid">
+              <div className="project-workspace-create-grid">
                 <label>
                   名称
                   <input
@@ -615,9 +657,8 @@ export function ProjectPage() {
                     placeholder="main"
                   />
                 </label>
-              </div>
-              <div className="project-property-actions">
                 <button
+                  className="project-workspace-create-button"
                   disabled={!workspaceName.trim() || createWorkspace.isPending}
                   onClick={submitWorkspace}
                   type="button"
@@ -628,13 +669,28 @@ export function ProjectPage() {
               <div className="project-workspace-list">
                 {(project.data.workspaces ?? []).map((workspace) => (
                   <div className="project-workspace-item" key={workspace.id}>
-                    <div>
-                      <strong>{workspace.name}</strong>
-                      <span>{workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}</span>
+                    <div className="project-workspace-main">
+                      <div className="project-workspace-name-row">
+                        <strong>{workspace.name}</strong>
+                        <div className="project-workspace-badges">
+                          {workspace.isPrimary && <Badge>主工作区</Badge>}
+                          <Badge>{workspace.sourceType}</Badge>
+                          {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
+                        </div>
+                      </div>
+                      <span title={workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}>
+                        {workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}
+                      </span>
+                      {(workspace.repoUrl || workspace.repoRef || workspace.defaultRef) && (
+                        <small
+                          className="project-workspace-repo-line"
+                          title={[workspace.repoUrl, workspace.repoRef ?? workspace.defaultRef].filter(Boolean).join(" · ")}
+                        >
+                          {[workspace.repoUrl, workspace.repoRef ?? workspace.defaultRef].filter(Boolean).join(" · ")}
+                        </small>
+                      )}
                     </div>
-                    <div className="project-workspace-badges">
-                      {workspace.isPrimary && <Badge>主工作区</Badge>}
-                      <Badge>{workspace.sourceType}</Badge>
+                    <div className="project-workspace-actions">
                       <button
                         className="secondary small-button"
                         disabled={workspace.isPrimary || setPrimaryWorkspace.isPending}
@@ -656,6 +712,7 @@ export function ProjectPage() {
                 ))}
               </div>
             </section>
+            </div>
             {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
             {update.error && <ErrorNotice error={update.error} />}
             {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
@@ -670,7 +727,7 @@ export function ProjectPage() {
             <div className="project-resource-hero-card">
               <div className="project-resource-hero-top">
                 <div>
-                  <p className="eyebrow">项目上下文</p>
+                  <p className="eyebrow">PROJECT RESOURCES</p>
                   <h2>资源</h2>
                   <p className="muted">选择智能体在当前项目中实际使用的仓库、文档、URL 和连接器对象。组织资源目录保持统一维护，这里只决定项目范围内需要加载的资源。</p>
                 </div>
@@ -750,6 +807,7 @@ export function ProjectPage() {
             <div className="project-resource-attached-card">
               <div className="project-resource-attached-heading">
                 <div>
+                  <p className="eyebrow">ATTACHED RESOURCES</p>
                   <h3>已附加资源</h3>
                   <p className="muted">角色和备注只作用于当前项目，不会修改组织资源目录。</p>
                 </div>
@@ -874,20 +932,23 @@ export function ProjectPage() {
           {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
             <div className="panel-heading">
               <div>
+                <p className="eyebrow">PROJECT ISSUES</p>
                 <h2>任务</h2>
                 <p className="muted">按状态展示当前项目关联的任务。</p>
               </div>
             </div>
             {issues.error && <ErrorNotice error={issues.error} />}
             {agents.error && <ErrorNotice error={agents.error} />}
-            {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
-            <IssueStatusBoard
-              agents={agentList}
-              issues={projectIssues}
-              orgId={orgId}
-              projects={project.data ? [project.data] : []}
-              showProject={false}
-            />
+            <div className="project-issues-body">
+              {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
+              <IssueStatusBoard
+                agents={agentList}
+                issues={projectIssues}
+                orgId={orgId}
+                projects={project.data ? [project.data] : []}
+                showProject={false}
+              />
+            </div>
           </section>}
         </>
       )}
