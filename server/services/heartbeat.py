@@ -1109,9 +1109,9 @@ class HeartbeatService:
                 agent.id,
                 {"status": "idle" if final_status == "succeeded" else "error"},
             )
+            await self._release_issue_execution(final)
             if final_status == "succeeded":
                 await self._queue_issue_passive_followup_if_needed(agent, final)
-            await self._release_issue_execution(final)
             await self._append_event(
                 final,
                 sequence,
@@ -1473,6 +1473,15 @@ class HeartbeatService:
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
+        issue = await self._session.get(IssueRow, issue_id) if issue_id else None
+        should_request_review = (
+            final.status == "succeeded"
+            and final.invocation_source == "assignment"
+            and issue is not None
+            and issue.org_id == final.org_id
+            and issue.status == "in_progress"
+            and bool(issue.reviewer_agent_id)
+        )
         criteria = [
             IssueRow.execution_run_id == final.id,
             IssueRow.checkout_run_id == final.id,
@@ -1496,6 +1505,27 @@ class HeartbeatService:
             .where(IssueRow.org_id == final.org_id, or_(*criteria))
             .values(**values)
         )
+        if should_request_review and issue is not None:
+            issue.status = "in_review"
+            issue.updated_at = values["updated_at"]
+            await self._session.flush()
+            await insert_activity_log(
+                self._session,
+                org_id=issue.org_id,
+                actor_type="agent",
+                actor_id=final.agent_id,
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                run_id=final.id,
+                details={
+                    "status": "in_review",
+                    "fromStatus": "in_progress",
+                    "reason": "run_succeeded",
+                    "runId": final.id,
+                },
+            )
+            await self._queue_issue_review_wakeup_after_success(final, issue)
         if issue_id is not None and final.status in {
             "failed",
             "timed_out",
@@ -1503,6 +1533,46 @@ class HeartbeatService:
             "succeeded",
         }:
             await self._promote_deferred_issue_wakeup(final.org_id, issue_id)
+
+    async def _queue_issue_review_wakeup_after_success(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> None:
+        if not issue.reviewer_agent_id or issue.reviewer_agent_id == final.agent_id:
+            return
+        await self.wakeup(
+            issue.reviewer_agent_id,
+            {
+                "source": "review",
+                "triggerDetail": "system",
+                "reason": "issue_review_requested",
+                "idempotencyKey": f"issue:{issue.id}:review:run_succeeded",
+                "payload": {"issueId": issue.id, "mutation": "run_succeeded"},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "source": "issue.run_succeeded",
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_requested",
+                    "role": "reviewer",
+                    "issue": {
+                        "id": issue.id,
+                        "identifier": issue.identifier,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "status": issue.status,
+                        "priority": issue.priority,
+                    },
+                    "reviewInstructions": (
+                        "The assigned run succeeded and the issue is ready for "
+                        "review. Record one structured reviewer decision before "
+                        "exiting: approve, request_changes, needs_followup, or "
+                        "blocked. Use `control-plane issue review`."
+                    ),
+                },
+            },
+            actor_type="agent",
+            actor_id=final.agent_id,
+            execute_immediately=False,
+        )
 
     async def _promote_deferred_issue_wakeup(self, org_id: str, issue_id: str) -> None:
         issue = await self._session.get(IssueRow, issue_id)

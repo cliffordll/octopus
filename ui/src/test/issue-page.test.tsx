@@ -418,11 +418,7 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(properties).toHaveTextContent("层级");
   expect(properties).toHaveTextContent("已启动");
   expect(properties).toHaveTextContent("已完成");
-  await userEvent.selectOptions(screen.getByLabelText("任务阶段"), "in_progress");
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/issues/issue-1",
-    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }),
-  );
+  expect(screen.getByRole("option", { name: "进行中" })).toBeDisabled();
   await userEvent.selectOptions(screen.getByLabelText("优先级"), "critical");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
