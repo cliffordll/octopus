@@ -165,7 +165,10 @@ class HeartbeatService:
             )
             if existing is not None and existing.run_id:
                 existing_run = await get_run(self._session, existing.run_id)
-                if existing_run is not None:
+                if existing_run is not None and existing_run.status in {
+                    "queued",
+                    "running",
+                }:
                     return self._to_run(existing_run)
             if existing is not None and existing.status == "deferred_agent_paused":
                 await update_wakeup_request(
@@ -235,7 +238,27 @@ class HeartbeatService:
         issue = await self._session.get(IssueRow, issue_id)
         if issue is None or issue.org_id != agent.org_id:
             return False
-        if not issue.execution_run_id and not issue.checkout_run_id:
+        run_ids = [
+            value
+            for value in (issue.execution_run_id, issue.checkout_run_id)
+            if value
+        ]
+        if not run_ids:
+            return False
+        active_run_ids = {
+            row.id
+            for row in (
+                await self._session.execute(
+                    select(HeartbeatRunRow).where(
+                        HeartbeatRunRow.id.in_(run_ids),
+                        HeartbeatRunRow.status.in_(("queued", "running")),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        }
+        if not active_run_ids:
             return False
 
         deferred_payload = dict(payload.get("payload") or {})
@@ -571,6 +594,7 @@ class HeartbeatService:
                 reason="process_lost",
                 message="Run interrupted before server recovery",
             )
+            await self._release_issue_execution(failed)
             if detached_message:
                 await self._append_event(
                     failed,
