@@ -255,12 +255,12 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   }
 
   return (
-    <section className="runtime-settings" aria-label="模型供应商设置">
+    <section className="runtime-settings runtime-provider-settings" aria-label="模型供应商设置">
       <div className="panel-heading runtime-provider-heading">
         <div className="settings-section-heading-copy">
           <p className="eyebrow">Runtime Providers</p>
           <div className="runtime-provider-title-line">
-            <h3>{english ? "Runtime Providers" : "模型供应商"}</h3>
+            <h3>模型供应商</h3>
             <p className="muted">
               {english ? "Manage shared LLM providers and models for all runtimes." : "维护所有运行时共享的 LLM provider 和 model。"}
             </p>
