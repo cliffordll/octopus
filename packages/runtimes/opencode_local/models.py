@@ -6,6 +6,7 @@ import os
 import time
 from typing import Any
 
+from ..common import runtime_subprocess_kwargs
 from .protocol import string
 
 _CACHE_TTL_SECONDS = 60.0
@@ -55,6 +56,7 @@ async def _discover(
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **runtime_subprocess_kwargs(),
     )
     try:
         stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=20)

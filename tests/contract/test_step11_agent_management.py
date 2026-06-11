@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import importlib.util
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import sqlite3
@@ -20,8 +21,17 @@ from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import _build_config, upgrade_to_head
-from packages.database.schema import Agent, AgentWakeupRequest, Base, Organization
+from packages.database.schema import (
+    Agent,
+    AgentWakeupRequest,
+    Base,
+    HeartbeatRun,
+    Issue,
+    IssueComment,
+    Organization,
+)
 from server.app import create_app
+from server.services.heartbeat import dispatch_queued_agent
 
 
 def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
@@ -58,6 +68,8 @@ def test_agent_contract_modules_define_management_boundary() -> None:
         == "/api/orgs/{orgId}/agents/name-suggestion"
     )
     assert paths.AGENT_DETAIL_PATH == "/api/agents/{id}"
+    assert paths.AGENT_INBOX_PATH == "/api/agents/{id}/inbox-lite"
+    assert paths.AGENT_ME_INBOX_PATH == "/api/agents/me/inbox-lite"
     assert paths.AGENT_ARCHIVE_PATH == "/api/agents/{id}/archive"
     assert paths.AGENT_PAUSE_PATH == "/api/agents/{id}/pause"
     assert paths.AGENT_CONFIGURATION_PATH == "/api/agents/{id}/configuration"
@@ -102,6 +114,120 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     assert validators.validate_reset_agent_session({"taskKey": "issue-1"}) == {
         "taskKey": "issue-1"
     }
+
+
+async def test_agent_inbox_lite_lists_assignee_and_reviewer_work(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-inbox")
+    agent_id = str(uuid.uuid4())
+    other_agent_id = str(uuid.uuid4())
+    build_issue_id = str(uuid.uuid4())
+    comment_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Inbox Owner",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=other_agent_id,
+                    org_id=org_id,
+                    name="Other",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    org_id=org_id,
+                    identifier="INB-1",
+                    title="Review me",
+                    status="in_review",
+                    priority="high",
+                    reviewer_agent_id=agent_id,
+                ),
+                Issue(
+                    id=build_issue_id,
+                    org_id=org_id,
+                    identifier="INB-2",
+                    title="Build me",
+                    status="in_progress",
+                    priority="medium",
+                    assignee_agent_id=agent_id,
+                    checkout_run_id="run-checkout",
+                    execution_run_id="run-exec",
+                ),
+                IssueComment(
+                    id=comment_id,
+                    org_id=org_id,
+                    issue_id=build_issue_id,
+                    body="Please update the implementation plan before continuing.",
+                ),
+                AgentWakeupRequest(
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    source="assignment",
+                    trigger_detail="system",
+                    reason="issue_comment_added",
+                    payload={"issueId": build_issue_id, "commentId": comment_id},
+                    status="queued",
+                ),
+                Issue(
+                    org_id=org_id,
+                    identifier="INB-3",
+                    title="Ignore done",
+                    status="done",
+                    priority="medium",
+                    assignee_agent_id=agent_id,
+                ),
+                Issue(
+                    org_id=org_id,
+                    identifier="INB-4",
+                    title="Ignore other",
+                    status="todo",
+                    priority="medium",
+                    assignee_agent_id=other_agent_id,
+                ),
+            ]
+        )
+        await session.commit()
+
+    code, body = await _request(app, "GET", f"/api/agents/{agent_id}/inbox-lite")
+
+    assert code == 200
+    assert [(row["relationship"], row["identifier"]) for row in body] == [
+        ("reviewer", "INB-1"),
+        ("assignee", "INB-2"),
+    ]
+    assert body[1]["checkoutRunId"] == "run-checkout"
+    assert body[1]["executionRunId"] == "run-exec"
+    assert body[1]["wakeReason"] == "issue_comment_added"
+    assert body[1]["wakeCommentId"] == comment_id
+    assert body[1]["commentPreview"] == (
+        "Please update the implementation plan before continuing."
+    )
+
+    code, own_body = await _request(
+        app,
+        "GET",
+        "/api/agents/me/inbox-lite",
+        headers={"x-test-agent-id": agent_id, "x-test-org-id": org_id},
+    )
+    assert code == 200
+    assert own_body == body
+
+    code, denied = await _request(
+        app,
+        "GET",
+        f"/api/agents/{other_agent_id}/inbox-lite",
+        headers={"x-test-agent-id": agent_id, "x-test-org-id": org_id},
+    )
+    assert code == 403
+    assert denied["detail"] == "Agent cannot access another agent inbox"
 
 
 def test_heartbeat_contract_modules_define_execution_boundary() -> None:
@@ -1100,9 +1226,42 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert rows[0].payload == {
         "issueId": issue["id"],
         "originRunId": run["id"],
-        "mutation": "passive_followup",
+        "previousRunId": run["id"],
+        "attempt": 1,
+        "reason": "missing_closure",
     }
+    assert rows[0].source == "automation"
     assert rows[0].status == "queued"
+    assert rows[0].idempotency_key == f"issue_passive_followup:{run['id']}"
+    requested_at = rows[0].requested_at
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=UTC)
+    assert requested_at > datetime.now(UTC) + timedelta(seconds=30)
+
+    async with session_factory() as session:
+        followup_run = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == rows[0].id)
+            )
+        ).scalar_one()
+        assert followup_run.invocation_source == "automation"
+        assert followup_run.status == "queued"
+        assert followup_run.context_snapshot is not None
+        assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
+        assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
+        assert followup_run.context_snapshot["passiveFollowup"]["attempt"] == 1
+        assert followup_run.context_snapshot["passiveFollowup"]["maxAttempts"] == 2
+        assert (
+            followup_run.context_snapshot["passiveFollowup"]["reason"]
+            == "missing_closure"
+        )
+
+    await dispatch_queued_agent(app.state.session_factory, agent["id"])
+
+    async with session_factory() as session:
+        still_queued = await session.get(HeartbeatRun, followup_run.id)
+        assert still_queued is not None
+        assert still_queued.status == "queued"
 
 
 async def test_successful_issue_run_with_closeout_comment_skips_passive_followup(
@@ -1185,8 +1344,6 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
 async def test_successful_reviewer_run_without_decision_queues_review_closeout(
     session_factory: async_sessionmaker,
 ) -> None:
-    from datetime import UTC, datetime
-
     from packages.database.schema import Agent, HeartbeatRun, Issue
     from server.services.heartbeat import HeartbeatService
 
@@ -1287,9 +1444,8 @@ async def test_issue_wakeup_defers_while_execution_locked_and_promotes_on_releas
                 agent_id=agent_id,
                 invocation_source="assignment",
                 trigger_detail="system",
-                status="succeeded",
+                status="running",
                 context_snapshot={"issueId": issue_id},
-                finished_at=datetime.now(UTC),
             )
         )
         session.add(
@@ -1337,9 +1493,10 @@ async def test_issue_wakeup_defers_while_execution_locked_and_promotes_on_releas
             .one()
         )
 
-        await service._release_issue_execution(
-            await session.get_one(HeartbeatRun, active_run_id)
-        )
+        active_run = await session.get_one(HeartbeatRun, active_run_id)
+        active_run.status = "succeeded"
+        active_run.finished_at = datetime.now(UTC)
+        await service._release_issue_execution(active_run)
         await session.refresh(wakeup)
         issue = await session.get_one(Issue, issue_id)
         promoted = (

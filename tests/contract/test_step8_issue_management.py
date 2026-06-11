@@ -729,6 +729,140 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
     assert activity_rows[0].details["agentId"] == agent_id
 
 
+async def test_issue_execute_route_retries_after_terminal_execution_run(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    old_run_id = str(uuid.uuid4())
+    old_wakeup_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Retry Executor",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=old_run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="failed",
+                error="Process lost -- child pid 31740 is no longer running",
+                error_code="process_lost",
+                context_snapshot={"issueId": issue_id, "wakeReason": "issue_execute"},
+            )
+        )
+        session.add(
+            AgentWakeupRequest(
+                id=old_wakeup_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                source="assignment",
+                trigger_detail="system",
+                reason="issue_execute",
+                payload={"issueId": issue_id, "mutation": "execute"},
+                status="failed",
+                run_id=old_run_id,
+                idempotency_key=f"issue:{issue_id}:execute",
+                error="Run interrupted before server recovery",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Retry executable task",
+                status="in_progress",
+                priority="medium",
+                assignee_agent_id=agent_id,
+                checkout_run_id=old_run_id,
+                execution_run_id=old_run_id,
+            )
+        )
+
+    code, run = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+
+    assert code == 202
+    assert run["id"] != old_run_id
+    assert run["status"] == "queued"
+    assert run["issueId"] == issue_id
+    async with session_factory() as verify:
+        issue = await verify.get(Issue, issue_id)
+        new_wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_execute",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert issue is not None
+    assert issue.execution_run_id == run["id"]
+    assert issue.checkout_run_id == run["id"]
+    assert {wakeup.run_id for wakeup in new_wakeups} == {old_run_id, run["id"]}
+
+
+async def test_issue_execute_route_reports_paused_assignee_deferred(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Paused Executor",
+                role="engineer",
+                status="paused",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Deferred executable task",
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+
+    code, body = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+
+    assert code == 202
+    assert body == {
+        "status": "deferred_agent_paused",
+        "detail": (
+            "Issue execution was deferred because the assignee agent is paused. "
+            "Resume the agent to continue."
+        ),
+    }
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent_id,
+                    AgentWakeupRequest.reason == "issue_execute",
+                )
+            )
+        ).scalar_one()
+    assert wakeup.status == "deferred_agent_paused"
+
+
 async def test_agent_cannot_mark_issue_done_without_checkout_ownership(
     app: FastAPI,
     session: AsyncSession,
@@ -854,6 +988,98 @@ async def test_issue_comment_queues_assignee_wakeup(
     assert run.context_snapshot is not None
     assert run.context_snapshot["commentId"] == create_body["id"]
     assert run.context_snapshot["wakeReason"] == "issue_comment_added"
+
+
+async def test_issue_comment_queues_mentioned_agent_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    assignee_agent_id = str(uuid.uuid4())
+    mentioned_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id=assignee_agent_id,
+                    org_id=org_id,
+                    name="Comment Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=mentioned_agent_id,
+                    org_id=org_id,
+                    name="reviewer-1",
+                    role="engineer",
+                    status="idle",
+                ),
+            ]
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_progress",
+        assignee_agent_id=assignee_agent_id,
+    )
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "请 @reviewer-1 看一下这个边界情况"},
+    )
+
+    assert create_code == 200
+    async with session_factory() as verify:
+        assignee_wakeup = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == assignee_agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_added",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        mentioned_wakeup = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == mentioned_agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_mentioned",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.wakeup_request_id == mentioned_wakeup.id
+                )
+            )
+        ).scalar_one()
+
+    assert assignee_wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "comment",
+        "commentId": create_body["id"],
+    }
+    assert mentioned_wakeup.source == "on_demand"
+    assert mentioned_wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "comment_mention",
+        "commentId": create_body["id"],
+    }
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["wakeSource"] == "mention"
+    assert run.context_snapshot["wakeReason"] == "issue_comment_mentioned"
+    assert run.context_snapshot["commentId"] == create_body["id"]
 
 
 async def test_review_decision_route_applies_status_mapping(

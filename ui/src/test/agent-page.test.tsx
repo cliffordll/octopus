@@ -42,6 +42,24 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: "succeeded", sessionDisplayId: "session-1", totalInputTokens: 10, totalOutputTokens: 5, totalCostCents: 1 });
     }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") {
+      return respond([
+        {
+          relationship: "assignee",
+          issueId: "issue-1",
+          identifier: "OCT-1",
+          title: "Wire inbox",
+          status: "in_progress",
+          priority: "medium",
+          checkoutRunId: null,
+          executionRunId: null,
+          wakeReason: "issue_comment_added",
+          wakeCommentId: "comment-1",
+          commentPreview: "Please update the implementation plan before continuing.",
+          updatedAt: "2026-06-11T00:00:00Z",
+        },
+      ]);
+    }
     if (path === "/api/agents/agent-1/instructions-bundle" && init?.method === "GET") {
       return respond({
         agentId: "agent-1",
@@ -152,6 +170,9 @@ it("controls an agent from its overview and shows runtime status", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1");
   const heading = await screen.findByRole("heading", { name: "Builder" });
+  expect(await screen.findByRole("heading", { name: "待办收件箱" })).toBeInTheDocument();
+  expect(screen.getByText("Wire inbox")).toBeInTheDocument();
+  expect(screen.getByText("Please update the implementation plan before continuing.")).toBeInTheDocument();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
@@ -350,6 +371,7 @@ it("assigns a task to the current agent from a modal", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
     }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/issues" && init?.method === "POST") return respond(createdIssue, 201);
     if (path === "/api/issues/issue-1" && init?.method === "GET") return respond(createdIssue);
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
@@ -429,6 +451,28 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
       return respond([
         {
+          id: "run-timer",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "running",
+          invocationSource: "timer",
+          triggerDetail: "heartbeat_timer",
+          createdAt: "2026-05-28T23:58:00Z",
+          startedAt: "2026-05-28T23:59:00Z",
+        },
+        {
+          id: "run-assignment",
+          orgId: "org-1",
+          agentId: "agent-1",
+          issueId: "issue-1",
+          issueIdentifier: "OCT-1",
+          issueTitle: "排查队列",
+          status: "queued",
+          invocationSource: "assignment",
+          triggerDetail: "issue_assigned",
+          createdAt: "2026-05-28T23:57:00Z",
+        },
+        {
           id: "run-1",
           orgId: "org-1",
           agentId: "agent-1",
@@ -442,6 +486,15 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
           resultJson: { summary: "failed" },
           usageJson: { inputTokens: 10, outputTokens: 2 },
           createdAt: "2026-05-29T01:00:00Z",
+        },
+        {
+          id: "run-automation",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "failed",
+          invocationSource: "automation",
+          triggerDetail: "issue_passive_followup",
+          createdAt: "2026-05-28T23:56:00Z",
         },
       ]);
     }
@@ -483,6 +536,11 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
+  const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
+  expect(queueRegion).toHaveTextContent("2 个活跃运行");
+  expect(within(queueRegion).getByText("定时心跳")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
+  expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
@@ -496,7 +554,15 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("raw run log")).toBeInTheDocument();
   expect(within(detail).getByText("npm test")).toBeInTheDocument();
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
-  expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
+  const rail = screen.getByTestId("agent-runs-list-pane");
+  expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("定时心跳").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getByText("定时心跳到点触发，用来检查智能体是否需要继续工作。")).toBeInTheDocument();
+  expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
+  expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
+  expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
 });
 
 it("saves heartbeat policy from the agent configuration form", async () => {

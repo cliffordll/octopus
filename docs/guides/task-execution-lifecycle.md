@@ -1,350 +1,388 @@
-# 任务执行生命周期
+# Task Execution Lifecycle Guide
 
-本文总结 Octopus 如何把产品里的工作项转成 agent 的实际执行。
+本文说明 Octopus 当前任务执行逻辑，重点解释 issue/task 被分配、执行、释放执行锁、以及为什么成功 run 后可能出现第二次执行。
 
-最重要的区分是：
-
-```text
-issue
-= 产品里的任务 / 工作项
-
-heartbeat_run
-= agent 的一次可执行运行
-```
-
-一个 issue 可以触发 run，但执行队列不是 issue 看板。真正的执行队列持久化在数据库里的 `heartbeat_runs.status`。
-
-## 总体流程
-
-```text
-Issue / Chat / 手动触发 / 定时心跳 / 重试
-  -> wakeup request
-  -> heartbeat_run(status = queued)
-  -> claim
-  -> heartbeat_run(status = running)
-  -> runtime adapter 执行
-  -> events、logs、usage、cost、runtime state、work products 回写
-  -> succeeded / failed / timed_out / cancelled
-```
-
-核心实现位置：
-
-```text
-server/services/heartbeat.py
-server/services/issue_assignment_wakeup.py
-server/routes/issues.py
-server/lifespan.py
-packages/runtimes/types.py
-packages/runtimes/registry.py
-packages/database/schema/heartbeat.py
-```
-
-相关文档：
+相关队列底层机制见：
 
 ```text
 docs/guides/task-queue.md
-docs/guides/heartbeat-scheduler.md
 ```
 
-## 执行入口
+本文关注业务生命周期，而不是通用 queued run 调度细节。
 
-Run 可以由多种产品事件创建：
+## 核心结论
 
-| 来源 | 含义 |
+Octopus 的任务执行不是“run 成功就等于 issue 完成”。
+
+核心语义来自上游 Rudder：
+
+```text
+run succeeded 表示一次执行进程成功结束
+issue done 必须由明确 close-out 动作产生
+```
+
+如果一个 issue run 成功结束，但 issue 仍是 `todo` 或 `in_progress`，并且该 run 没有留下 close-out signal，server 会触发同 agent 的 passive follow-up。
+
+这就是用户看到“任务好像执行了两次”的主要原因。
+
+第二次 run 的语义不是重新分配任务，而是 close-out governance：
+
+```text
+issue_passive_followup
+```
+
+它要求 agent 检查第一次 run 的结果，并补上进展评论、完成、阻塞或明确交接。
+
+## 关键对象
+
+| 对象 | 作用 |
 | --- | --- |
-| Issue 分配或执行 | 任务分配给 agent，或用户显式执行任务。 |
-| Issue checkout | agent 领取任务并开始处理。 |
-| Timer heartbeat | scheduler 发现某个 agent 到了定时执行时间。 |
-| Manual wakeup | 用户或 agent 手动唤醒某个 agent。 |
-| Review / follow-up | 待 review 或后续跟进工作唤醒 agent。 |
-| Retry / recovery | 终态 run 或 orphaned run 创建新的 queued run。 |
-| Chat | Chat 可以调用 runtime 或转成 issue，但不会为了展示而伪造 heartbeat run。 |
+| `issues` | 业务任务本体，保存 assignee、reviewer、status 和执行锁 |
+| `agent_wakeup_requests` | 记录一次唤醒请求，包括分配、评论、review、follow-up 等原因 |
+| `heartbeat_runs` | 记录一次实际 runtime 执行 |
+| `issue_comments` | 任务评论，可作为 close-out signal |
+| `activity_log` | 记录 issue close-out、review decision、follow-up 等可审计事件 |
 
-主要的 issue 执行接口是：
+关键字段：
 
-```text
-POST /api/issues/{id}/execute
-```
-
-它要求 issue 已经有 `assigneeAgentId`。如果该 issue 已经存在 active 的 queued/running run，会直接返回已有 run，避免重复创建。
-
-## Issue 如何变成 Wakeup
-
-Issue 驱动的唤醒通过 `queue_issue_assignment_wakeup()` 创建。
-
-它会构造类似这样的 wakeup payload：
-
-```json
-{
-  "source": "assignment",
-  "triggerDetail": "system",
-  "reason": "issue_execute",
-  "payload": {
-    "issueId": "issue-id",
-    "mutation": "execute"
-  },
-  "contextSnapshot": {
-    "issueId": "issue-id",
-    "wakeSource": "assignment",
-    "wakeReason": "issue_execute",
-    "issue": {
-      "id": "issue-id",
-      "title": "任务标题",
-      "description": "任务描述",
-      "status": "todo",
-      "priority": "medium"
-    }
-  }
-}
-```
-
-这里的 issue 快照只是 runtime 执行时的上下文。真正进入执行队列的对象仍然是 `heartbeat_run`。
-
-## Wakeup 与 Queued Run 创建
-
-`HeartbeatService.wakeup()` 是 run 入队前的 gate。
-
-它会检查：
-
-- agent 是否存在
-- agent 状态，拒绝 `terminated` 和 `pending_approval`
-- 非 timer wakeup 是否被 `wakeOnDemand=false` 禁止
-- budget 是否阻止本次调用
-- idempotency key 是否已经对应已有 run
-- agent paused 时是否需要延期
-- issue 是否已有执行锁
-
-如果允许执行，会调用 `_create_queued_run()` 写入：
-
-```text
-agent_wakeup_requests.status = queued
-heartbeat_runs.status = queued
-```
-
-同时会：
-
-- 初始化本地 run log
-- 把 wakeup request 关联到 run
-- 如果上下文里有 issue id，则补齐 issue context
-- 写入第一条 lifecycle event：`run queued`
-- assignment run 会尝试给 issue 写入执行锁
-
-## Scheduler 与 Dispatch
-
-Scheduler 从 `server/lifespan.py` 启动。
-
-启动时会执行：
-
-```text
-recover_orphaned_runs()
-dispatch_all_queued_runs()
-```
-
-之后每个 tick 执行：
-
-```text
-tick_timers()
-dispatch_all_queued_runs()
-```
-
-Timer heartbeat 只负责创建 wakeup。真正执行仍然走同一套 queued、claim、running、runtime adapter 流程。
-
-## Claim 与并发控制
-
-Claim 是从 queued 变成 running：
-
-```text
-queued -> running
-```
-
-它的作用是防止重复执行。多个 dispatcher 可能同时看到同一个 queued run，但只有一个 dispatcher 能 claim 成功。
-
-并发限制按 agent 控制：
-
-```text
-runtimeConfig.heartbeat.maxConcurrentRuns
-```
-
-Dispatcher 会按下面方式计算可用容量：
-
-```text
-maxConcurrentRuns - 数据库中 running 的 run - 当前进程内 active 的 run
-```
-
-如果没有容量，run 会继续保持 `queued`。
-
-## Runtime 执行
-
-Run claim 成功后，`execute_claimed_run()` 会调用 `_execute_run()`。
-
-执行服务会：
-
-1. 加载 agent。
-2. 通过 `get_runtime_adapter(agent.agent_runtime_type)` 选择 runtime adapter。
-3. 准备 workspace context。
-4. 为 adapter 执行创建 workspace operation。
-5. 构造 agent runtime config。
-6. 注入 Octopus 上下文，例如 agent 名称、run context、session id、desired skills。
-7. 注入 runtime provider/model 配置。
-8. 创建 `RuntimeExecutionContext`。
-9. 调用 `adapter.execute(context)`。
-
-Runtime contract 是：
-
-```text
-RuntimeExecutionContext -> RuntimeExecutionResult
-```
-
-当前已注册的 runtime adapter 包括：
-
-```text
-process
-http
-codex_local
-claude_local
-opencode_local
-openclaw_gateway
-```
-
-已知但尚不可用的 runtime id 会返回 unavailable adapter，而不是让系统直接崩溃。
-
-## 日志与事件
-
-Runtime adapter 通过 `on_log` 回调流式输出日志。
-
-每个 log chunk 可能写入：
-
-- 本地 run log 文件
-- `heartbeat_run_events`
-- workspace operation log
-
-本地子进程类 runtime 还可以调用 `on_process_started`，记录：
-
-```text
-process_pid
-process_started_at
-```
-
-这些信息用于实时查看和取消当前执行。但恢复流程不会盲目 kill 历史 PID，因为 PID 可能被系统复用。
-
-## 执行完成与结果持久化
-
-Adapter 执行结束后，`_execute_run()` 会计算最终状态：
-
-| 条件 | 最终状态 |
+| 字段 | 含义 |
 | --- | --- |
-| `result.timed_out` | `timed_out` |
-| `result.error_message` 或非 0 exit code | `failed` |
-| 其它情况 | `succeeded` |
+| `issues.checkout_run_id` | 当前签出该 issue 的 run |
+| `issues.execution_run_id` | 当前持有 issue 执行锁的 run |
+| `issues.execution_agent_name_key` | 当前执行 agent 的 name key |
+| `issues.execution_locked_at` | 执行锁创建时间 |
+| `heartbeat_runs.context_snapshot.issueId` | run 和 issue 的稳定关联 |
+| `heartbeat_runs.context_snapshot.wakeReason` | run 被唤醒的业务原因 |
 
-然后持久化：
+## 基本执行流
 
-- run 状态和完成时间
-- exit code 和 signal
-- error 和 error code
-- usage JSON
-- result JSON
-- 执行后的 session id
-- stdout/stderr 摘要
-- log 元数据
-- runtime services
-- run work products
-- 成功时生成的 workspace files
-- cost event
-- agent runtime state
+一次 issue 执行通常经过：
 
-如果 run 和 issue 相关，进入终态后会清理 issue 的执行锁。
+```text
+issue assigned / execute clicked
+  ↓
+agent wakeup request
+  ↓
+heartbeat_run(status = queued)
+  ↓
+issue execution lock
+  ↓
+heartbeat_run(status = running)
+  ↓
+runtime adapter execute
+  ↓
+succeeded / failed / timed_out / cancelled
+  ↓
+release issue execution lock
+  ↓
+close-out governance
+```
 
-## Issue Review 与 Approval
+其中队列领取只保证 run 执行权，不代表 issue 已完成。
 
-Review 是 issue workflow 上的业务层，不是执行队列的基础对象。
+## 入队来源
 
-Issue review decision 对状态的影响是：
+常见 issue 相关 wake reason：
 
-| Decision | 状态变化 |
+| reason | 场景 |
 | --- | --- |
-| `approve` | `done` |
-| `request_changes` | `in_progress` |
-| `blocked` | `blocked` |
-| `needs_followup` | 记录 human intervention activity |
+| `issue_assigned` | 创建或分配给 agent 的任务 |
+| `issue_checked_out` | checkout 后需要唤醒负责人 |
+| `issue_execute` | UI 或 API 主动启动任务执行 |
+| `issue_status_changed` | backlog 进入可执行状态 |
+| `issue_changes_requested` | reviewer 请求修改 |
+| `issue_comment_added` | 负责人任务收到新评论 |
+| `issue_comment_mentioned` | 评论中 mention agent |
+| `issue_passive_followup` | 成功 run 缺少 close-out，需要补收尾 |
+| `issue_review_closeout_missing` | reviewer run 缺少结构化 review decision |
 
-Approval 是另一套审批流程，用于需要显式批准的动作。它可以影响业务流程，但不是 heartbeat queue 的核心状态机。
+## 执行锁
 
-## 取消
-
-Queued 和 running run 都可以取消：
+issue 执行时会写入：
 
 ```text
-queued/running -> cancelled
+issues.execution_run_id = heartbeat_runs.id
+issues.checkout_run_id = heartbeat_runs.id
 ```
 
-对于 running run，服务会设置内存里的 cancellation event。Runtime adapter 可以观察这个事件并停止子进程。关联的 workspace operation 会被标记为 interrupted。
+执行锁的作用：
 
-## 重试
+- 防止同一 issue 被多个普通 assignment run 并行处理。
+- 让 UI 能知道当前活跃 run。
+- 让 run 终态后能安全释放或 promote 后续 deferred wakeup。
 
-只有终态 run 可以重试：
+当前 Octopus 实现中，assignment run 创建后会尝试 claim issue execution：
 
 ```text
-failed
-timed_out
-cancelled
+server/services/heartbeat.py
+  _claim_issue_execution_for_assignment_run(...)
 ```
 
-重试会创建一个新的 run：
+如果 issue 已经有 `execution_run_id` 或 `checkout_run_id`，普通 issue wakeup 会先延期：
 
 ```text
-retryOfRunId = 原始 run id
-status = queued
+agent_wakeup_requests.status = deferred_issue_execution
 ```
 
-原始 run 不会被覆盖。
+当前执行锁释放后，server 再 promote 最早的 deferred issue wakeup。
 
-## Orphaned Run 恢复
+## Run 成功不自动 Done
 
-如果 server 重启时某个 run 还处于 `running`，重启后的 server 可能已经没有它的进程控制权。
-
-启动恢复流程会：
-
-1. 找到当前进程不知道的 running runs。
-2. 把它们标记为 `failed`。
-3. 使用 error code：`process_lost`。
-4. 写入 lifecycle 证据。
-5. 在限制内创建 automatic recovery run。
-
-恢复流程不会盲目 kill 历史 PID，因为 PID 可能复用，直接 kill 可能误杀无关进程。
-
-## 排查顺序
-
-当任务没有执行时，建议按这个顺序检查：
-
-1. `heartbeat_runs.status`
-2. agent 状态
-3. `runtimeConfig.heartbeat.maxConcurrentRuns`
-4. scheduler 是否开启
-5. run events
-6. run log
-7. `contextSnapshot.wakeReason` 和 `invocationSource`
-8. issue 执行锁，尤其是 `checkoutRunId` 和 `executionRunId`
-9. runtime adapter 环境检查
-
-常见 queued run 卡住原因：
-
-- scheduler 关闭
-- agent paused、pending approval 或 terminated
-- 该 agent 的并发容量已满
-- claim 失败，因为其他 dispatcher 已经领取
-- wakeup 被 issue execution lock 延期
-- runtime 前置条件缺失
-
-## 总结
-
-Octopus 的任务执行是基于数据库的 run 队列。
+上游和 Octopus 都不把成功 run 自动转换成：
 
 ```text
-issue 描述要做什么
-heartbeat_run 表示一次实际执行
-claim 防止重复执行
-scheduler 和 dispatcher 推进 queued runs
-runtime adapter 执行具体工作
-events、logs、state、cost、work products 是执行证据
+issues.status = done
+```
+
+原因：
+
+- runtime 进程成功只说明 agent 进程正常结束。
+- agent 可能只完成了一部分工作。
+- agent 可能需要 reviewer。
+- agent 可能生成了产物但还未更新任务状态。
+- 自动 done 会掩盖未收尾、未交付、未评审的问题。
+
+因此 issue 完成必须由明确动作产生，例如：
+
+- 添加进展或交接评论。
+- 将 issue 标记为 `done`。
+- 将 issue 标记为 `blocked` 并说明原因。
+- 将 issue 移入 `in_review`。
+- reviewer 记录结构化 review decision。
+
+## Close-Out Signal
+
+当前 Octopus 识别的 close-out signal 主要来自 `activity_log`：
+
+```text
+issue.comment_added
+issue.review_decision_recorded
+```
+
+也就是说，如果 agent 的 run 成功结束，但没有产生这些动作，并且 issue 仍处于 `todo` 或 `in_progress`，server 会认为任务缺少 close-out。
+
+对应代码：
+
+```text
+server/services/heartbeat.py
+  _run_has_issue_closeout_signal(...)
+```
+
+## Passive Follow-Up
+
+当成功 issue run 缺少 close-out 时，server 会创建后续 wakeup：
+
+```text
+reason = issue_passive_followup
+```
+
+当前 Octopus 会构造 context：
+
+```text
+contextSnapshot.wakeReason = issue_passive_followup
+contextSnapshot.wakeSource = passive_issue_followup
+contextSnapshot.passiveFollowup.originRunId = <first-run-id>
+contextSnapshot.passiveFollowup.previousRunId = <first-run-id>
+contextSnapshot.passiveFollowup.reason = missing_closure
+```
+
+这个 follow-up 的正确语义：
+
+```text
+不是新任务
+不是失败重试
+不是重新从头执行
+```
+
+agent 应该先检查上一个 run 已完成的内容和副作用，然后执行一个 close-out 动作。
+
+## 为什么看起来执行了两次
+
+典型情况：
+
+```text
+1. 用户点击“启动执行”
+2. server 创建 assignment run
+3. run 成功结束
+4. issue 仍然是 todo / in_progress
+5. run 没有写 issue comment，也没有 review decision
+6. server queue issue_passive_followup
+7. scheduler/dispatcher 执行 follow-up run
+```
+
+因此看到两条 run：
+
+```text
+assignment run
+automation/passive follow-up run
+```
+
+这不是同一个 run 被重复 claim。底层 claim 使用条件更新：
+
+```text
+heartbeat_runs.status == queued
+```
+
+同一条 run 只能被一个 dispatcher 从 `queued` 改成 `running`。
+
+## 上游 Rudder 行为
+
+上游参考实现位于：
+
+```text
+D:\coding\rudder
+```
+
+关键文件：
+
+```text
+D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.release.ts
+D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.recovery.ts
+D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.sessions.ts
+D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts
+D:\coding\rudder\server\src\__tests__\heartbeat-passive-issue-closeout.test.ts
+```
+
+上游主线：
+
+```text
+execute run finishes
+  ↓
+releaseIssueExecutionAndPromote(run)
+  ↓
+evaluatePassiveIssueClosureForLockedIssue(...)
+  ↓
+queue issue_passive_followup / reviewer closeout / operator review
+```
+
+上游关键规则：
+
+| 规则 | 上游行为 |
+| --- | --- |
+| 成功 run 自动 done | 不会 |
+| 缺 close-out | queue `issue_passive_followup` |
+| follow-up source | `automation` |
+| follow-up wake source | `passive_issue_followup` |
+| failure reason | `missing_closure` |
+| max attempts | 2 |
+| cooldown | 第 1 次约 2 分钟，第 2 次约 5 分钟 |
+| 有 reviewer 且 attempts exhausted | 请求 convergence review |
+| 无 reviewer 且 attempts exhausted | 记录 operator review |
+
+上游 prompt 也明确写明：
+
+```text
+This is a passive issue follow-up, not a fresh assignment and not a failure recovery.
+```
+
+## 当前 Octopus 与上游差异
+
+当前 Python 实现已经具备基础 close-out governance，并已对齐 passive follow-up 的
+automation source、wake source、failure reason、attempt metadata、idempotency key
+和 cooldown 排队语义。
+
+已实现：
+
+- 成功 run 不自动 done。
+- 成功 issue run 缺 close-out 时 queue passive follow-up。
+- reviewer run 缺少结构化 decision 时 queue reviewer closeout。
+- issue execution lock 终态释放。
+- deferred issue wakeup 在锁释放后 promote。
+
+主要差异：
+
+| 维度 | 当前 Octopus | 上游 Rudder |
+| --- | --- | --- |
+| passive follow-up source | `automation` | `automation` |
+| wake source | `passive_issue_followup` | `passive_issue_followup` |
+| reason 文案 | `missing_closure` | `missing_closure` |
+| attempts metadata | `maxAttempts = 2` | `maxAttempts = 2` |
+| cooldown | 第 1 次约 2 分钟 | 第 1 次约 2 分钟，第 2 次约 5 分钟 |
+| escalation | 基础实现较少 | reviewer convergence / operator review |
+| events/activity | 基础实现较少 | 记录 follow-up queued、operator review、convergence review |
+| idempotency key | `issue_passive_followup:<run>` | `issue_passive_followup:<run>` |
+
+这些差异不会改变“为什么会出现第二次 run”的核心结论，但会影响用户对重复执行、延迟、升级和审计记录的感知。
+
+## Agent 应该如何避免被再次唤醒
+
+agent 在成功退出前，应留下一个明确 close-out signal。
+
+推荐动作：
+
+```text
+完成了任务：
+  PATCH issue status = done
+
+还没完成但有进展：
+  添加 issue comment，说明已完成内容和下一步
+
+被阻塞：
+  PATCH issue status = blocked，并写清原因
+
+需要 review：
+  PATCH issue status = in_review
+
+只是交接给别人：
+  添加明确 handoff comment
+```
+
+不要只让 runtime 进程成功退出。进程成功但 issue 未收尾时，server 会按治理逻辑继续唤醒 agent。
+
+## 排查“执行两次”的方法
+
+先区分是哪一种：
+
+```text
+同一 run 执行两次
+两条不同 run，第二条是 passive follow-up
+两条不同 run，来自两个独立 wakeup
+```
+
+排查字段：
+
+```text
+heartbeat_runs.id
+heartbeat_runs.invocation_source
+heartbeat_runs.status
+heartbeat_runs.context_snapshot.issueId
+heartbeat_runs.context_snapshot.wakeReason
+heartbeat_runs.context_snapshot.passiveFollowup
+agent_wakeup_requests.reason
+agent_wakeup_requests.idempotency_key
+issues.execution_run_id
+issues.checkout_run_id
+activity_log.action
+```
+
+判断方式：
+
+| 现象 | 结论 |
+| --- | --- |
+| 第二条 run 的 `wakeReason = issue_passive_followup` | close-out governance |
+| 第二条 run 的 `retryOfRunId` 不为空 | retry/recovery |
+| 第二条 run 的 `reason = issue_execute` | 用户/API 重新执行 |
+| 多条 queued run 但 issue lock 未释放 | deferred wakeup/promotion 需要检查 |
+| 同一 run 出现两次 `adapter.invoke` | 才需要怀疑同一 run 被重复执行 |
+
+## 相关代码
+
+当前 Octopus：
+
+```text
+server/services/heartbeat.py
+server/routes/issues.py
+server/services/issue_assignment_wakeup.py
+server/services/issue_review_wakeup.py
+packages/database/queries/heartbeat.py
+packages/database/schema/heartbeat.py
+packages/database/schema/issues.py
+```
+
+相关测试：
+
+```text
+tests/contract/test_step11_agent_management.py
+tests/contract/test_step8_issue_management.py
+tests/workflows/test_step13_run_workflow.py
 ```

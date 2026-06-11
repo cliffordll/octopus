@@ -5,6 +5,7 @@ import contextlib
 import os
 from datetime import UTC, datetime
 
+from ..common import runtime_subprocess_kwargs
 from ..environment import resolve_runtime_executable
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import args, configured_env
@@ -32,6 +33,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **runtime_subprocess_kwargs(),
     )
     pid = getattr(process, "pid", None)
     if context.on_process_started is not None and isinstance(pid, int):
