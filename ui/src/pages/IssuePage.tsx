@@ -1426,7 +1426,6 @@ function IssueRunOutputPanel({
   streamError: string | null;
   streamLog: string;
 }) {
-  const [showExecutionOutput, setShowExecutionOutput] = useState(true);
   const [showEvents, setShowEvents] = useState(true);
   const [showOperations, setShowOperations] = useState(true);
   const [showRawOutput, setShowRawOutput] = useState(true);
@@ -1471,7 +1470,6 @@ function IssueRunOutputPanel({
       <div className="issue-run-output-heading">
         <div>
           <h3>执行输出</h3>
-          {liveRun && <p className="muted">运行中会通过 stream 动态刷新事件和输出。</p>}
         </div>
         <div className="issue-run-actions">
           {liveRun && runElapsedText(run) && <Badge>已运行 {runElapsedText(run)}</Badge>}
@@ -1484,21 +1482,79 @@ function IssueRunOutputPanel({
           </div>
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
           {canCancel && <button className="secondary small-button" onClick={onCancel} type="button">取消运行</button>}
-          <button aria-label={showExecutionOutput ? "折叠执行输出" : "展开执行输出"} className="secondary small-button" type="button" onClick={() => setShowExecutionOutput((value) => !value)}>
-            {showExecutionOutput ? "折叠" : "展开"}
-          </button>
         </div>
       </div>
-      {!showExecutionOutput ? (
-        <p className="muted">执行输出已折叠。</p>
-      ) : (
-        <>
+      <>
           {data.run.error && <ErrorNotice error={data.run.error} />}
           {data.events.error && <ErrorNotice error={data.events.error} />}
           {data.operations.error && <ErrorNotice error={data.operations.error} />}
           {runLog.error && <ErrorNotice error={runLog.error} />}
           {streamError && <p className="error-notice">{streamError}</p>}
-          {viewMode === "raw" && run && (
+      {liveLogDelta && (
+        <section className="issue-run-output-block">
+          <div className="issue-run-output-heading">
+            <div>
+              <h3
+                aria-expanded={showLiveLogDelta}
+                className="issue-run-heading-toggle"
+                onClick={() => setShowLiveLogDelta((value) => !value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setShowLiveLogDelta((value) => !value);
+                  }
+                }}
+                tabIndex={0}
+              >
+                实时日志增量
+              </h3>
+            </div>
+            <Badge>stream</Badge>
+          </div>
+          {showLiveLogDelta ? (
+            <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
+          ) : (
+            <p className="muted">实时日志增量已折叠。</p>
+          )}
+        </section>
+      )}
+      {viewMode === "nice" && silentRuntimeText && (
+        <section className="issue-run-progress-note" aria-label="运行进度提示">
+          <strong>{silentRuntimeText}</strong>
+          {lastEvent && (
+            <span>
+              最近进度：{runEventBody(lastEvent) || lastEvent.message || runEventLabel(lastEvent)}
+              <small>{formatDateTime(lastEvent.createdAt)}</small>
+            </span>
+          )}
+        </section>
+      )}
+      <section className="issue-run-output-block">
+        <div className="issue-run-output-heading">
+          <div>
+            <h3>运行日志</h3>
+            {liveRun && <p className="muted">运行中会通过 stream 动态刷新事件和输出。</p>}
+          </div>
+          <div className="issue-run-operation-actions">
+            {showRunLog && runLog.data?.eof === false && <Badge>可继续读取</Badge>}
+            <button aria-label={showRunLog ? "折叠运行日志" : "展开运行日志"} className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
+              {showRunLog ? "折叠" : "展开"}
+            </button>
+          </div>
+        </div>
+        {!showRunLog ? (
+          <p className="muted">运行日志已折叠。</p>
+        ) : (
+          <PaginatedLogView
+            emptyText="暂无运行日志。"
+            loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
+            loadingText="加载运行日志中..."
+            log={runLog}
+            preClassName="run-excerpt inline"
+          />
+        )}
+      </section>
+      {viewMode === "raw" && run && (
         <section className="issue-run-output-block">
           <h3>Raw 数据</h3>
           <div className="issue-run-raw-stack">
@@ -1523,63 +1579,7 @@ function IssueRunOutputPanel({
           </div>
         </section>
       )}
-      {viewMode === "nice" && liveLogDelta && (
-        <section className="issue-run-output-block">
-          <div className="issue-run-output-heading">
-            <h3>
-              <button
-                aria-expanded={showLiveLogDelta}
-                className="issue-run-heading-toggle"
-                onClick={() => setShowLiveLogDelta((value) => !value)}
-                type="button"
-              >
-                实时日志增量
-              </button>
-            </h3>
-            <Badge>stream</Badge>
-          </div>
-          {showLiveLogDelta ? (
-            <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
-          ) : (
-            <p className="muted">实时日志增量已折叠。</p>
-          )}
-        </section>
-      )}
-      {viewMode === "nice" && silentRuntimeText && (
-        <section className="issue-run-progress-note" aria-label="运行进度提示">
-          <strong>{silentRuntimeText}</strong>
-          {lastEvent && (
-            <span>
-              最近进度：{runEventBody(lastEvent) || lastEvent.message || runEventLabel(lastEvent)}
-              <small>{formatDateTime(lastEvent.createdAt)}</small>
-            </span>
-          )}
-        </section>
-      )}
-      {viewMode === "raw" && <section className="issue-run-output-block">
-        <div className="issue-run-output-heading">
-          <h3>运行日志</h3>
-          <div className="issue-run-operation-actions">
-            {showRunLog && runLog.data?.eof === false && <Badge>可继续读取</Badge>}
-            <button aria-label={showRunLog ? "折叠运行日志" : "展开运行日志"} className="secondary small-button" type="button" onClick={() => setShowRunLog((value) => !value)}>
-              {showRunLog ? "折叠" : "展开"}
-            </button>
-          </div>
-        </div>
-        {!showRunLog ? (
-          <p className="muted">运行日志已折叠。</p>
-        ) : (
-          <PaginatedLogView
-            emptyText="暂无运行日志。"
-            loadMore={(offset) => heartbeatApi.getLog(runId, { offset })}
-            loadingText="加载运行日志中..."
-            log={runLog}
-            preClassName="run-excerpt inline"
-          />
-        )}
-      </section>}
-        </>
-      )}
+      </>
       </section>
       <section className="issue-run-output-block issue-run-events-flat">
         <div className="issue-run-output-heading">
