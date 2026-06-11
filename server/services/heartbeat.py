@@ -1305,8 +1305,6 @@ class HeartbeatService:
         context = (
             final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
         )
-        if context.get("wakeReason") == "issue_passive_followup":
-            return
         if context.get("wakeReason") == "issue_review_closeout_missing":
             return
         issue_id = _issue_id_from_context(context)
@@ -1323,9 +1321,23 @@ class HeartbeatService:
             "in_progress",
         }:
             return
-        if await self._run_has_issue_closeout_signal(final, issue.id):
+        issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
+        if await self._run_has_issue_closeout_signal(
+            final, issue.id, issue_has_reviewer=issue_has_reviewer
+        ):
             return
-        next_attempt = 1
+        passive_followup = _passive_followup_context(context)
+        current_attempt = passive_followup.get("attempt", 0)
+        origin_run_id = passive_followup.get("originRunId", final.id)
+        if current_attempt >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+            await self._record_issue_closure_convergence_needed(
+                final,
+                issue,
+                origin_run_id=origin_run_id,
+                attempts=current_attempt,
+            )
+            return
+        next_attempt = current_attempt + 1
         requested_at = (
             datetime.now(UTC) + ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT[next_attempt]
         )
@@ -1339,7 +1351,7 @@ class HeartbeatService:
                 "requestedAt": requested_at,
                 "payload": {
                     "issueId": issue.id,
-                    "originRunId": final.id,
+                    "originRunId": origin_run_id,
                     "previousRunId": final.id,
                     "attempt": next_attempt,
                     "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
@@ -1350,7 +1362,7 @@ class HeartbeatService:
                     "wakeSource": ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE,
                     "wakeReason": ISSUE_PASSIVE_FOLLOWUP_REASON,
                     "passiveFollowup": {
-                        "originRunId": final.id,
+                        "originRunId": origin_run_id,
                         "previousRunId": final.id,
                         "attempt": next_attempt,
                         "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
@@ -1368,6 +1380,84 @@ class HeartbeatService:
             },
             actor_type="system",
             actor_id="heartbeat_closeout_governance",
+            execute_immediately=False,
+        )
+
+    async def _record_issue_closure_convergence_needed(
+        self,
+        final: HeartbeatRunRow,
+        issue: IssueRow,
+        *,
+        origin_run_id: str,
+        attempts: int,
+    ) -> None:
+        action = (
+            "issue.convergence_review_requested"
+            if issue.reviewer_agent_id or issue.reviewer_user_id
+            else "issue.closure_needs_operator_review"
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="issue_closure_governance",
+            action=action,
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "issueTitle": issue.title,
+                "reviewerAgentId": issue.reviewer_agent_id,
+                "reviewerUserId": issue.reviewer_user_id,
+                "originRunId": origin_run_id,
+                "previousRunId": final.id,
+                "attempts": attempts,
+                "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
+                "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
+            },
+        )
+        if not issue.reviewer_agent_id:
+            return
+        await self.wakeup(
+            issue.reviewer_agent_id,
+            {
+                "source": "review",
+                "triggerDetail": "system",
+                "reason": "issue_convergence_review_requested",
+                "idempotencyKey": f"issue_convergence_review_requested:{origin_run_id}",
+                "payload": {"issueId": issue.id, "mutation": "passive_followup_exhausted"},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "source": "issue.passive_followup_exhausted",
+                    "wakeSource": "review",
+                    "wakeReason": "issue_convergence_review_requested",
+                    "role": "reviewer",
+                    "convergenceReview": {
+                        "originRunId": origin_run_id,
+                        "previousRunId": final.id,
+                        "attempts": attempts,
+                        "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
+                        "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
+                    },
+                    "issue": {
+                        "id": issue.id,
+                        "title": issue.title,
+                        "description": issue.description,
+                        "status": issue.status,
+                        "priority": issue.priority,
+                    },
+                    "reviewInstructions": (
+                        "The assignee did not converge this issue after passive "
+                        "follow-up. Review the thread and decide the next step: "
+                        "request changes, mark blocked, escalate or reassign, or "
+                        "mark done only if the evidence is sufficient."
+                    ),
+                },
+            },
+            actor_type="system",
+            actor_id="issue_closure_governance",
             execute_immediately=False,
         )
 
@@ -1443,12 +1533,21 @@ class HeartbeatService:
         )
 
     async def _run_has_issue_closeout_signal(
-        self, final: HeartbeatRunRow, issue_id: str
+        self,
+        final: HeartbeatRunRow,
+        issue_id: str,
+        *,
+        issue_has_reviewer: bool,
     ) -> bool:
+        actions = (
+            ("issue.review_decision_recorded",)
+            if issue_has_reviewer
+            else ("issue.comment_added", "issue.review_decision_recorded")
+        )
         return await self._run_has_issue_activity(
             final,
             issue_id,
-            ("issue.comment_added", "issue.review_decision_recorded"),
+            actions,
         )
 
     async def _run_has_issue_activity(
@@ -2001,6 +2100,20 @@ def _issue_id_from_context(context_snapshot: dict[str, Any] | None) -> str | Non
     snapshot = context_snapshot if isinstance(context_snapshot, dict) else {}
     value = snapshot.get("issueId") or snapshot.get("primaryIssueId")
     return value if isinstance(value, str) and value else None
+
+
+def _passive_followup_context(context_snapshot: dict[str, Any]) -> dict[str, int | str]:
+    raw = context_snapshot.get("passiveFollowup")
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, int | str] = {}
+    attempt = raw.get("attempt")
+    if isinstance(attempt, int) and not isinstance(attempt, bool) and attempt >= 0:
+        result["attempt"] = attempt
+    origin_run_id = raw.get("originRunId")
+    if isinstance(origin_run_id, str) and origin_run_id:
+        result["originRunId"] = origin_run_id
+    return result
 
 
 def _agent_name_key(name: str) -> str:

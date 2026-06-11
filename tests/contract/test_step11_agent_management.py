@@ -22,6 +22,7 @@ from starlette.responses import Response
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import _build_config, upgrade_to_head
 from packages.database.schema import (
+    ActivityLog,
     Agent,
     AgentWakeupRequest,
     Base,
@@ -1339,6 +1340,277 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
         )
 
     assert rows == []
+
+
+async def test_reviewed_issue_comment_without_review_routing_queues_passive_followup(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.queries.activity_log import insert_activity_log
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="reviewed-comment")
+    assignee_id = str(uuid.uuid4())
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=assignee_id,
+                    org_id=org_id,
+                    name="Reviewed Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=reviewer_id,
+                    org_id=org_id,
+                    name="Reviewed Reviewer",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Reviewed comment",
+                    status="in_progress",
+                    assignee_agent_id=assignee_id,
+                    reviewer_agent_id=reviewer_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=assignee_id,
+                    invocation_source="assignment",
+                    trigger_detail="system",
+                    status="succeeded",
+                    context_snapshot={"issueId": issue_id},
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        await insert_activity_log(
+            session,
+            org_id=org_id,
+            actor_type="agent",
+            actor_id=assignee_id,
+            action="issue.comment_added",
+            entity_type="issue",
+            entity_id=issue_id,
+            agent_id=assignee_id,
+            run_id=run_id,
+            details={"commentId": str(uuid.uuid4())},
+        )
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, assignee_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == assignee_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(rows) == 1
+    assert rows[0].payload["originRunId"] == run_id
+    assert rows[0].payload["attempt"] == 1
+
+
+async def test_passive_followup_exhaustion_without_reviewer_requests_operator_review(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="passive-exhaust-operator")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    origin_run_id = str(uuid.uuid4())
+    previous_run_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Exhausted Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Exhausted operator review",
+                    status="in_progress",
+                    assignee_agent_id=agent_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    invocation_source="automation",
+                    trigger_detail="system",
+                    status="succeeded",
+                    context_snapshot={
+                        "issueId": issue_id,
+                        "wakeReason": "issue_passive_followup",
+                        "passiveFollowup": {
+                            "originRunId": origin_run_id,
+                            "previousRunId": previous_run_id,
+                            "attempt": 2,
+                            "maxAttempts": 2,
+                            "reason": "missing_closure",
+                        },
+                    },
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one()
+
+    assert wakeups == []
+    assert activity.details["originRunId"] == origin_run_id
+    assert activity.details["previousRunId"] == run_id
+    assert activity.details["attempts"] == 2
+    assert activity.details["maxAttempts"] == 2
+
+
+async def test_passive_followup_exhaustion_with_reviewer_queues_convergence_review(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="passive-exhaust-reviewer")
+    assignee_id = str(uuid.uuid4())
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    origin_run_id = str(uuid.uuid4())
+    previous_run_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=assignee_id,
+                    org_id=org_id,
+                    name="Exhausted Reviewed Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=reviewer_id,
+                    org_id=org_id,
+                    name="Convergence Reviewer",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Exhausted reviewer review",
+                    status="in_progress",
+                    assignee_agent_id=assignee_id,
+                    reviewer_agent_id=reviewer_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=assignee_id,
+                    invocation_source="automation",
+                    trigger_detail="system",
+                    status="succeeded",
+                    context_snapshot={
+                        "issueId": issue_id,
+                        "wakeReason": "issue_passive_followup",
+                        "passiveFollowup": {
+                            "originRunId": origin_run_id,
+                            "previousRunId": previous_run_id,
+                            "attempt": 2,
+                            "maxAttempts": 2,
+                            "reason": "missing_closure",
+                        },
+                    },
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, assignee_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        wakeup = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == reviewer_id,
+                    AgentWakeupRequest.reason == "issue_convergence_review_requested",
+                )
+            )
+        ).scalar_one()
+        convergence_run = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == wakeup.id)
+            )
+        ).scalar_one()
+        activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.convergence_review_requested",
+                )
+            )
+        ).scalar_one()
+
+    assert wakeup.source == "review"
+    assert wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "passive_followup_exhausted",
+    }
+    assert convergence_run.agent_id == reviewer_id
+    assert convergence_run.invocation_source == "review"
+    assert convergence_run.status == "queued"
+    assert convergence_run.context_snapshot["wakeReason"] == (
+        "issue_convergence_review_requested"
+    )
+    assert convergence_run.context_snapshot["convergenceReview"]["attempts"] == 2
+    assert activity.details["originRunId"] == origin_run_id
+    assert activity.details["previousRunId"] == run_id
 
 
 async def test_successful_reviewer_run_without_decision_queues_review_closeout(
