@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond, respondStream } from "./render-app";
@@ -997,7 +997,7 @@ it("allows re-executing an issue after the latest run failed", async () => {
     invocationSource: "assignment",
     triggerDetail: "manual",
     status: "failed",
-    error: "Separator is found in model output",
+    error: "Process lost -- child pid 31740 is no longer running",
     createdAt: "2026-06-02T10:00:00Z",
   };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -1034,8 +1034,12 @@ it("allows re-executing an issue after the latest run failed", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: "修复运行错误" })).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: "重新执行" })).toBeInTheDocument();
-  expect(screen.getAllByText(/Separator is found in model output/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/运行进程已中断。子进程在服务完成跟踪前已退出。/).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Process lost -- child pid/)).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
+  await waitFor(() => {
+    expect(screen.queryByText(/最新运行失败：运行进程已中断。子进程在服务完成跟踪前已退出。/)).not.toBeInTheDocument();
+  });
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/execute",
     expect.objectContaining({ method: "POST", body: "{}" }),
