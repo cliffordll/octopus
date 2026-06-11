@@ -28,7 +28,7 @@ import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
-import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, sourceLabel, statusLabel } from "../utils/display";
+import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -317,7 +317,8 @@ function formattedJson(value: unknown): string {
 
 function runSummary(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录";
-  if (run.error?.trim()) return run.error.trim();
+  const error = runErrorMessage(run.error);
+  if (error) return error;
   if (run.summary?.trim()) return run.summary.trim();
   const result = hasJsonObject(run.resultJson) ? run.resultJson : null;
   for (const key of ["summary", "result", "message"]) {
@@ -2007,10 +2008,17 @@ export function IssuePage() {
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
   const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
+  const latestRunError = runErrorMessage(latestRun?.error);
   const activeAssigneeRuns = activeQueueRunsForAgent(orgHeartbeatRuns.data ?? [], issue.data?.assigneeAgentId);
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
+  const hideLatestRunError =
+    executeIssue.isPending ||
+    executeNotice.startsWith("正在提交") ||
+    executeNotice.startsWith("执行请求已提交") ||
+    executeNotice.startsWith("已连接到运行") ||
+    executeNotice.startsWith("已创建运行");
   const executeButtonLabel = executeIssue.isPending
     ? "提交中"
     : latestRunCanReexecute
@@ -2079,9 +2087,9 @@ export function IssuePage() {
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
             {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
-            {latestRun && isRerunnableRun(latestRun.status) && latestRun.error?.trim() && (
+            {latestRun && isRerunnableRun(latestRun.status) && latestRunError && !hideLatestRunError && (
               <p className="error-notice" role="status">
-                最新运行{statusLabel(latestRun.status)}：{latestRun.error.trim()}
+                最新运行{statusLabel(latestRun.status)}：{latestRunError}
               </p>
             )}
           </header>

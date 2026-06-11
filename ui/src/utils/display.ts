@@ -190,6 +190,21 @@ export function sourceLabel(value: string | null | undefined): string {
   return displayLabel(value);
 }
 
+export function runErrorMessage(value: string | null | undefined): string | null {
+  const error = value?.trim();
+  if (!error) return null;
+  const english = getLocalePreference() === "en-US";
+  if (/^Process lost -- child pid \d+ is no longer running$/i.test(error)) {
+    return english
+      ? "Run process was interrupted. The child process exited before the server finished tracking it."
+      : "运行进程已中断。子进程在服务完成跟踪前已退出。";
+  }
+  if (error === "^C") {
+    return english ? "Run was interrupted by Ctrl+C." : "运行被 Ctrl+C 中断。";
+  }
+  return error;
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "-";
   const date = new Date(value);
