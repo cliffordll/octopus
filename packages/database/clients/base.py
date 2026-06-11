@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 from sqlalchemy import event
@@ -35,7 +36,12 @@ def _configure_sqlite_engine(engine: AsyncEngine) -> None:
     def _set_sqlite_pragmas(dbapi_connection: Any, _: object) -> None:
         cursor = dbapi_connection.cursor()
         try:
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA journal_mode=TRUNCATE")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError as exc:
+                if "database is locked" not in str(exc).lower():
+                    raise
+            cursor.execute("PRAGMA synchronous=NORMAL")
         finally:
             cursor.close()

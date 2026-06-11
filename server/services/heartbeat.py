@@ -642,6 +642,10 @@ class HeartbeatService:
         finally:
             self._active_run_ids.get(agent.id, set()).discard(run.id)
 
+    async def _commit_background_runtime_progress(self) -> None:
+        if self._commit_process_metadata:
+            await self._session.commit()
+
     async def resume_deferred_wakeups(
         self, agent_id: str, *, execute_immediately: bool = True
     ) -> list[HeartbeatRun]:
@@ -867,6 +871,7 @@ class HeartbeatService:
                     level="info" if stream == "stdout" else "error",
                 )
                 sequence += 1
+                await self._commit_background_runtime_progress()
 
         async def on_process_started(pid: int, started_at: datetime) -> None:
             nonlocal sequence, running
@@ -890,8 +895,7 @@ class HeartbeatService:
                         },
                     )
                     sequence += 1
-                if self._commit_process_metadata:
-                    await self._session.commit()
+                await self._commit_background_runtime_progress()
 
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
@@ -940,6 +944,7 @@ class HeartbeatService:
                 runtime_type=agent.agent_runtime_type,
                 config=runtime_config,
             )
+            await self._commit_background_runtime_progress()
             result = await adapter.execute(
                 RuntimeExecutionContext(
                     run_id=running.id,

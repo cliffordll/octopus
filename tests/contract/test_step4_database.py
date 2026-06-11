@@ -140,13 +140,19 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
+async def test_sqlite_file_engine_uses_wal_journal_and_busy_timeout(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "journal-mode.db"
     engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
     try:
         async with engine.begin() as conn:
             result = await conn.execute(text("PRAGMA journal_mode"))
-            assert result.scalar_one() == "truncate"
+            assert result.scalar_one() == "wal"
+            result = await conn.execute(text("PRAGMA busy_timeout"))
+            assert result.scalar_one() == 30000
+            result = await conn.execute(text("PRAGMA synchronous"))
+            assert result.scalar_one() == 1
             await conn.execute(
                 text(
                     "create table write_check "

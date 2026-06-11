@@ -411,6 +411,14 @@ $env:OCTOPUS_HOME = "C:/Users/lianaipeng/.octopus"
 例如启动一个 `dev` 实例：
 
 ```powershell
+# 查看是谁占用：
+Get-NetTCPConnection -LocalPort 8000 -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess
+
+# 如果要停掉当前 8000 的 server：
+Stop-Process -Id <OwningProcess> -Force
+```
+
+```powershell
 $env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
