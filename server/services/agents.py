@@ -18,6 +18,7 @@ from packages.database.queries.agents import (
     list_org_agents,
     update_agent,
 )
+from packages.database.queries.issues import list_agent_inbox_issues
 from packages.database.queries.organizations import get_organization_by_id
 from packages.database.queries.agent_skills import (
     add_enabled_skill_keys,
@@ -41,6 +42,9 @@ from packages.database.schema import (
     AgentConfigRevision as AgentConfigRevisionRow,
     AgentRuntimeState as AgentRuntimeStateRow,
     AgentTaskSession as AgentTaskSessionRow,
+    AgentWakeupRequest as AgentWakeupRequestRow,
+    Issue as IssueRow,
+    IssueComment as IssueCommentRow,
     Organization as OrganizationRow,
 )
 from packages.shared.constants.agent import (
@@ -53,6 +57,7 @@ from packages.shared.constants.agent import (
     AgentStatus,
     PauseReason,
 )
+from packages.shared.constants.issue import IssuePriority, IssueStatus
 from packages.shared.constants.heartbeat import (
     AGENT_RUN_CONCURRENCY_DEFAULT,
     HEARTBEAT_INTERVAL_DEFAULT_SEC,
@@ -65,6 +70,7 @@ from packages.shared.types.agent import (
     AgentConfiguration,
     AgentDetail,
     AgentHireResult,
+    AgentInboxItem,
     AgentRuntimeState,
     AgentSkillAnalytics,
     AgentSkillSnapshot,
@@ -116,6 +122,13 @@ _DEFAULT_HEARTBEAT_POLICY: dict[str, Any] = {
     "wakeOnDemand": True,
     "preflightEnabled": True,
     "maxConcurrentRuns": AGENT_RUN_CONCURRENCY_DEFAULT,
+}
+_INBOX_COMMENT_WAKEUP_REASONS = {"issue_comment_added", "issue_comment_mentioned"}
+_INBOX_ACTIVE_WAKEUP_STATUSES = {
+    "queued",
+    "claimed",
+    "deferred_issue_execution",
+    "deferred_agent_paused",
 }
 
 
@@ -230,6 +243,38 @@ def _ensure_agent_workspace_layout(agent_home: Path) -> Path:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _compact_text(value: str | None, *, limit: int = 140) -> str | None:
+    if value is None:
+        return None
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 1]}..."
+
+
+def _relationship_rank(value: str) -> int:
+    return {"mentioned": 0, "reviewer": 1, "assignee": 2}.get(value, 3)
+
+
+def _issue_status_rank(value: str) -> int:
+    return {
+        "blocked": 0,
+        "in_review": 1,
+        "in_progress": 2,
+        "todo": 3,
+    }.get(value, 4)
+
+
+def _timestamp_desc_rank(value: str | None) -> float:
+    if not value:
+        return 0.0
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return -parsed.timestamp()
 
 
 def _normalized_permissions(value: object, role: str) -> dict[str, bool]:
@@ -587,6 +632,35 @@ class AgentService:
             "access": self._access_state(row),
         }
         return detail
+
+    async def list_inbox(self, agent_id: str) -> list[AgentInboxItem] | None:
+        row = await get_agent_by_id(self._session, agent_id)
+        if row is None:
+            return None
+        issue_rows = await list_agent_inbox_issues(self._session, row.org_id, row.id)
+        items_by_issue_id = {
+            issue.id: self._to_inbox_item(row.id, issue) for issue in issue_rows
+        }
+        for wakeup in await self._list_inbox_comment_wakeups(row):
+            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+            issue_id = payload.get("issueId")
+            if not isinstance(issue_id, str) or not issue_id:
+                continue
+            issue = await self._session.get(IssueRow, issue_id)
+            if issue is None or issue.org_id != row.org_id or issue.hidden_at is not None:
+                continue
+            item = items_by_issue_id.get(issue.id) or self._to_inbox_item(row.id, issue)
+            items_by_issue_id[issue.id] = await self._merge_comment_wakeup(
+                row.org_id, item, wakeup
+            )
+        return sorted(
+            items_by_issue_id.values(),
+            key=lambda item: (
+                _relationship_rank(item["relationship"]),
+                _issue_status_rank(item["status"]),
+                _timestamp_desc_rank(item["updatedAt"]),
+            ),
+        )
 
     async def suggest_name(self, org_id: str) -> str:
         existing = await list_org_agents(self._session, org_id)
@@ -1625,6 +1699,69 @@ class AgentService:
             "createdAt": row.created_at.isoformat(),
             "updatedAt": row.updated_at.isoformat(),
         }
+
+    def _to_inbox_item(self, agent_id: str, row: IssueRow) -> AgentInboxItem:
+        relationship = "reviewer" if row.reviewer_agent_id == agent_id else "assignee"
+        return {
+            "relationship": relationship,
+            "issueId": row.id,
+            "identifier": row.identifier,
+            "title": row.title,
+            "status": cast(IssueStatus, row.status),
+            "priority": cast(IssuePriority, row.priority),
+            "checkoutRunId": row.checkout_run_id,
+            "executionRunId": row.execution_run_id,
+            "wakeReason": None,
+            "wakeCommentId": None,
+            "commentPreview": None,
+            "updatedAt": row.updated_at.isoformat(),
+        }
+
+    async def _list_inbox_comment_wakeups(
+        self, agent: AgentRow
+    ) -> Sequence[AgentWakeupRequestRow]:
+        result = await self._session.execute(
+            select(AgentWakeupRequestRow)
+            .where(
+                AgentWakeupRequestRow.org_id == agent.org_id,
+                AgentWakeupRequestRow.agent_id == agent.id,
+                AgentWakeupRequestRow.reason.in_(_INBOX_COMMENT_WAKEUP_REASONS),
+                AgentWakeupRequestRow.status.in_(_INBOX_ACTIVE_WAKEUP_STATUSES),
+            )
+            .order_by(AgentWakeupRequestRow.requested_at.desc())
+        )
+        return result.scalars().all()
+
+    async def _merge_comment_wakeup(
+        self,
+        org_id: str,
+        item: AgentInboxItem,
+        wakeup: AgentWakeupRequestRow,
+    ) -> AgentInboxItem:
+        payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+        comment_id = payload.get("commentId")
+        wake_time = wakeup.requested_at.isoformat()
+        if (
+            wakeup.reason == "issue_comment_mentioned"
+            and item["relationship"] != "reviewer"
+        ):
+            item = {**item, "relationship": "mentioned"}
+        if item["updatedAt"] < wake_time:
+            item = {**item, "updatedAt": wake_time}
+        return {
+            **item,
+            "wakeReason": wakeup.reason,
+            "wakeCommentId": comment_id if isinstance(comment_id, str) else None,
+            "commentPreview": await self._comment_preview(org_id, comment_id),
+        }
+
+    async def _comment_preview(self, org_id: str, comment_id: object) -> str | None:
+        if not isinstance(comment_id, str) or not comment_id:
+            return None
+        comment = await self._session.get(IssueCommentRow, comment_id)
+        if comment is None or comment.org_id != org_id:
+            return None
+        return _compact_text(comment.body)
 
     def _config_snapshot(self, row: AgentRow) -> dict[str, Any]:
         return {
