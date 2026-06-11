@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
+from packages.database.clients.base import _apply_sqlite_pragmas
 from packages.database.queries import activity_log as activity_log_queries
 from packages.database.queries import issue_comments as issue_comment_queries
 from packages.database.queries.approvals import (
@@ -140,13 +142,19 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
+async def test_sqlite_file_engine_uses_wal_journal_and_busy_timeout(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "journal-mode.db"
     engine = create_database_engine(f"sqlite+aiosqlite:///{db_path}")
     try:
         async with engine.begin() as conn:
             result = await conn.execute(text("PRAGMA journal_mode"))
-            assert result.scalar_one() == "truncate"
+            assert result.scalar_one() == "wal"
+            timeout = await conn.execute(text("PRAGMA busy_timeout"))
+            assert timeout.scalar_one() == 30000
+            synchronous = await conn.execute(text("PRAGMA synchronous"))
+            assert synchronous.scalar_one() == 1
             await conn.execute(
                 text(
                     "create table write_check "
@@ -156,6 +164,56 @@ async def test_sqlite_file_engine_uses_truncate_journal(tmp_path: Path) -> None:
             await conn.execute(text("insert into write_check(value) values ('ok')"))
     finally:
         await engine.dispose()
+
+
+def test_sqlite_pragmas_tolerate_locked_journal_mode() -> None:
+    class Cursor:
+        def __init__(self) -> None:
+            self.closed = False
+            self.statements: list[str] = []
+
+        def execute(self, statement: str) -> None:
+            self.statements.append(statement)
+            if statement == "PRAGMA journal_mode=WAL":
+                raise sqlite3.OperationalError("database is locked")
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Connection:
+        def __init__(self) -> None:
+            self.cursor_obj = Cursor()
+
+        def cursor(self) -> Cursor:
+            return self.cursor_obj
+
+    connection = Connection()
+
+    _apply_sqlite_pragmas(connection)
+
+    assert connection.cursor_obj.closed is True
+    assert connection.cursor_obj.statements == [
+        "PRAGMA busy_timeout=30000",
+        "PRAGMA journal_mode=WAL",
+        "PRAGMA synchronous=NORMAL",
+    ]
+
+
+def test_sqlite_pragmas_raise_unexpected_journal_errors() -> None:
+    class Cursor:
+        def execute(self, statement: str) -> None:
+            if statement == "PRAGMA journal_mode=WAL":
+                raise sqlite3.OperationalError("disk I/O error")
+
+        def close(self) -> None:
+            pass
+
+    class Connection:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        _apply_sqlite_pragmas(Connection())
 
 
 @pytest.mark.asyncio

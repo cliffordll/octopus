@@ -1353,3 +1353,73 @@ it("explains why an unassigned issue cannot be executed", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 });
+
+it("explains queued issue runs from the assignee active queue", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "排队任务",
+    description: "查看为什么还没执行",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const queuedRun = {
+    id: "run-queued",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    triggerDetail: "issue_assigned",
+    status: "queued",
+    createdAt: "2026-06-10T10:05:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "running" }]);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") {
+      return respond([
+        { id: "run-timer", orgId: "org-1", agentId: "agent-1", invocationSource: "timer", triggerDetail: "heartbeat_timer", status: "running", createdAt: "2026-06-10T10:00:00Z" },
+        { id: "run-auto", orgId: "org-1", agentId: "agent-1", invocationSource: "automation", triggerDetail: "issue_passive_followup", status: "queued", createdAt: "2026-06-10T10:01:00Z" },
+        queuedRun,
+      ]);
+    }
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([queuedRun]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-queued" && init?.method === "GET") return respond(queuedRun);
+    if (path === "/api/heartbeat-runs/run-queued/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-queued/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const queueRegion = await screen.findByRole("region", { name: "运行队列状态" });
+  expect(queueRegion).toHaveTextContent("Builder 正在处理 3 个活跃运行");
+  expect(queueRegion).toHaveTextContent("当前任务前面还有 2 个运行");
+  expect(queueRegion).toHaveTextContent("定时心跳");
+  expect(queueRegion).toHaveTextContent("自动化");
+  expect(within(queueRegion).getByRole("link", { name: "打开负责人运行页" })).toHaveAttribute("href", "/orgs/org-1/agents/agent-1/runs");
+});

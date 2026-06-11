@@ -28,7 +28,7 @@ import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
-import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, statusLabel } from "../utils/display";
+import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, sourceLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -126,6 +126,30 @@ function runSortTime(run: HeartbeatRun): number {
   const value = run.createdAt ?? run.startedAt ?? run.updatedAt ?? "";
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
+}
+
+function activeQueueRunsForAgent(runs: HeartbeatRun[], agentId: string | null | undefined): HeartbeatRun[] {
+  if (!agentId) return [];
+  return runs
+    .filter((run) => run.agentId === agentId && isLiveRun(run.status))
+    .sort((left, right) => runSortTime(left) - runSortTime(right));
+}
+
+function queueRunsAhead(activeRuns: HeartbeatRun[], currentRun: HeartbeatRun | null): number {
+  if (!currentRun) return 0;
+  const currentRunId = heartbeatRunId(currentRun);
+  const currentIndex = activeRuns.findIndex((run) => heartbeatRunId(run) === currentRunId);
+  if (currentIndex >= 0) return currentIndex;
+  const currentTime = runSortTime(currentRun);
+  return activeRuns.filter((run) => runSortTime(run) <= currentTime).length;
+}
+
+function queueSourceCounts(runs: HeartbeatRun[]): Array<{ count: number; source: string }> {
+  const counts = new Map<string, number>();
+  for (const run of runs) counts.set(run.invocationSource, (counts.get(run.invocationSource) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([source, count]) => ({ count, source }))
+    .sort((left, right) => right.count - left.count || sourceLabel(left.source).localeCompare(sourceLabel(right.source)));
 }
 
 function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, issueId: string): HeartbeatRun | null {
@@ -671,6 +695,59 @@ function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
         <div className="issue-property-row"><span>输出</span><strong>{costSummary.outputTokens.toLocaleString()}</strong></div>
         <div className="issue-property-row"><span>已缓存</span><strong>{costSummary.cachedInputTokens.toLocaleString()}</strong></div>
       </div>
+    </section>
+  );
+}
+
+function IssueQueueStatusPanel({
+  activeRuns,
+  agentsById,
+  currentRun,
+  issue,
+  orgId,
+}: {
+  activeRuns: HeartbeatRun[];
+  agentsById: Map<string, Agent>;
+  currentRun: HeartbeatRun | null;
+  issue: IssueDetail;
+  orgId: string;
+}) {
+  if (!currentRun || !isLiveRun(currentRun.status) || activeRuns.length === 0 || !issue.assigneeAgentId) return null;
+  const aheadCount = queueRunsAhead(activeRuns, currentRun);
+  const assigneeName = agentName(issue.assigneeAgentId, agentsById);
+  const counts = queueSourceCounts(activeRuns);
+  const previewRuns = activeRuns.slice(0, 4);
+  return (
+    <section aria-label="运行队列状态" className="issue-queue-status">
+      <div className="issue-queue-status-heading">
+        <div>
+          <p className="eyebrow">QUEUE</p>
+          <h2>运行队列</h2>
+        </div>
+        <StatusPill status={currentRun.status}>{statusLabel(currentRun.status)}</StatusPill>
+      </div>
+      <p>
+        {assigneeName} 正在处理 {activeRuns.length} 个活跃运行；当前任务前面还有 {aheadCount} 个运行。
+      </p>
+      <div className="issue-queue-source-list" aria-label="队列来源">
+        {counts.map((item) => (
+          <span key={item.source}>
+            {sourceLabel(item.source)}
+            <strong>{item.count}</strong>
+          </span>
+        ))}
+      </div>
+      <div className="issue-queue-run-list">
+        {previewRuns.map((run) => (
+          <article className={heartbeatRunId(run) === heartbeatRunId(currentRun) ? "current" : ""} key={heartbeatRunId(run)}>
+            <span>{run.id.slice(0, 8)}</span>
+            <Badge>{sourceLabel(run.invocationSource)}</Badge>
+            {run.triggerDetail && <small>{sourceLabel(run.triggerDetail)}</small>}
+            <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+          </article>
+        ))}
+      </div>
+      <Link className="button secondary small-button" to={`/orgs/${orgId}/agents/${issue.assigneeAgentId}/runs`}>打开负责人运行页</Link>
     </section>
   );
 }
@@ -1697,6 +1774,12 @@ export function IssuePage() {
     enabled: Boolean(issueId),
     refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? LIVE_RUN_REFETCH_MS : false,
   });
+  const orgHeartbeatRuns = useQuery({
+    queryKey: ["heartbeat-runs", orgId],
+    queryFn: () => heartbeatApi.list(orgId),
+    enabled: Boolean(orgId && issue.data?.assigneeAgentId),
+    refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? LIVE_RUN_REFETCH_MS : false,
+  });
   const subIssues = useQuery({
     queryKey: ["issues", orgId, "children", issueId],
     queryFn: () => issuesApi.list(orgId, { parentId: issueId }),
@@ -1924,6 +2007,7 @@ export function IssuePage() {
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
   const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
+  const activeAssigneeRuns = activeQueueRunsForAgent(orgHeartbeatRuns.data ?? [], issue.data?.assigneeAgentId);
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
@@ -1946,6 +2030,7 @@ export function IssuePage() {
       {agents.error && <ErrorNotice error={agents.error} />}
       {goals.error && <ErrorNotice error={goals.error} />}
       {projects.error && <ErrorNotice error={projects.error} />}
+      {orgHeartbeatRuns.error && <ErrorNotice error={orgHeartbeatRuns.error} />}
       {issue.data && (
         <div className="issue-detail-layout">
           <header className="issue-detail-top">
@@ -2003,6 +2088,13 @@ export function IssuePage() {
 
           <main className="issue-detail-main">
             <p className="issue-description">{issue.data.description || "暂无描述"}</p>
+            <IssueQueueStatusPanel
+              activeRuns={activeAssigneeRuns}
+              agentsById={agentsById}
+              currentRun={latestRun}
+              issue={issue.data}
+              orgId={orgId}
+            />
 
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">

@@ -429,6 +429,28 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
       return respond([
         {
+          id: "run-timer",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "running",
+          invocationSource: "timer",
+          triggerDetail: "heartbeat_timer",
+          createdAt: "2026-05-28T23:58:00Z",
+          startedAt: "2026-05-28T23:59:00Z",
+        },
+        {
+          id: "run-assignment",
+          orgId: "org-1",
+          agentId: "agent-1",
+          issueId: "issue-1",
+          issueIdentifier: "OCT-1",
+          issueTitle: "排查队列",
+          status: "queued",
+          invocationSource: "assignment",
+          triggerDetail: "issue_assigned",
+          createdAt: "2026-05-28T23:57:00Z",
+        },
+        {
           id: "run-1",
           orgId: "org-1",
           agentId: "agent-1",
@@ -483,6 +505,11 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   );
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
+  const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
+  expect(queueRegion).toHaveTextContent("2 个活跃运行");
+  expect(screen.getByText("定时心跳")).toBeInTheDocument();
+  expect(screen.getByText("任务分配")).toBeInTheDocument();
+  expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
