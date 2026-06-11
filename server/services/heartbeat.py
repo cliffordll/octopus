@@ -786,6 +786,9 @@ class HeartbeatService:
         )
         run = await self._initialize_run_log(run)
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
+        await self._claim_issue_execution_for_assignment_run(
+            agent, run, context_snapshot
+        )
         await self._append_event(
             run,
             1,
@@ -1540,12 +1543,12 @@ class HeartbeatService:
                     "error": None,
                 },
             )
-            now = datetime.now(UTC)
-            issue.checkout_run_id = run.id
-            issue.execution_run_id = run.id
-            issue.execution_agent_name_key = _agent_name_key(agent.name)
-            issue.execution_locked_at = now
-            issue.updated_at = now
+            await self._claim_issue_execution_for_assignment_run(
+                agent,
+                run,
+                context_snapshot,
+                issue=issue,
+            )
             await self._append_event(
                 run,
                 1,
@@ -1562,6 +1565,38 @@ class HeartbeatService:
             )
             await self._session.flush()
             return
+
+    async def _claim_issue_execution_for_assignment_run(
+        self,
+        agent: AgentRow,
+        run: HeartbeatRunRow,
+        context_snapshot: dict[str, Any],
+        *,
+        issue: IssueRow | None = None,
+    ) -> None:
+        if run.invocation_source != "assignment":
+            return
+        issue_id = _issue_id_from_context(context_snapshot)
+        if issue_id is None:
+            return
+        issue = issue or await self._session.get(IssueRow, issue_id)
+        if (
+            issue is None
+            or issue.org_id != run.org_id
+            or issue.assignee_agent_id != agent.id
+            or issue.status in {"done", "cancelled"}
+        ):
+            return
+        now = datetime.now(UTC)
+        issue.checkout_run_id = run.id
+        issue.execution_run_id = run.id
+        issue.execution_agent_name_key = _agent_name_key(agent.name)
+        issue.execution_locked_at = now
+        if issue.status in {"backlog", "todo"}:
+            issue.status = "in_progress"
+            if issue.started_at is None:
+                issue.started_at = now
+        issue.updated_at = now
 
     async def _next_event_sequence(self, run_id: str) -> int:
         events = await list_run_events(self._session, run_id, limit=1000)

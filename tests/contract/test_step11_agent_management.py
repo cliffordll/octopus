@@ -1078,7 +1078,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert detail["status"] == "succeeded"
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
-    assert issue_after["status"] == "todo"
+    assert issue_after["status"] == "in_progress"
 
     async with session_factory() as session:
         rows = (

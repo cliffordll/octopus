@@ -16,6 +16,92 @@ async function expandRunRecords() {
   return region;
 }
 
+it("shows existing run records without collapsing the section by default", async () => {
+  const longSummary = `任务执行摘要很长，需要默认收起，避免运行记录布局被撑乱。${"继续补充执行细节。".repeat(12)}最终结论。`;
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "运行中任务",
+    description: "查看运行记录",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-visible",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    status: "running",
+    resultJson: { summary: longSummary },
+    usageJson: { cachedInputTokens: 900, costCents: 37, inputTokens: 1200, outputTokens: 340 },
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "running" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-visible" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-visible/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-visible/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const runRecordsRegion = await screen.findByRole("region", { name: "运行记录" });
+  expect((await within(runRecordsRegion).findAllByText("run-visible")).length).toBeGreaterThan(0);
+  expect(within(runRecordsRegion).queryByRole("button", { name: "折叠运行记录" })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).queryByRole("button", { name: "展开运行记录" })).not.toBeInTheDocument();
+  const summaryBlock = within(runRecordsRegion).getByText("输出摘要").closest(".issue-run-record-summary");
+  expect(summaryBlock).not.toHaveTextContent(longSummary);
+  expect(summaryBlock).toHaveTextContent("展开");
+  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行摘要 run-visible" }));
+  expect(summaryBlock).toHaveTextContent(longSummary);
+  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "收起运行摘要 run-visible" }));
+  expect(summaryBlock).not.toHaveTextContent(longSummary);
+  expect(summaryBlock).toHaveTextContent("展开");
+  const costPanel = await screen.findByRole("region", { name: "任务成本" });
+  expect(within(costPanel).getByRole("heading", { name: "成本" })).toBeInTheDocument();
+  expect(within(costPanel).getByText(/(?:US)?\$0\.37/)).toBeInTheDocument();
+  expect(within(costPanel).getByText("Total tokens")).toBeInTheDocument();
+  expect(within(costPanel).getByText("1,540")).toBeInTheDocument();
+  expect(within(costPanel).getByText("输入")).toBeInTheDocument();
+  expect(within(costPanel).getByText("1,200")).toBeInTheDocument();
+  expect(within(costPanel).getByText("输出")).toBeInTheDocument();
+  expect(within(costPanel).getByText("340")).toBeInTheDocument();
+  expect(within(costPanel).getByText("已缓存")).toBeInTheDocument();
+  expect(within(costPanel).getByText("900")).toBeInTheDocument();
+});
+
 it("shows an issue and records comments and review decisions", async () => {
   const longIssueTitle = "实现登录流程并处理一个非常长的任务名称用于验证顶部操作按钮不会被标题挤压变形";
   const issue = {
@@ -289,8 +375,8 @@ it("shows an issue and records comments and review decisions", async () => {
 
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: longIssueTitle })).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "复制 ID" })[0]).toBeInTheDocument();
-  expect(screen.getAllByRole("link", { name: "聊天" })[0]).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "复制 ID" })).toHaveLength(1);
+  expect(screen.getAllByRole("link", { name: "聊天" })).toHaveLength(1);
   const properties = screen.getByRole("region", { name: "任务属性" });
   expect(properties).toHaveTextContent("属性");
   expect(properties).toHaveTextContent("编号");
@@ -630,7 +716,7 @@ it("executes an assigned issue through the issue execution route", async () => {
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
   const runRecordsRegion = await expandRunRecords();
-  expect(runRecordsRegion).toHaveTextContent("运行输出摘要");
+  expect(runRecordsRegion).toHaveTextContent("输出摘要");
   expect(runRecordsRegion).toHaveTextContent("等待执行");
   expect(runRecordsRegion).toHaveTextContent("第 1 次");
   expect(runRecordsRegion).toHaveTextContent("首次执行");
