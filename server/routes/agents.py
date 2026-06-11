@@ -62,6 +62,7 @@ from packages.shared.api_paths.heartbeat import (
     HEARTBEAT_RUN_RETRY_PATH,
     HEARTBEAT_RUN_STREAM_PATH,
     HEARTBEAT_RUN_WORKSPACE_OPERATIONS_PATH,
+    INSTANCE_SCHEDULER_HEARTBEATS_PATH,
     ORG_HEARTBEAT_RUNS_PATH,
 )
 from packages.shared.types.agent import (
@@ -81,7 +82,11 @@ from packages.shared.types.agent import (
     AgentTaskSession,
     ResetAgentSessionResult,
 )
-from packages.shared.types.heartbeat import HeartbeatRun, HeartbeatRunEvent
+from packages.shared.types.heartbeat import (
+    HeartbeatRun,
+    HeartbeatRunEvent,
+    InstanceSchedulerHeartbeatAgent,
+)
 from packages.shared.types.workspace import WorkspaceOperation
 from packages.shared.validators.agent import (
     validate_agent_private_skill,
@@ -951,6 +956,14 @@ async def get_agent_skills_analytics_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
         )
     return analytics
+
+
+@router.get(INSTANCE_SCHEDULER_HEARTBEATS_PATH)
+async def list_instance_scheduler_heartbeats_route(
+    _: None = Depends(require_board_access),
+    service: AgentService = Depends(get_agent_service),
+) -> list[InstanceSchedulerHeartbeatAgent]:
+    return await service.list_instance_scheduler_heartbeats()
 
 
 async def _invoke_agent(

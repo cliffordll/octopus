@@ -56,14 +56,29 @@ export function GoalsPage() {
 
   return (
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div><p className="eyebrow">Goals</p><h1>目标</h1></div>
-        <button type="button" onClick={() => setDialogOpen(true)}>New Goal</button>
+      <header className="org-resource-hero org-goals-hero">
+        <div className="org-resource-hero-copy">
+          <div className="org-resource-title-block">
+            <p className="eyebrow">Goals</p>
+            <h1>目标</h1>
+          </div>
+          <p>维护组织、团队、智能体和任务层级的目标，并跟踪它们之间的父子关系。</p>
+        </div>
+        <div className="org-hero-actions org-page-actions">
+          <button className="org-primary-action" type="button" onClick={() => setDialogOpen(true)}>New Goal</button>
+        </div>
       </header>
-      <section className="panel">
-        <h2>Goals</h2>
+      <section className="panel org-goal-list-card">
+        <div className="org-goal-list-heading">
+          <div>
+            <p className="eyebrow">Goal Tree</p>
+            <h2>目标列表</h2>
+          </div>
+        </div>
         {goals.error && <ErrorNotice error={goals.error} />}
-        <GoalTree goals={goalList} goalLink={(goal) => `/orgs/${orgId}/goals/${goal.id}`} />
+        <div className="org-goal-list-body">
+          <GoalTree goals={goalList} goalLink={(goal) => `/orgs/${orgId}/goals/${goal.id}`} />
+        </div>
       </section>
       {dialogOpen && (
         <div

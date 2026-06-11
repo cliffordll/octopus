@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
 import { sourceLabel, statusLabel } from "../utils/display";
 
 export function OrganizationPage() {
@@ -68,61 +69,77 @@ export function OrganizationPage() {
         </div>
       </header>
       <form className="panel form narrow" onSubmit={submit}>
-        <label>
-          组织名称
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </label>
-        <label>
-          描述
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-        </label>
-        <label>
-          月度预算（美元）
-          <input
-            min="0"
-            step="0.01"
-            type="number"
-            value={budgetMonthlyDollars}
-            onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
-          />
-        </label>
-        <label>
-          品牌色
-          <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
-        </label>
-        <label className="checkbox-row">
-          <input
-            checked={requireBoardApprovalForNewAgents}
-            onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
-            type="checkbox"
-          />
-          新建智能体需要审批
-        </label>
-        <label>
-          默认聊天任务创建模式
-          <select
-            value={defaultChatIssueCreationMode}
-            onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
-          >
-            <option value="manual_approval">手动确认</option>
-            <option value="auto_create">自动创建</option>
-          </select>
-        </label>
-        {update.error && <ErrorNotice error={update.error} />}
-        {archive.error && <ErrorNotice error={archive.error} />}
-        <div className="form-actions">
-          <button type="submit">保存组织</button>
-          <button
-            className="danger"
-            disabled={organization.data?.status === "archived" || archive.isPending}
-            type="button"
-            onClick={() => archive.mutate()}
-          >
-            归档组织
-          </button>
-        </div>
+          <label>
+            组织名称
+            <input value={name} onChange={(event) => setName(event.target.value)} required />
+          </label>
+          <label>
+            描述
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+          </label>
+          <label>
+            月度预算（美元）
+            <input
+              min="0"
+              step="0.01"
+              type="number"
+              value={budgetMonthlyDollars}
+              onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
+            />
+          </label>
+          <label>
+            品牌色
+            <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={requireBoardApprovalForNewAgents}
+              onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
+              type="checkbox"
+            />
+            新建智能体需要审批
+          </label>
+          <label>
+            默认聊天任务创建模式
+            <select
+              value={defaultChatIssueCreationMode}
+              onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
+            >
+              <option value="manual_approval">手动确认</option>
+              <option value="auto_create">自动创建</option>
+            </select>
+          </label>
+          {update.error && <ErrorNotice error={update.error} />}
+          {archive.error && <ErrorNotice error={archive.error} />}
+          <div className="form-actions">
+            <button type="submit">保存组织</button>
+            <button
+              className="danger"
+              disabled={organization.data?.status === "archived" || archive.isPending}
+              type="button"
+              onClick={() => archive.mutate()}
+            >
+              归档组织
+            </button>
+          </div>
       </form>
     </div>
+  );
+}
+
+export function OrganizationCostsPage() {
+  const { orgId = "" } = useParams();
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Organization Costs</p>
+          <h1>成本</h1>
+          <p className="muted">查看当前组织下的 runtime cost event 汇总。</p>
+        </div>
+      </header>
+      <OrganizationCostPanel orgId={orgId} />
+    </OrgWorkspace>
   );
 }
 
@@ -272,10 +289,10 @@ export function OrganizationStructurePage() {
           <p className="muted">按上游组织图布局展示智能体汇报关系。</p>
         </div>
         {agentList.length > 0 && (
-          <div className="org-chart-controls">
-            <button type="button" onClick={() => setZoom((value) => Math.min(value * 1.2, 1.8))}>+</button>
-            <button type="button" onClick={() => setZoom((value) => Math.max(value * 0.8, 0.35))}>-</button>
-            <button type="button" onClick={fitChart}>Fit</button>
+          <div className="org-chart-controls org-page-actions">
+            <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.min(value * 1.2, 1.8))}>+</button>
+            <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.max(value * 0.8, 0.35))}>-</button>
+            <button className="secondary small-button" type="button" onClick={fitChart}>Fit</button>
           </div>
         )}
       </header>
@@ -429,11 +446,10 @@ export function OrganizationResourcesPage() {
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <section className="org-resource-hero">
         <div className="org-resource-hero-copy">
-          <p className="org-resource-eyebrow">
-            <span aria-hidden="true">R</span>
-            组织资源目录
-          </p>
-          <h1>资源</h1>
+          <div className="org-resource-title-block">
+            <p className="eyebrow">Resources</p>
+            <h1>资源</h1>
+          </div>
           <p>
             维护组织内可复用的代码库、文件、链接和连接器对象。资源在这里统一登记，再由项目按角色说明进行引用。
           </p>
@@ -442,8 +458,8 @@ export function OrganizationResourcesPage() {
             <span>项目引用时补充角色和说明</span>
           </div>
           <div className="org-resource-actions">
-            <button type="button" onClick={openCreateResourceDialog}>添加资源</button>
-            <Link className="button secondary" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
+            <button className="secondary small-button" type="button" onClick={openCreateResourceDialog}>添加资源</button>
+            <Link className="button secondary small-button" to={`/orgs/${orgId}/workspaces`}>浏览工作区</Link>
           </div>
         </div>
         <aside className="org-resource-context-card">
@@ -726,10 +742,10 @@ function organizationSkillReadableSummary(skill: OrganizationSkillListItem, cont
 
 function organizationSkillSections(skills: OrganizationSkillListItem[]) {
   return [
-    { label: "内置技能", rows: skills.filter(isBuiltInOrganizationSkill), title: "built-in" },
-    { label: "社区技能", rows: skills.filter(isCommunityOrganizationSkill), title: "community" },
+    { label: "内置技能列表", rows: skills.filter(isBuiltInOrganizationSkill), title: "built-in" },
+    { label: "社区技能列表", rows: skills.filter(isCommunityOrganizationSkill), title: "community" },
     {
-      label: "本地技能",
+      label: "本地技能列表",
       title: "local",
       rows: skills.filter((skill) => !isBuiltInOrganizationSkill(skill) && !isCommunityOrganizationSkill(skill)),
     },
@@ -788,6 +804,11 @@ export function OrganizationSkillsPage() {
     enabled: Boolean(selectedSkill),
   });
   const readableSkillSummary = selectedSkill ? organizationSkillReadableSummary(selectedSkill, skillFile.data?.content) : "";
+  const headerSkillDescription = selectedSkill?.description?.trim() || "";
+  const showReadableSkillSummary = Boolean(
+    readableSkillSummary
+      && readableSkillSummary.trim() !== headerSkillDescription
+  );
   const updateStatus = useQuery({
     queryKey: ["organization-skill-update-status", orgId, selectedSkill?.id],
     queryFn: () => organizationSkillsApi.updateStatus(orgId, selectedSkill!.id),
@@ -938,9 +959,9 @@ export function OrganizationSkillsPage() {
         <aside className="organization-skills-sidebar">
           <div className="organization-skills-sidebar-header">
             <div>
+              <p className="eyebrow">Skills</p>
               <h1>技能</h1>
               <p>{skillRows.length} 个可用</p>
-              <p>当前组织的内置、社区和导入技能。</p>
             </div>
             <div className="row-actions">
               <button className="secondary small-button" onClick={() => setCreateOpen(true)} type="button">创建</button>
@@ -976,7 +997,6 @@ export function OrganizationSkillsPage() {
                       <strong>{skill.name}</strong>
                       <small>{organizationSkillSourceText(skill.sourceBadge, isBuiltInOrganizationSkill(skill))}</small>
                     </span>
-                    {skill.description && <span className="organization-skill-list-card-description">{skill.description}</span>}
                     <span className="organization-skill-list-card-meta">
                       <span>{skill.fileInventory.length} 文件</span>
                       <span>{skill.attachedAgentCount} 智能体</span>
@@ -997,11 +1017,6 @@ export function OrganizationSkillsPage() {
                     <Badge>{organizationSkillSourceText(selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</Badge>
                     <Badge>{updateStatus.data?.hasUpdate ? "有更新" : "无更新"}</Badge>
                   </div>
-                  <p>{selectedSkill.description || "未填写描述"}</p>
-                  <p className="muted">{organizationSkillSourceText(selectedSkill.sourceLabel, isBuiltInOrganizationSkill(selectedSkill), selectedSkill.slug)}</p>
-                  {!selectedSkill.editable && selectedSkill.editableReason && (
-                    <p className="organization-skill-readonly">只读：{organizationSkillSourceText(selectedSkill.editableReason, isBuiltInOrganizationSkill(selectedSkill))}</p>
-                  )}
                 </div>
                 <div className="row-actions">
                   <button className="secondary small-button" onClick={() => void updateStatus.refetch()} type="button">检查更新</button>
@@ -1027,24 +1042,20 @@ export function OrganizationSkillsPage() {
               {skillFile.error && <ErrorNotice error={skillFile.error} />}
               {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
               {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
-              {readableSkillSummary && (
+              {showReadableSkillSummary && (
                 <section className="organization-skill-readable-summary">
                   <span>技能说明</span>
                   <p>{readableSkillSummary}</p>
                 </section>
               )}
               <div className="organization-skill-info-grid">
-                <div>
-                  <span>来源</span>
-                  <strong>{organizationSkillSourceText(selectedSkill.sourceLabel ?? selectedSkill.sourceBadge, isBuiltInOrganizationSkill(selectedSkill))}</strong>
-                </div>
-                <div>
+                <div className="organization-skill-info-grid-full">
                   <span>来源路径</span>
-                  <strong>{selectedSkill.sourcePath ?? "未设置"}</strong>
+                  <strong title={selectedSkill.sourcePath ?? "未设置"}>{selectedSkill.sourcePath ?? "未设置"}</strong>
                 </div>
                 <div>
                   <span>工作区编辑路径</span>
-                  <strong>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
+                  <strong title={selectedSkill.workspaceEditPath ?? "只读或未设置"}>{selectedSkill.workspaceEditPath ?? "只读或未设置"}</strong>
                 </div>
                 <div>
                   <span>兼容性</span>
@@ -1379,10 +1390,11 @@ export function OrganizationWorkspacesPage() {
     <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header">
         <div>
+          <p className="eyebrow">Workspaces</p>
           <h1>工作区</h1>
           <p className="muted">查看组织文件、运行产物和智能体配置。</p>
         </div>
-        <button onClick={refreshWorkspace} type="button">刷新</button>
+        <button className="org-primary-action" onClick={refreshWorkspace} type="button">刷新</button>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}
       {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
@@ -1470,6 +1482,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
             <span aria-hidden="true" className="context-entry-icon">H</span>
             <span>心跳</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/costs`}>
+            <span aria-hidden="true" className="context-entry-icon">C</span>
+            <span>成本</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/resources`}>
             <span aria-hidden="true" className="context-entry-icon">R</span>

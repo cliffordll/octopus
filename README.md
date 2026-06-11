@@ -267,6 +267,23 @@ $env:OCTOPUS_LOG_LEVEL = "info"
 curl.exe http://127.0.0.1:8000/api/health
 ```
 
+### 启动 UI
+
+前端在 `ui/` 目录运行，Vite 默认将 `/api` 代理到 `http://127.0.0.1:8000`：
+
+```powershell
+cd ui
+npm run dev -- --host 127.0.0.1 --port 5175
+```
+
+访问：
+
+```text
+http://127.0.0.1:5175
+```
+
+如果 `5174` 已被上游 Rudder 或其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
+
 ## 7. 创建一个组织
 
 启动服务后，可以用以下命令创建本地调试组织：
@@ -293,7 +310,57 @@ curl.exe -s "http://127.0.0.1:8000/api/orgs/$env:ORG_ID"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 ```
 
-## 8. 运行目录说明
+## 8. Process runtime demo
+
+项目内置了一个最小 process runtime demo，用来验证 Octopus server 可以启动外部进程、等待退出并收集 stdout。
+
+先在项目根目录确认 demo 命令可执行：
+
+```powershell
+uv run --no-sync python -m packages.runtimes.process.demo
+```
+
+输出会是 JSON，包含 `message`、当前 `cwd`、时间戳和安全的 Octopus 环境变量摘录。
+
+在 UI 创建或编辑 Agent 时：
+
+- Runtime 选择 `process`
+- Command 填 `uv`
+- Args 填 `run, --no-sync, python, -m, packages.runtimes.process.demo`
+- CWD 留空
+
+CWD 留空时，process runtime 使用 server 当前工作目录。只要 server 从项目根目录启动，项目迁移到其他目录后也不需要修改 demo 配置。
+
+该 demo 只证明 process runtime 的最小执行链路：
+
+```text
+Octopus -> process runtime -> octopus-process-demo -> stdout -> run result
+```
+
+它不是完整 AI agent 对话运行时，也不会从 stdin 读取任务 prompt。
+
+## 9. UI 设置
+
+左下角 `设置` 打开统一设置面板。当前主要分类：
+
+- `供应商`：配置 `llm_providers`、`llm_models`、`llm_provider_bindings` 和 `llm_runtime_defaults` 对应的供应商、模型、运行时绑定与默认模型。
+- `心跳`：按智能体查看和切换 scheduler heartbeat 状态。
+
+心跳页面也可以直接打开：
+
+```text
+http://127.0.0.1:5175/instance/settings/heartbeats
+```
+
+`心跳` 页面控制每个智能体的：
+
+```text
+runtimeConfig.heartbeat.enabled
+```
+
+它只影响 timer heartbeat。它不是 server 全局 scheduler 总开关，也不会关闭 assignment、manual invoke、retry 或 automation 等非 timer wakeup。非 timer wakeup 由 `runtimeConfig.heartbeat.wakeOnDemand` 控制；具体语义见 `docs/guides/heartbeat-scheduler.md`。
+
+## 10. 运行目录说明
 
 默认运行数据不会写入仓库根目录。未显式设置 `OCTOPUS_HOME` 时，Octopus home 默认是用户目录下的 `.octopus`。
 
@@ -344,6 +411,7 @@ $env:OCTOPUS_HOME = "C:/Users/lianaipeng/.octopus"
 例如启动一个 `dev` 实例：
 
 ```powershell
+$env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
@@ -362,7 +430,17 @@ uv run server
 
 这些目录是本地运行产物，不应提交到 Git。
 
-## 9. 常用验证命令
+开发不同 step 或功能分支时，不要复用同一个 SQLite instance。迁移版本会写入
+`alembic_version`，较新的分支升级过 `default` 后，较旧分支可能因为缺少后续
+migration 文件而无法自动迁移。建议约定：
+
+```text
+default  稳定分支或主线本地实例
+dev      step-29 或正在开发的下一步功能实例
+step28   step-28-bug-fix 等旧分支验证实例
+```
+
+## 11. 常用验证命令
 
 提交前执行四步验证：
 
@@ -379,7 +457,7 @@ uv run pyright .
 uv run --no-sync pyright .
 ```
 
-## 10. 清理本地数据
+## 12. 清理本地数据
 
 开发阶段如果可以丢弃本地数据，可以删除：
 
@@ -397,7 +475,7 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 uv run server
 ```
 
-## 11. 常用环境变量
+## 13. 常用环境变量
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -410,7 +488,7 @@ uv run server
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
 | `OCTOPUS_HOME` | `~/.octopus` | Octopus instance home 根目录 |
 | `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离默认数据库和文件侧数据目录 |
-| `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 heartbeat scheduler |
+| `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 server 全局 heartbeat scheduler；UI 设置里的 `心跳` 不修改该环境变量 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
 | `OCTOPUS_STORAGE_PROVIDER` | `local_disk` | 文件存储 provider，可选 `local_disk`、`minio`、`s3` |
 | `OCTOPUS_STORAGE_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/data/storage` | local disk 存储目录 |
@@ -422,7 +500,7 @@ uv run server
 | `OCTOPUS_STORAGE_REGION` | `us-east-1` | MinIO/S3 region |
 | `OCTOPUS_STORAGE_FORCE_PATH_STYLE` | MinIO 默认为 `true` | 是否使用 path-style S3 地址 |
 
-## 12. 延伸文档
+## 14. 延伸文档
 
 按问题类型继续阅读：
 
@@ -434,6 +512,7 @@ uv run server
 - 本地 actor / scope：`docs/step-05-scope/TASK.md`
 - 组织创建与管理：`docs/step-06-orgs/TASK.md`
 - 任务队列、queued run、claim、preflight：`docs/guides/task-queue.md`
+- 心跳 scheduler 与 wakeup 语义：`docs/guides/heartbeat-scheduler.md`
 - 文件存储、附件、MinIO/S3：`docs/step-19-storage/TASK.md`
 - 组织技能、智能体技能、`.agents/skills` 区别：`docs/guides/skills.md`
 - runtime provider / model 配置：`docs/guides/runtime-provider-model-design.md`

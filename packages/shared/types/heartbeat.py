@@ -7,6 +7,7 @@ from packages.shared.constants.heartbeat import (
     HeartbeatRunStatus,
     WakeupTriggerDetail,
 )
+from packages.shared.constants.agent import AgentRole, AgentRuntimeType, AgentStatus
 
 
 class WakeAgentPayload(TypedDict, total=False):
@@ -72,3 +73,20 @@ class HeartbeatRunEvent(TypedDict):
     message: str | None
     payload: dict[str, Any] | None
     createdAt: str
+
+
+class InstanceSchedulerHeartbeatAgent(TypedDict):
+    id: str
+    orgId: str
+    organizationName: str
+    organizationIssuePrefix: str
+    agentName: str
+    agentUrlKey: str
+    role: AgentRole
+    title: str | None
+    status: AgentStatus
+    agentRuntimeType: AgentRuntimeType
+    intervalSec: float
+    heartbeatEnabled: bool
+    schedulerActive: bool
+    lastHeartbeatAt: str | None

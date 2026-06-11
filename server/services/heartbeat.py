@@ -50,6 +50,7 @@ from packages.shared.constants.heartbeat import (
     AGENT_RUN_CONCURRENCY_DEFAULT,
     AGENT_RUN_CONCURRENCY_MAX,
     AGENT_RUN_CONCURRENCY_MIN,
+    HEARTBEAT_INTERVAL_DEFAULT_SEC,
     HeartbeatInvocationSource,
     HeartbeatRunStatus,
     WakeupTriggerDetail,
@@ -124,6 +125,16 @@ class HeartbeatService:
             return None
         if agent.status in ("terminated", "pending_approval"):
             raise AgentConflictError("Agent is not invokable in its current state")
+        policy = self._heartbeat_policy(agent)
+        if payload.get("source", "on_demand") != "timer" and not policy["wakeOnDemand"]:
+            await self._create_skipped_wakeup(
+                agent,
+                payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                error="heartbeat.wakeOnDemand.disabled",
+            )
+            return None
         from .budgets import BudgetService
 
         context = {
@@ -680,6 +691,30 @@ class HeartbeatService:
             )
         return resumed
 
+    async def _create_skipped_wakeup(
+        self,
+        agent: AgentRow,
+        payload: WakeAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        error: str,
+    ) -> None:
+        await create_wakeup_request(
+            self._session,
+            {
+                **self._wakeup_values(
+                    agent,
+                    payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    status="skipped",
+                ),
+                "error": error,
+                "finished_at": datetime.now(UTC),
+            },
+        )
+
     async def tick_timers(
         self, org_id: str, *, now: datetime | None = None
     ) -> list[HeartbeatRun]:
@@ -751,6 +786,9 @@ class HeartbeatService:
         )
         run = await self._initialize_run_log(run)
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
+        await self._claim_issue_execution_for_assignment_run(
+            agent, run, context_snapshot
+        )
         await self._append_event(
             run,
             1,
@@ -1505,12 +1543,12 @@ class HeartbeatService:
                     "error": None,
                 },
             )
-            now = datetime.now(UTC)
-            issue.checkout_run_id = run.id
-            issue.execution_run_id = run.id
-            issue.execution_agent_name_key = _agent_name_key(agent.name)
-            issue.execution_locked_at = now
-            issue.updated_at = now
+            await self._claim_issue_execution_for_assignment_run(
+                agent,
+                run,
+                context_snapshot,
+                issue=issue,
+            )
             await self._append_event(
                 run,
                 1,
@@ -1528,6 +1566,38 @@ class HeartbeatService:
             await self._session.flush()
             return
 
+    async def _claim_issue_execution_for_assignment_run(
+        self,
+        agent: AgentRow,
+        run: HeartbeatRunRow,
+        context_snapshot: dict[str, Any],
+        *,
+        issue: IssueRow | None = None,
+    ) -> None:
+        if run.invocation_source != "assignment":
+            return
+        issue_id = _issue_id_from_context(context_snapshot)
+        if issue_id is None:
+            return
+        issue = issue or await self._session.get(IssueRow, issue_id)
+        if (
+            issue is None
+            or issue.org_id != run.org_id
+            or issue.assignee_agent_id != agent.id
+            or issue.status in {"done", "cancelled"}
+        ):
+            return
+        now = datetime.now(UTC)
+        issue.checkout_run_id = run.id
+        issue.execution_run_id = run.id
+        issue.execution_agent_name_key = _agent_name_key(agent.name)
+        issue.execution_locked_at = now
+        if issue.status in {"backlog", "todo"}:
+            issue.status = "in_progress"
+            if issue.started_at is None:
+                issue.started_at = now
+        issue.updated_at = now
+
     async def _next_event_sequence(self, run_id: str) -> int:
         events = await list_run_events(self._session, run_id, limit=1000)
         return (events[-1].seq if events else 0) + 1
@@ -1537,12 +1607,27 @@ class HeartbeatService:
         config = heartbeat if isinstance(heartbeat, dict) else {}
         enabled = config.get("enabled", True)
         interval = config.get("intervalSec", 0)
+        interval_sec = (
+            max(0.0, float(interval))
+            if isinstance(interval, (int, float)) and not isinstance(interval, bool)
+            else 0.0
+        )
+        wake_on_demand = (
+            config.get("wakeOnDemand")
+            if "wakeOnDemand" in config
+            else config.get("wakeOnAssignment")
+            if "wakeOnAssignment" in config
+            else config.get("wakeOnOnDemand")
+            if "wakeOnOnDemand" in config
+            else config.get("wakeOnAutomation", True)
+        )
         return {
             "enabled": enabled if isinstance(enabled, bool) else True,
-            "intervalSec": (
-                max(0.0, float(interval))
-                if isinstance(interval, (int, float)) and not isinstance(interval, bool)
-                else 0.0
+            "intervalSec": interval_sec
+            if interval_sec > 0
+            else float(HEARTBEAT_INTERVAL_DEFAULT_SEC),
+            "wakeOnDemand": (
+                wake_on_demand if isinstance(wake_on_demand, bool) else True
             ),
         }
 
@@ -1716,14 +1801,23 @@ class HeartbeatService:
         self, row: HeartbeatRunRow, issue: IssueRow
     ) -> dict[str, Any]:
         return {
+            "id": row.id,
             "runId": row.id,
+            "orgId": row.org_id,
             "status": row.status,
             "agentId": row.agent_id,
+            "invocationSource": row.invocation_source,
+            "triggerDetail": row.trigger_detail,
+            "retryOfRunId": row.retry_of_run_id,
+            "processLossRetryCount": row.process_loss_retry_count,
             "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
             "startedAt": row.started_at.isoformat() if row.started_at else None,
             "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
             "error": row.error,
             "summary": _run_summary(row.result_json),
+            "usageJson": row.usage_json,
+            "resultJson": row.result_json,
             "issueId": issue.id,
             "issueIdentifier": issue.identifier,
             "issueTitle": issue.title,

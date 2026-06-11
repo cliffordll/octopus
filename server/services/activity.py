@@ -193,10 +193,18 @@ class ActivityService:
         ]
 
     async def resolve_issue(self, raw_id: str) -> IssueRow | None:
-        statement = select(IssueRow).where(IssueRow.id == raw_id)
+        issue = (
+            await self._session.execute(select(IssueRow).where(IssueRow.id == raw_id))
+        ).scalar_one_or_none()
+        if issue is not None:
+            return issue
         if _looks_like_issue_identifier(raw_id):
-            statement = select(IssueRow).where(IssueRow.identifier == raw_id)
-        return (await self._session.execute(statement)).scalar_one_or_none()
+            return (
+                await self._session.execute(
+                    select(IssueRow).where(IssueRow.identifier == raw_id)
+                )
+            ).scalar_one_or_none()
+        return None
 
     def _apply_filters(self, statement: Any, query: ActivityQuery) -> Any:
         agent_id = query.get("agentId")

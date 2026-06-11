@@ -129,6 +129,68 @@ async def test_queued_run_resumes_after_concurrency_slot_is_available(
     assert resumed[0]["status"] == "succeeded"
 
 
+async def test_wake_on_demand_false_skips_non_timer_wakeup(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="DemandOff",
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "wakeOnDemand": False,
+            }
+        },
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    runs = (await session.execute(select(HeartbeatRun))).scalars().all()
+    assert run is None
+    assert wakeup.source == "on_demand"
+    assert wakeup.status == "skipped"
+    assert wakeup.error == "heartbeat.wakeOnDemand.disabled"
+    assert runs == []
+
+
+async def test_wake_on_demand_false_does_not_block_timer_wakeup(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerStillRuns",
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "wakeOnDemand": False,
+            }
+        },
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert timed[0]["id"] == run.id
+    assert wakeup.source == "timer"
+    assert wakeup.status == "queued"
+    assert run.invocation_source == "timer"
+
+
 async def test_paused_wakeup_coalesces_and_replays_on_resume(
     session: AsyncSession,
 ) -> None:

@@ -183,7 +183,7 @@ Step 14 剩余工作必须先补齐控制面可调用的服务端契约，再深
 ## 不包含
 
 - `gemini_local`、`cursor`、`pi_local` 本步骤不做。
-- `openclaw_gateway`、`hermes_local` 本步骤不做完整执行实现。
+- `openclaw_gateway`、`hermes_local` 本步骤不做完整执行实现；`openclaw_gateway` 已在后续 OpenClaw Gateway 工作中升级为真实 WebSocket Gateway runtime，Step 14 的该条只描述当阶段边界。
 - Workspace 生命周期与产物持久化，归 Step 15。
 - Workspace runtime service 建立、复用、释放和停止，归 Step 15。
 - Cost/activity 查询归 Step 21；budget 治理归 Step 22。
@@ -195,7 +195,7 @@ Step 14 剩余工作必须先补齐控制面可调用的服务端契约，再深
 ## 验收
 
 - `http` adapter 可以通过 heartbeat run 执行，并将成功、非 2xx、超时和网络错误写入兼容 run 结果。
-- Runtime environment test API 对 `process`、`codex_local`、`http`、`claude_local`、`opencode_local` 有真实 probe 结果；对 `gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 返回可解释的未纳入结果。
+- Runtime environment test API 对 `process`、`codex_local`、`http`、`claude_local`、`opencode_local` 有真实 probe 结果；对 `gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在 Step 14 当阶段返回可解释的未纳入结果。`openclaw_gateway` 的后续真实 probe 由 OpenClaw Gateway 实现覆盖。
 - `codex_local`、`claude_local` 与 `opencode_local` 的执行、取消、日志、进程元数据、session、usage、loaded skills、认证错误、模型错误和失败行为复用 Step 11/13 的 adapter contract 与 run 状态机。
 - Runtime model discovery 对 `codex_local` 与 `opencode_local` 有上游兼容发现与缓存，对 `claude_local` 有上游静态模型列表，对未纳入 runtime 有明确未支持结果。
 - Skills snapshot、sync、enable、private skill、analytics 对已纳入 runtime 有上游兼容响应结构和 activity 副作用。

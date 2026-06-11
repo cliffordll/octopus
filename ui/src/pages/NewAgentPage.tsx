@@ -7,6 +7,7 @@ import { organizationsApi } from "../api/organizations";
 import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { roleLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
@@ -16,12 +17,8 @@ const RUNTIMES: AgentRuntimeType[] = [
   "http",
   "claude_local",
   "codex_local",
-  "gemini_local",
   "opencode_local",
-  "pi_local",
-  "cursor",
   "openclaw_gateway",
-  "hermes_local",
 ];
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
@@ -30,6 +27,14 @@ function readJsonObject(value: string, label: string): Record<string, unknown> {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function readJsonObjectSafe(value: string): Record<string, unknown> {
+  try {
+    return readJsonObject(value, "Agent runtime config");
+  } catch {
+    return {};
+  }
 }
 
 function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntimeType, model: string): Record<string, unknown> {
@@ -107,6 +112,10 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
   }
+  function updateAgentRuntimeConfig(next: Record<string, unknown>) {
+    setAgentRuntimeConfig(JSON.stringify(next, null, 2));
+    setConfigurationError("");
+  }
   return (
       <form className="panel form agent-create-form" onSubmit={submit}>
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
@@ -182,10 +191,20 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           期望技能
           <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
         </label>
-        <label>
-          Agent runtime config
-          <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
-        </label>
+        <RuntimeConfigFields
+          advancedEditor={(
+            <details className="runtime-config-advanced">
+              <summary>高级 JSON</summary>
+              <label>
+                Agent runtime config
+                <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
+              </label>
+            </details>
+          )}
+          runtime={runtime}
+          value={readJsonObjectSafe(agentRuntimeConfig)}
+          onChange={updateAgentRuntimeConfig}
+        />
         <label>
           Metadata
           <textarea className="config-editor" value={metadata} onChange={(event) => setMetadata(event.target.value)} />
