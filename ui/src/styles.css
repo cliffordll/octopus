@@ -1235,7 +1235,9 @@ small {
 }
 
 .org-content-full > .chat-panel {
+  height: calc(100vh - 48px);
   max-width: none;
+  min-height: 0;
 }
 
 .org-content-full .agent-config-card,
@@ -5961,33 +5963,60 @@ pre {
   background: #0d131d;
   display: grid;
   grid-template-columns: 304px minmax(0, 1fr);
-  min-height: calc(100vh - 150px);
+  height: calc(100vh - 150px);
+  min-height: 560px;
   overflow: hidden;
+  position: relative;
+}
+
+.organization-skills-shell::after {
+  background: #202a3b;
+  content: "";
+  height: 1px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 81px;
+  z-index: 1;
+}
+
+.organization-skills-shell::before {
+  background: #202a3b;
+  content: "";
+  height: 1px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 165px;
+  z-index: 1;
 }
 
 .org-content-full .organization-skills-shell {
-  min-height: 100vh;
+  height: calc(100vh - 48px);
+  min-height: 560px;
 }
 
 .organization-skills-sidebar {
   border-right: 1px solid #202a3b;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
 }
 
 .organization-skills-sidebar-header {
   align-items: flex-start;
-  border-bottom: 1px solid #202a3b;
+  box-sizing: border-box;
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  min-height: 82px;
   padding: 12px 14px;
 }
 
 .organization-skills-sidebar-header .row-actions {
   flex-wrap: nowrap;
-  margin-top: 20px;
+  margin-top: 0;
   min-width: max-content;
 }
 
@@ -6029,7 +6058,10 @@ pre {
 
 .organization-skills-sidebar-header h1 {
   color: #eef4ff;
-  font-size: var(--text-lg);
+  font-size: var(--text-page);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: var(--line-tight);
   margin: 0;
 }
 
@@ -6096,8 +6128,7 @@ pre {
 
 .org-content-full > .page-header .eyebrow,
 .org-resource-hero-copy > .eyebrow,
-.heartbeat-card-header .eyebrow,
-.organization-skills-sidebar-header .eyebrow {
+.heartbeat-card-header .eyebrow {
   color: #73b6ff;
   font-size: var(--text-xs);
   font-weight: 700;
@@ -6109,8 +6140,7 @@ pre {
 
 .org-content-full > .page-header h1,
 .org-resource-hero h1,
-.heartbeat-card-header h1,
-.organization-skills-sidebar-header h1 {
+.heartbeat-card-header h1 {
   color: #f5f8ff;
   font-size: var(--text-page);
   font-weight: 700;
@@ -6120,8 +6150,7 @@ pre {
 }
 
 .org-content-full > .page-header .muted,
-.heartbeat-card-header p,
-.organization-skills-sidebar-header p {
+.heartbeat-card-header p {
   color: #8792a6;
   font-size: 12px;
   line-height: 1.45;
@@ -6136,16 +6165,25 @@ pre {
 }
 
 .organization-skill-search {
-  border-bottom: 1px solid #202a3b;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: 5px;
+  height: 84px;
+  justify-content: flex-start;
+  padding: 12px 14px 8px;
 }
 
 .organization-skill-search span {
   color: #8792a6;
   font-size: 11px;
+  line-height: 1.2;
+}
+
+.organization-skill-search input {
+  font-size: 13px;
+  min-height: 34px;
+  padding: 7px 9px;
 }
 
 .organization-skill-list-panel {
@@ -6245,16 +6283,19 @@ pre {
 .organization-skill-pane {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .organization-skill-pane-header {
-  align-items: center;
-  border-bottom: 1px solid #202a3b;
+  align-items: flex-end;
+  box-sizing: border-box;
   display: flex;
   gap: 16px;
   justify-content: space-between;
-  padding: 14px 18px;
+  min-height: 82px;
+  padding: 26px 18px 10px;
 }
 
 .organization-skill-pane-header > div:first-child {
@@ -6318,11 +6359,15 @@ pre {
 }
 
 .organization-skill-info-grid {
-  border-bottom: 1px solid #202a3b;
+  align-content: center;
+  box-sizing: border-box;
   display: grid;
-  gap: 10px;
+  column-gap: 22px;
+  row-gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 12px 18px;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  height: 84px;
+  padding: 9px 18px;
 }
 
 .organization-skill-readable-summary {
@@ -6348,42 +6393,37 @@ pre {
 }
 
 .organization-skill-info-grid div {
-  background: #101722;
-  border: 1px solid #202a3b;
-  border-radius: 10px;
+  align-items: center;
+  display: flex;
+  gap: 8px;
   min-width: 0;
-  padding: 10px;
 }
 
 .organization-skill-info-grid .organization-skill-info-grid-full {
-  align-items: center;
-  display: flex;
-  gap: 10px;
   grid-column: 1 / -1;
 }
 
 .organization-skill-info-grid div:not(.organization-skill-info-grid-full) {
-  align-items: center;
-  display: flex;
-  gap: 10px;
+  min-width: 0;
 }
 
 .organization-skill-info-grid span {
   color: #778397;
   display: block;
   font-size: 11px;
-  margin-bottom: 5px;
+  flex: 0 0 88px;
+  margin-bottom: 0;
+  text-align: left;
   white-space: nowrap;
-  width: 86px;
 }
 
 .organization-skill-info-grid div:not(.organization-skill-info-grid-full) span {
-  flex: 0 0 86px;
+  flex: 0 0 88px;
   margin-bottom: 0;
 }
 
 .organization-skill-info-grid .organization-skill-info-grid-full span {
-  flex: 0 0 86px;
+  flex: 0 0 88px;
   margin-bottom: 0;
 }
 
@@ -6392,8 +6432,9 @@ pre {
   display: block;
   font-size: 12px;
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .organization-skill-info-grid div:not(.organization-skill-info-grid-full) strong {
@@ -7836,8 +7877,10 @@ pre {
 .chat-panel {
   display: flex;
   flex-direction: column;
+  gap: 16px;
   min-height: calc(100vh - 145px);
   max-width: 860px;
+  overflow: hidden;
 }
 
 .chat-thread-shell {
@@ -7909,11 +7952,10 @@ pre {
   display: grid;
   gap: 10px;
   grid-template-columns:
-    minmax(140px, 1fr)
-    minmax(140px, 1fr)
-    minmax(140px, 1fr)
-    minmax(140px, 1fr)
-    minmax(140px, 1fr)
+    repeat(3, minmax(130px, 1fr))
+    auto
+    minmax(130px, 1fr)
+    auto
     auto;
 }
 
@@ -7942,6 +7984,7 @@ pre {
 
 .chat-context-controls-readonly select:disabled {
   appearance: none;
+  padding-left: 10px;
   padding-right: 42px;
 }
 
@@ -7954,6 +7997,8 @@ pre {
 }
 
 .chat-context-controls select {
+  box-sizing: border-box;
+  padding-left: 10px;
   width: 100%;
 }
 
@@ -7975,23 +8020,47 @@ pre {
 }
 
 .chat-context-help {
+  align-self: end;
   color: #7d899b;
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.25;
   margin: 0;
+  position: relative;
 }
 
 .chat-context-help summary {
+  align-items: center;
+  background: #0a0f17;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  color: #cbd7e8;
   cursor: pointer;
   display: inline-flex;
   font-size: 11px;
+  min-height: 24px;
   list-style-position: inside;
+  padding: 3px 8px;
+}
+
+.chat-context-help summary:hover {
+  background: #111827;
+  border-color: #334155;
+  color: #f0f6ff;
 }
 
 .chat-context-help div {
+  background: #101722;
+  border: 1px solid #263346;
+  border-radius: 12px;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 32%);
   display: grid;
   gap: 4px;
-  margin-top: 6px;
+  min-width: 280px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  z-index: 40;
 }
 
 .chat-context-help p {
@@ -8005,11 +8074,13 @@ pre {
   border-radius: 10px;
   color: #dce5f2;
   min-height: 38px;
+  min-width: 0;
   position: relative;
 }
 
 .chat-create-submit {
   align-self: end;
+  min-width: 110px;
   white-space: nowrap;
 }
 
@@ -8063,7 +8134,11 @@ pre {
 .chat-composer textarea {
   background: #090d14;
   border: 1px solid #3a4658;
-  min-height: 90px;
+  box-sizing: border-box;
+  height: 104px;
+  min-height: 104px;
+  padding-bottom: 12px;
+  padding-top: 12px;
   resize: vertical;
 }
 
@@ -8074,10 +8149,15 @@ pre {
 }
 
 .chat-compose-actions {
-  align-items: end;
+  align-items: center;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   justify-content: space-between;
+  min-height: 24px;
+}
+
+.chat-compose-actions > .muted {
+  line-height: 1.25;
 }
 
 .chat-messages {
@@ -8426,6 +8506,7 @@ pre {
   .agent-runs-layout,
   .agent-instructions-grid,
   .agent-property-row,
+  .organization-skill-info-grid,
   .project-runtime-grid,
   .agent-run-metrics,
   .agent-run-session,

@@ -122,10 +122,13 @@ export function ChatsPage() {
   }
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
-        <div><p className="eyebrow">Messages</p><h1>新对话</h1></div>
-      </header>
-      <section className="panel chat-panel">
+      <section className="chat-panel">
+        <header className="chat-thread-header">
+          <div>
+            <h1>新对话</h1>
+            <p>选择智能体后发送消息</p>
+          </div>
+        </header>
         <div className="chat-empty-state">
           <h2>你想让智能体处理什么？</h2>
           <p className="muted">选择智能体并发送第一条消息。</p>
@@ -134,10 +137,10 @@ export function ChatsPage() {
           {agents.isSuccess && chatAgentList.length === 0 && (
             <p className="muted">暂无可用于对话的智能体，请先创建或恢复智能体。</p>
           )}
-          <label aria-label="消息输入" className="chat-message-input">
+          <label className="chat-message-input">
             <textarea
               autoFocus
-              aria-label="消息"
+              aria-label="消息输入"
               placeholder="输入消息，Enter 发送，Shift+Enter 换行"
               value={body}
               onChange={(event) => setBody(event.target.value)}
