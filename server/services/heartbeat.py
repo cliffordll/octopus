@@ -1801,14 +1801,23 @@ class HeartbeatService:
         self, row: HeartbeatRunRow, issue: IssueRow
     ) -> dict[str, Any]:
         return {
+            "id": row.id,
             "runId": row.id,
+            "orgId": row.org_id,
             "status": row.status,
             "agentId": row.agent_id,
+            "invocationSource": row.invocation_source,
+            "triggerDetail": row.trigger_detail,
+            "retryOfRunId": row.retry_of_run_id,
+            "processLossRetryCount": row.process_loss_retry_count,
             "createdAt": row.created_at.isoformat(),
+            "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
             "startedAt": row.started_at.isoformat() if row.started_at else None,
             "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
             "error": row.error,
             "summary": _run_summary(row.result_json),
+            "usageJson": row.usage_json,
+            "resultJson": row.result_json,
             "issueId": issue.id,
             "issueIdentifier": issue.identifier,
             "issueTitle": issue.title,
