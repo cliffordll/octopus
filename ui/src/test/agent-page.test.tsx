@@ -42,6 +42,24 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: "succeeded", sessionDisplayId: "session-1", totalInputTokens: 10, totalOutputTokens: 5, totalCostCents: 1 });
     }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") {
+      return respond([
+        {
+          relationship: "assignee",
+          issueId: "issue-1",
+          identifier: "OCT-1",
+          title: "Wire inbox",
+          status: "in_progress",
+          priority: "medium",
+          checkoutRunId: null,
+          executionRunId: null,
+          wakeReason: "issue_comment_added",
+          wakeCommentId: "comment-1",
+          commentPreview: "Please update the implementation plan before continuing.",
+          updatedAt: "2026-06-11T00:00:00Z",
+        },
+      ]);
+    }
     if (path === "/api/agents/agent-1/instructions-bundle" && init?.method === "GET") {
       return respond({
         agentId: "agent-1",
@@ -152,6 +170,9 @@ it("controls an agent from its overview and shows runtime status", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1");
   const heading = await screen.findByRole("heading", { name: "Builder" });
+  expect(await screen.findByRole("heading", { name: "待办收件箱" })).toBeInTheDocument();
+  expect(screen.getByText("Wire inbox")).toBeInTheDocument();
+  expect(screen.getByText("Please update the implementation plan before continuing.")).toBeInTheDocument();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
@@ -350,6 +371,7 @@ it("assigns a task to the current agent from a modal", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
     }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/issues" && init?.method === "POST") return respond(createdIssue, 201);
     if (path === "/api/issues/issue-1" && init?.method === "GET") return respond(createdIssue);
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);

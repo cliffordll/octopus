@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
+import type { AgentInboxItem, AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -37,6 +37,12 @@ const RUN_SOURCE_HELP = [
   ["automation", "系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。"],
   ["on_demand", "用户在 UI 或 API 中手动触发一次运行。"],
 ] as const;
+
+function inboxRelationshipLabel(relationship: AgentInboxItem["relationship"]): string {
+  if (relationship === "reviewer") return "评审";
+  if (relationship === "mentioned") return "提及";
+  return "执行";
+}
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -850,6 +856,11 @@ export function AgentPage() {
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
   });
+  const inbox = useQuery({
+    queryKey: ["agent-inbox", agentId],
+    queryFn: () => agentsApi.inbox(agentId),
+    enabled: activeTab === "dashboard",
+  });
   const configuration = useQuery({
     queryKey: ["agent-configuration", agentId],
     queryFn: () => agentsApi.configuration(agentId),
@@ -1377,59 +1388,99 @@ export function AgentPage() {
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/budget`}>预算</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
-            <section className="panel agent-latest-run-card">
-              <div className="agent-latest-run-header">
-                <p className="eyebrow">Latest Run</p>
-              </div>
-              <div className="agent-latest-run-title-row">
-                {selectedRun ? (
-                  <>
-                    <h2>运行 {selectedRun.id.slice(0, 8)}</h2>
-                    <StatusPill status={selectedRun.status}>{statusLabel(selectedRun.status)}</StatusPill>
-                  </>
-                ) : (
-                  <h2 className="agent-latest-run-empty">暂无运行记录</h2>
+            <div className="agent-dashboard-column">
+              <section className="panel agent-latest-run-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Latest Run</p>
+                    <h2>最近运行</h2>
+                  </div>
+                </div>
+                <div className="agent-latest-run-title-row">
+                  {selectedRun ? (
+                    <>
+                      <strong>运行 {selectedRun.id.slice(0, 8)}</strong>
+                      <StatusPill status={selectedRun.status}>{statusLabel(selectedRun.status)}</StatusPill>
+                    </>
+                  ) : (
+                    <strong className="agent-latest-run-empty">暂无运行记录</strong>
+                  )}
+                </div>
+                <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
+                <dl className="detail-grid compact">
+                  <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
+                  <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
+                  <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
+                  <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
+                </dl>
+              </section>
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Runtime</p>
+                    <h2>运行状态</h2>
+                  </div>
+                </div>
+                {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+                {runtimeState.data && (
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
+                    <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
+                  </div>
                 )}
-              </div>
-              <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
-              <dl className="detail-grid compact">
-                <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
-                <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
-                <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
-                <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
-              </dl>
-            </section>
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Runtime</p>
-                  <h2>Runtime State</h2>
+              </section>
+            </div>
+            <div className="agent-dashboard-column">
+              <section className="panel agent-inbox-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Inbox</p>
+                    <h2>待办收件箱</h2>
+                  </div>
+                  <Badge>{inbox.data?.length ?? 0}</Badge>
                 </div>
-              </div>
-              {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-              {runtimeState.data && (
-                <div className="agent-summary-grid">
-                  <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
-                  <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                  <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
-                  <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
+                {inbox.error && <ErrorNotice error={inbox.error} />}
+                {inbox.isLoading && <p className="muted">载入中...</p>}
+                {inbox.data && inbox.data.length === 0 && <p className="muted">暂无待办事项。</p>}
+                {inbox.data && inbox.data.length > 0 && (
+                  <div className="agent-inbox-list">
+                    {inbox.data.map((item) => (
+                      <Link className="agent-inbox-row" key={`${item.relationship}-${item.issueId}`} to={`/orgs/${orgId}/issues/${item.issueId}`}>
+                        <div>
+                          <div className="agent-inbox-title-row">
+                            <Badge>{inboxRelationshipLabel(item.relationship)}</Badge>
+                            <strong>{item.identifier ?? item.issueId.slice(0, 8)}</strong>
+                          </div>
+                          <p>{item.title}</p>
+                          {item.commentPreview && <p className="agent-inbox-comment">{item.commentPreview}</p>}
+                        </div>
+                        <div className="agent-inbox-meta">
+                          <StatusPill status={item.status}>{statusLabel(item.status)}</StatusPill>
+                          <span>{item.priority}</span>
+                          <span>{formatDateTime(item.updatedAt)}</span>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Profile</p>
+                    <h2>智能体档案</h2>
+                  </div>
                 </div>
-              )}
-            </section>
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Profile</p>
-                  <h2>智能体档案</h2>
-                </div>
-              </div>
-              <dl className="agent-properties">
-                <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
-                <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
-                <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
-                <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
-              </dl>
-            </section>
+                <dl className="agent-properties">
+                  <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
+                  <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
+                  <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
+                  <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
+                </dl>
+              </section>
+            </div>
           </div>}
           {activeTab === "profile" && <section aria-label="Managed Instructions" className="agent-instructions-page">
             {save.error && <ErrorNotice error={save.error} />}

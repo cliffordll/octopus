@@ -625,6 +625,18 @@ describe("agent and heartbeat APIs", () => {
       expect.objectContaining({ method: "GET" }),
     );
   });
+
+  it("fetches agent inbox", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await agentsApi.inbox("agent-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agents/agent-1/inbox-lite",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
 });
 
 describe("run intelligence API", () => {

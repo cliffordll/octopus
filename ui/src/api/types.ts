@@ -869,6 +869,23 @@ export interface AgentDetail extends Agent {
   capabilities?: string | null;
 }
 
+export type AgentInboxRelationship = "assignee" | "reviewer" | "mentioned";
+
+export interface AgentInboxItem {
+  relationship: AgentInboxRelationship;
+  issueId: string;
+  identifier: string | null;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  checkoutRunId: string | null;
+  executionRunId: string | null;
+  wakeReason: string | null;
+  wakeCommentId: string | null;
+  commentPreview: string | null;
+  updatedAt: string;
+}
+
 export interface AgentConfiguration {
   id?: string;
   agentId?: string;

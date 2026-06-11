@@ -21,11 +21,13 @@ from packages.shared.api_paths.agents import (
     AGENT_CONFIG_REVISION_PATH,
     AGENT_CONFIG_ROLLBACK_PATH,
     AGENT_DETAIL_PATH,
+    AGENT_INBOX_PATH,
     AGENT_INSTRUCTIONS_BUNDLE_FILE_PATH,
     AGENT_INSTRUCTIONS_BUNDLE_PATH,
     AGENT_INSTRUCTIONS_PATH,
     AGENT_MEMORY_FILE_PATH,
     AGENT_MEMORY_FILES_PATH,
+    AGENT_ME_INBOX_PATH,
     AGENT_PAUSE_PATH,
     AGENT_RESET_SESSION_PATH,
     AGENT_RESUME_PATH,
@@ -74,6 +76,7 @@ from packages.shared.types.agent import (
     AgentInstructionsBundle,
     AgentInstructionsFileDetail,
     AgentInstructionsPathResult,
+    AgentInboxItem,
     AgentMemoryFileDetail,
     AgentMemoryFileList,
     AgentRuntimeState,
@@ -223,6 +226,46 @@ async def get_agent_route(
         )
     assert_organization_access(request, agent["orgId"])
     return agent
+
+
+@router.get(AGENT_ME_INBOX_PATH)
+async def get_current_agent_inbox_route(
+    request: Request,
+    service: AgentService = Depends(get_agent_service),
+) -> list[AgentInboxItem]:
+    actor = require_actor_identity(request)
+    if actor.actor_type != "agent":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent access required",
+        )
+    items = await service.list_inbox(actor.actor_id)
+    if items is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return items
+
+
+@router.get(AGENT_INBOX_PATH)
+async def get_agent_inbox_route(
+    id: str,
+    request: Request,
+    service: AgentService = Depends(get_agent_service),
+) -> list[AgentInboxItem]:
+    agent = await _get_agent_or_404(id, request=request, service=service)
+    actor = require_actor_identity(request)
+    if actor.actor_type == "agent" and actor.actor_id != id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent cannot access another agent inbox",
+        )
+    items = await service.list_inbox(agent["id"])
+    if items is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found"
+        )
+    return items
 
 
 @router.patch(AGENT_DETAIL_PATH)

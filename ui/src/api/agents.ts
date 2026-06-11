@@ -8,6 +8,7 @@ import type {
   AgentInstructionsPathResult,
   AgentDetail,
   AgentHireResult,
+  AgentInboxItem,
   AgentMemoryFileDetail,
   AgentMemoryFileList,
   AgentRuntimeEnvironmentTestResult,
@@ -97,6 +98,8 @@ export const agentsApi = {
     ),
   runtimeState: (agentId: string): Promise<AgentRuntimeState> =>
     request<AgentRuntimeState>(`${agentRoot(agentId)}/runtime-state`, { method: "GET" }),
+  inbox: (agentId: string): Promise<AgentInboxItem[]> =>
+    request<AgentInboxItem[]>(`${agentRoot(agentId)}/inbox-lite`, { method: "GET" }),
   taskSessions: (agentId: string): Promise<AgentTaskSession[]> =>
     request<AgentTaskSession[]>(`${agentRoot(agentId)}/task-sessions`, { method: "GET" }),
   resetSession: (agentId: string, payload: ResetAgentSessionPayload): Promise<AgentRuntimeState> =>
