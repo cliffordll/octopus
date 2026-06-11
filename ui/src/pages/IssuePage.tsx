@@ -28,7 +28,7 @@ import { Badge } from "../components/Badge";
 import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
-import { formatBytes, formatDateTime, priorityLabel, statusLabel } from "../utils/display";
+import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, statusLabel } from "../utils/display";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -36,6 +36,7 @@ const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
 const LIVE_RUN_REFETCH_MS = 1000;
 const AGENT_REPLY_COLLAPSE_CHARS = 600;
 const AGENT_REPLY_COLLAPSE_LINES = 8;
+const RUN_SUMMARY_PREVIEW_CHARS = 110;
 
 interface RunStreamCursor {
   lastSeq: number;
@@ -305,6 +306,11 @@ function runSummary(run: HeartbeatRun | null): string {
   return statusLabel(run.status);
 }
 
+function previewRunSummary(summary: string): string {
+  if (summary.length <= RUN_SUMMARY_PREVIEW_CHARS) return summary;
+  return `${summary.slice(0, RUN_SUMMARY_PREVIEW_CHARS).trimEnd()}...`;
+}
+
 function sourceReasonLabel(source: string | null | undefined): string {
   switch (source) {
     case "assignment":
@@ -432,6 +438,41 @@ function AgentReplyBody({ body }: { body: string }) {
 
 function formatIssueTime(value: string | null | undefined): string {
   return formatDateTime(value);
+}
+
+function numericUsageValue(run: HeartbeatRun, key: string): number {
+  const value = run.usageJson?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function issueRunCostSummary(runs: HeartbeatRun[]): {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalCostCents: number;
+  totalTokens: number;
+} {
+  return runs.reduce(
+    (summary, run) => {
+      const costCents = numericUsageValue(run, "costCents");
+      const costUsd = numericUsageValue(run, "costUsd");
+      const inputTokens = numericUsageValue(run, "inputTokens");
+      const outputTokens = numericUsageValue(run, "outputTokens");
+      const totalTokens = numericUsageValue(run, "totalTokens") || inputTokens + outputTokens;
+      summary.totalCostCents += costCents || Math.round(costUsd * 100);
+      summary.totalTokens += totalTokens;
+      summary.inputTokens += inputTokens;
+      summary.outputTokens += outputTokens;
+      summary.cachedInputTokens += numericUsageValue(run, "cachedInputTokens");
+      return summary;
+    },
+    { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, totalCostCents: 0, totalTokens: 0 },
+  );
 }
 
 function IssuePropertiesPanel({
@@ -565,6 +606,27 @@ function IssuePropertiesPanel({
         <div className="issue-property-row"><span>已完成</span><strong>{issue.completedAt ?? "-"}</strong></div>
         <div className="issue-property-row"><span>已创建</span><strong>{formatDateTime(issue.createdAt)}</strong></div>
         <div className="issue-property-row"><span>已更新</span><strong>{formatDateTime(issue.updatedAt)}</strong></div>
+      </div>
+    </section>
+  );
+}
+
+function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
+  const costSummary = issueRunCostSummary(runs);
+  return (
+    <section aria-label="任务成本" className="panel issue-cost-card">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Usage & Cost</p>
+          <h2>成本</h2>
+        </div>
+      </div>
+      <div className="issue-property-list">
+        <div className="issue-property-row"><span>成本</span><strong>{formatMoneyCents(costSummary.totalCostCents)}</strong></div>
+        <div className="issue-property-row"><span>Total tokens</span><strong>{costSummary.totalTokens.toLocaleString()}</strong></div>
+        <div className="issue-property-row"><span>输入</span><strong>{costSummary.inputTokens.toLocaleString()}</strong></div>
+        <div className="issue-property-row"><span>输出</span><strong>{costSummary.outputTokens.toLocaleString()}</strong></div>
+        <div className="issue-property-row"><span>已缓存</span><strong>{costSummary.cachedInputTokens.toLocaleString()}</strong></div>
       </div>
     </section>
   );
@@ -893,6 +955,7 @@ function IssueRunsPanel({
   runs: HeartbeatRun[];
 }) {
   const displayRuns = [...runs].sort((left, right) => runSortTime(left) - runSortTime(right));
+  const [expandedSummaryRunIds, setExpandedSummaryRunIds] = useState<Set<string>>(() => new Set());
   const content = runs.length === 0 ? (
     <p className="muted">暂无运行记录。</p>
   ) : (
@@ -908,51 +971,85 @@ function IssueRunsPanel({
           triggerDetail: run.triggerDetail ?? displayRun.triggerDetail,
         };
         const summary = runSummary(displayRun);
+        const summaryExpanded = expandedSummaryRunIds.has(runId);
+        const summaryExpandable = summary.length > RUN_SUMMARY_PREVIEW_CHARS;
+        const visibleSummary = summaryExpanded || !summaryExpandable ? summary : previewRunSummary(summary);
         const isSelected = runId === currentRunId;
         const isExpanded = runId === expandedRunId;
         return (
-          <div className={`issue-run-record-group${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
-            <button
-              className={`issue-run-record${isSelected ? " active" : ""}`}
-              onClick={() => onSelect(runId)}
-              type="button"
-            >
-              <div className="issue-run-record-header">
-                <div className="issue-run-record-title">
-                  <Badge>第 {index + 1} 次</Badge>
-                  <strong>{runId}</strong>
+          <article className={`issue-run-record-group${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
+            <div className={`issue-run-record-main-row${isSelected ? " active" : ""}`}>
+              <button
+                className={`issue-run-record${isSelected ? " active" : ""}`}
+                onClick={() => onSelect(runId)}
+                type="button"
+              >
+                <span className="issue-run-record-index">第 {index + 1} 次</span>
+                <div className="issue-run-record-header">
+                  <div className="issue-run-record-title">
+                    <strong>{runId}</strong>
+                    <span className="issue-run-record-badges">
+                      <Badge>{runReasonLabel(reasonRun, displayRuns)}</Badge>
+                      <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
+                    </span>
+                  </div>
                 </div>
-                <span className="issue-run-record-badges">
-                  <Badge>{runReasonLabel(reasonRun, displayRuns)}</Badge>
-                  <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
-                </span>
-              </div>
-              <dl className="issue-run-record-meta">
-                <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
-                <div><dt>创建时间</dt><dd>{formatIssueTime(displayRun.createdAt)}</dd></div>
-                <div><dt>开始时间</dt><dd>{formatIssueTime(displayRun.startedAt)}</dd></div>
-              </dl>
+                <dl className="issue-run-record-meta">
+                  <div><dt>执行智能体</dt><dd>{agentName(displayRun.agentId, agentsById)}</dd></div>
+                  <div><dt>创建时间</dt><dd>{formatIssueTime(displayRun.createdAt)}</dd></div>
+                  <div><dt>开始时间</dt><dd>{formatIssueTime(displayRun.startedAt)}</dd></div>
+                </dl>
+              </button>
               {summary && (
-                <p className="issue-run-record-summary">
-                  <span>运行输出摘要</span>
-                  {summary}
-                </p>
+                <div className={`issue-run-record-summary${summaryExpanded ? " expanded" : ""}`}>
+                  <span>输出摘要</span>
+                  <p>
+                    {summaryExpandable && !summaryExpanded ? (
+                      visibleSummary.slice(0, -3)
+                    ) : summaryExpandable && summaryExpanded ? (
+                      visibleSummary
+                    ) : (
+                      visibleSummary
+                    )}
+                  </p>
+                  {summaryExpandable && (
+                    <button
+                      aria-label={summaryExpanded ? `收起运行摘要 ${runId}` : `展开运行摘要 ${runId}`}
+                      className="issue-run-summary-more"
+                      title={summaryExpanded ? "收起摘要" : "展开摘要"}
+                      onClick={() => {
+                        setExpandedSummaryRunIds((current) => {
+                          const next = new Set(current);
+                          if (summaryExpanded) {
+                            next.delete(runId);
+                          } else {
+                            next.add(runId);
+                          }
+                          return next;
+                        });
+                      }}
+                      type="button"
+                    >
+                      {summaryExpanded ? "收起" : "展开"}
+                    </button>
+                  )}
+                </div>
               )}
-            </button>
-            <button
-              aria-label={isExpanded ? `折叠运行 ${runId}` : `展开运行 ${runId}`}
-              className="secondary small-button issue-run-record-toggle"
-              onClick={() => onToggle(runId)}
-              type="button"
-            >
-              {isExpanded ? "折叠" : "展开"}
-            </button>
+              <button
+                aria-label={isExpanded ? `折叠运行 ${runId}` : `展开运行 ${runId}`}
+                className="secondary small-button issue-run-record-toggle"
+                onClick={() => onToggle(runId)}
+                type="button"
+              >
+                {isExpanded ? "折叠" : "展开"}
+              </button>
+            </div>
             {isExpanded && renderSelectedRunDetails && (
               <div className="issue-run-record-details">
                 {renderSelectedRunDetails()}
               </div>
             )}
-          </div>
+          </article>
         );
       })}
     </div>
@@ -1378,7 +1475,6 @@ export function IssuePage() {
   const [executeNotice, setExecuteNotice] = useState("");
   const [subIssueTitle, setSubIssueTitle] = useState("");
   const [reviewNotice, setReviewNotice] = useState("");
-  const [runsHidden, setRunsHidden] = useState(true);
   const [heartbeatContextHidden, setHeartbeatContextHidden] = useState(true);
   const [currentRunId, setCurrentRunId] = useState(() => {
     if (!orgId || !issueId) return "";
@@ -1787,7 +1883,7 @@ export function IssuePage() {
       {projects.error && <ErrorNotice error={projects.error} />}
       {issue.data && (
         <div className="issue-detail-layout">
-          <main className="issue-detail-main">
+          <header className="issue-detail-top">
             <nav aria-label="任务导航" className="issue-breadcrumb">
               <Link to={`/orgs/${orgId}/issues`}>任务</Link>
               <span>/</span>
@@ -1829,7 +1925,6 @@ export function IssuePage() {
                   <Link className="button secondary small-button" to={`/orgs/${orgId}/chats`}>聊天</Link>
                 </div>
               </div>
-              <p className="issue-description">{issue.data.description || "暂无描述"}</p>
             </div>
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
             {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
@@ -1839,6 +1934,10 @@ export function IssuePage() {
                 最新运行{statusLabel(latestRun.status)}：{latestRun.error.trim()}
               </p>
             )}
+          </header>
+
+          <main className="issue-detail-main">
+            <p className="issue-description">{issue.data.description || "暂无描述"}</p>
 
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">
@@ -1934,94 +2033,82 @@ export function IssuePage() {
                 </div>
                 <div className="issue-section-heading-actions">
                   <span className="muted">{issueRuns.data?.length ?? 0} 次运行</span>
-                  <button
-                    aria-label={runsHidden ? "展开运行记录" : "折叠运行记录"}
-                    className="secondary small-button"
-                    onClick={() => setRunsHidden((hidden) => !hidden)}
-                    type="button"
-                  >
-                    {runsHidden ? "展开" : "折叠"}
-                  </button>
                 </div>
               </div>
 
-              {!runsHidden && (
-                <>
-                  <IssueRunsPanel
-                    agentsById={agentsById}
-                    currentRun={runDetail.data ?? null}
-                    currentRunId={currentRunId}
-                    embedded
-                    expandedRunId={expandedRunId}
-                    onSelect={(runId) => {
-                      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-                      setCurrentRunId(runId);
-                      setExpandedRunId(runId);
-                    }}
-                    onToggle={(runId) => {
-                      if (expandedRunId === runId) {
-                        setExpandedRunId("");
-                        return;
-                      }
-                      localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
-                      setCurrentRunId(runId);
-                      setExpandedRunId(runId);
-                    }}
-                    renderSelectedRunDetails={() => (
-                      <>
-                        {currentRunId && (
-                          <IssueRunOutputPanel
-                            data={{
-                              events: runEvents,
-                              operations: runWorkspaceOperations,
-                              run: runDetail,
-                            }}
-                            onCancel={() => cancelRun.mutate()}
-                            onRetry={() => retryRun.mutate()}
-                            runId={currentRunId}
-                            streamActive={streamActiveRunId === currentRunId}
-                            streamError={streamErrorsByRun[currentRunId] ?? null}
-                            streamLog={streamLogsByRun[currentRunId] ?? ""}
-                          />
-                        )}
-                        {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
-                        {retryRun.error && <ErrorNotice error={retryRun.error} />}
-
-                        <section aria-label="心跳上下文" className="issue-run-output-block">
-                          <div className="issue-section-heading">
-                            <div>
-                              <p className="eyebrow">HEARTBEAT CONTEXT</p>
-                              <h2>心跳上下文 · {currentRunId || "未选择运行"}</h2>
-                            </div>
-                            <div className="issue-section-heading-actions">
-                              <span className="muted">运行输入</span>
-                              <button
-                                aria-label={heartbeatContextHidden ? "展开心跳上下文" : "折叠心跳上下文"}
-                                className="secondary small-button"
-                                onClick={() => setHeartbeatContextHidden((hidden) => !hidden)}
-                                type="button"
-                              >
-                                {heartbeatContextHidden ? "展开" : "折叠"}
-                              </button>
-                            </div>
-                          </div>
-                          {!heartbeatContextHidden && heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
-                          {!heartbeatContextHidden && heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
-                          {!heartbeatContextHidden && heartbeatContext.data && (
-                            <details className="issue-run-inline-details">
-                              <summary>查看心跳上下文 JSON</summary>
-                              <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
-                            </details>
-                          )}
-                        </section>
-
-                        <IssueWorkProductsPanel embedded issue={issue.data} latestRunStatus={latestRun?.status} selectedRunId={currentRunId} />
-                      </>
+              <IssueRunsPanel
+                agentsById={agentsById}
+                currentRun={runDetail.data ?? null}
+                currentRunId={currentRunId}
+                embedded
+                expandedRunId={expandedRunId}
+                onSelect={(runId) => {
+                  localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+                  setCurrentRunId(runId);
+                  setExpandedRunId(runId);
+                }}
+                onToggle={(runId) => {
+                  if (expandedRunId === runId) {
+                    setExpandedRunId("");
+                    return;
+                  }
+                  localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+                  setCurrentRunId(runId);
+                  setExpandedRunId(runId);
+                }}
+                renderSelectedRunDetails={() => (
+                  <>
+                    {currentRunId && (
+                      <IssueRunOutputPanel
+                        data={{
+                          events: runEvents,
+                          operations: runWorkspaceOperations,
+                          run: runDetail,
+                        }}
+                        onCancel={() => cancelRun.mutate()}
+                        onRetry={() => retryRun.mutate()}
+                        runId={currentRunId}
+                        streamActive={streamActiveRunId === currentRunId}
+                        streamError={streamErrorsByRun[currentRunId] ?? null}
+                        streamLog={streamLogsByRun[currentRunId] ?? ""}
+                      />
                     )}
-                    runs={issueRuns.data ?? []}
-                  />
-                </>
-              )}
+                    {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
+                    {retryRun.error && <ErrorNotice error={retryRun.error} />}
+
+                    <section aria-label="心跳上下文" className="issue-run-output-block">
+                      <div className="issue-section-heading">
+                        <div>
+                          <p className="eyebrow">HEARTBEAT CONTEXT</p>
+                          <h2>心跳上下文 · {currentRunId || "未选择运行"}</h2>
+                        </div>
+                        <div className="issue-section-heading-actions">
+                          <span className="muted">运行输入</span>
+                          <button
+                            aria-label={heartbeatContextHidden ? "展开心跳上下文" : "折叠心跳上下文"}
+                            className="secondary small-button"
+                            onClick={() => setHeartbeatContextHidden((hidden) => !hidden)}
+                            type="button"
+                          >
+                            {heartbeatContextHidden ? "展开" : "折叠"}
+                          </button>
+                        </div>
+                      </div>
+                      {!heartbeatContextHidden && heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
+                      {!heartbeatContextHidden && heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
+                      {!heartbeatContextHidden && heartbeatContext.data && (
+                        <details className="issue-run-inline-details">
+                          <summary>查看心跳上下文 JSON</summary>
+                          <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
+                        </details>
+                      )}
+                    </section>
+
+                    <IssueWorkProductsPanel embedded issue={issue.data} latestRunStatus={latestRun?.status} selectedRunId={currentRunId} />
+                  </>
+                )}
+                runs={issueRuns.data ?? []}
+              />
             </section>
 
             <IssueDocumentsPanel issueId={issueId} />
@@ -2154,12 +2241,6 @@ export function IssuePage() {
 
           <aside className="issue-detail-sidebar">
             <div className="issue-sidebar-sticky">
-              <div className="issue-sidebar-actions">
-                <button className="secondary small-button" type="button" onClick={() => navigator.clipboard?.writeText(issue.data.id)}>
-                  复制 ID
-                </button>
-                <Link className="button secondary small-button" to={`/orgs/${orgId}/chats`}>聊天</Link>
-              </div>
               <IssuePropertiesPanel
                 agents={agentList}
                 goals={goalList}
@@ -2168,6 +2249,7 @@ export function IssuePage() {
                 onUpdate={(payload) => updateIssue.mutate(payload)}
                 projects={projectList}
               />
+              <IssueCostPanel runs={issueRuns.data ?? []} />
               {updateIssue.error && <ErrorNotice error={updateIssue.error} />}
             </div>
           </aside>

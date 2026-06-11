@@ -217,6 +217,7 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
             .scalars()
             .all()
         )
+        issue = await verify.get(Issue, body["id"])
 
     assert wakeup.source == "assignment"
     assert wakeup.trigger_detail == "system"
@@ -252,6 +253,10 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     assert [(event.seq, event.event_type, event.message) for event in events] == [
         (1, "lifecycle", "run queued")
     ]
+    assert issue is not None
+    assert issue.status == "in_progress"
+    assert issue.execution_run_id == run.id
+    assert issue.checkout_run_id == run.id
 
 
 async def test_create_assigned_issue_skips_wakeup_when_on_demand_disabled(
