@@ -742,9 +742,7 @@ _LOCAL_CODEX_HOME_CREDENTIAL_ENTRIES = (
 )
 
 
-def _sync_local_codex_home_entries(
-    source_home: Path, target_codex_home: Path
-) -> list[str]:
+def _sync_local_codex_home_entries(source_home: Path, target_codex_home: Path) -> list[str]:
     source_codex_home = source_home / ".codex"
     if _same_path(source_codex_home, target_codex_home):
         return []
