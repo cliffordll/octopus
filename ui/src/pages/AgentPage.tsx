@@ -31,6 +31,12 @@ const DEFAULT_HEARTBEAT_POLICY = {
   maxConcurrentRuns: 3,
 };
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
+const RUN_SOURCE_HELP = [
+  ["timer", "定时心跳到点触发，用来检查智能体是否需要继续工作。"],
+  ["assignment", "任务分配后触发，通常来自 issue 指派给该智能体。"],
+  ["automation", "系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。"],
+  ["on_demand", "用户在 UI 或 API 中手动触发一次运行。"],
+] as const;
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -2093,6 +2099,17 @@ export function AgentPage() {
                   <p className="muted">最近运行</p>
                 </div>
               </div>
+              <details className="agent-run-source-help">
+                <summary>来源说明</summary>
+                <dl aria-label="Run 来源说明">
+                  {RUN_SOURCE_HELP.map(([source, description]) => (
+                    <div key={source}>
+                      <dt>{sourceLabel(source)}</dt>
+                      <dd>{description}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
               {runs.isSuccess && sortedRuns.length === 0 && <p className="muted">暂无运行记录。</p>}
               {sortedRuns.map((run) => (
                 <button
@@ -2101,12 +2118,15 @@ export function AgentPage() {
                   onClick={() => setSelectedRunId(run.id)}
                   type="button"
                 >
-                  <span>
-                    <strong>{run.id.slice(0, 8)}</strong>
-                    <small>{sourceLabel(run.invocationSource)} · {summarizeRun(run)}</small>
+                  <span className="agent-run-list-copy">
+                    <span className="agent-run-list-title-row">
+                      <strong>{run.id.slice(0, 8)}</strong>
+                      <Badge>{sourceLabel(run.invocationSource)}</Badge>
+                    </span>
+                    <small>{summarizeRun(run)}</small>
                     {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
                   </span>
-                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
                 </button>
               ))}
             </aside>

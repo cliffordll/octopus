@@ -465,6 +465,15 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
           usageJson: { inputTokens: 10, outputTokens: 2 },
           createdAt: "2026-05-29T01:00:00Z",
         },
+        {
+          id: "run-automation",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "failed",
+          invocationSource: "automation",
+          triggerDetail: "issue_passive_followup",
+          createdAt: "2026-05-28T23:56:00Z",
+        },
       ]);
     }
     return respond({ ...agent, name: "Builder 2" });
@@ -507,8 +516,8 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
   const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
   expect(queueRegion).toHaveTextContent("2 个活跃运行");
-  expect(screen.getByText("定时心跳")).toBeInTheDocument();
-  expect(screen.getByText("任务分配")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("定时心跳")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
   expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
@@ -523,7 +532,15 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("raw run log")).toBeInTheDocument();
   expect(within(detail).getByText("npm test")).toBeInTheDocument();
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
-  expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
+  const rail = screen.getByTestId("agent-runs-list-pane");
+  expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("定时心跳").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getByText("定时心跳到点触发，用来检查智能体是否需要继续工作。")).toBeInTheDocument();
+  expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
+  expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
+  expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
 });
 
 it("saves heartbeat policy from the agent configuration form", async () => {
