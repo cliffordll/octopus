@@ -1105,6 +1105,16 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     operator_home.joinpath(".npmrc").write_text(
         "//registry.npmjs.org/:_authToken=test\n", encoding="utf-8"
     )
+    operator_home.joinpath(".codex").mkdir()
+    operator_home.joinpath(".codex", "auth.json").write_text(
+        '{"tokens":"test"}\n', encoding="utf-8"
+    )
+    operator_home.joinpath(".codex", "cap_sid").write_text(
+        "test-capability-session\n", encoding="utf-8"
+    )
+    operator_home.joinpath(".codex", "config.toml").write_text(
+        "model = \"gpt-test\"\n", encoding="utf-8"
+    )
     codex_home = tmp_path / "codex-home"
     captured_env: dict[str, str] = {}
     logs: list[tuple[str, str]] = []
@@ -1172,7 +1182,14 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     )
     assert managed_home.joinpath(".config", "gh", "hosts.yml").exists()
     assert managed_home.joinpath(".npmrc").exists()
+    assert codex_home.joinpath("auth.json").exists()
+    assert codex_home.joinpath("cap_sid").exists()
+    assert codex_home.joinpath("config.toml").exists()
     assert any("Shared 2 local CLI credential entries" in chunk for _, chunk in logs)
+    assert any(
+        "Shared 3 local Codex credential entries into managed CODEX_HOME" in chunk
+        for _, chunk in logs
+    )
 
 
 async def test_codex_execute_retries_unknown_resume_session(
