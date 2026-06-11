@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
@@ -641,11 +642,24 @@ async def test_issue_checkout_route_atomically_claims_issue_for_agent(
     assert body["assigneeAgentId"] == agent_id
     assert body["checkoutRunId"] is None
     assert body["executionRunId"] is None
+    tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
+    if tasks:
+        await asyncio.gather(*tasks)
     async with session_factory() as verify:
         row = await verify.get(Issue, issue_id)
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert row is not None
         assert row.status == "in_progress"
         assert row.assignee_agent_id == agent_id
+    assert any(run.status in {"running", "succeeded", "failed"} for run in runs)
 
     conflict_code, conflict = await _request(
         app,
