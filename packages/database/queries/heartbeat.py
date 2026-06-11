@@ -109,6 +109,19 @@ async def list_running_run_ids(session: AsyncSession, agent_id: str) -> set[str]
     return set(result.all())
 
 
+async def has_active_timer_run(session: AsyncSession, agent_id: str) -> bool:
+    result = await session.scalars(
+        select(HeartbeatRun.id)
+        .where(
+            HeartbeatRun.agent_id == agent_id,
+            HeartbeatRun.invocation_source == "timer",
+            HeartbeatRun.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )
+    return result.first() is not None
+
+
 async def list_runs_by_status(
     session: AsyncSession, status: str
 ) -> Sequence[HeartbeatRun]:
