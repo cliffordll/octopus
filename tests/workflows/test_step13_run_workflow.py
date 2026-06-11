@@ -191,6 +191,42 @@ async def test_wake_on_demand_false_does_not_block_timer_wakeup(
     assert run.invocation_source == "timer"
 
 
+async def test_timer_wakeup_does_not_stack_when_timer_run_is_active(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerCoalesces",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        first_tick = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+        second_tick = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=4)
+        )
+
+    assert len(first_tick) == 1
+    assert second_tick == []
+
+    async with async_transaction(session):
+        run = await session.get(HeartbeatRun, first_tick[0]["id"])
+        assert run is not None
+        assert run.invocation_source == "timer"
+        assert run.status == "queued"
+        run.status = "running"
+        running_tick = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=6)
+        )
+
+    runs = (await session.execute(select(HeartbeatRun))).scalars().all()
+    assert running_tick == []
+    assert len(runs) == 1
+
+
 async def test_paused_wakeup_coalesces_and_replays_on_resume(
     session: AsyncSession,
 ) -> None:

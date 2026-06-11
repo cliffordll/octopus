@@ -27,6 +27,7 @@ from packages.database.queries.heartbeat import (
     create_wakeup_request,
     get_run,
     get_wakeup_by_idempotency_key,
+    has_active_timer_run,
     list_queued_agent_ids,
     list_queued_runs,
     list_run_events,
@@ -739,6 +740,8 @@ class HeartbeatService:
                 or policy["intervalSec"] <= 0
                 or checked_at - baseline < timedelta(seconds=policy["intervalSec"])
             ):
+                continue
+            if await has_active_timer_run(self._session, agent.id):
                 continue
             run = await self.wakeup(
                 agent.id,
