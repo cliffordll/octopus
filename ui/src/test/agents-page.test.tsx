@@ -422,7 +422,8 @@ it("manages runtime providers and models from settings", async () => {
   expect(document.documentElement.lang).toBe("en-US");
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
-  expect(await dialog.findByRole("heading", { name: "Runtime Providers" })).toBeInTheDocument();
+  expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.getAllByText("Runtime Providers")).toHaveLength(1);
   const englishKimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   expect(englishKimiProvider.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   expect(englishKimiProvider.queryByRole("button", { name: "Edit" })).toBeInTheDocument();

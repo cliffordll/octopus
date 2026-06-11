@@ -331,6 +331,14 @@ small {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.runtime-provider-settings {
+  gap: 6px;
+}
+
+.runtime-provider-settings .runtime-provider-heading {
+  margin-bottom: 0;
+}
+
 .runtime-provider-heading {
   align-items: center;
   display: grid;
@@ -523,6 +531,11 @@ small {
   display: flex;
   gap: 10px;
   min-width: 0;
+}
+
+.runtime-provider-title-line h3,
+.runtime-provider-title-line p {
+  margin: 0;
 }
 
 .settings-section-heading-copy {
