@@ -57,6 +57,7 @@ from packages.shared.validators.work_product import (
     validate_update_issue_work_product,
 )
 from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.heartbeat import get_wakeup_by_idempotency_key
 
 from ..dependencies.access import (
     assert_organization_access,
@@ -99,6 +100,29 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
 
 def _mentioned_tokens(body: str) -> set[str]:
     return {match.group(1).strip().lower() for match in _MENTION_PATTERN.finditer(body)}
+
+
+def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
+    if wakeup is None:
+        return "Issue assignee is not invokable"
+    if wakeup.status == "deferred_agent_paused":
+        return (
+            "Issue execution was deferred because the assignee agent is paused. "
+            "Resume the agent to continue."
+        )
+    if wakeup.status == "deferred_issue_execution":
+        return (
+            "Issue execution was deferred because the issue already has an active "
+            "execution run. It will continue after the active run finishes."
+        )
+    if wakeup.status == "skipped" and wakeup.error == "heartbeat.wakeOnDemand.disabled":
+        return (
+            "Issue execution was skipped because the assignee agent has on-demand "
+            "wakeup disabled."
+        )
+    if wakeup.status == "skipped" and wakeup.error:
+        return f"Issue execution was skipped: {wakeup.error}"
+    return "Issue assignee is not invokable"
 
 
 async def _mentioned_agents(
@@ -406,11 +430,12 @@ async def execute_issue_route(
         return active
 
     actor = require_actor_identity(request)
+    idempotency_key = f"issue:{id}:execute"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
         "reason": "issue_execute",
-        "idempotencyKey": f"issue:{id}:execute",
+        "idempotencyKey": idempotency_key,
         "payload": {"issueId": id, "mutation": "execute"},
         "contextSnapshot": {
             "issueId": id,
@@ -440,9 +465,20 @@ async def execute_issue_route(
             detail=str(exc),
         ) from exc
     if run is None:
+        wakeup = await get_wakeup_by_idempotency_key(
+            session, assignee_agent_id, idempotency_key
+        )
+        if wakeup is not None:
+            return JSONResponse(
+                status_code=http_status.HTTP_202_ACCEPTED,
+                content={
+                    "status": wakeup.status,
+                    "detail": _issue_execute_unavailable_detail(wakeup),
+                },
+            )
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail="Issue assignee is not invokable",
+            detail=_issue_execute_unavailable_detail(wakeup),
         )
     enriched = await heartbeat.get(run["id"])
     assert enriched is not None
