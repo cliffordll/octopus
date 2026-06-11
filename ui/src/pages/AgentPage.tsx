@@ -30,6 +30,7 @@ const DEFAULT_HEARTBEAT_POLICY = {
   preflightEnabled: true,
   maxConcurrentRuns: 3,
 };
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -310,6 +311,34 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
+}
+
+function activeRuns(runs: HeartbeatRun[]): HeartbeatRun[] {
+  return runs.filter((run) => ACTIVE_RUN_STATUSES.has(run.status));
+}
+
+function sourceCounts(runs: HeartbeatRun[]): Array<{ count: number; source: string }> {
+  const counts = new Map<string, number>();
+  for (const run of runs) counts.set(run.invocationSource, (counts.get(run.invocationSource) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([source, count]) => ({ count, source }))
+    .sort((left, right) => right.count - left.count || sourceLabel(left.source).localeCompare(sourceLabel(right.source)));
+}
+
+function heartbeatMaxConcurrentRuns(runtimeConfig: Record<string, unknown> | null | undefined): number {
+  const heartbeat = runtimeConfig ? asRecord(runtimeConfig.heartbeat) : null;
+  const value = heartbeat?.maxConcurrentRuns;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_HEARTBEAT_POLICY.maxConcurrentRuns;
+}
+
+function runIssueLabel(run: HeartbeatRun): string {
+  return run.issueIdentifier ?? run.issueTitle ?? run.issueId ?? "";
+}
+
+function triggerLabel(run: HeartbeatRun): string {
+  return run.triggerDetail ? sourceLabel(run.triggerDetail) : sourceLabel(run.invocationSource);
 }
 
 function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
@@ -704,6 +733,71 @@ function AgentRunDetail({
   );
 }
 
+function AgentQueuePanel({
+  maxConcurrentRuns,
+  orgId,
+  runs,
+}: {
+  maxConcurrentRuns: number;
+  orgId: string;
+  runs: HeartbeatRun[];
+}) {
+  const runningCount = runs.filter((run) => run.status === "running").length;
+  const queuedCount = runs.filter((run) => run.status === "queued").length;
+  const counts = sourceCounts(runs);
+  return (
+    <section aria-label="活跃队列" className="panel agent-active-queue">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">QUEUE</p>
+          <h2>活跃队列</h2>
+        </div>
+        <Badge>{runs.length} 个活跃运行</Badge>
+      </div>
+      {runs.length === 0 ? (
+        <p className="muted">当前没有排队或运行中的 run。</p>
+      ) : (
+        <>
+          <div className="agent-queue-metrics">
+            <div><span>运行中</span><strong>{runningCount}</strong></div>
+            <div><span>排队中</span><strong>{queuedCount}</strong></div>
+            <div><span>并发上限</span><strong>{maxConcurrentRuns}</strong></div>
+          </div>
+          <div className="agent-queue-source-list" aria-label="来源分布">
+            {counts.map((item) => (
+              <span key={item.source}>
+                {sourceLabel(item.source)}
+                <strong>{item.count}</strong>
+              </span>
+            ))}
+          </div>
+          <div className="agent-queue-run-list">
+            {runs.slice(0, 5).map((run) => {
+              const issueLabel = runIssueLabel(run);
+              return (
+                <article className="agent-queue-run" key={run.id}>
+                  <div>
+                    <strong>{run.id.slice(0, 8)}</strong>
+                    <span>{triggerLabel(run)}</span>
+                  </div>
+                  <div className="agent-queue-run-meta">
+                    {issueLabel && run.issueId ? (
+                      <Link to={`/orgs/${orgId}/issues/${run.issueId}`}>{issueLabel}</Link>
+                    ) : issueLabel ? (
+                      <span>{issueLabel}</span>
+                    ) : null}
+                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
   const activeTab = ["dashboard", "profile", "memory", "configuration", "skills", "runs", "budget"].includes(tab) ? tab : "dashboard";
@@ -1016,6 +1110,11 @@ export function AgentPage() {
     () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
     [runRows],
   );
+  const sortedActiveRuns = useMemo(
+    () => activeRuns(sortedRuns),
+    [sortedRuns],
+  );
+  const maxConcurrentRuns = heartbeatMaxConcurrentRuns(agent.data?.runtimeConfig ?? null);
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", selectedRun?.id],
@@ -1973,17 +2072,20 @@ export function AgentPage() {
           </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
-            <AgentRunDetail
-              events={runEvents.data ?? []}
-              eventsError={runEvents.error}
-              eventsLoading={runEvents.isLoading}
-              log={runLog.data}
-              logError={runLog.error}
-              operations={runWorkspaceOperations.data ?? []}
-              operationsError={runWorkspaceOperations.error}
-              operationsLoading={runWorkspaceOperations.isLoading}
-              run={selectedRun}
-            />
+            <div className="agent-runs-main">
+              <AgentQueuePanel maxConcurrentRuns={maxConcurrentRuns} orgId={orgId} runs={sortedActiveRuns} />
+              <AgentRunDetail
+                events={runEvents.data ?? []}
+                eventsError={runEvents.error}
+                eventsLoading={runEvents.isLoading}
+                log={runLog.data}
+                logError={runLog.error}
+                operations={runWorkspaceOperations.data ?? []}
+                operationsError={runWorkspaceOperations.error}
+                operationsLoading={runWorkspaceOperations.isLoading}
+                run={selectedRun}
+              />
+            </div>
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">
               <div className="panel-heading">
                 <div>
@@ -2001,7 +2103,8 @@ export function AgentPage() {
                 >
                   <span>
                     <strong>{run.id.slice(0, 8)}</strong>
-                    <small>{summarizeRun(run)}</small>
+                    <small>{sourceLabel(run.invocationSource)} · {summarizeRun(run)}</small>
+                    {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
                   </span>
                     <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
                 </button>

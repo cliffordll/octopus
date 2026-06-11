@@ -277,6 +277,38 @@ $env:OCTOPUS_LOG_LEVEL = "info"
 curl.exe http://127.0.0.1:8000/api/health
 ```
 
+如果手动启动时报 `WinError 10048` / `address already in use`，说明 `127.0.0.1:8000` 已经有 server 或残留进程在监听。先查占用端口的 PID：
+
+```powershell
+netstat -ano | Select-String ':8000'
+```
+
+只看监听进程：
+
+```powershell
+netstat -ano | Select-String '127.0.0.1:8000.*LISTENING'
+```
+
+查看该 PID 对应命令行，确认它是当前 checkout 的 Octopus server，而不是其他项目：
+
+```powershell
+$pidToCheck = 12892
+Get-CimInstance Win32_Process |  Where-Object { $_.ProcessId -eq $pidToCheck } |  Select-Object ProcessId,ParentProcessId,CommandLine
+```
+
+确认无误后停止进程，再重新启动 server：
+
+```powershell
+Stop-Process -Id 12892 -Force
+.\.venv\Scripts\python.exe -m server
+```
+
+如果看到一对父子 Python 进程，通常父进程是 `.venv\Scripts\python.exe -m server`，子进程是实际监听端口的 Python。需要重启时可以一起停：
+
+```powershell
+Stop-Process -Id 12892,4852 -Force
+```
+
 ### 手动启动 UI
 
 前端在 `ui/` 目录运行，Vite 默认将 `/api` 代理到 `http://127.0.0.1:8000`：
