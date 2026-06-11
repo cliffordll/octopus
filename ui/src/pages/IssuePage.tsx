@@ -543,11 +543,23 @@ function issueRunCostSummary(runs: HeartbeatRun[]): {
   );
 }
 
+function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus): string {
+  if (status === issue.status) return "";
+  if (status === "in_review" && !issue.reviewerAgentId) return "请先设置 Reviewer。";
+  if (["in_review", "blocked"].includes(issue.status) && ["done", "in_progress", "todo"].includes(status)) {
+    return "请通过评审结论推进或退回任务。";
+  }
+  if (issue.status === "done") return "已完成任务请使用重新打开流程。";
+  if (issue.status === "cancelled") return "已取消任务请使用重新打开流程。";
+  return "";
+}
+
 function IssuePropertiesPanel({
   agents,
   goals,
   issue,
   isUpdating,
+  latestRunStatus,
   onUpdate,
   projects,
 }: {
@@ -555,10 +567,13 @@ function IssuePropertiesPanel({
   goals: Goal[];
   issue: IssueDetail;
   isUpdating: boolean;
+  latestRunStatus?: HeartbeatRun["status"];
   onUpdate: (payload: UpdateIssuePayload) => void;
   projects: ProjectDetail[];
 }) {
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+  const statusSelectDisabledReason = isLiveRun(latestRunStatus) ? "当前任务已有运行在执行中，运行结束后再调整阶段。" : "";
+  const statusSelectDisabled = isUpdating || Boolean(statusSelectDisabledReason);
   return (
     <section aria-label="任务属性" className="panel issue-properties-card">
       <div className="panel-heading">
@@ -571,11 +586,19 @@ function IssuePropertiesPanel({
         <label className="issue-property-row">
           <span>任务阶段</span>
           <select
-            disabled={isUpdating}
+            disabled={statusSelectDisabled}
+            title={statusSelectDisabledReason || undefined}
             value={issue.status}
             onChange={(event) => onUpdate({ status: event.target.value as IssueStatus })}
           >
-            {ISSUE_STATUSES.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
+            {ISSUE_STATUSES.map((status) => {
+              const disabledReason = issueStatusOptionDisabledReason(issue, status);
+              return (
+                <option disabled={Boolean(disabledReason)} key={status} title={disabledReason || undefined} value={status}>
+                  {statusLabel(status)}
+                </option>
+              );
+            })}
           </select>
         </label>
         <label className="issue-property-row">
@@ -2369,6 +2392,7 @@ export function IssuePage() {
                 goals={goalList}
                 issue={issue.data}
                 isUpdating={updateIssue.isPending}
+                latestRunStatus={latestRun?.status}
                 onUpdate={(payload) => updateIssue.mutate(payload)}
                 projects={projectList}
               />

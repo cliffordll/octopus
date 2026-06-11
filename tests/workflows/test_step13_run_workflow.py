@@ -16,6 +16,7 @@ from packages.database.clients import (
     create_session_factory,
 )
 from packages.database.schema import (
+    ActivityLog,
     AgentWakeupRequest,
     Base,
     HeartbeatRun,
@@ -127,6 +128,76 @@ async def test_queued_run_resumes_after_concurrency_slot_is_available(
         resumed = await heartbeat.resume_queued_runs(agent["id"])
     assert resumed[0]["id"] == queued["id"]
     assert resumed[0]["status"] == "succeeded"
+
+
+async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
+    session: AsyncSession,
+) -> None:
+    assignee = await _seed_agent(session, name="Assignee")
+    agent_service = AgentService(session)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        reviewer = await agent_service.create_agent(
+            assignee["orgId"],
+            {
+                "name": "Reviewer",
+                "agentRuntimeConfig": {
+                    "command": sys.executable,
+                    "args": ["-c", "print('review-ready')"],
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+        issue = Issue(
+            org_id=assignee["orgId"],
+            title="Review after run",
+            status="todo",
+            priority="medium",
+            identifier="RUN-1",
+            assignee_agent_id=assignee["id"],
+            reviewer_agent_id=reviewer["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        run = await heartbeat.wakeup(
+            assignee["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "manual",
+                "payload": {"issueId": issue.id},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeReason": "issue_execute",
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None and run["status"] == "succeeded"
+    persisted_issue = (await session.execute(select(Issue))).scalar_one()
+    assert persisted_issue.status == "in_review"
+    assert persisted_issue.execution_run_id is None
+    reviewer_wakeup = (
+        await session.execute(
+            select(AgentWakeupRequest).where(
+                AgentWakeupRequest.agent_id == reviewer["id"]
+            )
+        )
+    ).scalar_one()
+    assert reviewer_wakeup.source == "review"
+    assert reviewer_wakeup.status == "queued"
+    assert reviewer_wakeup.payload["issueId"] == persisted_issue.id
+    activity = (
+        await session.execute(
+            select(ActivityLog).where(ActivityLog.entity_id == persisted_issue.id)
+        )
+    ).scalar_one()
+    assert activity.action == "issue.updated"
+    assert activity.run_id == run["id"]
+    assert activity.details["reason"] == "run_succeeded"
 
 
 async def test_wake_on_demand_false_skips_non_timer_wakeup(
