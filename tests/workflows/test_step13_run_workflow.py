@@ -189,6 +189,7 @@ async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     ).scalar_one()
     assert reviewer_wakeup.source == "review"
     assert reviewer_wakeup.status == "queued"
+    assert isinstance(reviewer_wakeup.payload, dict)
     assert reviewer_wakeup.payload["issueId"] == persisted_issue.id
     activity = (
         await session.execute(
@@ -197,6 +198,7 @@ async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     ).scalar_one()
     assert activity.action == "issue.updated"
     assert activity.run_id == run["id"]
+    assert isinstance(activity.details, dict)
     assert activity.details["reason"] == "run_succeeded"
 
 

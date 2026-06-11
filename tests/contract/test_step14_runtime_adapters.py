@@ -1113,7 +1113,7 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
         "test-capability-session\n", encoding="utf-8"
     )
     operator_home.joinpath(".codex", "config.toml").write_text(
-        "model = \"gpt-test\"\n", encoding="utf-8"
+        'model = "gpt-test"\n', encoding="utf-8"
     )
     codex_home = tmp_path / "codex-home"
     captured_env: dict[str, str] = {}
