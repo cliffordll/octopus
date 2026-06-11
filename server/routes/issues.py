@@ -401,6 +401,9 @@ async def checkout_issue_route(
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
     )
+    assignee_agent_id = updated.get("assigneeAgentId")
+    if assignee_agent_id and updated["status"] != "backlog":
+        _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 
@@ -708,11 +711,15 @@ async def create_issue_comment_route(
             extra_payload={"commentId": comment.id},
             extra_context={"commentId": comment.id, "commentBody": comment.body},
         )
-    for mentioned in await _mentioned_agents(agent_service, detail["orgId"], comment.body):
+    for mentioned in await _mentioned_agents(
+        agent_service, detail["orgId"], comment.body
+    ):
         mentioned_agent_id = mentioned["id"]
         if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
             continue
-        if queued_assignee_wakeup and mentioned_agent_id == detail.get("assigneeAgentId"):
+        if queued_assignee_wakeup and mentioned_agent_id == detail.get(
+            "assigneeAgentId"
+        ):
             continue
         await _queue_issue_comment_mention_wakeup(
             heartbeat,
