@@ -428,13 +428,14 @@ it("shows an issue and records comments and review decisions", async () => {
   const runRecordsRegion = await expandRunRecords();
   await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
   const workProductsRegion = screen.getByRole("region", { name: "运行产物" });
+  expect(workProductsRegion).toHaveTextContent("任务产物已折叠");
+  await userEvent.click(within(workProductsRegion).getByRole("button", { name: "展开任务产物 2" }));
   expect(workProductsRegion).toHaveTextContent("登录流程 PR");
   expect(workProductsRegion).toHaveTextContent("运行摘要");
   expect(workProductsRegion).toHaveTextContent("pull_request");
   expect(workProductsRegion).toHaveTextContent("运行产物");
   expect(workProductsRegion).toHaveTextContent("技术详情");
   expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
-  expect(workProductsRegion).toHaveTextContent("下载只读取 contentPath");
   expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
     "href",
@@ -1025,6 +1026,7 @@ it("refreshes server registered work products when an issue run succeeds", async
 
   const runRecordsRegion = await expandRunRecords();
   await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
+  await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 1" }));
   expect((await screen.findAllByText("README 标题文档"))[0]).toBeInTheDocument();
   expect(screen.getByText("server 登记的生成文件")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("organization_artifacts_scan");
@@ -1248,6 +1250,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(runRecordsRegion).toHaveTextContent("run-succeeded");
   expect(screen.getByText("运行：成功")).toBeInTheDocument();
   await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-succeeded" }));
+  await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 0" }));
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
 });
 

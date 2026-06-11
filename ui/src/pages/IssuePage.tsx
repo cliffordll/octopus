@@ -820,7 +820,7 @@ function IssueQueueStatusPanel({
 
 function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { embedded?: boolean; issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"] }) {
   const queryClient = useQueryClient();
-  const [workProductsExpanded, setWorkProductsExpanded] = useState(true);
+  const [workProductsExpanded, setWorkProductsExpanded] = useState(!embedded);
   const workProductsQuery = useQuery({
     queryKey: ["issue-work-products", issue.id],
     queryFn: () => issuesApi.listWorkProducts(issue.id),
@@ -860,9 +860,6 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
         <p className="muted">任务产物已折叠。</p>
       ) : (
         <>
-      <p className="muted issue-work-product-hint">
-            这里展示当前任务下 server 记录的产物；每个产物会标出来源运行。下载只读取 contentPath，不会写入本地工作区。
-      </p>
       {workProductsQuery.error && <ErrorNotice error={workProductsQuery.error} />}
       {workProductsQuery.isLoading && <p className="muted">加载工作产物中...</p>}
       {!workProductsQuery.isLoading && workProducts.length === 0 && (

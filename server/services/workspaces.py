@@ -132,6 +132,12 @@ _GENERATED_FILE_EXCLUDED_PARTS = {
     "dist",
     "node_modules",
 }
+_GENERATED_FILE_EXCLUDED_AGENT_DIRS = {
+    "instructions",
+    "life",
+    "memory",
+    "skills",
+}
 _GENERATED_FILE_MAX_BYTES = 1_000_000
 _GENERATED_FILE_MAX_COUNT = 20
 
@@ -154,6 +160,8 @@ def _iter_generated_workspace_files(root: Path, since: datetime | None) -> list[
         rel_parts = path.relative_to(root).parts
         if any(part in _GENERATED_FILE_EXCLUDED_PARTS for part in rel_parts):
             continue
+        if _is_agent_internal_generated_file(rel_parts):
+            continue
         if path.suffix.lower() not in _GENERATED_FILE_EXTENSIONS:
             continue
         try:
@@ -168,6 +176,14 @@ def _iter_generated_workspace_files(root: Path, since: datetime | None) -> list[
         candidates.append((modified_at, path))
     candidates.sort(key=lambda item: (item[0], item[1].as_posix()))
     return [path for _, path in candidates[:_GENERATED_FILE_MAX_COUNT]]
+
+
+def _is_agent_internal_generated_file(rel_parts: tuple[str, ...]) -> bool:
+    return (
+        len(rel_parts) >= 4
+        and rel_parts[0] == "agents"
+        and rel_parts[2] in _GENERATED_FILE_EXCLUDED_AGENT_DIRS
+    )
 
 
 def _parse_project_policy(value: Any) -> dict[str, Any] | None:
