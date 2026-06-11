@@ -21,6 +21,7 @@ const RUNTIMES: AgentRuntimeType[] = [
   "codex_local",
   "opencode_local",
   "openclaw_gateway",
+  "openclaw_local",
 ];
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
 const DEFAULT_HEARTBEAT_POLICY = {

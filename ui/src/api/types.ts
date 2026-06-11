@@ -846,6 +846,7 @@ export type AgentRuntimeType =
   | "pi_local"
   | "cursor"
   | "openclaw_gateway"
+  | "openclaw_local"
   | "hermes_local";
 
 export interface Agent {

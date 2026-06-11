@@ -19,6 +19,7 @@ const RUNTIMES: AgentRuntimeType[] = [
   "codex_local",
   "opencode_local",
   "openclaw_gateway",
+  "openclaw_local",
 ];
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
