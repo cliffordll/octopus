@@ -33,7 +33,7 @@ INSTANCE_SCOPE = "instance"
 ORGANIZATION_SCOPE = "organization"
 AGENT_SCOPE = "agent"
 MANAGED_RUNTIME_PROVIDER_TYPES = frozenset(
-    {"opencode_local", "codex_local", "claude_local"}
+    {"opencode_local", "codex_local", "claude_local", "openclaw_local"}
 )
 
 

@@ -82,6 +82,131 @@ async def test_openclaw_gateway_runtime_metadata_reports_environment_support() -
     )
 
 
+def test_step14_registry_resolves_openclaw_local() -> None:
+    registry = importlib.import_module("packages.runtimes.registry")
+
+    adapter = registry.get_runtime_adapter("openclaw_local")
+    assert adapter.type == "openclaw_local"
+    assert adapter.__class__.__name__ == "OpenClawLocalRuntimeAdapter"
+
+
+async def test_openclaw_local_runtime_metadata_reports_capabilities() -> None:
+    from packages.runtimes.registry import get_runtime_metadata
+
+    metadata = await get_runtime_metadata("openclaw_local")
+
+    assert metadata["type"] == "openclaw_local"
+    assert metadata["capabilities"]["environmentTest"] is True
+    assert metadata["capabilities"]["skills"] is False
+    assert metadata["supportsLocalAgentJwt"] is True
+    assert isinstance(metadata["agentConfigurationDoc"], str)
+
+
+async def test_openclaw_local_registers_model_and_parses_reply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    from packages.runtimes.openclaw_local.runner import execute as execute_openclaw_local
+
+    calls: list[list[str]] = []
+    patch_stdin: dict[str, str] = {}
+
+    class FakeProcess:
+        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+            self._stdout = stdout
+            self._stderr = stderr
+            self.returncode = returncode
+            self.pid = 4242
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            if payload is not None:
+                patch_stdin["payload"] = payload.decode()
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        calls.append(list(args))
+        if "patch" in args:
+            return FakeProcess(b"Applied 6 config update(s).", b"", 0)
+        return FakeProcess(
+            b'{"payloads":[{"text":"hello from openclaw","mediaUrl":null}],'
+            b'"meta":{"agentMeta":{"sessionId":"sess-ocl-1",'
+            b'"usage":{"input":10,"output":2,"total":12}}}}',
+            b"",
+            0,
+        )
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_openclaw_local(
+        RuntimeExecutionContext(
+            run_id="run-ocl",
+            agent_id="agent-ocl",
+            org_id="org-ocl",
+            agent_name="OpenClaw",
+            config={
+                "command": "openclaw-test",
+                "model": "epai-test/deepseek-v4-flash",
+                "promptTemplate": "do the task",
+                "_octopus": {
+                    "runtimeProvider": {
+                        "baseUrl": "http://platform/v1",
+                        "apiKey": "sk-platform",
+                        "model": {
+                            "modelId": "deepseek-v4-flash",
+                            "displayName": "DeepSeek V4 Flash",
+                            "metadata": {"contextWindow": 131072},
+                        },
+                    }
+                },
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    patch_call = next(c for c in calls if "patch" in c)
+    assert patch_call[1:] == ["config", "patch", "--stdin"]
+    registered = json.loads(patch_stdin["payload"])
+    provider = registered["models"]["providers"]["epai-test"]
+    assert provider["baseUrl"] == "http://platform/v1"
+    assert provider["apiKey"] == "sk-platform"
+    assert provider["api"] == "openai-completions"
+    assert provider["models"][0]["id"] == "deepseek-v4-flash"
+    assert provider["models"][0]["contextWindow"] == 131072
+
+    agent_call = next(c for c in calls if "agent" in c and "--local" in c)
+    assert "--json" in agent_call
+    model_idx = agent_call.index("--model")
+    assert agent_call[model_idx + 1] == "epai-test/deepseek-v4-flash"
+    session_idx = agent_call.index("--session-key")
+    assert agent_call[session_idx + 1] == "agent:agent-ocl:run-ocl"
+    assert agent_call[-2] == "-m"
+    assert "do the task" in agent_call[-1]
+
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "hello from openclaw"
+    assert result.result_json.get("modelRegistrationError") is None
+    assert result.session_id_after == "sess-ocl-1"
+    assert result.usage_json == {
+        "inputTokens": 10,
+        "outputTokens": 2,
+        "totalTokens": 12,
+    }
+
+
 def test_opencode_extra_args_are_run_subcommand_options() -> None:
     args = build_opencode_args(
         {

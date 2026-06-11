@@ -5,6 +5,7 @@ export const MODEL_PROVIDER_RUNTIMES: AgentRuntimeType[] = [
   "opencode_local",
   "codex_local",
   "claude_local",
+  "openclaw_local",
 ];
 
 export function supportsRuntimeModels(runtime: AgentRuntimeType): boolean {
