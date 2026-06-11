@@ -108,7 +108,6 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
       sidebar={
         <>
           <section className="context-nav-section">
-            <h3>消息</h3>
             <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>
               <span aria-hidden="true" className="context-entry-icon">+</span>
               <span>新建聊天</span>

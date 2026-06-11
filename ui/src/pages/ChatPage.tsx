@@ -563,8 +563,8 @@ export function ChatPage() {
           {messages.error && <ErrorNotice error={messages.error} />}
           <form aria-label="发送消息" className="form chat-composer" onSubmit={submit}>
             <label className="chat-message-input">
-              消息
               <textarea
+                aria-label="消息输入"
                 placeholder="输入消息，Enter 发送，Shift+Enter 换行"
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
