@@ -632,10 +632,12 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
     codex_home = _string(env.get("CODEX_HOME"))
     if not codex_home:
         return
+    codex_home_path = Path(codex_home).expanduser()
     managed_home = Path(codex_home).expanduser() / "home"
     managed_home.mkdir(parents=True, exist_ok=True)
     operator_home = _operator_home(env)
     linked = _sync_local_cli_credential_home_entries(operator_home, managed_home)
+    linked_codex = _sync_local_codex_home_entries(operator_home, codex_home_path)
     env["HOME"] = str(managed_home)
     env["USERPROFILE"] = str(managed_home)
     configure_managed_profile_env(env, managed_home)
@@ -649,6 +651,15 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
                 f"[octopus] Shared {len(linked)} local CLI credential "
                 f"entr{'y' if len(linked) == 1 else 'ies'} into managed HOME "
                 f"{managed_home}: {', '.join(linked)}\n"
+            ),
+        )
+    if linked_codex:
+        await on_log(
+            "stdout",
+            (
+                f"[octopus] Shared {len(linked_codex)} local Codex credential "
+                f"entr{'y' if len(linked_codex) == 1 else 'ies'} into managed "
+                f"CODEX_HOME {codex_home_path}: {', '.join(linked_codex)}\n"
             ),
         )
 
@@ -723,6 +734,29 @@ _LOCAL_CLI_CREDENTIAL_HOME_ENTRIES = (
     "Library/Application Support/gh",
     "Library/Application Support/com.heroku.cli",
 )
+
+_LOCAL_CODEX_HOME_CREDENTIAL_ENTRIES = (
+    "auth.json",
+    "cap_sid",
+    "config.toml",
+)
+
+
+def _sync_local_codex_home_entries(
+    source_home: Path, target_codex_home: Path
+) -> list[str]:
+    source_codex_home = source_home / ".codex"
+    if _same_path(source_codex_home, target_codex_home):
+        return []
+    linked: list[str] = []
+    for relative_entry in _LOCAL_CODEX_HOME_CREDENTIAL_ENTRIES:
+        source = source_codex_home / relative_entry
+        if not source.exists():
+            continue
+        target = target_codex_home / relative_entry
+        if _ensure_link_or_copy(source, target):
+            linked.append(relative_entry)
+    return linked
 
 
 def _sync_local_cli_credential_home_entries(

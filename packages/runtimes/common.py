@@ -8,7 +8,7 @@ from .skills import skill_snapshot_from_root
 from .types import RuntimeEnvironmentTestResult, RuntimeExecutionResult
 
 
-def runtime_subprocess_kwargs() -> dict[str, int]:
+def runtime_subprocess_kwargs() -> dict[str, Any]:
     if os.name != "nt":
         return {}
     return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
