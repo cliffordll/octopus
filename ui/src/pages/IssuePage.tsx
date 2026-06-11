@@ -13,6 +13,7 @@ import type {
   Goal,
   HeartbeatRun,
   HeartbeatRunEvent,
+  IssueComment,
   IssueDetail,
   IssueListItem,
   IssuePriority,
@@ -211,6 +212,23 @@ function streamLogDelta(streamLog: string, persistedLog: string | undefined): st
   return streamLog;
 }
 
+function runElapsedText(run: HeartbeatRun | null): string {
+  const startedAt = run?.startedAt ?? run?.createdAt;
+  if (!startedAt) return "";
+  const startedTime = Date.parse(startedAt);
+  if (Number.isNaN(startedTime)) return "";
+  const endTime = run?.finishedAt ? Date.parse(run.finishedAt) : Date.now();
+  if (Number.isNaN(endTime) || endTime <= startedTime) return "";
+  const elapsedSeconds = Math.floor((endTime - startedTime) / 1000);
+  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒`;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours} 小时 ${restMinutes} 分` : `${hours} 小时`;
+}
+
 function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -330,6 +348,40 @@ function issueConvergenceReviewSummary(event: ActivityEvent): string {
 function issueCloseoutReviewActivity(issue: IssueDetail, events: ActivityEvent[] | undefined): ActivityEvent | null {
   if (issue.status !== "in_progress" || !Array.isArray(events)) return null;
   return events.find((event) => event.action === "issue.closure_needs_operator_review") ?? null;
+}
+
+type IssueTimelineItem =
+  | { id: string; item: ActivityEvent; kind: "activity"; timestamp: string }
+  | { id: string; item: IssueComment; kind: "comment"; timestamp: string };
+
+function timelineTime(value: string): number {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function issueTimelineItems(
+  events: ActivityEvent[] | undefined,
+  comments: IssueComment[] | undefined,
+): IssueTimelineItem[] {
+  const items: IssueTimelineItem[] = [
+    ...(Array.isArray(events)
+      ? events.map((item) => ({
+          id: `activity:${item.id}`,
+          item,
+          kind: "activity" as const,
+          timestamp: item.createdAt,
+        }))
+      : []),
+    ...(Array.isArray(comments)
+      ? comments.map((item) => ({
+          id: `comment:${item.id}`,
+          item,
+          kind: "comment" as const,
+          timestamp: item.createdAt,
+        }))
+      : []),
+  ];
+  return items.sort((left, right) => timelineTime(left.timestamp) - timelineTime(right.timestamp));
 }
 
 function workProductSize(product: IssueWorkProduct): string {
@@ -474,6 +526,7 @@ function runEventLabel(event: HeartbeatRunEvent): string {
   if (isTextRunEvent(event)) return "Agent 回复";
   if (eventType.includes("queued")) return "入队";
   if (eventType.includes("started") || eventType.includes("running")) return "开始";
+  if (eventType.includes("progress")) return "运行进度";
   if (eventType.includes("adapter") || eventType.includes("runtime")) return "调用 adapter";
   if (eventType.includes("succeeded") || eventType.includes("completed")) return "成功";
   if (eventType.includes("cancel")) return "取消";
@@ -848,7 +901,6 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
           )}
         </div>
         <div className={embedded ? "issue-run-operation-actions" : "issue-section-heading-actions"}>
-          <span className="muted">{workProducts.length}</span>
           {embedded && (
             <button aria-label={workProductsExpanded ? "折叠任务产物" : `展开任务产物 ${workProducts.length}`} className="secondary small-button" type="button" onClick={() => setWorkProductsExpanded((value) => !value)}>
               {workProductsExpanded ? "折叠" : `展开 ${workProducts.length}`}
@@ -1026,7 +1078,6 @@ function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean
           <h2>任务文档</h2>
         </div>
         <div className="issue-section-heading-actions">
-          <span className="muted">{documents.data?.length ?? 0}</span>
           <button
             aria-label={documentsHidden ? "展开任务文档" : "折叠任务文档"}
             className="secondary small-button"
@@ -1379,6 +1430,7 @@ function IssueRunOutputPanel({
   const [showEvents, setShowEvents] = useState(true);
   const [showOperations, setShowOperations] = useState(true);
   const [showRawOutput, setShowRawOutput] = useState(true);
+  const [showLiveLogDelta, setShowLiveLogDelta] = useState(true);
   const [showRunLog, setShowRunLog] = useState(true);
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const [viewMode, setViewMode] = useState<"nice" | "raw">("nice");
@@ -1397,8 +1449,21 @@ function IssueRunOutputPanel({
   const canCancel = isLiveRun(run?.status);
   const liveRun = isLiveRun(run?.status);
   const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
+  const lastEvent = events.at(-1) ?? null;
+  const hasVisibleRuntimeOutput = Boolean(
+    liveLogDelta ||
+    runLog.data?.content ||
+    run?.stdoutExcerpt ||
+    run?.stderrExcerpt ||
+    visibleEvents.some((event) => isTextRunEvent(event) && runEventBody(event))
+  );
+  const processPid = typeof run?.processPid === "number" ? run.processPid : null;
+  const silentRuntimeText = liveRun && !hasVisibleRuntimeOutput
+    ? `${processPid ? `进程 ${processPid} 已启动` : "运行已启动"}，等待 runtime 输出。`
+    : "";
   useEffect(() => {
     setViewMode("nice");
+    setShowLiveLogDelta(true);
   }, [runId]);
   return (
     <>
@@ -1409,6 +1474,8 @@ function IssueRunOutputPanel({
           {liveRun && <p className="muted">运行中会通过 stream 动态刷新事件和输出。</p>}
         </div>
         <div className="issue-run-actions">
+          {liveRun && runElapsedText(run) && <Badge>已运行 {runElapsedText(run)}</Badge>}
+          {processPid && <Badge>PID {processPid}</Badge>}
           {streamActive && <Badge>stream 连接中</Badge>}
           {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
           <div className="agent-run-view-toggle" aria-label="任务执行视图">
@@ -1459,10 +1526,34 @@ function IssueRunOutputPanel({
       {viewMode === "nice" && liveLogDelta && (
         <section className="issue-run-output-block">
           <div className="issue-run-output-heading">
-            <h3>实时日志增量</h3>
+            <h3>
+              <button
+                aria-expanded={showLiveLogDelta}
+                className="issue-run-heading-toggle"
+                onClick={() => setShowLiveLogDelta((value) => !value)}
+                type="button"
+              >
+                实时日志增量
+              </button>
+            </h3>
             <Badge>stream</Badge>
           </div>
-          <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
+          {showLiveLogDelta ? (
+            <AutoScrollPre className="run-excerpt inline" content={liveLogDelta} />
+          ) : (
+            <p className="muted">实时日志增量已折叠。</p>
+          )}
+        </section>
+      )}
+      {viewMode === "nice" && silentRuntimeText && (
+        <section className="issue-run-progress-note" aria-label="运行进度提示">
+          <strong>{silentRuntimeText}</strong>
+          {lastEvent && (
+            <span>
+              最近进度：{runEventBody(lastEvent) || lastEvent.message || runEventLabel(lastEvent)}
+              <small>{formatDateTime(lastEvent.createdAt)}</small>
+            </span>
+          )}
         </section>
       )}
       {viewMode === "raw" && <section className="issue-run-output-block">
@@ -1812,6 +1903,7 @@ export function IssuePage() {
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
   const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(() => new Set());
+  const autoExpandedLiveRunRef = useRef("");
   const refreshedTerminalRunRef = useRef("");
   const queryClient = useQueryClient();
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
@@ -1853,6 +1945,7 @@ export function IssuePage() {
     const storedRunId = localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
     setCurrentRunId(storedRunId);
     setExpandedRunIds(new Set());
+    autoExpandedLiveRunRef.current = "";
   }, [orgId, issueId]);
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
@@ -1862,6 +1955,22 @@ export function IssuePage() {
     localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
     setCurrentRunId(latestRunId);
   }, [currentRunId, issueRuns.data, issueId, orgId]);
+  useEffect(() => {
+    if (!orgId || !issueId || !issueRuns.data?.length) return;
+    const latestRun = latestIssueRun(issueRuns.data, null, issueId);
+    const latestRunId = heartbeatRunId(latestRun);
+    if (!latestRunId || latestRun?.status !== "running") return;
+    if (autoExpandedLiveRunRef.current === latestRunId) return;
+    autoExpandedLiveRunRef.current = latestRunId;
+    localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);
+    setCurrentRunId(latestRunId);
+    setExpandedRunIds((current) => {
+      if (current.has(latestRunId)) return current;
+      const next = new Set(current);
+      next.add(latestRunId);
+      return next;
+    });
+  }, [issueId, issueRuns.data, orgId]);
   useEffect(() => {
     if (!reviewNotice) return;
     const timer = window.setTimeout(() => setReviewNotice(""), 3000);
@@ -2015,6 +2124,7 @@ export function IssuePage() {
     event.preventDefault();
     if (comment.trim()) addComment.mutate();
   }
+  const timelineItems = issueTimelineItems(issueActivity.data, comments.data);
   function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     setAttachmentFile(file);
@@ -2374,29 +2484,36 @@ export function IssuePage() {
                 ) : null}
               </section>
               <div className="issue-activity-list">
-                {Array.isArray(issueActivity.data) && issueActivity.data.map((item) => (
-                  <article className={`issue-activity-item tone-${activityTone(item)}`} key={item.id}>
-                    <div className="issue-activity-avatar">{activityIcon(item)}</div>
-                    <div className="issue-activity-content">
-                      <div className="issue-activity-title-row">
-                        <strong>{activityTitle(item)}</strong>
-                        <span className="muted">{activityMeta(item)}</span>
+                {timelineItems.map((timelineItem) => {
+                  if (timelineItem.kind === "activity") {
+                    const item = timelineItem.item;
+                    return (
+                      <article className={`issue-activity-item tone-${activityTone(item)}`} key={timelineItem.id}>
+                        <div className="issue-activity-avatar">{activityIcon(item)}</div>
+                        <div className="issue-activity-content">
+                          <div className="issue-activity-title-row">
+                            <strong>{activityTitle(item)}</strong>
+                            <span className="muted">{activityMeta(item)}</span>
+                          </div>
+                          <p>{activitySummary(item)}</p>
+                        </div>
+                      </article>
+                    );
+                  }
+                  const item = timelineItem.item;
+                  return (
+                    <article className="issue-activity-item tone-comment" key={timelineItem.id}>
+                      <div className="issue-activity-avatar">C</div>
+                      <div className="issue-activity-content">
+                        <div className="issue-activity-title-row">
+                          <strong>评论</strong>
+                          <span className="muted">{formatDateTime(item.createdAt)}</span>
+                        </div>
+                        <p>{item.body}</p>
                       </div>
-                      <p>{activitySummary(item)}</p>
-                    </div>
-                  </article>
-                ))}
-                {comments.data?.map((item) => (
-                  <article className="issue-activity-item tone-comment" key={item.id}>
-                    <div className="issue-activity-avatar">C</div>
-                    <div className="issue-activity-content">
-                      <div className="issue-activity-title-row">
-                        <strong>评论</strong>
-                      </div>
-                      <p>{item.body}</p>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  );
+                })}
                 {comments.isSuccess && comments.data.length === 0 && (!Array.isArray(issueActivity.data) || issueActivity.data.length === 0) && (
                   <p className="muted">暂无动态。</p>
                 )}

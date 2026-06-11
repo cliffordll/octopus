@@ -5209,11 +5209,54 @@ button.danger {
   margin: 0;
 }
 
+.issue-run-heading-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.issue-run-heading-toggle:hover {
+  color: #93c5fd;
+}
+
 .issue-run-output-heading {
   align-items: center;
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+.issue-run-progress-note {
+  background: rgb(14 165 233 / 10%);
+  border: 1px solid rgb(14 165 233 / 28%);
+  border-radius: 8px;
+  color: #dbeafe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.issue-run-progress-note strong {
+  color: #e8edf5;
+  font-size: 13px;
+}
+
+.issue-run-progress-note span {
+  color: #9fb2ca;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.issue-run-progress-note small {
+  color: #778397;
 }
 
 .issue-run-stream-list {
