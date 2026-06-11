@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
+from ..common import runtime_subprocess_kwargs
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
@@ -152,6 +153,7 @@ async def _run_once(
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **runtime_subprocess_kwargs(),
     )
     pid = getattr(process, "pid", None)
     if context.on_process_started is not None and isinstance(pid, int):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -31,6 +32,7 @@ from packages.shared.api_paths.issues import (
     WORK_PRODUCT_DETAIL_PATH,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
+from packages.shared.types.agent import Agent
 from packages.shared.types.issue import (
     DocumentRevision,
     IssueDetail,
@@ -55,6 +57,7 @@ from packages.shared.validators.work_product import (
     validate_update_issue_work_product,
 )
 from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.heartbeat import get_wakeup_by_idempotency_key
 
 from ..dependencies.access import (
     assert_organization_access,
@@ -62,6 +65,7 @@ from ..dependencies.access import (
     require_board_access,
     require_organization_access,
 )
+from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
 from ..dependencies.documents import get_document_service
@@ -70,12 +74,14 @@ from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
+from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..services.documents import DocumentService
 from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
+_MENTION_PATTERN = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -90,6 +96,96 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
     tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
     task.add_done_callback(tasks.discard)
+
+
+def _mentioned_tokens(body: str) -> set[str]:
+    return {match.group(1).strip().lower() for match in _MENTION_PATTERN.finditer(body)}
+
+
+def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
+    if wakeup is None:
+        return "Issue assignee is not invokable"
+    if wakeup.status == "deferred_agent_paused":
+        return (
+            "Issue execution was deferred because the assignee agent is paused. "
+            "Resume the agent to continue."
+        )
+    if wakeup.status == "deferred_issue_execution":
+        return (
+            "Issue execution was deferred because the issue already has an active "
+            "execution run. It will continue after the active run finishes."
+        )
+    if wakeup.status == "skipped" and wakeup.error == "heartbeat.wakeOnDemand.disabled":
+        return (
+            "Issue execution was skipped because the assignee agent has on-demand "
+            "wakeup disabled."
+        )
+    if wakeup.status == "skipped" and wakeup.error:
+        return f"Issue execution was skipped: {wakeup.error}"
+    return "Issue assignee is not invokable"
+
+
+async def _mentioned_agents(
+    agent_service: AgentService, org_id: str, body: str
+) -> list[Agent]:
+    tokens = _mentioned_tokens(body)
+    if not tokens:
+        return []
+    agents = await agent_service.list_for_org(org_id)
+    mentioned: list[Agent] = []
+    for agent in agents:
+        aliases = {
+            value.lower()
+            for value in (agent["id"], agent["name"], agent["urlKey"])
+            if isinstance(value, str) and value
+        }
+        if tokens & aliases:
+            mentioned.append(agent)
+    return mentioned
+
+
+async def _queue_issue_comment_mention_wakeup(
+    heartbeat: HeartbeatService,
+    issue: IssueDetail,
+    *,
+    mentioned_agent_id: str,
+    comment_id: str,
+    comment_body: str,
+    actor_type: str,
+    actor_id: str,
+) -> None:
+    payload: WakeAgentPayload = {
+        "source": "on_demand",
+        "triggerDetail": "system",
+        "reason": "issue_comment_mentioned",
+        "payload": {
+            "issueId": issue["id"],
+            "mutation": "comment_mention",
+            "commentId": comment_id,
+        },
+        "contextSnapshot": {
+            "issueId": issue["id"],
+            "source": "issue.comment",
+            "wakeSource": "mention",
+            "wakeReason": "issue_comment_mentioned",
+            "commentId": comment_id,
+            "commentBody": comment_body,
+            "issue": {
+                "id": issue["id"],
+                "title": issue["title"],
+                "description": issue.get("description"),
+                "status": issue["status"],
+                "priority": issue["priority"],
+            },
+        },
+    }
+    await heartbeat.wakeup(
+        mentioned_agent_id,
+        payload,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        execute_immediately=False,
+    )
 
 
 @router.get(ISSUE_LIST_MISSING_ORG_PATH)
@@ -334,11 +430,12 @@ async def execute_issue_route(
         return active
 
     actor = require_actor_identity(request)
+    idempotency_key = f"issue:{id}:execute"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
         "reason": "issue_execute",
-        "idempotencyKey": f"issue:{id}:execute",
+        "idempotencyKey": idempotency_key,
         "payload": {"issueId": id, "mutation": "execute"},
         "contextSnapshot": {
             "issueId": id,
@@ -368,9 +465,20 @@ async def execute_issue_route(
             detail=str(exc),
         ) from exc
     if run is None:
+        wakeup = await get_wakeup_by_idempotency_key(
+            session, assignee_agent_id, idempotency_key
+        )
+        if wakeup is not None:
+            return JSONResponse(
+                status_code=http_status.HTTP_202_ACCEPTED,
+                content={
+                    "status": wakeup.status,
+                    "detail": _issue_execute_unavailable_detail(wakeup),
+                },
+            )
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail="Issue assignee is not invokable",
+            detail=_issue_execute_unavailable_detail(wakeup),
         )
     enriched = await heartbeat.get(run["id"])
     assert enriched is not None
@@ -559,6 +667,7 @@ async def create_issue_comment_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    agent_service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
@@ -584,9 +693,10 @@ async def create_issue_comment_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
-    if not (
+    queued_assignee_wakeup = not (
         actor.actor_type == "agent" and actor.actor_id == detail.get("assigneeAgentId")
-    ):
+    )
+    if queued_assignee_wakeup:
         await queue_issue_assignment_wakeup(
             heartbeat,
             detail,
@@ -597,6 +707,21 @@ async def create_issue_comment_route(
             actor_id=actor.actor_id,
             extra_payload={"commentId": comment.id},
             extra_context={"commentId": comment.id, "commentBody": comment.body},
+        )
+    for mentioned in await _mentioned_agents(agent_service, detail["orgId"], comment.body):
+        mentioned_agent_id = mentioned["id"]
+        if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
+            continue
+        if queued_assignee_wakeup and mentioned_agent_id == detail.get("assigneeAgentId"):
+            continue
+        await _queue_issue_comment_mention_wakeup(
+            heartbeat,
+            detail,
+            mentioned_agent_id=mentioned_agent_id,
+            comment_id=comment.id,
+            comment_body=comment.body,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
         )
     return {
         "id": comment.id,

@@ -27,6 +27,7 @@ from packages.database.queries.heartbeat import (
     create_wakeup_request,
     get_run,
     get_wakeup_by_idempotency_key,
+    has_active_timer_run,
     list_queued_agent_ids,
     list_queued_runs,
     list_run_events,
@@ -81,6 +82,15 @@ LOCAL_CHILD_PROCESS_RUNTIMES = {
     "opencode_local",
     "pi_local",
     "hermes_local",
+}
+
+ISSUE_PASSIVE_FOLLOWUP_REASON = "issue_passive_followup"
+ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE = "passive_issue_followup"
+ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
+ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
+ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT = {
+    1: timedelta(minutes=2),
+    2: timedelta(minutes=5),
 }
 
 
@@ -155,7 +165,10 @@ class HeartbeatService:
             )
             if existing is not None and existing.run_id:
                 existing_run = await get_run(self._session, existing.run_id)
-                if existing_run is not None:
+                if existing_run is not None and existing_run.status in {
+                    "queued",
+                    "running",
+                }:
                     return self._to_run(existing_run)
             if existing is not None and existing.status == "deferred_agent_paused":
                 await update_wakeup_request(
@@ -225,7 +238,27 @@ class HeartbeatService:
         issue = await self._session.get(IssueRow, issue_id)
         if issue is None or issue.org_id != agent.org_id:
             return False
-        if not issue.execution_run_id and not issue.checkout_run_id:
+        run_ids = [
+            value
+            for value in (issue.execution_run_id, issue.checkout_run_id)
+            if value
+        ]
+        if not run_ids:
+            return False
+        active_run_ids = {
+            row.id
+            for row in (
+                await self._session.execute(
+                    select(HeartbeatRunRow).where(
+                        HeartbeatRunRow.id.in_(run_ids),
+                        HeartbeatRunRow.status.in_(("queued", "running")),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        }
+        if not active_run_ids:
             return False
 
         deferred_payload = dict(payload.get("payload") or {})
@@ -561,6 +594,7 @@ class HeartbeatService:
                 reason="process_lost",
                 message="Run interrupted before server recovery",
             )
+            await self._release_issue_execution(failed)
             if detached_message:
                 await self._append_event(
                     failed,
@@ -734,6 +768,8 @@ class HeartbeatService:
                 or policy["intervalSec"] <= 0
                 or checked_at - baseline < timedelta(seconds=policy["intervalSec"])
             ):
+                continue
+            if await has_active_timer_run(self._session, agent.id):
                 continue
             run = await self.wakeup(
                 agent.id,
@@ -1291,29 +1327,37 @@ class HeartbeatService:
             return
         if await self._run_has_issue_closeout_signal(final, issue.id):
             return
+        next_attempt = 1
+        requested_at = (
+            datetime.now(UTC) + ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT[next_attempt]
+        )
         await self.wakeup(
             agent.id,
             {
-                "source": "assignment",
+                "source": "automation",
                 "triggerDetail": "system",
-                "reason": "issue_passive_followup",
-                "idempotencyKey": f"issue:{issue.id}:passive-followup:{final.id}",
+                "reason": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                "idempotencyKey": f"{ISSUE_PASSIVE_FOLLOWUP_REASON}:{final.id}",
+                "requestedAt": requested_at,
                 "payload": {
                     "issueId": issue.id,
                     "originRunId": final.id,
-                    "mutation": "passive_followup",
+                    "previousRunId": final.id,
+                    "attempt": next_attempt,
+                    "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
                 },
                 "contextSnapshot": {
                     "issueId": issue.id,
                     "source": "issue.passive_followup",
-                    "wakeSource": "assignment",
-                    "wakeReason": "issue_passive_followup",
+                    "wakeSource": ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE,
+                    "wakeReason": ISSUE_PASSIVE_FOLLOWUP_REASON,
                     "passiveFollowup": {
                         "originRunId": final.id,
                         "previousRunId": final.id,
-                        "attempt": 1,
-                        "maxAttempts": 1,
-                        "reason": "closeout_missing",
+                        "attempt": next_attempt,
+                        "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
+                        "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
+                        "queuedAt": datetime.now(UTC).isoformat(),
                     },
                     "issue": {
                         "id": issue.id,
@@ -1579,7 +1623,10 @@ class HeartbeatService:
         *,
         issue: IssueRow | None = None,
     ) -> None:
-        if run.invocation_source != "assignment":
+        is_passive_followup = (
+            context_snapshot.get("wakeReason") == ISSUE_PASSIVE_FOLLOWUP_REASON
+        )
+        if run.invocation_source != "assignment" and not is_passive_followup:
             return
         issue_id = _issue_id_from_context(context_snapshot)
         if issue_id is None:
@@ -1728,7 +1775,7 @@ class HeartbeatService:
         actor_id: str,
         status: str,
     ) -> dict[str, Any]:
-        return {
+        values = {
             "org_id": agent.org_id,
             "agent_id": agent.id,
             "source": payload.get("source", "on_demand"),
@@ -1740,6 +1787,15 @@ class HeartbeatService:
             "requested_by_actor_id": actor_id,
             "idempotency_key": payload.get("idempotencyKey"),
         }
+        requested_at = payload.get("requestedAt")
+        if isinstance(requested_at, datetime):
+            values["requested_at"] = requested_at
+        elif isinstance(requested_at, str):
+            parsed = datetime.fromisoformat(requested_at)
+            values["requested_at"] = (
+                parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+            )
+        return values
 
     def _payload_context(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(payload, dict):

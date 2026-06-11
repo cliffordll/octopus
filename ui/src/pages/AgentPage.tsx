@@ -4,7 +4,7 @@ import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
-import type { AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
+import type { AgentInboxItem, AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvironmentTestResult, AgentRuntimeType, HeartbeatRun, HeartbeatRunEvent, LogReadResult, RuntimeModel, UpdateAgentPayload, WorkspaceOperation } from "../api/types";
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -30,6 +30,19 @@ const DEFAULT_HEARTBEAT_POLICY = {
   preflightEnabled: true,
   maxConcurrentRuns: 3,
 };
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
+const RUN_SOURCE_HELP = [
+  ["timer", "定时心跳到点触发，用来检查智能体是否需要继续工作。"],
+  ["assignment", "任务分配后触发，通常来自 issue 指派给该智能体。"],
+  ["automation", "系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。"],
+  ["on_demand", "用户在 UI 或 API 中手动触发一次运行。"],
+] as const;
+
+function inboxRelationshipLabel(relationship: AgentInboxItem["relationship"]): string {
+  if (relationship === "reviewer") return "评审";
+  if (relationship === "mentioned") return "提及";
+  return "执行";
+}
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
@@ -310,6 +323,34 @@ function runMetric(run: HeartbeatRun | null, key: string): string {
   if (typeof value === "number") return String(value);
   if (typeof value === "string" && value.trim()) return value;
   return "-";
+}
+
+function activeRuns(runs: HeartbeatRun[]): HeartbeatRun[] {
+  return runs.filter((run) => ACTIVE_RUN_STATUSES.has(run.status));
+}
+
+function sourceCounts(runs: HeartbeatRun[]): Array<{ count: number; source: string }> {
+  const counts = new Map<string, number>();
+  for (const run of runs) counts.set(run.invocationSource, (counts.get(run.invocationSource) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .map(([source, count]) => ({ count, source }))
+    .sort((left, right) => right.count - left.count || sourceLabel(left.source).localeCompare(sourceLabel(right.source)));
+}
+
+function heartbeatMaxConcurrentRuns(runtimeConfig: Record<string, unknown> | null | undefined): number {
+  const heartbeat = runtimeConfig ? asRecord(runtimeConfig.heartbeat) : null;
+  const value = heartbeat?.maxConcurrentRuns;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_HEARTBEAT_POLICY.maxConcurrentRuns;
+}
+
+function runIssueLabel(run: HeartbeatRun): string {
+  return run.issueIdentifier ?? run.issueTitle ?? run.issueId ?? "";
+}
+
+function triggerLabel(run: HeartbeatRun): string {
+  return run.triggerDetail ? sourceLabel(run.triggerDetail) : sourceLabel(run.invocationSource);
 }
 
 function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
@@ -704,6 +745,71 @@ function AgentRunDetail({
   );
 }
 
+function AgentQueuePanel({
+  maxConcurrentRuns,
+  orgId,
+  runs,
+}: {
+  maxConcurrentRuns: number;
+  orgId: string;
+  runs: HeartbeatRun[];
+}) {
+  const runningCount = runs.filter((run) => run.status === "running").length;
+  const queuedCount = runs.filter((run) => run.status === "queued").length;
+  const counts = sourceCounts(runs);
+  return (
+    <section aria-label="活跃队列" className="panel agent-active-queue">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">QUEUE</p>
+          <h2>活跃队列</h2>
+        </div>
+        <Badge>{runs.length} 个活跃运行</Badge>
+      </div>
+      {runs.length === 0 ? (
+        <p className="muted">当前没有排队或运行中的 run。</p>
+      ) : (
+        <>
+          <div className="agent-queue-metrics">
+            <div><span>运行中</span><strong>{runningCount}</strong></div>
+            <div><span>排队中</span><strong>{queuedCount}</strong></div>
+            <div><span>并发上限</span><strong>{maxConcurrentRuns}</strong></div>
+          </div>
+          <div className="agent-queue-source-list" aria-label="来源分布">
+            {counts.map((item) => (
+              <span key={item.source}>
+                {sourceLabel(item.source)}
+                <strong>{item.count}</strong>
+              </span>
+            ))}
+          </div>
+          <div className="agent-queue-run-list">
+            {runs.slice(0, 5).map((run) => {
+              const issueLabel = runIssueLabel(run);
+              return (
+                <article className="agent-queue-run" key={run.id}>
+                  <div>
+                    <strong>{run.id.slice(0, 8)}</strong>
+                    <span>{triggerLabel(run)}</span>
+                  </div>
+                  <div className="agent-queue-run-meta">
+                    {issueLabel && run.issueId ? (
+                      <Link to={`/orgs/${orgId}/issues/${run.issueId}`}>{issueLabel}</Link>
+                    ) : issueLabel ? (
+                      <span>{issueLabel}</span>
+                    ) : null}
+                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
   const activeTab = ["dashboard", "profile", "memory", "configuration", "skills", "runs", "budget"].includes(tab) ? tab : "dashboard";
@@ -749,6 +855,11 @@ export function AgentPage() {
   const runtimeState = useQuery({
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
+  });
+  const inbox = useQuery({
+    queryKey: ["agent-inbox", agentId],
+    queryFn: () => agentsApi.inbox(agentId),
+    enabled: activeTab === "dashboard",
   });
   const configuration = useQuery({
     queryKey: ["agent-configuration", agentId],
@@ -1016,6 +1127,11 @@ export function AgentPage() {
     () => [...runRows].sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
     [runRows],
   );
+  const sortedActiveRuns = useMemo(
+    () => activeRuns(sortedRuns),
+    [sortedRuns],
+  );
+  const maxConcurrentRuns = heartbeatMaxConcurrentRuns(agent.data?.runtimeConfig ?? null);
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
   const runEvents = useQuery({
     queryKey: ["heartbeat-run-events", selectedRun?.id],
@@ -1272,59 +1388,99 @@ export function AgentPage() {
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/budget`}>预算</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
-            <section className="panel agent-latest-run-card">
-              <div className="agent-latest-run-header">
-                <p className="eyebrow">Latest Run</p>
-              </div>
-              <div className="agent-latest-run-title-row">
-                {selectedRun ? (
-                  <>
-                    <h2>运行 {selectedRun.id.slice(0, 8)}</h2>
-                    <StatusPill status={selectedRun.status}>{statusLabel(selectedRun.status)}</StatusPill>
-                  </>
-                ) : (
-                  <h2 className="agent-latest-run-empty">暂无运行记录</h2>
+            <div className="agent-dashboard-column">
+              <section className="panel agent-latest-run-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Latest Run</p>
+                    <h2>最近运行</h2>
+                  </div>
+                </div>
+                <div className="agent-latest-run-title-row">
+                  {selectedRun ? (
+                    <>
+                      <strong>运行 {selectedRun.id.slice(0, 8)}</strong>
+                      <StatusPill status={selectedRun.status}>{statusLabel(selectedRun.status)}</StatusPill>
+                    </>
+                  ) : (
+                    <strong className="agent-latest-run-empty">暂无运行记录</strong>
+                  )}
+                </div>
+                <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
+                <dl className="detail-grid compact">
+                  <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
+                  <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
+                  <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
+                  <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
+                </dl>
+              </section>
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Runtime</p>
+                    <h2>运行状态</h2>
+                  </div>
+                </div>
+                {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+                {runtimeState.data && (
+                  <div className="agent-summary-grid">
+                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
+                    <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
+                    <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
+                  </div>
                 )}
-              </div>
-              <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
-              <dl className="detail-grid compact">
-                <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
-                <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
-                <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
-                <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
-              </dl>
-            </section>
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Runtime</p>
-                  <h2>Runtime State</h2>
+              </section>
+            </div>
+            <div className="agent-dashboard-column">
+              <section className="panel agent-inbox-card">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Inbox</p>
+                    <h2>待办收件箱</h2>
+                  </div>
+                  <Badge>{inbox.data?.length ?? 0}</Badge>
                 </div>
-              </div>
-              {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-              {runtimeState.data && (
-                <div className="agent-summary-grid">
-                  <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
-                  <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                  <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
-                  <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
+                {inbox.error && <ErrorNotice error={inbox.error} />}
+                {inbox.isLoading && <p className="muted">载入中...</p>}
+                {inbox.data && inbox.data.length === 0 && <p className="muted">暂无待办事项。</p>}
+                {inbox.data && inbox.data.length > 0 && (
+                  <div className="agent-inbox-list">
+                    {inbox.data.map((item) => (
+                      <Link className="agent-inbox-row" key={`${item.relationship}-${item.issueId}`} to={`/orgs/${orgId}/issues/${item.issueId}`}>
+                        <div>
+                          <div className="agent-inbox-title-row">
+                            <Badge>{inboxRelationshipLabel(item.relationship)}</Badge>
+                            <strong>{item.identifier ?? item.issueId.slice(0, 8)}</strong>
+                          </div>
+                          <p>{item.title}</p>
+                          {item.commentPreview && <p className="agent-inbox-comment">{item.commentPreview}</p>}
+                        </div>
+                        <div className="agent-inbox-meta">
+                          <StatusPill status={item.status}>{statusLabel(item.status)}</StatusPill>
+                          <span>{item.priority}</span>
+                          <span>{formatDateTime(item.updatedAt)}</span>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </section>
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Profile</p>
+                    <h2>智能体档案</h2>
+                  </div>
                 </div>
-              )}
-            </section>
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <p className="eyebrow">Profile</p>
-                  <h2>智能体档案</h2>
-                </div>
-              </div>
-              <dl className="agent-properties">
-                <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
-                <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
-                <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
-                <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
-              </dl>
-            </section>
+                <dl className="agent-properties">
+                  <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
+                  <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
+                  <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
+                  <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
+                </dl>
+              </section>
+            </div>
           </div>}
           {activeTab === "profile" && <section aria-label="Managed Instructions" className="agent-instructions-page">
             {save.error && <ErrorNotice error={save.error} />}
@@ -1973,17 +2129,20 @@ export function AgentPage() {
           </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
-            <AgentRunDetail
-              events={runEvents.data ?? []}
-              eventsError={runEvents.error}
-              eventsLoading={runEvents.isLoading}
-              log={runLog.data}
-              logError={runLog.error}
-              operations={runWorkspaceOperations.data ?? []}
-              operationsError={runWorkspaceOperations.error}
-              operationsLoading={runWorkspaceOperations.isLoading}
-              run={selectedRun}
-            />
+            <div className="agent-runs-main">
+              <AgentQueuePanel maxConcurrentRuns={maxConcurrentRuns} orgId={orgId} runs={sortedActiveRuns} />
+              <AgentRunDetail
+                events={runEvents.data ?? []}
+                eventsError={runEvents.error}
+                eventsLoading={runEvents.isLoading}
+                log={runLog.data}
+                logError={runLog.error}
+                operations={runWorkspaceOperations.data ?? []}
+                operationsError={runWorkspaceOperations.error}
+                operationsLoading={runWorkspaceOperations.isLoading}
+                run={selectedRun}
+              />
+            </div>
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">
               <div className="panel-heading">
                 <div>
@@ -1991,6 +2150,17 @@ export function AgentPage() {
                   <p className="muted">最近运行</p>
                 </div>
               </div>
+              <details className="agent-run-source-help">
+                <summary>来源说明</summary>
+                <dl aria-label="Run 来源说明">
+                  {RUN_SOURCE_HELP.map(([source, description]) => (
+                    <div key={source}>
+                      <dt>{sourceLabel(source)}</dt>
+                      <dd>{description}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
               {runs.isSuccess && sortedRuns.length === 0 && <p className="muted">暂无运行记录。</p>}
               {sortedRuns.map((run) => (
                 <button
@@ -1999,11 +2169,15 @@ export function AgentPage() {
                   onClick={() => setSelectedRunId(run.id)}
                   type="button"
                 >
-                  <span>
-                    <strong>{run.id.slice(0, 8)}</strong>
+                  <span className="agent-run-list-copy">
+                    <span className="agent-run-list-title-row">
+                      <strong>{run.id.slice(0, 8)}</strong>
+                      <Badge>{sourceLabel(run.invocationSource)}</Badge>
+                    </span>
                     <small>{summarizeRun(run)}</small>
+                    {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
                   </span>
-                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
                 </button>
               ))}
             </aside>
