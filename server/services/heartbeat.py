@@ -165,9 +165,10 @@ class HeartbeatService:
             )
             if existing is not None and existing.run_id:
                 existing_run = await get_run(self._session, existing.run_id)
-                if existing_run is not None and existing_run.status in {
-                    "queued",
-                    "running",
+                if existing_run is not None and existing_run.status not in {
+                    "failed",
+                    "timed_out",
+                    "cancelled",
                 }:
                     return self._to_run(existing_run)
             if existing is not None and existing.status == "deferred_agent_paused":
@@ -1327,8 +1328,16 @@ class HeartbeatService:
         ):
             return
         passive_followup = _passive_followup_context(context)
-        current_attempt = passive_followup.get("attempt", 0)
-        origin_run_id = passive_followup.get("originRunId", final.id)
+        raw_attempt = passive_followup.get("attempt")
+        current_attempt = (
+            raw_attempt
+            if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool)
+            else 0
+        )
+        raw_origin_run_id = passive_followup.get("originRunId")
+        origin_run_id = (
+            raw_origin_run_id if isinstance(raw_origin_run_id, str) else final.id
+        )
         if current_attempt >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
             await self._record_issue_closure_convergence_needed(
                 final,
@@ -1427,7 +1436,10 @@ class HeartbeatService:
                 "triggerDetail": "system",
                 "reason": "issue_convergence_review_requested",
                 "idempotencyKey": f"issue_convergence_review_requested:{origin_run_id}",
-                "payload": {"issueId": issue.id, "mutation": "passive_followup_exhausted"},
+                "payload": {
+                    "issueId": issue.id,
+                    "mutation": "passive_followup_exhausted",
+                },
                 "contextSnapshot": {
                     "issueId": issue.id,
                     "source": "issue.passive_followup_exhausted",
