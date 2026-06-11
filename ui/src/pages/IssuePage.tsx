@@ -245,6 +245,8 @@ function workProductSourceLabel(product: IssueWorkProduct): string {
 }
 
 function activitySummary(event: ActivityEvent): string {
+  if (event.action === "issue.closure_needs_operator_review") return issueCloseoutReviewSummary(event);
+  if (event.action === "issue.convergence_review_requested") return issueConvergenceReviewSummary(event);
   if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
   const details = event.details ?? {};
   for (const key of ["summary", "message", "title", "note"]) {
@@ -266,6 +268,10 @@ function activityTitle(event: ActivityEvent): string {
       return "更新任务";
     case "issue.reviewed":
       return "评审任务";
+    case "issue.closure_needs_operator_review":
+      return "需要人工确认收口";
+    case "issue.convergence_review_requested":
+      return "需要收敛评审";
     case "heartbeat.invoked":
       return "唤醒智能体";
     case "heartbeat.retried":
@@ -276,10 +282,22 @@ function activityTitle(event: ActivityEvent): string {
 }
 
 function activityIcon(event: ActivityEvent): string {
+  if (event.action === "issue.closure_needs_operator_review") return "!";
+  if (event.action === "issue.convergence_review_requested") return "!";
   if (event.action.includes("executed") || event.action.includes("heartbeat")) return "R";
   if (event.action.includes("status")) return "S";
   if (event.action.includes("review")) return "V";
   return event.actorType === "agent" ? "A" : "U";
+}
+
+function activityTone(event: ActivityEvent): string {
+  if (event.action === "issue.closure_needs_operator_review") return "needs-attention";
+  if (event.action === "issue.convergence_review_requested") return "needs-review";
+  if (event.action.includes("heartbeat") || event.action === "issue.executed") return "run";
+  if (event.action.includes("review")) return "review";
+  if (event.action.includes("status") || event.action === "issue.updated") return "status";
+  if (event.action === "issue.created") return "created";
+  return event.actorType === "agent" ? "agent" : "default";
 }
 
 function activityMeta(event: ActivityEvent): string {
@@ -288,6 +306,30 @@ function activityMeta(event: ActivityEvent): string {
   const agentId = typeof event.details?.agentId === "string" ? event.details.agentId : event.agentId;
   if (agentId) parts.push(`Agent ${agentId}`);
   return parts.join(" · ");
+}
+
+function activityNumber(event: ActivityEvent, key: string): number | null {
+  const value = event.details?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function issueCloseoutReviewSummary(event: ActivityEvent): string {
+  const attempts = activityNumber(event, "attempts");
+  const maxAttempts = activityNumber(event, "maxAttempts");
+  const attemptText = attempts !== null && maxAttempts !== null ? ` ${attempts}/${maxAttempts} 次` : "";
+  return `自动收口已尝试${attemptText}，智能体仍未明确完成、阻塞或提交评审。`;
+}
+
+function issueConvergenceReviewSummary(event: ActivityEvent): string {
+  const attempts = activityNumber(event, "attempts");
+  const maxAttempts = activityNumber(event, "maxAttempts");
+  const attemptText = attempts !== null && maxAttempts !== null ? ` ${attempts}/${maxAttempts} 次` : "";
+  return `自动收口已尝试${attemptText}，已转交 Reviewer 判断下一步。`;
+}
+
+function issueCloseoutReviewActivity(issue: IssueDetail, events: ActivityEvent[] | undefined): ActivityEvent | null {
+  if (issue.status !== "in_progress" || !Array.isArray(events)) return null;
+  return events.find((event) => event.action === "issue.closure_needs_operator_review") ?? null;
 }
 
 function workProductSize(product: IssueWorkProduct): string {
@@ -2036,6 +2078,7 @@ export function IssuePage() {
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
+  const closeoutReviewActivity = issue.data ? issueCloseoutReviewActivity(issue.data, issueActivity.data) : null;
   const hideLatestRunError =
     executeIssue.isPending ||
     executeNotice.startsWith("正在提交") ||
@@ -2113,6 +2156,12 @@ export function IssuePage() {
             {latestRun && isRerunnableRun(latestRun.status) && latestRunError && !hideLatestRunError && (
               <p className="error-notice" role="status">
                 最新运行{statusLabel(latestRun.status)}：{latestRunError}
+              </p>
+            )}
+            {closeoutReviewActivity && (
+              <p aria-label="需要人工确认收口" className="error-notice" role="status">
+                该任务的自动收口已用尽，需要人工确认：标记完成、改为阻塞、重新执行或补充评论。
+                {` ${issueCloseoutReviewSummary(closeoutReviewActivity)}`}
               </p>
             )}
           </header>
@@ -2329,7 +2378,7 @@ export function IssuePage() {
               </section>
               <div className="issue-activity-list">
                 {Array.isArray(issueActivity.data) && issueActivity.data.map((item) => (
-                  <article className="issue-activity-item" key={item.id}>
+                  <article className={`issue-activity-item tone-${activityTone(item)}`} key={item.id}>
                     <div className="issue-activity-avatar">{activityIcon(item)}</div>
                     <div className="issue-activity-content">
                       <div className="issue-activity-title-row">
@@ -2341,7 +2390,7 @@ export function IssuePage() {
                   </article>
                 ))}
                 {comments.data?.map((item) => (
-                  <article className="issue-activity-item" key={item.id}>
+                  <article className="issue-activity-item tone-comment" key={item.id}>
                     <div className="issue-activity-avatar">C</div>
                     <div className="issue-activity-content">
                       <div className="issue-activity-title-row">

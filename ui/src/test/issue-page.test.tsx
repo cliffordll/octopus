@@ -848,6 +848,83 @@ it("executes an assigned issue through the issue execution route", async () => {
   );
 });
 
+it("surfaces operator closeout review activity on the issue page", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "收口缺失任务",
+    description: "需要人工确认",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") {
+      return respond([
+        {
+          id: "activity-closeout",
+          orgId: "org-1",
+          action: "issue.closure_needs_operator_review",
+          actorType: "system",
+          actorId: "issue_closure_governance",
+          entityType: "issue",
+          entityId: "issue-1",
+          agentId: "agent-1",
+          runId: "run-closeout",
+          details: {
+            attempts: 2,
+            maxAttempts: 2,
+            reason: "missing_closure",
+          },
+          createdAt: "2026-06-08T10:10:00Z",
+        },
+      ]);
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByRole("heading", { name: "收口缺失任务" })).toBeInTheDocument();
+  expect(await screen.findByRole("status", { name: "需要人工确认收口" })).toHaveTextContent(
+    "自动收口已尝试 2/2 次",
+  );
+  const activityRegion = await screen.findByRole("region", { name: "动态" });
+  expect(activityRegion).toHaveTextContent("需要人工确认收口");
+  expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
+  expect(screen.getByText("需要人工确认收口").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
+  expect(screen.getByText(/Run run-closeout/)).toHaveClass("muted");
+});
+
 it("refreshes server registered work products when an issue run succeeds", async () => {
   const issue = {
     id: "issue-1",

@@ -4342,11 +4342,49 @@ button.danger {
 
 .issue-activity-item {
   align-items: flex-start;
+  background: #0f1724;
   border: 1px solid #202a3b;
-  border-radius: 10px;
+  border-left: 3px solid #3d4b63;
+  border-radius: 8px;
   display: flex;
   gap: 10px;
   padding: 10px;
+}
+
+.issue-activity-item.tone-needs-attention {
+  background: #21171a;
+  border-color: #68414a;
+  border-left-color: #f06b7b;
+}
+
+.issue-activity-item.tone-needs-review,
+.issue-activity-item.tone-review {
+  background: #151b28;
+  border-color: #2f4973;
+  border-left-color: #6aa8ff;
+}
+
+.issue-activity-item.tone-run {
+  background: #101b1d;
+  border-color: #24494f;
+  border-left-color: #2fc7a6;
+}
+
+.issue-activity-item.tone-status {
+  background: #171827;
+  border-color: #34365c;
+  border-left-color: #8f8cff;
+}
+
+.issue-activity-item.tone-comment {
+  background: #111a2a;
+  border-color: #2b3d59;
+  border-left-color: #82a7d8;
+}
+
+.issue-activity-item.tone-created,
+.issue-activity-item.tone-agent {
+  border-left-color: #d7a950;
 }
 
 .issue-activity-avatar {
@@ -4362,8 +4400,35 @@ button.danger {
   justify-content: center;
 }
 
+.issue-activity-item.tone-needs-attention .issue-activity-avatar {
+  background: #3b1d25;
+  color: #ffd6dd;
+}
+
+.issue-activity-item.tone-needs-review .issue-activity-avatar,
+.issue-activity-item.tone-review .issue-activity-avatar {
+  background: #162c4c;
+  color: #cfe5ff;
+}
+
+.issue-activity-item.tone-run .issue-activity-avatar {
+  background: #123436;
+  color: #c8fff3;
+}
+
+.issue-activity-item.tone-status .issue-activity-avatar {
+  background: #22234a;
+  color: #ddddff;
+}
+
+.issue-activity-item.tone-comment .issue-activity-avatar {
+  background: #1c2c45;
+  color: #d9e9ff;
+}
+
 .issue-activity-content {
   min-width: 0;
+  width: 100%;
 }
 
 .issue-activity-title-row {
@@ -4371,6 +4436,7 @@ button.danger {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  justify-content: space-between;
 }
 
 .issue-activity-title-row strong {
@@ -4380,6 +4446,8 @@ button.danger {
 
 .issue-activity-title-row .muted {
   font-size: 12px;
+  margin-left: auto;
+  text-align: right;
 }
 
 .issue-activity-item p {
