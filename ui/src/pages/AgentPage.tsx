@@ -706,7 +706,7 @@ function AgentRunDetail({
 
 export function AgentPage() {
   const { orgId = "", agentId = "", tab = "dashboard" } = useParams();
-  const activeTab = ["dashboard", "profile", "memory", "configuration", "skills", "runs"].includes(tab) ? tab : "dashboard";
+  const activeTab = ["dashboard", "profile", "memory", "configuration", "skills", "runs", "budget"].includes(tab) ? tab : "dashboard";
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<AgentRole>("general");
@@ -965,6 +965,12 @@ export function AgentPage() {
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
+  }
+  function submitBudget(event: FormEvent) {
+    event.preventDefault();
+    save.mutate({
+      budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars || 0) * 100),
+    });
   }
   function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -1263,6 +1269,7 @@ export function AgentPage() {
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/budget`}>预算</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
             <section className="panel agent-latest-run-card">
@@ -1620,10 +1627,9 @@ export function AgentPage() {
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
                       <h2>运行策略</h2>
-                      <p className="muted">预算、技能偏好和运行上下文策略。</p>
+                      <p className="muted">技能偏好和运行上下文策略。</p>
                     </div>
                     <div className="agent-property-list">
-                      <label className="agent-property-row"><span>月度预算（美元）</span><input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} required /></label>
                       <label className="agent-property-row"><span>期望技能</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
                       <div className="runtime-config-panel agent-policy-subsection">
                         <div className="runtime-config-summary">
@@ -1770,6 +1776,35 @@ export function AgentPage() {
                 </div>
               </div>
             </div>
+          )}
+          {activeTab === "budget" && (
+            <form className="panel agent-config-card" aria-label="智能体预算" onSubmit={submitBudget}>
+              <div className="panel-heading">
+                <div>
+                  <p className="eyebrow">Budget</p>
+                  <h2>预算</h2>
+                  <p className="muted">维护当前智能体的月度预算上限。</p>
+                </div>
+              </div>
+              <div className="agent-config-sections">
+                <section className="agent-config-section">
+                  <div className="agent-config-section-heading">
+                    <h2>月度预算</h2>
+                    <p className="muted">预算保存到智能体的 budgetMonthlyCents 字段。</p>
+                  </div>
+                  <div className="agent-property-list">
+                    <label className="agent-property-row">
+                      <span>月度预算（美元）</span>
+                      <input min="0" step="0.01" type="number" value={budgetMonthlyDollars} onChange={(event) => setBudgetMonthlyDollars(event.target.value)} required />
+                    </label>
+                  </div>
+                </section>
+              </div>
+              {save.error && <ErrorNotice error={save.error} />}
+              <div className="form-actions">
+                <button disabled={save.isPending} type="submit">保存预算</button>
+              </div>
+            </form>
           )}
           {activeTab === "skills" && <section className="agent-skills-page">
             <div className="panel agent-skills-card">

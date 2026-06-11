@@ -187,6 +187,10 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/issues",
   );
+  expect(within(tabs).getByRole("link", { name: "预算" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/projects/project-1/budget",
+  );
   expect(screen.getByText("代码库")).toBeInTheDocument();
   expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
   expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
