@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, NotRequired, TypedDict
 
 from packages.shared.constants.heartbeat import (
@@ -18,6 +19,7 @@ class WakeAgentPayload(TypedDict, total=False):
     contextSnapshot: dict[str, Any] | None
     idempotencyKey: str | None
     forceFreshSession: bool
+    requestedAt: datetime | str
 
 
 class HeartbeatRun(TypedDict):

@@ -312,6 +312,8 @@ function sourceReasonLabel(source: string | null | undefined): string {
   switch (source) {
     case "assignment":
       return "任务执行";
+    case "automation":
+      return "自动治理";
     case "scheduler":
       return "心跳调度";
     case "on_demand":
@@ -325,9 +327,25 @@ function sourceReasonLabel(source: string | null | undefined): string {
   }
 }
 
+function wakeReasonLabel(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  switch (value.trim()) {
+    case "issue_passive_followup":
+      return "补充关闭信号";
+    case "issue_review_closeout_missing":
+      return "补充评审结论";
+    case "issue_convergence_review_requested":
+      return "收敛评审";
+    default:
+      return null;
+  }
+}
+
 function runReasonLabel(run: HeartbeatRun, orderedRuns: HeartbeatRun[]): string {
   if (run.retryOfRunId) return `重试 ${run.retryOfRunId}`;
   if ((run.processLossRetryCount ?? 0) > 0) return "进程恢复重试";
+  const wakeReason = wakeReasonLabel(run.contextSnapshot?.wakeReason);
+  if (wakeReason) return wakeReason;
   const sameSourceRuns = orderedRuns.filter((item) => item.invocationSource === run.invocationSource);
   const runId = heartbeatRunId(run);
   const sourceIndex = sameSourceRuns.findIndex((item) => heartbeatRunId(item) === runId);

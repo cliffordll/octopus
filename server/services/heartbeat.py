@@ -83,6 +83,15 @@ LOCAL_CHILD_PROCESS_RUNTIMES = {
     "hermes_local",
 }
 
+ISSUE_PASSIVE_FOLLOWUP_REASON = "issue_passive_followup"
+ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE = "passive_issue_followup"
+ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
+ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
+ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT = {
+    1: timedelta(minutes=2),
+    2: timedelta(minutes=5),
+}
+
 
 def _run_log_dir() -> Path:
     return ensure_octopus_run_log_dir()
@@ -1286,29 +1295,37 @@ class HeartbeatService:
             return
         if await self._run_has_issue_closeout_signal(final, issue.id):
             return
+        next_attempt = 1
+        requested_at = (
+            datetime.now(UTC) + ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT[next_attempt]
+        )
         await self.wakeup(
             agent.id,
             {
-                "source": "assignment",
+                "source": "automation",
                 "triggerDetail": "system",
-                "reason": "issue_passive_followup",
-                "idempotencyKey": f"issue:{issue.id}:passive-followup:{final.id}",
+                "reason": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                "idempotencyKey": f"{ISSUE_PASSIVE_FOLLOWUP_REASON}:{final.id}",
+                "requestedAt": requested_at,
                 "payload": {
                     "issueId": issue.id,
                     "originRunId": final.id,
-                    "mutation": "passive_followup",
+                    "previousRunId": final.id,
+                    "attempt": next_attempt,
+                    "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
                 },
                 "contextSnapshot": {
                     "issueId": issue.id,
                     "source": "issue.passive_followup",
-                    "wakeSource": "assignment",
-                    "wakeReason": "issue_passive_followup",
+                    "wakeSource": ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE,
+                    "wakeReason": ISSUE_PASSIVE_FOLLOWUP_REASON,
                     "passiveFollowup": {
                         "originRunId": final.id,
                         "previousRunId": final.id,
-                        "attempt": 1,
-                        "maxAttempts": 1,
-                        "reason": "closeout_missing",
+                        "attempt": next_attempt,
+                        "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
+                        "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
+                        "queuedAt": datetime.now(UTC).isoformat(),
                     },
                     "issue": {
                         "id": issue.id,
@@ -1574,7 +1591,10 @@ class HeartbeatService:
         *,
         issue: IssueRow | None = None,
     ) -> None:
-        if run.invocation_source != "assignment":
+        is_passive_followup = (
+            context_snapshot.get("wakeReason") == ISSUE_PASSIVE_FOLLOWUP_REASON
+        )
+        if run.invocation_source != "assignment" and not is_passive_followup:
             return
         issue_id = _issue_id_from_context(context_snapshot)
         if issue_id is None:
@@ -1723,7 +1743,7 @@ class HeartbeatService:
         actor_id: str,
         status: str,
     ) -> dict[str, Any]:
-        return {
+        values = {
             "org_id": agent.org_id,
             "agent_id": agent.id,
             "source": payload.get("source", "on_demand"),
@@ -1735,6 +1755,15 @@ class HeartbeatService:
             "requested_by_actor_id": actor_id,
             "idempotency_key": payload.get("idempotencyKey"),
         }
+        requested_at = payload.get("requestedAt")
+        if isinstance(requested_at, datetime):
+            values["requested_at"] = requested_at
+        elif isinstance(requested_at, str):
+            parsed = datetime.fromisoformat(requested_at)
+            values["requested_at"] = (
+                parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+            )
+        return values
 
     def _payload_context(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(payload, dict):

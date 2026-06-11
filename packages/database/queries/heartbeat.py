@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import AgentWakeupRequest, HeartbeatRun, HeartbeatRunEvent
@@ -123,11 +123,20 @@ async def list_runs_by_status(
 async def list_queued_runs(
     session: AsyncSession, agent_id: str
 ) -> Sequence[HeartbeatRun]:
+    now = datetime.now(UTC)
     result = await session.execute(
         select(HeartbeatRun)
+        .outerjoin(
+            AgentWakeupRequest,
+            HeartbeatRun.wakeup_request_id == AgentWakeupRequest.id,
+        )
         .where(
             HeartbeatRun.agent_id == agent_id,
             HeartbeatRun.status == "queued",
+            or_(
+                HeartbeatRun.wakeup_request_id.is_(None),
+                AgentWakeupRequest.requested_at <= now,
+            ),
         )
         .order_by(HeartbeatRun.created_at, HeartbeatRun.id)
     )
@@ -136,7 +145,19 @@ async def list_queued_runs(
 
 async def list_queued_agent_ids(session: AsyncSession) -> set[str]:
     result = await session.scalars(
-        select(HeartbeatRun.agent_id).where(HeartbeatRun.status == "queued").distinct()
+        select(HeartbeatRun.agent_id)
+        .outerjoin(
+            AgentWakeupRequest,
+            HeartbeatRun.wakeup_request_id == AgentWakeupRequest.id,
+        )
+        .where(
+            HeartbeatRun.status == "queued",
+            or_(
+                HeartbeatRun.wakeup_request_id.is_(None),
+                AgentWakeupRequest.requested_at <= datetime.now(UTC),
+            ),
+        )
+        .distinct()
     )
     return set(result.all())
 
