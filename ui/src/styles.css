@@ -332,10 +332,14 @@ small {
 }
 
 .runtime-provider-settings {
-  gap: 6px;
+  gap: 10px;
 }
 
 .runtime-provider-settings .runtime-provider-heading {
+  margin-bottom: 0;
+}
+
+.settings-section-content > .runtime-settings .runtime-provider-heading {
   margin-bottom: 0;
 }
 
@@ -418,13 +422,13 @@ small {
 
 .settings-empty-section {
   align-content: start;
-  background: #0b1018;
-  border: 1px solid #273244;
-  border-radius: 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   height: 100%;
-  padding: 18px;
+  padding: 0;
 }
 
 .settings-empty-section h3,
@@ -551,7 +555,7 @@ small {
 .settings-preference-list {
   display: grid;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin-top: 0;
 }
 
 .settings-preference-row {
