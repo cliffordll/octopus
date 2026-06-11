@@ -239,9 +239,7 @@ class HeartbeatService:
         if issue is None or issue.org_id != agent.org_id:
             return False
         run_ids = [
-            value
-            for value in (issue.execution_run_id, issue.checkout_run_id)
-            if value
+            value for value in (issue.execution_run_id, issue.checkout_run_id) if value
         ]
         if not run_ids:
             return False

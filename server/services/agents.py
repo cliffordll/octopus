@@ -647,7 +647,11 @@ class AgentService:
             if not isinstance(issue_id, str) or not issue_id:
                 continue
             issue = await self._session.get(IssueRow, issue_id)
-            if issue is None or issue.org_id != row.org_id or issue.hidden_at is not None:
+            if (
+                issue is None
+                or issue.org_id != row.org_id
+                or issue.hidden_at is not None
+            ):
                 continue
             item = items_by_issue_id.get(issue.id) or self._to_inbox_item(row.id, issue)
             items_by_issue_id[issue.id] = await self._merge_comment_wakeup(
