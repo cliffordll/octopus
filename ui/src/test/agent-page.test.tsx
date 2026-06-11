@@ -180,6 +180,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "href",
     "/orgs/org-1/agents/agent-1/skills",
   );
+  expect(within(tabs).getByRole("link", { name: "预算" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/agents/agent-1/budget",
+  );
   await userEvent.click(within(tabs).getByRole("link", { name: "说明" }));
   const instructionsPanel = screen.getByRole("region", { name: "Managed Instructions" });
   expect(await within(instructionsPanel).findByRole("heading", { name: "文件" })).toBeInTheDocument();
@@ -454,8 +458,6 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.clear(screen.getByLabelText("月度预算（美元）"));
-  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
   await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -465,6 +467,18 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"agentRuntimeType":"codex_local"'),
+    }),
+  );
+
+  await userEvent.click(screen.getByRole("link", { name: "预算" }));
+  await userEvent.clear(await screen.findByLabelText("月度预算（美元）"));
+  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
+  await userEvent.click(screen.getByRole("button", { name: "保存预算" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ budgetMonthlyCents: 1000 }),
     }),
   );
 

@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
 import { sourceLabel, statusLabel } from "../utils/display";
 
 export function OrganizationPage() {
@@ -68,61 +69,77 @@ export function OrganizationPage() {
         </div>
       </header>
       <form className="panel form narrow" onSubmit={submit}>
-        <label>
-          组织名称
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </label>
-        <label>
-          描述
-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
-        </label>
-        <label>
-          月度预算（美元）
-          <input
-            min="0"
-            step="0.01"
-            type="number"
-            value={budgetMonthlyDollars}
-            onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
-          />
-        </label>
-        <label>
-          品牌色
-          <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
-        </label>
-        <label className="checkbox-row">
-          <input
-            checked={requireBoardApprovalForNewAgents}
-            onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
-            type="checkbox"
-          />
-          新建智能体需要审批
-        </label>
-        <label>
-          默认聊天任务创建模式
-          <select
-            value={defaultChatIssueCreationMode}
-            onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
-          >
-            <option value="manual_approval">手动确认</option>
-            <option value="auto_create">自动创建</option>
-          </select>
-        </label>
-        {update.error && <ErrorNotice error={update.error} />}
-        {archive.error && <ErrorNotice error={archive.error} />}
-        <div className="form-actions">
-          <button type="submit">保存组织</button>
-          <button
-            className="danger"
-            disabled={organization.data?.status === "archived" || archive.isPending}
-            type="button"
-            onClick={() => archive.mutate()}
-          >
-            归档组织
-          </button>
-        </div>
+          <label>
+            组织名称
+            <input value={name} onChange={(event) => setName(event.target.value)} required />
+          </label>
+          <label>
+            描述
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+          </label>
+          <label>
+            月度预算（美元）
+            <input
+              min="0"
+              step="0.01"
+              type="number"
+              value={budgetMonthlyDollars}
+              onChange={(event) => setBudgetMonthlyDollars(event.target.value)}
+            />
+          </label>
+          <label>
+            品牌色
+            <input value={brandColor} onChange={(event) => setBrandColor(event.target.value)} />
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={requireBoardApprovalForNewAgents}
+              onChange={(event) => setRequireBoardApprovalForNewAgents(event.target.checked)}
+              type="checkbox"
+            />
+            新建智能体需要审批
+          </label>
+          <label>
+            默认聊天任务创建模式
+            <select
+              value={defaultChatIssueCreationMode}
+              onChange={(event) => setDefaultChatIssueCreationMode(event.target.value)}
+            >
+              <option value="manual_approval">手动确认</option>
+              <option value="auto_create">自动创建</option>
+            </select>
+          </label>
+          {update.error && <ErrorNotice error={update.error} />}
+          {archive.error && <ErrorNotice error={archive.error} />}
+          <div className="form-actions">
+            <button type="submit">保存组织</button>
+            <button
+              className="danger"
+              disabled={organization.data?.status === "archived" || archive.isPending}
+              type="button"
+              onClick={() => archive.mutate()}
+            >
+              归档组织
+            </button>
+          </div>
       </form>
     </div>
+  );
+}
+
+export function OrganizationCostsPage() {
+  const { orgId = "" } = useParams();
+  return (
+    <OrgWorkspace orgId={orgId}>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">Organization Costs</p>
+          <h1>成本</h1>
+          <p className="muted">查看当前组织下的 runtime cost event 汇总。</p>
+        </div>
+      </header>
+      <OrganizationCostPanel orgId={orgId} />
+    </OrgWorkspace>
   );
 }
 
@@ -1465,6 +1482,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
             <span aria-hidden="true" className="context-entry-icon">H</span>
             <span>心跳</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/costs`}>
+            <span aria-hidden="true" className="context-entry-icon">C</span>
+            <span>成本</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/resources`}>
             <span aria-hidden="true" className="context-entry-icon">R</span>

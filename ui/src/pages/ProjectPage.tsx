@@ -215,7 +215,7 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
 }
 export function ProjectPage() {
   const { orgId = "", projectId = "", tab = "configuration" } = useParams();
-  const activeTab = ["configuration", "resources", "issues"].includes(tab) ? tab : "configuration";
+  const activeTab = ["configuration", "resources", "issues", "budget"].includes(tab) ? tab : "configuration";
   const [projectName, setProjectName] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState<ProjectStatus>("backlog");
@@ -471,7 +471,35 @@ export function ProjectPage() {
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/resources`}>资源</NavLink>
             <NavLink to={`/orgs/${orgId}/projects/${projectId}/issues`}>任务</NavLink>
+            <NavLink to={`/orgs/${orgId}/projects/${projectId}/budget`}>预算</NavLink>
           </nav>
+          {activeTab === "budget" && (
+            <section className="project-properties-card project-tab-panel" aria-label="项目预算">
+              <div className="project-config-sections">
+                <section className="project-config-section">
+                  <div className="project-section-heading">
+                    <p className="eyebrow">Budget</p>
+                    <h2>预算</h2>
+                    <p className="muted">项目预算由组织成本治理和预算策略驱动；当前页面展示项目级治理状态。</p>
+                  </div>
+                  <div className="project-property-list">
+                    <div className="project-property-row">
+                      <span>预算状态</span>
+                      <strong>{project.data.pauseReason === "budget" ? "已触发硬限制" : "未触发硬限制"}</strong>
+                    </div>
+                    <div className="project-property-row">
+                      <span>暂停原因</span>
+                      <strong>{project.data.pauseReason ?? "无"}</strong>
+                    </div>
+                    <div className="project-property-row">
+                      <span>暂停时间</span>
+                      <strong>{formatDateTime(project.data.pausedAt)}</strong>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </section>
+          )}
           {activeTab === "configuration" && <form className="project-properties-card project-tab-panel" onSubmit={save}>
             <div className="project-config-sections">
               <section className="project-config-section">

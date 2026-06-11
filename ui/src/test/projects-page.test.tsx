@@ -34,6 +34,10 @@ it("opens the first project for an organization with projects", async () => {
     .toHaveAttribute("href", "/orgs/org-1/heartbeat-runs");
   expect(within(organizationNavigation).getByRole("link", { name: "心跳" }))
     .toHaveClass("local-nav-primary");
+  expect(within(organizationNavigation).getByRole("link", { name: "成本" }))
+    .toHaveAttribute("href", "/orgs/org-1/costs");
+  expect(within(organizationNavigation).getByRole("link", { name: "成本" }))
+    .toHaveClass("local-nav-primary");
   expect(within(organizationNavigation).getByText("项目")).toBeInTheDocument();
   expect(within(organizationNavigation).queryByRole("link", { name: "全部项目" })).not.toBeInTheDocument();
   expect(within(organizationNavigation).getByRole("link", { name: "控制台" }))

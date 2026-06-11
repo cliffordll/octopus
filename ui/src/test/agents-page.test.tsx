@@ -405,6 +405,7 @@ it("manages runtime providers and models from settings", async () => {
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   expect(dialog.getByRole("button", { name: /供应商/ })).toHaveClass("active");
+  expect(dialog.queryByRole("button", { name: /成本/ })).not.toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /存储/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
