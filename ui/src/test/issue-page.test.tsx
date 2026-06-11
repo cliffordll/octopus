@@ -16,6 +16,11 @@ async function expandRunRecords() {
   return region;
 }
 
+async function ensureRunExpanded(region: HTMLElement, runId: string) {
+  const expandButton = within(region).queryByRole("button", { name: `展开运行 ${runId}` });
+  if (expandButton) await userEvent.click(expandButton);
+}
+
 it("shows existing run records without collapsing the section by default", async () => {
   const longSummary = `任务执行摘要很长，需要默认收起，避免运行记录布局被撑乱。${"继续补充执行细节。".repeat(12)}最终结论。`;
   const issue = {
@@ -127,13 +132,13 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(costPanel).getByText("已缓存")).toBeInTheDocument();
   expect(within(costPanel).getByText("900")).toBeInTheDocument();
 
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-visible" }));
+  await ensureRunExpanded(runRecordsRegion, "run-visible");
   expect(await within(runRecordsRegion).findByRole("heading", { name: "心跳上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*运行中/ })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*成功/ })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*补充关闭信号.*失败/ })).toBeInTheDocument();
   expect(runRecordsRegion).not.toHaveTextContent("未知来源");
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-second" }));
+  await ensureRunExpanded(runRecordsRegion, "run-second");
   expect((await within(runRecordsRegion).findAllByRole("heading", { name: "心跳上下文" })).length).toBeGreaterThanOrEqual(2);
 });
 
@@ -292,7 +297,17 @@ it("shows an issue and records comments and review decisions", async () => {
       ]);
     }
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") {
-      return respond([{ id: "c-1", issueId: "issue-1", body: "已有讨论" }]);
+      return respond([
+        {
+          id: "c-1",
+          issueId: "issue-1",
+          body: "已有讨论",
+          authorAgentId: null,
+          authorUserId: "board",
+          createdAt: "2026-06-08T10:03:00Z",
+          updatedAt: "2026-06-08T10:03:00Z",
+        },
+      ]);
     }
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") {
       return respond([{
@@ -426,7 +441,7 @@ it("shows an issue and records comments and review decisions", async () => {
   );
   expect(screen.getByRole("region", { name: "运行记录" })).not.toHaveTextContent("登录流程 PR");
   const runRecordsRegion = await expandRunRecords();
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
+  await ensureRunExpanded(runRecordsRegion, "run-1");
   const workProductsRegion = screen.getByRole("region", { name: "运行产物" });
   expect(workProductsRegion).toHaveTextContent("任务产物已折叠");
   await userEvent.click(within(workProductsRegion).getByRole("button", { name: "展开任务产物 2" }));
@@ -489,7 +504,13 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(activityRegion).toHaveTextContent("执行任务");
   expect(activityRegion).toHaveTextContent("run-1");
   expect(activityRegion).toHaveTextContent("2026年6月8日 18:05");
+  expect(activityRegion).toHaveTextContent("2026年6月8日 18:03");
   expect(activityRegion).toHaveTextContent("进入评审");
+  const activityItems = Array.from(activityRegion.querySelectorAll(".issue-activity-item"));
+  expect(activityItems[0]).toHaveTextContent("状态变更");
+  expect(activityItems[1]).toHaveTextContent("评论");
+  expect(activityItems[1]).toHaveTextContent("已有讨论");
+  expect(activityItems[2]).toHaveTextContent("执行任务");
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
   ]);
@@ -764,11 +785,16 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runRecordsRegion).toHaveTextContent("首次执行");
   expect(runRecordsRegion).not.toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
+  await ensureRunExpanded(runRecordsRegion, "run-1");
   expect(await screen.findByRole("region", { name: "执行输出" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
+  await userEvent.click(screen.getByRole("button", { name: "实时日志增量" }));
+  expect(screen.getByText("实时日志增量已折叠。")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).not.toHaveTextContent("stream log chunk");
+  await userEvent.click(screen.getByRole("button", { name: "实时日志增量" }));
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.getByRole("heading", { name: "执行输出" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "关键事件" })).toBeInTheDocument();
@@ -847,6 +873,80 @@ it("executes an assigned issue through the issue execution route", async () => {
     "/api/heartbeat-runs/run-1/cancel",
     expect.objectContaining({ method: "POST" }),
   );
+});
+
+it("auto-expands the latest live run and explains silent runtime progress", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "运行中任务",
+    description: "查看运行进度",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-live",
+    runId: "run-live",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    status: "running",
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+    processPid: 31740,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "running" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-live" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-live/events" && init?.method === "GET") {
+      return respond([
+        { id: 1, runId: "run-live", agentId: "agent-1", seq: 1, eventType: "lifecycle", stream: "system", message: "run started", createdAt: "2026-06-02T10:01:00Z" },
+        { id: 2, runId: "run-live", agentId: "agent-1", seq: 2, eventType: "runtime.progress", stream: "system", message: "runtime still running", payload: { elapsedSeconds: 45, processPid: 31740 }, createdAt: "2026-06-02T10:01:45Z" },
+      ]);
+    }
+    if (path === "/api/heartbeat-runs/run-live/log" && init?.method === "GET") return respond({ content: "", endOffset: 0, eof: true });
+    if (path === "/api/heartbeat-runs/run-live/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path.startsWith("/api/heartbeat-runs/run-live/stream") && init?.method === "GET") return respondStream([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const runRecordsRegion = await expandRunRecords();
+  expect(await within(runRecordsRegion).findByRole("button", { name: "折叠运行 run-live" })).toBeInTheDocument();
+  const output = await screen.findByRole("region", { name: "执行输出" });
+  expect(output).toHaveTextContent("进程 31740 已启动，等待 runtime 输出。");
+  expect(output).toHaveTextContent("最近进度：runtime still running");
 });
 
 it("surfaces operator closeout review activity on the issue page", async () => {
@@ -1025,7 +1125,7 @@ it("refreshes server registered work products when an issue run succeeds", async
   await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
 
   const runRecordsRegion = await expandRunRecords();
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
+  await ensureRunExpanded(runRecordsRegion, "run-1");
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 1" }));
   expect((await screen.findAllByText("README 标题文档"))[0]).toBeInTheDocument();
   expect(screen.getByText("server 登记的生成文件")).toBeInTheDocument();
@@ -1176,7 +1276,7 @@ it("hides the live stream log when it duplicates the persisted run log", async (
   renderApp("/orgs/org-1/issues/issue-1");
 
   const runRecordsRegion = await expandRunRecords();
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-1" }));
+  await ensureRunExpanded(runRecordsRegion, "run-1");
   expect(await screen.findByRole("heading", { name: "执行输出" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "实时日志增量" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Raw" }));
@@ -1249,7 +1349,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
   const runRecordsRegion = await expandRunRecords();
   expect(runRecordsRegion).toHaveTextContent("run-succeeded");
   expect(screen.getByText("运行：成功")).toBeInTheDocument();
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "展开运行 run-succeeded" }));
+  await ensureRunExpanded(runRecordsRegion, "run-succeeded");
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 0" }));
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
 });

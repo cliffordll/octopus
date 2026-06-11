@@ -20,9 +20,11 @@ from packages.database.schema import (
     AgentWakeupRequest,
     Base,
     HeartbeatRun,
+    HeartbeatRunEvent,
     Issue,
     Organization,
 )
+from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import Agent
 from server.services.agents import AgentService
@@ -513,6 +515,64 @@ async def test_process_run_persists_child_process_metadata(
     assert isinstance(run["processPid"], int)
     assert run["processPid"] > 0
     assert run["processStartedAt"] is not None
+
+
+async def test_running_adapter_emits_progress_events_without_log_output(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class SilentSlowAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            if context.on_process_started is not None:
+                await context.on_process_started(43210, datetime.now(UTC))
+            await asyncio.sleep(0.05)
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "silent complete"},
+            )
+
+    agent = await _seed_agent(session, name="SilentProgress")
+    monkeypatch.setattr(
+        heartbeat_module, "get_runtime_adapter", lambda _runtime_type: SilentSlowAdapter()
+    )
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.01)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    progress_events = (
+        (
+            await session.execute(
+                select(HeartbeatRunEvent)
+                .where(
+                    HeartbeatRunEvent.run_id == run["id"],
+                    HeartbeatRunEvent.event_type == "runtime.progress",
+                )
+                .order_by(HeartbeatRunEvent.seq)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert progress_events
+    assert progress_events[-1].message == "runtime still running"
+    payload = progress_events[-1].payload
+    assert isinstance(payload, dict)
+    assert payload["processPid"] == 43210
 
 
 async def test_orphaned_running_run_does_not_terminate_tracked_child_process(

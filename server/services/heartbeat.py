@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -111,6 +112,7 @@ def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
+    RUNTIME_PROGRESS_INTERVAL_SECONDS = 15.0
     _start_locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _active_run_ids: ClassVar[dict[str, set[str]]] = {}
     _cancel_events: ClassVar[dict[str, asyncio.Event]] = {}
@@ -880,6 +882,7 @@ class HeartbeatService:
         stderr = ""
         adapter_operation: object | None = None
         runtime_callback_lock = asyncio.Lock()
+        adapter_started_at = datetime.now(UTC)
 
         async def on_log(stream: str, chunk: str) -> None:
             nonlocal sequence, stdout, stderr
@@ -932,6 +935,51 @@ class HeartbeatService:
                     sequence += 1
                 await self._commit_background_runtime_progress()
 
+        async def emit_runtime_progress() -> None:
+            nonlocal sequence
+            async with runtime_callback_lock:
+                payload: dict[str, Any] = {
+                    "elapsedSeconds": max(
+                        0, int((datetime.now(UTC) - adapter_started_at).total_seconds())
+                    )
+                }
+                if running.process_pid is not None:
+                    payload["processPid"] = running.process_pid
+                if running.process_started_at is not None:
+                    payload["processStartedAt"] = running.process_started_at.isoformat()
+                await self._append_event(
+                    running,
+                    sequence,
+                    "runtime.progress",
+                    message="runtime still running",
+                    stream="system",
+                    level="info",
+                    payload=payload,
+                )
+                sequence += 1
+                await self._commit_background_runtime_progress()
+
+        async def execute_adapter_with_progress(
+            context: RuntimeExecutionContext,
+        ):
+            interval = self.RUNTIME_PROGRESS_INTERVAL_SECONDS
+            if interval <= 0:
+                return await adapter.execute(context)
+            task = asyncio.create_task(adapter.execute(context))
+            try:
+                while True:
+                    done, _ = await asyncio.wait({task}, timeout=interval)
+                    if task in done:
+                        return task.result()
+                    if cancellation.is_set():
+                        continue
+                    await emit_runtime_progress()
+            except asyncio.CancelledError:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                raise
+
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
             workspace_context = await self._prepare_workspace_context(running)
@@ -980,7 +1028,7 @@ class HeartbeatService:
                 config=runtime_config,
             )
             await self._commit_background_runtime_progress()
-            result = await adapter.execute(
+            result = await execute_adapter_with_progress(
                 RuntimeExecutionContext(
                     run_id=running.id,
                     agent_id=agent.id,
