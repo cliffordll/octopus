@@ -1181,6 +1181,7 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
 
   renderApp("/orgs/org-1/issues/issue-1");
 
+  await screen.findByRole("heading", { name: "需要收尾的任务" });
   expect(screen.getByText("运行（补充关闭信号）：已取消")).toBeInTheDocument();
   expect(screen.getByText("补充关闭信号运行已取消：run cancelled")).toBeInTheDocument();
 });
