@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+import inspect
 from types import SimpleNamespace
 from typing import cast
 
@@ -10,6 +11,7 @@ import pytest
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import _dispose_engine
+from server.routes import agents as agent_routes
 
 
 class BrokenTransaction:
@@ -100,3 +102,10 @@ async def test_dispose_engine_times_out() -> None:
     await _dispose_engine(engine, timeout_seconds=0.01)  # type: ignore[arg-type]
 
     assert engine.dispose_started
+
+
+def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
+    source = inspect.getsource(agent_routes.stream_heartbeat_run_route)
+
+    assert "async with session_factory() as session" not in source
+    assert "_close_session(session)" in source
