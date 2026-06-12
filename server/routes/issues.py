@@ -26,6 +26,7 @@ from packages.shared.api_paths.issues import (
     ISSUE_EXECUTE_PATH,
     ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
+    ISSUE_PASSIVE_FOLLOWUP_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ISSUE_WORK_PRODUCTS_PATH,
     ORG_ISSUE_LIST_PATH,
@@ -505,6 +506,40 @@ async def execute_issue_route(
     if enriched["status"] == "queued":
         _schedule_dispatch(request, enriched["agentId"])
     return JSONResponse(enriched, status_code=http_status.HTTP_202_ACCEPTED)
+
+
+@router.post(ISSUE_PASSIVE_FOLLOWUP_PATH)
+async def request_issue_passive_followup_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> JSONResponse:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    assert_organization_access(request, detail["orgId"])
+    actor = require_actor_identity(request)
+    try:
+        run = await heartbeat.request_issue_passive_followup(
+            id,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if run is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    if run["status"] == "queued":
+        _schedule_dispatch(request, run["agentId"])
+    return JSONResponse(run, status_code=http_status.HTTP_202_ACCEPTED)
 
 
 @router.patch(ISSUE_DETAIL_PATH)

@@ -399,6 +399,148 @@ class HeartbeatService:
                 return await self._to_run_with_issue_context(row)
         return None
 
+    async def request_issue_passive_followup(
+        self, issue_id: str, *, actor_type: str, actor_id: str
+    ) -> HeartbeatRun | None:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None:
+            return None
+        if issue.status not in {"todo", "in_progress"}:
+            raise ValueError(
+                "Issue does not need passive follow-up in its current status"
+            )
+        if not issue.assignee_agent_id:
+            raise ValueError("Issue must have an assignee before passive follow-up")
+        agent = await get_agent_by_id(self._session, issue.assignee_agent_id)
+        if agent is None:
+            raise ValueError("Issue assignee is not invokable")
+
+        active = await self._active_issue_followup_run(issue)
+        if active is not None:
+            return await self._to_run_with_issue_context(active)
+
+        scheduled = await self._scheduled_issue_passive_followup(issue, agent)
+        if scheduled is not None:
+            await update_wakeup_request(
+                self._session,
+                scheduled.id,
+                {
+                    "requested_at": datetime.now(UTC),
+                    "trigger_detail": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                    "error": None,
+                },
+            )
+            return await self._materialize_manual_passive_followup(scheduled.id)
+
+        previous_run = await self._latest_issue_run_missing_closeout(issue)
+        if previous_run is None:
+            raise ValueError("Issue has no successful run that needs passive follow-up")
+
+        context = (
+            previous_run.context_snapshot
+            if isinstance(previous_run.context_snapshot, dict)
+            else {}
+        )
+        passive_followup = _passive_followup_context(context)
+        raw_attempt = passive_followup.get("attempt")
+        current_attempt = (
+            raw_attempt
+            if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool)
+            else 0
+        )
+        if current_attempt >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+            raise ValueError("Issue passive follow-up attempts are exhausted")
+        raw_origin_run_id = passive_followup.get("originRunId")
+        origin_run_id = (
+            raw_origin_run_id if isinstance(raw_origin_run_id, str) else previous_run.id
+        )
+        wakeup = await create_wakeup_request(
+            self._session,
+            self._wakeup_values(
+                agent,
+                {
+                    "source": "automation",
+                    "triggerDetail": "manual",
+                    "reason": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                    "idempotencyKey": (
+                        f"{ISSUE_PASSIVE_FOLLOWUP_REASON}:manual:{previous_run.id}"
+                    ),
+                    "requestedAt": datetime.now(UTC),
+                    "payload": {
+                        "issueId": issue.id,
+                        "originRunId": origin_run_id,
+                        "previousRunId": previous_run.id,
+                        "attempt": current_attempt + 1,
+                        "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
+                    },
+                },
+                actor_type=actor_type,
+                actor_id=actor_id,
+                status="scheduled",
+            ),
+        )
+        return await self._materialize_manual_passive_followup(wakeup.id)
+
+    async def _active_issue_followup_run(
+        self, issue: IssueRow
+    ) -> HeartbeatRunRow | None:
+        for row in await list_runs(self._session, issue.org_id):
+            if (
+                row.status in {"queued", "running"}
+                and row.run_purpose == "closeout_followup"
+                and _issue_id_from_context(row.context_snapshot) == issue.id
+            ):
+                return row
+        return None
+
+    async def _scheduled_issue_passive_followup(
+        self, issue: IssueRow, agent: AgentRow
+    ) -> AgentWakeupRequestRow | None:
+        for wakeup in await list_wakeup_requests_by_status(
+            self._session, agent.id, "scheduled"
+        ):
+            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+            if (
+                wakeup.org_id == issue.org_id
+                and wakeup.reason == ISSUE_PASSIVE_FOLLOWUP_REASON
+                and payload.get("issueId") == issue.id
+            ):
+                return wakeup
+        return None
+
+    async def _latest_issue_run_missing_closeout(
+        self, issue: IssueRow
+    ) -> HeartbeatRunRow | None:
+        issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
+        for row in await list_runs(self._session, issue.org_id):
+            if (
+                row.agent_id != issue.assignee_agent_id
+                or row.run_purpose != "task_execution"
+                or row.status != "succeeded"
+                or _issue_id_from_context(row.context_snapshot) != issue.id
+            ):
+                continue
+            if not await self._run_has_issue_closeout_signal(
+                row, issue.id, issue_has_reviewer=issue_has_reviewer
+            ):
+                return row
+        return None
+
+    async def _materialize_manual_passive_followup(
+        self, wakeup_id: str
+    ) -> HeartbeatRun:
+        await self.materialize_due_scheduled_wakeups()
+        run = (
+            await self._session.execute(
+                select(HeartbeatRunRow).where(
+                    HeartbeatRunRow.wakeup_request_id == wakeup_id
+                )
+            )
+        ).scalar_one_or_none()
+        if run is None:
+            raise ValueError("Issue passive follow-up is no longer eligible")
+        return await self._to_run_with_issue_context(run)
+
     async def list_events(
         self, run_id: str, *, after_seq: int = 0, limit: int = 200
     ) -> list[HeartbeatRunEvent]:
