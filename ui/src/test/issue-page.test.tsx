@@ -1610,6 +1610,10 @@ it("explains queued issue runs from the assignee active queue", async () => {
   expect(queueRegion).toHaveTextContent("Builder 正在处理 3 个活跃运行");
   expect(queueRegion).toHaveTextContent("当前任务前面还有 2 个运行");
   expect(queueRegion).toHaveTextContent("定时心跳");
-  expect(queueRegion).toHaveTextContent("自动化");
+  expect(queueRegion).toHaveTextContent("assignment");
+  expect(queueRegion).toHaveTextContent("issue_assigned");
+  expect(queueRegion).toHaveTextContent("OCT-1");
+  expect(queueRegion).toHaveTextContent("automation");
+  expect(queueRegion).toHaveTextContent("issue_passive_followup");
   expect(within(queueRegion).getByRole("link", { name: "打开负责人运行页" })).toHaveAttribute("href", "/orgs/org-1/agents/agent-1/runs");
 });

@@ -7,6 +7,7 @@ import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { roleLabel, statusLabel } from "../utils/display";
+import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
@@ -315,6 +316,7 @@ export function HeartbeatRunsPage() {
             <div className="heartbeat-activity-grid">
               {sortedRuns.slice(0, 6).map((run) => {
                 const summary = latestRunSummary(run);
+                const issueLabel = runIssueLabel(run);
                 return (
                   <Link
                     className="heartbeat-activity-card"
@@ -325,6 +327,8 @@ export function HeartbeatRunsPage() {
                       <StatusPill status={run.status}>{humanize(run.status)}</StatusPill>
                       <small>{agentNameById.get(run.agentId) ?? "未知智能体"}</small>
                     </div>
+                    <p className="heartbeat-activity-meta" title={runDescriptor(run)}>{runDescriptor(run)}</p>
+                    {issueLabel && <p className="heartbeat-activity-meta" title={issueLabel}>{issueLabel}</p>}
                     {summary && <p>{summary}</p>}
                     <time title={formatDateTime(run.createdAt)}>{relativeTime(run.createdAt)}</time>
                   </Link>

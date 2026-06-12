@@ -13,7 +13,11 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
     id: "run-1",
     orgId: "org-1",
     agentId: "agent-1",
-    invocationSource: "on_demand",
+    issueId: "issue-1",
+    issueIdentifier: "OCT-1",
+    issueTitle: "检查运行状态",
+    invocationSource: "automation",
+    triggerDetail: "issue_passive_followup",
     status: "running",
     createdAt: "2026-05-27T08:00:00",
     error: null,
@@ -55,6 +59,8 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
   expect(within(row).getByText("已调度")).toBeInTheDocument();
   expect(within(row).getByText("运行中")).toBeInTheDocument();
   expect(within(row).getByText("检查运行状态")).toBeInTheDocument();
+  expect(screen.getByText("automation · issue_passive_followup")).toBeInTheDocument();
+  expect(screen.getByText("OCT-1")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "最近活动" })).toBeInTheDocument();
 
   await userEvent.click(within(row).getByRole("button", { name: "关闭" }));
