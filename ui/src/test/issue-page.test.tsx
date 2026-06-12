@@ -1182,8 +1182,8 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   await screen.findByRole("heading", { name: "需要收尾的任务" });
-  expect(screen.getByText("运行（补充关闭信号）：已取消")).toBeInTheDocument();
-  expect(screen.getByText("补充关闭信号运行已取消：run cancelled")).toBeInTheDocument();
+  expect(screen.getByText("补充关闭信号运行：已停止")).toBeInTheDocument();
+  expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
 
 it("refreshes server registered work products when an issue run succeeds", async () => {
@@ -1508,7 +1508,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   const runRecordsRegion = await expandRunRecords();
   expect(runRecordsRegion).toHaveTextContent("run-succeeded");
-  expect(screen.getByText("运行：成功")).toBeInTheDocument();
+  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
   await ensureRunExpanded(runRecordsRegion, "run-succeeded");
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 0" }));
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
@@ -1584,7 +1584,7 @@ it("ignores stale selected runs that do not belong to the issue", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
-  expect(screen.getByText("运行：成功")).toBeInTheDocument();
+  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
   expect(screen.queryByText("运行：运行中")).not.toBeInTheDocument();
 });
 

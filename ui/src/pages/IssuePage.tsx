@@ -425,6 +425,7 @@ function formattedJson(value: unknown): string {
 function runSummary(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录";
   const error = runErrorMessage(run.error);
+  if (isPassiveFollowupRun(run) && run.status === "cancelled" && error === "run cancelled") return "已停止";
   if (error) return error;
   if (run.summary?.trim()) return run.summary.trim();
   const result = hasJsonObject(run.resultJson) ? run.resultJson : null;
@@ -435,10 +436,15 @@ function runSummary(run: HeartbeatRun | null): string {
   return statusLabel(run.status);
 }
 
-function latestRunStatusLabel(run: HeartbeatRun | null | undefined): string {
+function latestRunBadgeLabel(run: HeartbeatRun | null | undefined): string {
   if (!run) return "";
-  if (isPassiveFollowupRun(run)) return `补充关闭信号运行${statusLabel(run.status)}`;
-  return `最新运行${statusLabel(run.status)}`;
+  return isPassiveFollowupRun(run) ? "补充关闭信号运行" : "最新运行";
+}
+
+function latestRunStatusText(run: HeartbeatRun | null | undefined): string {
+  if (!run) return "";
+  if (isPassiveFollowupRun(run) && run.status === "cancelled") return "已停止";
+  return statusLabel(run.status);
 }
 
 function previewRunSummary(summary: string): string {
@@ -1458,6 +1464,10 @@ function IssueRunOutputPanel({
   const [showLowValueEvents, setShowLowValueEvents] = useState(false);
   const [viewMode, setViewMode] = useState<"nice" | "raw">("nice");
   const run = data.run.data ?? null;
+  const suppressPassiveFollowupCancelError =
+    isPassiveFollowupRun(run) &&
+    run?.status === "cancelled" &&
+    run?.error === "run cancelled";
   const events = data.events.data ?? [];
   const operations = data.operations.data ?? [];
   const visibleEvents = events.filter((event) => !isLowValueRunEvent(event));
@@ -1509,7 +1519,7 @@ function IssueRunOutputPanel({
         </div>
       </div>
       <>
-          {data.run.error && <ErrorNotice error={data.run.error} />}
+          {run?.error && !suppressPassiveFollowupCancelError && <ErrorNotice error={run.error} />}
           {data.events.error && <ErrorNotice error={data.events.error} />}
           {data.operations.error && <ErrorNotice error={data.operations.error} />}
           {runLog.error && <ErrorNotice error={runLog.error} />}
@@ -2205,6 +2215,10 @@ export function IssuePage() {
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
   const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
   const latestRunError = runErrorMessage(latestRun?.error);
+  const latestRunErrorNotice =
+    latestRun && isPassiveFollowupRun(latestRun) && latestRun.status === "cancelled" && latestRunError === "run cancelled"
+      ? null
+      : latestRunError;
   const activeAssigneeRuns = activeQueueRunsForAgent(orgHeartbeatRuns.data ?? [], issue.data?.assigneeAgentId);
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
@@ -2255,12 +2269,11 @@ export function IssuePage() {
             <div className="issue-detail-title-block">
               <div className="issue-detail-kicker">
                 <Badge>{issueDisplayId(issue.data)}</Badge>
-                <Badge>{statusLabel(issue.data.status)}</Badge>
+                <Badge>任务状态：{statusLabel(issue.data.status)}</Badge>
                 <Badge>{priorityLabel(issue.data.priority)}</Badge>
                 {latestRun && (
                   <StatusPill status={latestRun.status}>
-                    {isPassiveFollowupRun(latestRun) ? "运行（补充关闭信号）：" : "运行："}
-                    {statusLabel(latestRun.status)}
+                    {latestRunBadgeLabel(latestRun)}：{latestRunStatusText(latestRun)}
                   </StatusPill>
                 )}
               </div>
@@ -2296,9 +2309,10 @@ export function IssuePage() {
             {executeIssue.error && <ErrorNotice error={executeIssue.error} />}
             {checkoutIssue.error && <ErrorNotice error={checkoutIssue.error} />}
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
-            {latestRun && isRerunnableRun(latestRun.status) && latestRunError && !hideLatestRunError && (
+            {latestRun && isRerunnableRun(latestRun.status) && latestRunErrorNotice && !hideLatestRunError && (
               <p className="error-notice" role="status">
-                {latestRunStatusLabel(latestRun)}：{latestRunError}
+                {latestRunBadgeLabel(latestRun)}{isPassiveFollowupRun(latestRun) && latestRun.status === "cancelled" ? "已停止" : statusLabel(latestRun.status)}
+                ：{latestRunErrorNotice}
               </p>
             )}
             {closeoutReviewActivity && (
