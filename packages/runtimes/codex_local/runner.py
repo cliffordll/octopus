@@ -471,7 +471,7 @@ async def _completed_process_attempt(
 def _build_args(
     config: dict[str, Any], resume_session_id: str | None = None
 ) -> list[str]:
-    args = ["exec", "--json", "--disable", "plugins"]
+    args = ["exec", "--skip-git-repo-check", "--json", "--disable", "plugins"]
     if config.get("search") is True:
         args.insert(0, "--search")
     if config.get("dangerouslyBypassApprovalsAndSandbox") is True:
