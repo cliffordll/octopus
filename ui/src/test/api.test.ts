@@ -574,6 +574,23 @@ describe("agent and heartbeat APIs", () => {
     );
   });
 
+  it("requests an immediate issue passive follow-up", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "run-followup", status: "queued" }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await issuesApi.passiveFollowup("issue-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/issues/issue-1/passive-followup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+  });
+
   it("covers runtime adapter and skills management routes", async () => {
     const fetchMock = vi
       .fn()
