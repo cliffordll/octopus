@@ -1,4 +1,4 @@
-# Step 14: Runtime Adapter 扩展
+﻿# Step 14: Runtime Adapter 扩展
 
 状态：已完成
 
@@ -115,7 +115,7 @@ Step 19 负责 cost/activity 查询；Step 20 负责 budget、quota 和治理联
 - `codex_local` 执行时已补齐 managed `CODEX_HOME` 默认注入：未显式配置 `env.CODEX_HOME` 时，运行时使用 `.octopus/instances/<instanceId>/organizations/<orgId>/codex-home/agents/<agentId>`，与 skills sync 的默认 materialization 位置一致。
 - `codex_local` 执行时已补齐 managed runtime `HOME/USERPROFILE`：默认指向 `CODEX_HOME/home`，并从 operator home 同步常见本地 CLI 凭据目录/文件（如 `.ssh`、`.npmrc`、`.config/gh`），避免 Codex 直接污染或误读用户全局 home。
 - `codex_local` heartbeat run 已把 `sessionIdBefore` 注入 runtime context；执行时会先使用 `codex exec ... resume <sessionId> -`，如果上游兼容 unknown session/rollout missing 错误出现，则记录日志并用 fresh session 自动重试一次。
-- `codex_local`、`claude_local`、`opencode_local` 已注入上游兼容 runtime env/context：基础 `RUDDER_AGENT_ID`、`RUDDER_ORG_ID`、`RUDDER_RUN_ID`、`RUDDER_API_URL`，wake/task/approval 字段，workspace 字段，agent/org workspace 路径字段，以及 runtime service JSON/primary URL。
+- `codex_local`、`claude_local`、`opencode_local` 已注入上游兼容 runtime env/context：基础 `OCTOPUS_AGENT_ID`、`OCTOPUS_ORG_ID`、`OCTOPUS_RUN_ID`、`OCTOPUS_API_URL`，wake/task/approval 字段，workspace 字段，agent/org workspace 路径字段，以及 runtime service JSON/primary URL。
 - `codex_local` 执行结果已返回当前 `CODEX_HOME/skills/<slug>/SKILL.md` 中可发现的 `loadedSkills` 元数据，并在 `usageJson`/`resultJson` 中补齐 `billingType` 与 `biller` 基础归一化；`biller` 按上游规则识别 `OPENROUTER_API_KEY` 与 OpenRouter base URL。
 - `codex_local` 已准备 managed Git config：运行时设置 `GIT_CONFIG_GLOBAL` 指向 managed `HOME/.gitconfig`，强制 `user.useConfigOnly=true`，清理不安全 `.local` author/committer env，并注入 gh credential helper policy，避免 Codex git commit 退回到 hostname `.local` 作者。
 - `codex_local` 已过滤 Codex telemetry/analytics 类 benign stderr 噪声，并按上游逻辑抑制 closed stdin tool-session lifecycle warning，避免把该类工具会话告警误报为业务失败原因。
