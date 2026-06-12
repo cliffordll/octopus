@@ -1378,6 +1378,160 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
     assert rows == []
 
 
+async def test_successful_issue_run_with_closeout_done_skips_passive_followup(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime
+
+    from packages.database.queries.activity_log import insert_activity_log
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="closeout-done")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Closeout Done Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Closeout done",
+                status="in_progress",
+                assignee_agent_id=agent_id,
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": issue_id},
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+        await insert_activity_log(
+            session,
+            org_id=org_id,
+            actor_type="agent",
+            actor_id=agent_id,
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=issue_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            details={"status": "done"},
+        )
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert rows == []
+
+
+async def test_successful_issue_run_with_closeout_block_skips_passive_followup(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime
+
+    from packages.database.queries.activity_log import insert_activity_log
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="closeout-block")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Closeout Block Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Closeout block",
+                status="in_progress",
+                assignee_agent_id=agent_id,
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": issue_id},
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+        await insert_activity_log(
+            session,
+            org_id=org_id,
+            actor_type="agent",
+            actor_id=agent_id,
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=issue_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            details={"status": "blocked"},
+        )
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert rows == []
+
+
 async def test_reviewed_issue_comment_without_review_routing_queues_passive_followup(
     session_factory: async_sessionmaker,
 ) -> None:

@@ -1599,16 +1599,12 @@ class HeartbeatService:
         *,
         issue_has_reviewer: bool,
     ) -> bool:
-        actions = (
-            ("issue.review_decision_recorded",)
-            if issue_has_reviewer
-            else ("issue.comment_added", "issue.review_decision_recorded")
-        )
-        return await self._run_has_issue_activity(
-            final,
-            issue_id,
-            actions,
-        )
+        actions = ("issue.review_decision_recorded",)
+        if not issue_has_reviewer:
+            actions = ("issue.comment_added", "issue.review_decision_recorded")
+        if await self._run_has_issue_activity(final, issue_id, actions):
+            return True
+        return await self._run_has_issue_status_closeout(final, issue_id)
 
     async def _run_has_issue_activity(
         self, final: HeartbeatRunRow, issue_id: str, actions: tuple[str, ...]
@@ -1627,6 +1623,27 @@ class HeartbeatService:
             .limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    async def _run_has_issue_status_closeout(
+        self, final: HeartbeatRunRow, issue_id: str
+    ) -> bool:
+        result = await self._session.execute(
+            select(ActivityLog.details)
+            .where(
+                and_(
+                    ActivityLog.org_id == final.org_id,
+                    ActivityLog.run_id == final.id,
+                    ActivityLog.entity_type == "issue",
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.updated",
+                )
+            )
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if not isinstance(row, dict):
+            return False
+        return row.get("status") in {"done", "blocked", "in_review"}
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
