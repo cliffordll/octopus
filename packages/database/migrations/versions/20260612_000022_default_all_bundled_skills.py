@@ -49,7 +49,7 @@ def upgrade() -> None:
             sa.text("select agent_id, skill_key from agent_enabled_skills")
         ).mappings()
     }
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
 
     for agent in agents:
         for skill_key in _BUNDLED_SKILL_KEYS:
