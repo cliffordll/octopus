@@ -18,6 +18,9 @@ WakeupRequestStatus = Literal[
 HeartbeatRunStatus = Literal[
     "queued", "running", "succeeded", "failed", "cancelled", "timed_out"
 ]
+HeartbeatRunPurpose = Literal[
+    "task_execution", "closeout_followup", "review", "heartbeat"
+]
 
 AGENT_RUN_CONCURRENCY_DEFAULT = 3
 AGENT_RUN_CONCURRENCY_MIN = 1
@@ -55,4 +58,10 @@ HEARTBEAT_RUN_STATUSES: tuple[HeartbeatRunStatus, ...] = (
     "failed",
     "cancelled",
     "timed_out",
+)
+HEARTBEAT_RUN_PURPOSES: tuple[HeartbeatRunPurpose, ...] = (
+    "task_execution",
+    "closeout_followup",
+    "review",
+    "heartbeat",
 )

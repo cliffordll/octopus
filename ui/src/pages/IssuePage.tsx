@@ -30,7 +30,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
-import { isPassiveFollowupRun, runDescriptor, runIssueLabel, runWakeReason } from "../utils/runDisplay";
+import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPurposeLabel, runWakeReason } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -171,7 +171,9 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, i
       merged.set(id, listedRun ? { ...listedRun, ...currentRun } : currentRun);
     }
   }
-  const sorted = Array.from(merged.values()).sort((left, right) => runSortTime(right) - runSortTime(left));
+  const sorted = Array.from(merged.values())
+    .filter(isTaskExecutionRun)
+    .sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
 }
 
@@ -1209,6 +1211,7 @@ function IssueRunsPanel({
                   <div className="issue-run-record-title">
                     <strong>{runId}</strong>
                     <span className="issue-run-record-badges">
+                      <Badge>{runPurposeLabel(displayRun)}</Badge>
                       {source && <Badge>来源 {source}</Badge>}
                       {wakeReason && <Badge>触发原因 {wakeReason}</Badge>}
                       <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
@@ -1933,7 +1936,7 @@ export function IssuePage() {
   }, [orgId, issueId]);
   useEffect(() => {
     if (currentRunId || !issueRuns.data?.length || !orgId || !issueId) return;
-    const latestRun = issueRuns.data[0];
+    const latestRun = latestIssueRun(issueRuns.data, null, issueId) ?? issueRuns.data[0];
     const latestRunId = heartbeatRunId(latestRun);
     if (!latestRunId) return;
     localStorage.setItem(issueRunStorageKey(orgId, issueId), latestRunId);

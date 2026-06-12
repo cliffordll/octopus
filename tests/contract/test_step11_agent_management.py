@@ -32,7 +32,11 @@ from packages.database.schema import (
     Organization,
 )
 from server.app import create_app
-from server.services.heartbeat import dispatch_queued_agent
+from server.services.heartbeat import (
+    _issue_passive_followup_delay,
+    dispatch_all_queued_runs,
+    dispatch_queued_agent,
+)
 
 
 def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
@@ -46,6 +50,14 @@ def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -
         "get_agent_service",
         "get_heartbeat_service",
     }.issubset(set(dependencies.__all__))
+
+
+def test_passive_followup_delay_uses_configured_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", "90")
+
+    assert _issue_passive_followup_delay() == timedelta(seconds=90)
 
 
 def test_agent_contract_modules_define_management_boundary() -> None:
@@ -256,6 +268,12 @@ def test_heartbeat_contract_modules_define_execution_boundary() -> None:
         "cancelled",
         "timed_out",
     )
+    assert constants.HEARTBEAT_RUN_PURPOSES == (
+        "task_execution",
+        "closeout_followup",
+        "review",
+        "heartbeat",
+    )
     assert validators.validate_wake_agent({"reason": "run now"}) == {
         "source": "on_demand",
         "reason": "run now",
@@ -440,6 +458,7 @@ def test_upgrade_to_head_backfills_all_bundled_skills(tmp_path: Path) -> None:
 def test_heartbeat_tables_match_step11c_boundary() -> None:
     schema = importlib.import_module("packages.database.schema")
     assert schema.HeartbeatRun.__tablename__ == "heartbeat_runs"
+    assert "run_purpose" in schema.HeartbeatRun.__table__.c
     assert schema.HeartbeatRunEvent.__tablename__ == "heartbeat_run_events"
     assert isinstance(schema.HeartbeatRunEvent.__table__.c.id.type, BigInteger)
     assert {"heartbeat_runs", "heartbeat_run_events"}.issubset(
@@ -460,9 +479,119 @@ async def test_upgrade_to_head_creates_heartbeat_tables(tmp_path: Path) -> None:
                 )
             )
             names = {row[0] for row in result}
+            columns = {
+                row[1]
+                for row in (
+                    await conn.execute(text("pragma table_info('heartbeat_runs')"))
+                )
+            }
     finally:
         await engine.dispose()
     assert names == {"heartbeat_runs", "heartbeat_run_events"}
+    assert "run_purpose" in columns
+
+
+def test_run_purpose_migration_backfills_existing_passive_followup(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "step11c-run-purpose.db"
+    config = _build_config(f"sqlite+aiosqlite:///{db_path}")
+    command.upgrade(config, "20260612_000022")
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            insert into organizations (
+                id,
+                url_key,
+                name,
+                status,
+                issue_prefix,
+                issue_counter,
+                budget_monthly_cents,
+                spent_monthly_cents,
+                require_board_approval_for_new_agents,
+                default_chat_issue_creation_mode
+            )
+            values (
+                'org-1',
+                'org-1',
+                'Org 1',
+                'active',
+                'ORG',
+                0,
+                0,
+                0,
+                1,
+                'manual_approval'
+            )
+            """
+        )
+        connection.execute(
+            """
+            insert into agents (
+                id,
+                org_id,
+                name,
+                role,
+                status,
+                agent_runtime_type,
+                agent_runtime_config,
+                runtime_config,
+                budget_monthly_cents,
+                spent_monthly_cents,
+                permissions
+            )
+            values (
+                'agent-1',
+                'org-1',
+                'Agent 1',
+                'engineer',
+                'idle',
+                'process',
+                '{}',
+                '{}',
+                0,
+                0,
+                '{}'
+            )
+            """
+        )
+        connection.execute(
+            """
+            insert into heartbeat_runs
+                (
+                    id,
+                    org_id,
+                    agent_id,
+                    invocation_source,
+                    status,
+                    log_compressed,
+                    process_loss_retry_count,
+                    context_snapshot
+                )
+            values
+                (
+                    'run-1',
+                    'org-1',
+                    'agent-1',
+                    'automation',
+                    'succeeded',
+                    0,
+                    0,
+                    '{"wakeReason":"issue_passive_followup"}'
+                )
+            """
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+
+    with sqlite3.connect(db_path) as connection:
+        purpose = connection.execute(
+            "select run_purpose from heartbeat_runs where id = 'run-1'"
+        ).fetchone()
+
+    assert purpose == ("closeout_followup",)
 
 
 @pytest.fixture
@@ -1188,9 +1317,11 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
 async def test_successful_issue_run_without_closeout_queues_passive_followup(
     app: FastAPI,
     session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import sys
 
+    monkeypatch.delenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", raising=False)
     org_id = await _seed_org(session_factory, key="passive-followup")
     _, agent = await _request(
         app,
@@ -1227,10 +1358,12 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         "POST",
         f"/api/agents/{agent['id']}/wakeup",
         json={
-            "reason": "contract-issue-run",
+            "source": "assignment",
+            "triggerDetail": "system",
+            "reason": "issue_execute",
             "payload": {
                 "issueId": issue["id"],
-                "wakeReason": "contract-issue-run",
+                "wakeReason": "issue_execute",
             },
         },
     )
@@ -1268,12 +1401,44 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         "reason": "missing_closure",
     }
     assert rows[0].source == "automation"
-    assert rows[0].status == "queued"
+    assert rows[0].status == "scheduled"
     assert rows[0].idempotency_key == f"issue_passive_followup:{run['id']}"
     requested_at = rows[0].requested_at
     if requested_at.tzinfo is None:
         requested_at = requested_at.replace(tzinfo=UTC)
-    assert requested_at > datetime.now(UTC) + timedelta(seconds=30)
+    assert requested_at > datetime.now(UTC) + timedelta(minutes=29)
+
+    async with session_factory() as session:
+        followup_run = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == rows[0].id)
+            )
+        ).scalar_one_or_none()
+        issue_row = await session.get(Issue, issue["id"])
+        assert issue_row is not None
+        assert issue_row.execution_run_id is None
+        assert issue_row.checkout_run_id is None
+
+    assert followup_run is None
+
+    await dispatch_queued_agent(app.state.session_factory, agent["id"])
+
+    async with session_factory() as session:
+        followup_run = (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == rows[0].id)
+            )
+        ).scalar_one_or_none()
+
+    assert followup_run is None
+
+    async with session_factory() as session:
+        wakeup_row = await session.get(AgentWakeupRequest, rows[0].id)
+        assert wakeup_row is not None
+        wakeup_row.requested_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
+
+    await dispatch_all_queued_runs(app.state.session_factory)
 
     async with session_factory() as session:
         followup_run = (
@@ -1281,8 +1446,11 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
                 select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == rows[0].id)
             )
         ).scalar_one()
+        issue_row = await session.get(Issue, issue["id"])
+        assert issue_row is not None
         assert followup_run.invocation_source == "automation"
-        assert followup_run.status == "queued"
+        assert followup_run.run_purpose == "closeout_followup"
+        assert followup_run.status in {"running", "succeeded"}
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -1292,13 +1460,13 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
             followup_run.context_snapshot["passiveFollowup"]["reason"]
             == "missing_closure"
         )
+        assert issue_row.execution_run_id is None
+        assert issue_row.checkout_run_id is None
 
-    await dispatch_queued_agent(app.state.session_factory, agent["id"])
-
-    async with session_factory() as session:
-        still_queued = await session.get(HeartbeatRun, followup_run.id)
-        assert still_queued is not None
-        assert still_queued.status == "queued"
+    _, followup_detail = await _request(
+        app, "GET", f"/api/heartbeat-runs/{followup_run.id}"
+    )
+    assert followup_detail["runPurpose"] == "closeout_followup"
 
 
 async def test_successful_issue_run_with_closeout_comment_skips_passive_followup(

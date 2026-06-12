@@ -55,6 +55,7 @@ it("shows existing run records without collapsing the section by default", async
     agentId: "agent-1",
     issueId: "issue-1",
     invocationSource: "assignment",
+    runPurpose: "task_execution",
     status: "running",
     summary: longSummary,
     usageJson: { cachedInputTokens: 900, costCents: 37, inputTokens: 1200, outputTokens: 340 },
@@ -72,6 +73,7 @@ it("shows existing run records without collapsing the section by default", async
     agentId: "agent-1",
     issueId: "issue-1",
     invocationSource: "automation",
+    runPurpose: "closeout_followup",
     status: "failed",
     summary: "第二次运行失败",
     contextSnapshot: { wakeReason: "issue_passive_followup" },
@@ -109,12 +111,15 @@ it("shows existing run records without collapsing the section by default", async
 
   const runRecordsRegion = await screen.findByRole("region", { name: "运行记录" });
   expect((await within(runRecordsRegion).findAllByText("run-visible")).length).toBeGreaterThan(0);
-  expect(within(runRecordsRegion).queryByRole("region", { name: "心跳上下文" })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("region", { name: "心跳上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "折叠运行记录" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "展开运行记录" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("来源 assignment")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("来源 automation")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("任务执行")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
+  expect(screen.getByText("最新运行：运行中")).toBeInTheDocument();
   const summaryBlock = within(runRecordsRegion).getAllByText("输出摘要")[0].closest(".issue-run-record-summary");
   expect(summaryBlock).not.toHaveTextContent(longSummary);
   expect(summaryBlock).toHaveTextContent("展开");
@@ -785,7 +790,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runRecordsRegion).toHaveTextContent("排队中");
   expect(runRecordsRegion).toHaveTextContent("第 1 次");
   expect(runRecordsRegion).toHaveTextContent("run-1");
-  expect(runRecordsRegion).toHaveTextContent("首次执行");
+  expect(runRecordsRegion).toHaveTextContent("任务执行");
   expect(runRecordsRegion).not.toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
   await ensureRunExpanded(runRecordsRegion, "run-1");
@@ -1155,12 +1160,26 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
     agentId: "agent-1",
     issueId: "issue-1",
     invocationSource: "automation",
+    runPurpose: "closeout_followup",
     triggerDetail: "issue_passive_followup",
     contextSnapshot: { wakeReason: "issue_passive_followup" },
     status: "cancelled",
     error: "run cancelled",
     createdAt: "2026-06-02T10:00:00Z",
     startedAt: "2026-06-02T10:01:00Z",
+  };
+  const taskRun = {
+    id: "run-task",
+    runId: "run-task",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    runPurpose: "task_execution",
+    status: "succeeded",
+    createdAt: "2026-06-02T09:00:00Z",
+    startedAt: "2026-06-02T09:01:00Z",
+    finishedAt: "2026-06-02T09:02:00Z",
   };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
@@ -1169,7 +1188,7 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
-    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run, taskRun]);
     if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
@@ -1178,6 +1197,9 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
     if (path === "/api/heartbeat-runs/run-closeout" && init?.method === "GET") return respond(run);
     if (path === "/api/heartbeat-runs/run-closeout/events" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-closeout/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-task" && init?.method === "GET") return respond(taskRun);
+    if (path === "/api/heartbeat-runs/run-task/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-task/workspace-operations" && init?.method === "GET") return respond([]);
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -1185,7 +1207,11 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   await screen.findByRole("heading", { name: "需要收尾的任务" });
-  expect(screen.getByText("补充关闭信号运行：已停止")).toBeInTheDocument();
+  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
+  const runRecords = await screen.findByRole("region", { name: "运行记录" });
+  expect(within(runRecords).getByText("收尾跟进")).toBeInTheDocument();
+  expect(within(runRecords).getByText("任务执行")).toBeInTheDocument();
+  expect(within(runRecords).getAllByText("已停止").length).toBeGreaterThan(0);
   expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
 

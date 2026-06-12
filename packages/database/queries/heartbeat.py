@@ -62,6 +62,40 @@ async def list_wakeup_requests_by_status(
     return result.scalars().all()
 
 
+async def list_due_wakeup_request_ids(
+    session: AsyncSession, status: str, now: datetime
+) -> Sequence[str]:
+    result = await session.scalars(
+        select(AgentWakeupRequest.id)
+        .where(
+            AgentWakeupRequest.status == status,
+            AgentWakeupRequest.requested_at <= now,
+        )
+        .order_by(AgentWakeupRequest.requested_at, AgentWakeupRequest.id)
+    )
+    return result.all()
+
+
+async def claim_due_wakeup_request(
+    session: AsyncSession, wakeup_id: str, status: str, claimed_at: datetime
+) -> AgentWakeupRequest | None:
+    result = await session.execute(
+        update(AgentWakeupRequest)
+        .where(
+            AgentWakeupRequest.id == wakeup_id,
+            AgentWakeupRequest.status == status,
+            AgentWakeupRequest.requested_at <= claimed_at,
+        )
+        .values(
+            status="claimed",
+            claimed_at=claimed_at,
+            updated_at=claimed_at,
+        )
+        .returning(AgentWakeupRequest)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_run(session: AsyncSession, fields: Mapping[str, Any]) -> HeartbeatRun:
     row = HeartbeatRun(**dict(fields))
     session.add(row)
