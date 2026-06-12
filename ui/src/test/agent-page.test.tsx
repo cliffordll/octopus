@@ -559,6 +559,8 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(rail).getAllByText("定时心跳").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getByText(/issue_passive_followup/)).toBeInTheDocument();
+  expect(within(rail).getByText("OCT-1")).toBeInTheDocument();
   expect(within(rail).getByText("定时心跳到点触发，用来检查智能体是否需要继续工作。")).toBeInTheDocument();
   expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
   expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();

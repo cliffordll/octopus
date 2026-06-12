@@ -3250,6 +3250,16 @@ small {
   white-space: nowrap;
 }
 
+.heartbeat-activity-meta {
+  color: #9aa8ba;
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .heartbeat-activity-card time {
   color: #8792a6;
   font-size: 12px;
@@ -8417,6 +8427,15 @@ pre {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.agent-run-list-copy small {
+  color: #9aa8ba;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-run-list-title-row {

@@ -11,6 +11,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
+import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
@@ -343,14 +344,6 @@ function heartbeatMaxConcurrentRuns(runtimeConfig: Record<string, unknown> | nul
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : DEFAULT_HEARTBEAT_POLICY.maxConcurrentRuns;
-}
-
-function runIssueLabel(run: HeartbeatRun): string {
-  return run.issueIdentifier ?? run.issueTitle ?? run.issueId ?? "";
-}
-
-function triggerLabel(run: HeartbeatRun): string {
-  return run.triggerDetail ? sourceLabel(run.triggerDetail) : sourceLabel(run.invocationSource);
 }
 
 function skillField(entry: Record<string, unknown>, keys: string[], fallback = "-"): string {
@@ -783,19 +776,19 @@ function AgentQueuePanel({
               </span>
             ))}
           </div>
-          <div className="agent-queue-run-list">
-            {runs.slice(0, 5).map((run) => {
-              const issueLabel = runIssueLabel(run);
-              return (
-                <article className="agent-queue-run" key={run.id}>
-                  <div>
-                    <strong>{run.id.slice(0, 8)}</strong>
-                    <span>{triggerLabel(run)}</span>
-                  </div>
-                  <div className="agent-queue-run-meta">
-                    {issueLabel && run.issueId ? (
-                      <Link to={`/orgs/${orgId}/issues/${run.issueId}`}>{issueLabel}</Link>
-                    ) : issueLabel ? (
+            <div className="agent-queue-run-list">
+              {runs.slice(0, 5).map((run) => {
+                const issueLabel = runIssueLabel(run);
+                return (
+                  <article className="agent-queue-run" key={run.id}>
+                    <div>
+                      <strong>{run.id.slice(0, 8)}</strong>
+                      <span>{runDescriptor(run)}</span>
+                    </div>
+                    <div className="agent-queue-run-meta">
+                      {issueLabel && run.issueId ? (
+                        <Link to={`/orgs/${orgId}/issues/${run.issueId}`}>{issueLabel}</Link>
+                      ) : issueLabel ? (
                       <span>{issueLabel}</span>
                     ) : null}
                     <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
@@ -2174,8 +2167,9 @@ export function AgentPage() {
                       <strong>{run.id.slice(0, 8)}</strong>
                       <Badge>{sourceLabel(run.invocationSource)}</Badge>
                     </span>
-                    <small>{summarizeRun(run)}</small>
+                    <small title={runDescriptor(run)}>{runDescriptor(run)}</small>
                     {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
+                    <small title={summarizeRun(run)}>{summarizeRun(run)}</small>
                   </span>
                   <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
                 </button>

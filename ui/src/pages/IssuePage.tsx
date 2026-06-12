@@ -30,6 +30,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
+import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -836,6 +837,10 @@ function IssueQueueStatusPanel({
   const assigneeName = agentName(issue.assigneeAgentId, agentsById);
   const counts = queueSourceCounts(activeRuns);
   const previewRuns = activeRuns.slice(0, 4);
+  function queueRunIssueLabel(run: HeartbeatRun): string {
+    if (run.issueId === issue.id) return issue.identifier ?? issue.title ?? issue.id;
+    return runIssueLabel(run) ?? "";
+  }
   return (
     <section aria-label="运行队列状态" className="issue-queue-status">
       <div className="issue-queue-status-heading">
@@ -860,8 +865,9 @@ function IssueQueueStatusPanel({
         {previewRuns.map((run) => (
           <article className={heartbeatRunId(run) === heartbeatRunId(currentRun) ? "current" : ""} key={heartbeatRunId(run)}>
             <span>{run.id.slice(0, 8)}</span>
-            <Badge>{sourceLabel(run.invocationSource)}</Badge>
-            {run.triggerDetail && <small>{sourceLabel(run.triggerDetail)}</small>}
+            <Badge>{run.invocationSource}</Badge>
+            <small title={runDescriptor(run)}>{runDescriptor(run)}</small>
+            {queueRunIssueLabel(run) && <small>{queueRunIssueLabel(run)}</small>}
             <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
           </article>
         ))}
