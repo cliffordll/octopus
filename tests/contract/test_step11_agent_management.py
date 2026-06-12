@@ -335,7 +335,7 @@ async def test_upgrade_to_head_creates_agent_state_tables(tmp_path: Path) -> Non
     }
 
 
-def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -> None:
+def test_upgrade_to_head_backfills_all_bundled_skills(tmp_path: Path) -> None:
     db_path = tmp_path / "agent-skill-backfill.db"
     database_url = f"sqlite+aiosqlite:///{db_path}"
     config = _build_config(database_url)
@@ -365,7 +365,7 @@ def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -
                 "manual_approval",
             ),
         )
-        connection.execute(
+        connection.executemany(
             """
             insert into agents (
                 id, org_id, name, workspace_key, role, status,
@@ -374,20 +374,43 @@ def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                "agent-1",
-                "org-1",
-                "Existing Agent",
-                "agent-existing",
-                "general",
-                "idle",
-                "process",
-                json.dumps({}),
-                json.dumps({}),
-                0,
-                0,
-                json.dumps({}),
-            ),
+            [
+                (
+                    "agent-1",
+                    "org-1",
+                    "Existing Agent",
+                    "agent-existing",
+                    "general",
+                    "idle",
+                    "process",
+                    json.dumps({}),
+                    json.dumps({}),
+                    0,
+                    0,
+                    json.dumps({}),
+                ),
+                (
+                    "agent-2",
+                    "org-1",
+                    "Terminated Agent",
+                    "agent-terminated",
+                    "general",
+                    "terminated",
+                    "process",
+                    json.dumps({}),
+                    json.dumps({}),
+                    0,
+                    0,
+                    json.dumps({}),
+                ),
+            ],
+        )
+        connection.execute(
+            """
+            insert into agent_enabled_skills (id, org_id, agent_id, skill_key)
+            values (?, ?, ?, ?)
+            """,
+            ("custom-skill-1", "org-1", "agent-1", "custom/existing-skill"),
         )
         connection.commit()
 
@@ -395,10 +418,23 @@ def test_upgrade_to_head_backfills_default_control_plane_skill(tmp_path: Path) -
 
     with sqlite3.connect(db_path) as connection:
         rows = connection.execute(
-            "select agent_id, skill_key from agent_enabled_skills"
+            """
+            select agent_id, skill_key
+            from agent_enabled_skills
+            order by agent_id, skill_key
+            """
         ).fetchall()
 
-    assert rows == [("agent-1", "skills/control-plane")]
+    assert rows == [
+        ("agent-1", "custom/existing-skill"),
+        ("agent-1", "skills/control-plane"),
+        ("agent-1", "skills/conversation-to-skill"),
+        ("agent-1", "skills/create-agent"),
+        ("agent-1", "skills/create-plugin"),
+        ("agent-1", "skills/para-memory-files"),
+        ("agent-1", "skills/skill-creator"),
+        ("agent-1", "skills/skill-optimizer"),
+    ]
 
 
 def test_heartbeat_tables_match_step11c_boundary() -> None:

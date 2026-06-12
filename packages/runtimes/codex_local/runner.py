@@ -16,7 +16,11 @@ from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
-from ..local_skills import configure_managed_profile_env
+from ..local_skills import (
+    configure_managed_profile_env,
+    desired_skills_from_config,
+    materialize_runtime_skills,
+)
 from ..provider_config import apply_provider_env, model_for_cli
 from ..paths import ensure_managed_runtime_home
 from ..session import effective_resume_session_id
@@ -70,11 +74,25 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         base_url_env="OPENAI_BASE_URL",
     )
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
-    if not _string(env.get("CODEX_HOME")):
+    configured_codex_home = _string(env.get("CODEX_HOME"))
+    if configured_codex_home:
+        env["CODEX_HOME"] = str(
+            Path(configured_codex_home).expanduser().resolve()
+            / "agents"
+            / context.agent_id
+        )
+    else:
         env["CODEX_HOME"] = str(_default_codex_home(context))
     await _prepare_managed_home(env, context.on_log)
     _prepare_managed_git_config(env)
     apply_runtime_context_env(env, context)
+    materialize_runtime_skills(
+        runtime_type="codex_local",
+        config=context.config,
+        desired_skills=desired_skills_from_config(context.config),
+        skills_home=Path(env["CODEX_HOME"]) / "skills",
+        location_label="managed CODEX_HOME/skills",
+    )
     billing_type = _billing_type(env)
     biller = _biller(env, billing_type)
     loaded_skills = _loaded_skills(env)
