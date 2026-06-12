@@ -491,12 +491,37 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
           id: "run-automation",
           orgId: "org-1",
           agentId: "agent-1",
-          status: "failed",
+          status: "running",
           invocationSource: "automation",
           triggerDetail: "issue_passive_followup",
           createdAt: "2026-05-28T23:56:00Z",
         },
       ]);
+    }
+    if (path === "/api/heartbeat-runs/run-automation" && init?.method === "GET") {
+      return respond({
+        id: "run-automation",
+        orgId: "org-1",
+        agentId: "agent-1",
+        status: "running",
+        invocationSource: "automation",
+        triggerDetail: "issue_passive_followup",
+        createdAt: "2026-05-28T23:56:00Z",
+      });
+    }
+    if (path === "/api/heartbeat-runs/run-automation/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-automation/log" && init?.method === "GET") return respond({ content: "", endOffset: 0, eof: true });
+    if (path === "/api/heartbeat-runs/run-automation/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-automation/cancel" && init?.method === "POST") {
+      return respond({
+        id: "run-automation",
+        orgId: "org-1",
+        agentId: "agent-1",
+        status: "cancelled",
+        invocationSource: "automation",
+        triggerDetail: "issue_passive_followup",
+        createdAt: "2026-05-28T23:56:00Z",
+      });
     }
     return respond({ ...agent, name: "Builder 2" });
   });
@@ -537,7 +562,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
 
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
   const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
-  expect(queueRegion).toHaveTextContent("2 个活跃运行");
+  expect(queueRegion).toHaveTextContent("3 个活跃运行");
   expect(within(queueRegion).getByText("定时心跳")).toBeInTheDocument();
   expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
   expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
@@ -565,6 +590,13 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
   expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
   expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
+  await userEvent.click(within(rail).getByRole("button", { name: /run-automation/ }));
+  expect(await within(detail).findByRole("button", { name: "停止运行" })).toBeInTheDocument();
+  await userEvent.click(within(detail).getByRole("button", { name: "停止运行" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-automation/cancel",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
 });
 
 it("saves heartbeat policy from the agent configuration form", async () => {

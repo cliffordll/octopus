@@ -30,7 +30,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
-import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
+import { isPassiveFollowupRun, runDescriptor, runIssueLabel } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -351,6 +351,18 @@ function issueCloseoutReviewActivity(issue: IssueDetail, events: ActivityEvent[]
   return events.find((event) => event.action === "issue.closure_needs_operator_review") ?? null;
 }
 
+function runHasExplicitCloseoutSignal(run: HeartbeatRun | null, events: ActivityEvent[] | undefined, issueId: string): boolean {
+  if (!run || !Array.isArray(events)) return false;
+  const runId = heartbeatRunId(run);
+  return events.some((event) => {
+    if (event.entityType !== "issue" || event.entityId !== issueId || event.runId !== runId) return false;
+    if (event.action === "issue.comment_added") return true;
+    if (event.action !== "issue.updated") return false;
+    const status = event.details?.status;
+    return typeof status === "string" && ["done", "blocked", "in_review"].includes(status);
+  });
+}
+
 type IssueTimelineItem =
   | { id: string; item: ActivityEvent; kind: "activity"; timestamp: string }
   | { id: string; item: IssueComment; kind: "comment"; timestamp: string };
@@ -421,6 +433,12 @@ function runSummary(run: HeartbeatRun | null): string {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return statusLabel(run.status);
+}
+
+function latestRunStatusLabel(run: HeartbeatRun | null | undefined): string {
+  if (!run) return "";
+  if (isPassiveFollowupRun(run)) return `补充关闭信号运行${statusLabel(run.status)}`;
+  return `最新运行${statusLabel(run.status)}`;
 }
 
 function previewRunSummary(summary: string): string {
@@ -1432,7 +1450,7 @@ function IssueRunOutputPanel({
   streamError: string | null;
   streamLog: string;
 }) {
-  const [showEvents, setShowEvents] = useState(true);
+  const [showEvents, setShowEvents] = useState(false);
   const [showOperations, setShowOperations] = useState(true);
   const [showRawOutput, setShowRawOutput] = useState(true);
   const [showLiveLogDelta, setShowLiveLogDelta] = useState(true);
@@ -2192,6 +2210,13 @@ export function IssuePage() {
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
   const closeoutReviewActivity = issue.data ? issueCloseoutReviewActivity(issue.data, issueActivity.data) : null;
+  const latestRunHasCloseoutSignal = issue.data && latestRun ? runHasExplicitCloseoutSignal(latestRun, issueActivity.data, issue.data.id) : false;
+  const needsCloseoutPrompt = issue.data
+    ? latestRunSucceeded &&
+      ["todo", "in_progress"].includes(issue.data.status) &&
+      !closeoutReviewActivity &&
+      !latestRunHasCloseoutSignal
+    : false;
   const hideLatestRunError =
     executeIssue.isPending ||
     executeNotice.startsWith("正在提交") ||
@@ -2232,7 +2257,12 @@ export function IssuePage() {
                 <Badge>{issueDisplayId(issue.data)}</Badge>
                 <Badge>{statusLabel(issue.data.status)}</Badge>
                 <Badge>{priorityLabel(issue.data.priority)}</Badge>
-                {latestRun && <StatusPill status={latestRun.status}>运行：{statusLabel(latestRun.status)}</StatusPill>}
+                {latestRun && (
+                  <StatusPill status={latestRun.status}>
+                    {isPassiveFollowupRun(latestRun) ? "运行（补充关闭信号）：" : "运行："}
+                    {statusLabel(latestRun.status)}
+                  </StatusPill>
+                )}
               </div>
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
@@ -2268,13 +2298,18 @@ export function IssuePage() {
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
             {latestRun && isRerunnableRun(latestRun.status) && latestRunError && !hideLatestRunError && (
               <p className="error-notice" role="status">
-                最新运行{statusLabel(latestRun.status)}：{latestRunError}
+                {latestRunStatusLabel(latestRun)}：{latestRunError}
               </p>
             )}
             {closeoutReviewActivity && (
               <p aria-label="需要人工确认收口" className="error-notice" role="status">
                 该任务的自动收口已用尽，需要人工确认：标记完成、改为阻塞、重新执行或补充评论。
                 {` ${issueCloseoutReviewSummary(closeoutReviewActivity)}`}
+              </p>
+            )}
+            {needsCloseoutPrompt && (
+              <p aria-label="需要收尾" className="issue-action-notice" role="status">
+                最新运行已成功，但任务仍未收口。若任务已经完成，请在任务阶段下拉中改成 done；否则补充 issue block 或 issue comment。
               </p>
             )}
           </header>

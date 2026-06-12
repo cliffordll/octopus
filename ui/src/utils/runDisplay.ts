@@ -16,6 +16,12 @@ function fallbackReasonLabel(value: unknown): string | null {
   return normalized ? sourceLabel(normalized) : null;
 }
 
+function runContextSnapshot(run: Pick<HeartbeatRun, "contextSnapshot"> | null | undefined): Record<string, unknown> | null {
+  const snapshot = run?.contextSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  return snapshot as Record<string, unknown>;
+}
+
 export function runIssueLabel(run: Pick<HeartbeatRun, "issueIdentifier" | "issueTitle" | "issueId"> | null | undefined): string | null {
   if (!run) return null;
   return normalize(run.issueIdentifier) || normalize(run.issueTitle) || normalize(run.issueId) || null;
@@ -26,11 +32,24 @@ export function runReasonLabel(run: Pick<HeartbeatRun, "contextSnapshot" | "trig
   if (normalize(run.retryOfRunId)) return `retryOfRunId=${run.retryOfRunId}`;
   if ((run.processLossRetryCount ?? 0) > 0) return `processLossRetryCount=${run.processLossRetryCount}`;
   return (
-    fallbackReasonLabel((run.contextSnapshot as Record<string, unknown> | null | undefined)?.wakeReason) ||
-    triggerDetailLabel((run.contextSnapshot as Record<string, unknown> | null | undefined)?.wakeReason as string | null | undefined) ||
+    fallbackReasonLabel(runContextSnapshot(run)?.wakeReason) ||
+    triggerDetailLabel(runContextSnapshot(run)?.wakeReason as string | null | undefined) ||
     fallbackReasonLabel(run.triggerDetail) ||
     triggerDetailLabel(run.triggerDetail)
   );
+}
+
+export function runWakeReason(run: Pick<HeartbeatRun, "contextSnapshot" | "triggerDetail"> | null | undefined): string | null {
+  if (!run) return null;
+  const snapshot = runContextSnapshot(run);
+  const wakeReason = snapshot?.wakeReason;
+  if (typeof wakeReason === "string" && wakeReason.trim()) return wakeReason.trim();
+  if (typeof run.triggerDetail === "string" && run.triggerDetail.trim()) return run.triggerDetail.trim();
+  return null;
+}
+
+export function isPassiveFollowupRun(run: Pick<HeartbeatRun, "contextSnapshot" | "triggerDetail"> | null | undefined): boolean {
+  return runWakeReason(run) === "issue_passive_followup";
 }
 
 export function runDescriptor(run: HeartbeatRun | null | undefined): string {
