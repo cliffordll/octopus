@@ -792,6 +792,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.queryByRole("button", { name: "折叠执行输出" })).not.toBeInTheDocument();
   const runLogBlock = screen.getByRole("heading", { name: "运行日志" }).closest("section") as HTMLElement;
   expect(runLogBlock).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
+  await userEvent.click(screen.getByRole("button", { name: /展开关键事件/ }));
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.queryByRole("button", { name: "实时日志增量" })).not.toBeInTheDocument();
@@ -802,6 +803,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.getByRole("heading", { name: "执行输出" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "关键事件" })).toBeInTheDocument();
+  expect(screen.queryByText("关键事件已折叠。")).not.toBeInTheDocument();
   expect(screen.getAllByText("回复详情").length).toBeGreaterThan(0);
   expect(screen.queryByRole("heading", { name: "Raw 数据" })).not.toBeInTheDocument();
   expect(screen.queryByText("resultJson")).not.toBeInTheDocument();
@@ -828,6 +830,8 @@ it("executes an assigned issue through the issue execution route", async () => {
     expect.objectContaining({ method: "GET" }),
   );
   expect(screen.getByRole("heading", { name: "关键事件" })).toBeInTheDocument();
+  expect(screen.queryByText("关键事件已折叠。")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "折叠关键事件" })).toBeInTheDocument();
   expect(screen.getByText("resultJson")).toBeInTheDocument();
   expect(await screen.findByText("已入队")).toBeInTheDocument();
   expect(screen.getAllByText("Agent 回复")).toHaveLength(5);
@@ -1034,6 +1038,151 @@ it("surfaces operator closeout review activity on the issue page", async () => {
   expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
   expect(screen.getByText("需要人工确认收口").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
   expect(screen.getByText(/Run run-closeout/)).toHaveClass("muted");
+});
+
+it("prompts for explicit closeout when the latest run succeeded without a closeout signal", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "需要收尾的任务",
+    description: "成功后仍需显式收口",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-closeout",
+    runId: "run-closeout",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    status: "succeeded",
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-closeout" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-closeout/events" && init?.method === "GET") {
+      return respond([
+        {
+          id: 1,
+          runId: "run-closeout",
+          agentId: "agent-1",
+          seq: 1,
+          eventType: "lifecycle",
+          stream: "system",
+          message: "run succeeded",
+          createdAt: "2026-06-02T10:02:00Z",
+        },
+      ]);
+    }
+    if (path === "/api/heartbeat-runs/run-closeout/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const prompt = await screen.findByRole("status", { name: "需要收尾" });
+  expect(prompt).toHaveTextContent("最新运行已成功，但任务仍未收口");
+  expect(prompt).toHaveTextContent("任务阶段下拉");
+  expect(prompt).toHaveTextContent("done");
+  expect(screen.queryByRole("button", { name: "标记任务完成" })).not.toBeInTheDocument();
+});
+
+it("labels cancelled passive follow-up runs explicitly", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "需要收尾的任务",
+    description: "补充关闭信号已取消",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-closeout",
+    runId: "run-closeout",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "automation",
+    triggerDetail: "issue_passive_followup",
+    contextSnapshot: { wakeReason: "issue_passive_followup" },
+    status: "cancelled",
+    error: "run cancelled",
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-closeout" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-closeout/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-closeout/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(screen.getByText("运行（补充关闭信号）：已取消")).toBeInTheDocument();
+  expect(screen.getByText("补充关闭信号运行已取消：run cancelled")).toBeInTheDocument();
 });
 
 it("refreshes server registered work products when an issue run succeeds", async () => {

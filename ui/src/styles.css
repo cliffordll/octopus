@@ -8044,10 +8044,12 @@ pre {
 }
 
 .agent-run-detail-actions {
-  align-items: flex-end;
+  align-items: center;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 10px;
+  white-space: nowrap;
 }
 
 .agent-run-view-toggle {
@@ -8058,6 +8060,17 @@ pre {
   gap: 4px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 4px;
+  white-space: nowrap;
+}
+
+.agent-run-detail-actions .secondary.small-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.agent-run-detail-actions .badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .agent-run-view-toggle button {
