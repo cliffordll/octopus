@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+import psutil
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -93,6 +94,22 @@ ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT = {
     1: timedelta(minutes=2),
     2: timedelta(minutes=5),
 }
+
+
+class ProcessLostError(RuntimeError):
+    def __init__(self, pid: int) -> None:
+        super().__init__(f"Process lost -- child pid {pid} is no longer running")
+        self.pid = pid
+
+
+def _is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        process = psutil.Process(pid)
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, ValueError):
+        return False
 
 
 def _run_log_dir() -> Path:
@@ -973,6 +990,15 @@ class HeartbeatService:
                         return task.result()
                     if cancellation.is_set():
                         continue
+                    if (
+                        agent.agent_runtime_type in LOCAL_CHILD_PROCESS_RUNTIMES
+                        and running.process_pid is not None
+                        and not _is_process_alive(running.process_pid)
+                    ):
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
+                        raise ProcessLostError(running.process_pid)
                     await emit_runtime_progress()
             except asyncio.CancelledError:
                 task.cancel()
@@ -1184,6 +1210,9 @@ class HeartbeatService:
                 stderr_excerpt=message,
                 metadata={"error": message},
             )
+            error_code = (
+                "process_lost" if isinstance(exc, ProcessLostError) else "adapter_failed"
+            )
             failed = await update_run(
                 self._session,
                 running.id,
@@ -1191,7 +1220,7 @@ class HeartbeatService:
                     "status": "failed",
                     "finished_at": datetime.now(UTC),
                     "error": message,
-                    "error_code": "adapter_failed",
+                    "error_code": error_code,
                     **self._finalize_run_log_fields(running),
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,

@@ -132,6 +132,62 @@ async def test_queued_run_resumes_after_concurrency_slot_is_available(
     assert resumed[0]["status"] == "succeeded"
 
 
+async def test_dispatch_claims_queued_runs_when_concurrency_slots_remain(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="ConcurrentQueued",
+        runtime_config={"heartbeat": {"maxConcurrentRuns": 3}},
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        blocking = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="timer",
+            trigger_detail="system",
+            status="running",
+        )
+        session.add(blocking)
+        await session.flush()
+        first = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "assignment", "triggerDetail": "system"},
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+        second = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "assignment", "triggerDetail": "system"},
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert first is not None and first["status"] == "queued"
+    assert second is not None and second["status"] == "queued"
+
+    async with async_transaction(session):
+        claimed_ids = await heartbeat.claim_queued_for_dispatch(agent["id"])
+
+    assert set(claimed_ids) == {first["id"], second["id"]}
+    rows = (
+        (
+            await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.id.in_([first["id"], second["id"]])
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {row.status for row in rows} == {"running"}
+
+
 async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     session: AsyncSession,
 ) -> None:
@@ -543,6 +599,7 @@ async def test_running_adapter_emits_progress_events_without_log_output(
         "get_runtime_adapter",
         lambda _runtime_type: SilentSlowAdapter(),
     )
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: True)
     monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.01)
     heartbeat = HeartbeatService(session)
 
@@ -575,6 +632,55 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
+
+
+async def test_running_local_child_loss_fails_before_adapter_returns(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class LostChildAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            if context.on_process_started is not None:
+                await context.on_process_started(999_999, datetime.now(UTC))
+            await asyncio.sleep(0.05)
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "should not complete"},
+            )
+
+    agent = await _seed_agent(session, name="LostChild")
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: LostChildAdapter(),
+    )
+    monkeypatch.setattr(
+        heartbeat_module,
+        "_is_process_alive",
+        lambda _pid: False,
+        raising=False,
+    )
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.01)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["errorCode"] == "process_lost"
+    assert "999999" in (run["error"] or "")
 
 
 async def test_orphaned_running_run_does_not_terminate_tracked_child_process(

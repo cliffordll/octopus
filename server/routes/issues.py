@@ -619,11 +619,14 @@ async def update_issue_route(
             reason="issue_status_changed",
             mutation="update",
             context_source="issue.status_change",
-            source="automation",
-            wake_source="automation",
+            source="assignment",
+            wake_source="assignment",
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
         )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id:
+            _schedule_dispatch(request, assignee_agent_id)
     if status_returned_from_review_to_assignee:
         await queue_issue_assignment_wakeup(
             heartbeat,
