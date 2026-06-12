@@ -71,6 +71,7 @@ def test_agent_contract_modules_define_management_boundary() -> None:
         assert importlib.util.find_spec(module) is not None
 
     paths = importlib.import_module("packages.shared.api_paths.agents")
+    issue_paths = importlib.import_module("packages.shared.api_paths.issues")
     constants = importlib.import_module("packages.shared.constants.agent")
     validators = importlib.import_module("packages.shared.validators.agent")
 
@@ -82,6 +83,9 @@ def test_agent_contract_modules_define_management_boundary() -> None:
     )
     assert paths.AGENT_DETAIL_PATH == "/api/agents/{id}"
     assert paths.AGENT_INBOX_PATH == "/api/agents/{id}/inbox-lite"
+    assert issue_paths.ISSUE_PASSIVE_FOLLOWUP_PATH == (
+        "/api/issues/{id}/passive-followup"
+    )
     assert paths.AGENT_ME_INBOX_PATH == "/api/agents/me/inbox-lite"
     assert paths.AGENT_ARCHIVE_PATH == "/api/agents/{id}/archive"
     assert paths.AGENT_PAUSE_PATH == "/api/agents/{id}/pause"
@@ -1469,6 +1473,178 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert followup_detail["runPurpose"] == "closeout_followup"
 
 
+async def test_issue_passive_followup_endpoint_promotes_scheduled_wakeup(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.delenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", raising=False)
+    org_id = await _seed_org(session_factory, key="manual-passive-promote")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Manual Followup Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('manual followup')"],
+            },
+        },
+    )
+    _, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Manual closeout needed", "status": "todo"},
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "update issues set assignee_agent_id = :agent_id where id = :issue_id"
+            ),
+            {"agent_id": agent["id"], "issue_id": issue["id"]},
+        )
+        await session.commit()
+
+    _, run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={
+            "source": "assignment",
+            "triggerDetail": "system",
+            "reason": "issue_execute",
+            "payload": {"issueId": issue["id"], "wakeReason": "issue_execute"},
+        },
+    )
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        scheduled = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent["id"],
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                )
+            )
+        ).scalar_one()
+        assert scheduled.status == "scheduled"
+        assert scheduled.run_id is None
+
+    followup_code, followup = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue['id']}/passive-followup",
+    )
+
+    assert followup_code == 202
+    assert followup["runPurpose"] == "closeout_followup"
+    assert followup["triggerDetail"] == "issue_passive_followup"
+    assert followup["contextSnapshot"]["passiveFollowup"]["previousRunId"] == run["id"]
+    assert followup["status"] in {"queued", "running", "succeeded"}
+
+    async with session_factory() as session:
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent["id"],
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(wakeups) == 1
+    assert wakeups[0].id == scheduled.id
+    assert wakeups[0].run_id == followup["id"]
+
+
+async def test_issue_passive_followup_endpoint_creates_immediate_followup_without_scheduled_wakeup(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="manual-passive-immediate")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Immediate Followup Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('manual followup')"],
+            },
+        },
+    )
+    _, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Immediate closeout needed", "status": "todo"},
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "update issues set assignee_agent_id = :agent_id where id = :issue_id"
+            ),
+            {"agent_id": agent["id"], "issue_id": issue["id"]},
+        )
+        await session.commit()
+
+    monkeypatch.setenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", "9999")
+    _, run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={
+            "source": "assignment",
+            "triggerDetail": "system",
+            "reason": "issue_execute",
+            "payload": {"issueId": issue["id"], "wakeReason": "issue_execute"},
+        },
+    )
+    await _wait_for_dispatch(app)
+    async with session_factory() as session:
+        await session.execute(
+            text("delete from agent_wakeup_requests where agent_id = :agent_id"),
+            {"agent_id": agent["id"]},
+        )
+        await session.commit()
+
+    followup_code, followup = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue['id']}/passive-followup",
+    )
+
+    assert followup_code == 202
+    assert followup["runPurpose"] == "closeout_followup"
+    assert followup["contextSnapshot"]["passiveFollowup"]["previousRunId"] == run["id"]
+    assert followup["status"] in {"queued", "running", "succeeded"}
+
+    async with session_factory() as session:
+        wakeup = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent["id"],
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                )
+            )
+        ).scalar_one()
+
+    assert wakeup.status in {"queued", "claimed", "succeeded"}
+    assert wakeup.run_id == followup["id"]
+
+
 async def test_successful_issue_run_with_closeout_comment_skips_passive_followup(
     session_factory: async_sessionmaker,
 ) -> None:
@@ -2215,6 +2391,7 @@ async def test_agent_wakeup_executes_codex_local_adapter_and_persists_session_us
         "codex-test",
         "--search",
         "exec",
+        "--skip-git-repo-check",
         "--json",
         "--disable",
         "plugins",
