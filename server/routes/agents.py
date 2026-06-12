@@ -116,6 +116,7 @@ from ..dependencies.access import (
 from ..dependencies.agent_instructions import get_agent_instructions_service
 from ..dependencies.agent_memory import get_agent_memory_service
 from ..dependencies.agents import get_agent_service
+from ..dependencies.database import _close_session
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
@@ -1177,7 +1178,8 @@ async def stream_heartbeat_run_route(
         while True:
             if await request.is_disconnected():
                 break
-            async with session_factory() as session:
+            session = session_factory()
+            try:
                 service = HeartbeatService(session)
                 current = await service.get(runId)
                 if current is None:
@@ -1211,6 +1213,8 @@ async def stream_heartbeat_run_route(
                 }:
                     yield _stream_line({"type": "final", "run": current})
                     break
+            finally:
+                await _close_session(session)
             await asyncio.sleep(poll_seconds)
 
     return StreamingResponse(
