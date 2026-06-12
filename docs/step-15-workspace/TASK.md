@@ -1,4 +1,4 @@
-# Step 15: Workspace 与执行产物
+﻿# Step 15: Workspace 与执行产物
 
 状态：15A-15H 已完成并通过基线验收
 
@@ -70,7 +70,7 @@ Organization
 
 Runtime adapter 在执行时应通过统一 context/env 获取 workspace 信息，例如主 workspace、workspace 列表、worktree path、repo/ref/branch、organization workspace root、artifacts dir 和 runtime services JSON，而不是直接理解数据库表关系。
 
-上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `RUDDER_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
+上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
 
 ## Preflight 的含义
 
@@ -144,7 +144,7 @@ queued run
 实施记录：
 
 - `HeartbeatService._prepare_workspace_context()` 在 adapter 执行前调用 workspace preflight，并将结果写入 run `context_snapshot`。
-- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `RUDDER_WORKSPACE_ID`、`RUDDER_WORKSPACES_JSON`、`RUDDER_ORG_WORKSPACE_ROOT`、`RUDDER_ORG_SKILLS_DIR`、`RUDDER_ORG_PLANS_DIR`、`RUDDER_ORG_ARTIFACTS_DIR`。
+- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `OCTOPUS_WORKSPACE_ID`、`OCTOPUS_WORKSPACES_JSON`、`OCTOPUS_ORG_WORKSPACE_ROOT`、`OCTOPUS_ORG_SKILLS_DIR`、`OCTOPUS_ORG_PLANS_DIR`、`OCTOPUS_ORG_ARTIFACTS_DIR`。
 - Project 没有 workspace，或选中的 project workspace 没有本地 `cwd` 时，preflight 按上游行为使用组织共享 workspace root 作为执行 cwd，并在 execution workspace metadata 中记录 `fallback=organization_workspace` 和 warning。
 - 本地 managed workspace 目录由 `WorkspaceService._ensure_managed_workspace_paths()` 统一生成，不由 route 或 adapter 拼接。
 
@@ -206,7 +206,7 @@ $base = "http://127.0.0.1:8000"
 $org = curl.exe -s -X POST "$base/api/orgs" -H "Content-Type: application/json" -d '{"urlKey":"step15-demo","name":"Step 15 Demo","issuePrefix":"WKS"}' | ConvertFrom-Json
 $project = curl.exe -s -X POST "$base/api/orgs/$($org.id)/projects" -H "Content-Type: application/json" -d '{"name":"Workspace Demo","executionWorkspacePolicy":{"enabled":true,"defaultMode":"isolated_workspace"}}' | ConvertFrom-Json
 curl.exe -s -X POST "$base/api/projects/$($project.id)/workspaces" -H "Content-Type: application/json" -d '{"name":"Primary","cwd":"D:/work/step15-demo"}'
-$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" -H "Content-Type: application/json" -d '{"name":"Workspace Agent","agentRuntimeType":"process","agentRuntimeConfig":{"command":"python","args":["-c","import os; print(os.environ.get(\"RUDDER_WORKSPACE_ID\"))"]}}' | ConvertFrom-Json
+$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" -H "Content-Type: application/json" -d '{"name":"Workspace Agent","agentRuntimeType":"process","agentRuntimeConfig":{"command":"python","args":["-c","import os; print(os.environ.get(\"OCTOPUS_WORKSPACE_ID\"))"]}}' | ConvertFrom-Json
 $issue = curl.exe -s -X POST "$base/api/orgs/$($org.id)/issues" -H "Content-Type: application/json" -d "{\"title\":\"Workspace run demo\",\"projectId\":\"$($project.id)\"}" | ConvertFrom-Json
 curl.exe -s -X POST "$base/api/agents/$($agent.id)/wakeup" -H "Content-Type: application/json" -d "{\"payload\":{\"issueId\":\"$($issue.id)\"}}"
 ```
