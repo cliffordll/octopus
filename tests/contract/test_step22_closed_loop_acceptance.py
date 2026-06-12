@@ -23,7 +23,7 @@ class ClosedLoopAdapter:
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         await context.on_log("stdout", "closed-loop-start\n")
-        artifacts_dir = (context.env or {}).get("RUDDER_ORG_ARTIFACTS_DIR")
+        artifacts_dir = (context.env or {}).get("OCTOPUS_ORG_ARTIFACTS_DIR")
         assert isinstance(artifacts_dir, str)
         output_path = Path(artifacts_dir) / "ACCEPTANCE.md"
         output_path.write_text(

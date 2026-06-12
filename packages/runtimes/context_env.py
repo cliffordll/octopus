@@ -19,49 +19,49 @@ def apply_runtime_context_env(
         workspace_context = {}
 
     for key in (
-        "RUDDER_CONVERSATION_ARTIFACTS_DIR",
-        "RUDDER_ISSUE_ARTIFACTS_DIR",
-        "RUDDER_RUN_ARTIFACTS_DIR",
+        "OCTOPUS_CONVERSATION_ARTIFACTS_DIR",
+        "OCTOPUS_ISSUE_ARTIFACTS_DIR",
+        "OCTOPUS_RUN_ARTIFACTS_DIR",
     ):
         env.pop(key, None)
 
-    env["RUDDER_AGENT_ID"] = context.agent_id
-    env["RUDDER_ORG_ID"] = context.org_id
-    env["RUDDER_RUN_ID"] = context.run_id
+    env["OCTOPUS_AGENT_ID"] = context.agent_id
+    env["OCTOPUS_ORG_ID"] = context.org_id
+    env["OCTOPUS_RUN_ID"] = context.run_id
     env.setdefault(
-        "RUDDER_API_URL", os.environ.get("RUDDER_API_URL", "http://localhost:8000")
+        "OCTOPUS_API_URL", os.environ.get("OCTOPUS_API_URL", "http://localhost:8000")
     )
 
     _set_env(
         env,
-        "RUDDER_TASK_ID",
+        "OCTOPUS_TASK_ID",
         runtime_context.get("taskId") or runtime_context.get("issueId"),
     )
-    _set_env(env, "RUDDER_WAKE_REASON", runtime_context.get("wakeReason"))
+    _set_env(env, "OCTOPUS_WAKE_REASON", runtime_context.get("wakeReason"))
     _set_env(
         env,
-        "RUDDER_WAKE_COMMENT_ID",
+        "OCTOPUS_WAKE_COMMENT_ID",
         runtime_context.get("wakeCommentId") or runtime_context.get("commentId"),
     )
-    _set_env(env, "RUDDER_APPROVAL_ID", runtime_context.get("approvalId"))
-    _set_env(env, "RUDDER_APPROVAL_STATUS", runtime_context.get("approvalStatus"))
+    _set_env(env, "OCTOPUS_APPROVAL_ID", runtime_context.get("approvalId"))
+    _set_env(env, "OCTOPUS_APPROVAL_STATUS", runtime_context.get("approvalStatus"))
     issue_ids = runtime_context.get("issueIds")
     if isinstance(issue_ids, list):
         linked = [_string(value) for value in issue_ids]
         linked = [value for value in linked if value]
         if linked:
-            env["RUDDER_LINKED_ISSUE_IDS"] = ",".join(linked)
+            env["OCTOPUS_LINKED_ISSUE_IDS"] = ",".join(linked)
 
-    _set_env(env, "RUDDER_WORKSPACE_CWD", workspace_context.get("cwd"))
-    _set_env(env, "RUDDER_WORKSPACE_SOURCE", workspace_context.get("source"))
-    _set_env(env, "RUDDER_WORKSPACE_STRATEGY", workspace_context.get("strategy"))
-    _set_env(env, "RUDDER_WORKSPACE_ID", workspace_context.get("workspaceId"))
-    _set_env(env, "RUDDER_WORKSPACE_REPO_URL", workspace_context.get("repoUrl"))
-    _set_env(env, "RUDDER_WORKSPACE_REPO_REF", workspace_context.get("repoRef"))
-    _set_env(env, "RUDDER_WORKSPACE_BRANCH", workspace_context.get("branchName"))
+    _set_env(env, "OCTOPUS_WORKSPACE_CWD", workspace_context.get("cwd"))
+    _set_env(env, "OCTOPUS_WORKSPACE_SOURCE", workspace_context.get("source"))
+    _set_env(env, "OCTOPUS_WORKSPACE_STRATEGY", workspace_context.get("strategy"))
+    _set_env(env, "OCTOPUS_WORKSPACE_ID", workspace_context.get("workspaceId"))
+    _set_env(env, "OCTOPUS_WORKSPACE_REPO_URL", workspace_context.get("repoUrl"))
+    _set_env(env, "OCTOPUS_WORKSPACE_REPO_REF", workspace_context.get("repoRef"))
+    _set_env(env, "OCTOPUS_WORKSPACE_BRANCH", workspace_context.get("branchName"))
     _set_env(
         env,
-        "RUDDER_WORKSPACE_WORKTREE_PATH",
+        "OCTOPUS_WORKSPACE_WORKTREE_PATH",
         workspace_context.get("worktreePath"),
     )
     agent_home = _first_string(
@@ -69,10 +69,10 @@ def apply_runtime_context_env(
     )
     if agent_home:
         env["AGENT_HOME"] = agent_home
-        env["RUDDER_AGENT_ROOT"] = agent_home
+        env["OCTOPUS_AGENT_ROOT"] = agent_home
     _set_env(
         env,
-        "RUDDER_AGENT_INSTRUCTIONS_DIR",
+        "OCTOPUS_AGENT_INSTRUCTIONS_DIR",
         _first_string(
             workspace_context.get("instructionsDir"),
             runtime_context.get("agentInstructionsDir"),
@@ -80,41 +80,43 @@ def apply_runtime_context_env(
     )
     _set_env(
         env,
-        "RUDDER_AGENT_MEMORY_DIR",
+        "OCTOPUS_AGENT_MEMORY_DIR",
         _first_string(
             workspace_context.get("memoryDir"), runtime_context.get("agentMemoryDir")
         ),
     )
     _set_env(
         env,
-        "RUDDER_AGENT_LIFE_DIR",
+        "OCTOPUS_AGENT_LIFE_DIR",
         _first_string(
             workspace_context.get("lifeDir"), runtime_context.get("agentLifeDir")
         ),
     )
     _set_env(
         env,
-        "RUDDER_AGENT_SKILLS_DIR",
+        "OCTOPUS_AGENT_SKILLS_DIR",
         _first_string(
             workspace_context.get("skillsDir"),
             runtime_context.get("agentSkillsRootPath"),
         ),
     )
     _set_env(
-        env, "RUDDER_ORG_WORKSPACE_ROOT", workspace_context.get("orgWorkspaceRoot")
+        env, "OCTOPUS_ORG_WORKSPACE_ROOT", workspace_context.get("orgWorkspaceRoot")
     )
-    _set_env(env, "RUDDER_ORG_SKILLS_DIR", workspace_context.get("orgSkillsDir"))
-    _set_env(env, "RUDDER_ORG_PLANS_DIR", workspace_context.get("orgPlansDir"))
-    _set_env(env, "RUDDER_ORG_ARTIFACTS_DIR", workspace_context.get("orgArtifactsDir"))
+    _set_env(env, "OCTOPUS_ORG_SKILLS_DIR", workspace_context.get("orgSkillsDir"))
+    _set_env(env, "OCTOPUS_ORG_PLANS_DIR", workspace_context.get("orgPlansDir"))
+    _set_env(env, "OCTOPUS_ORG_ARTIFACTS_DIR", workspace_context.get("orgArtifactsDir"))
 
     runtime_services = workspace.get("rudderRuntimeServices")
     if isinstance(runtime_services, list) and runtime_services:
-        env["RUDDER_RUNTIME_SERVICES_JSON"] = json.dumps(runtime_services)
+        env["OCTOPUS_RUNTIME_SERVICES_JSON"] = json.dumps(runtime_services)
     runtime_service_intents = workspace.get("rudderRuntimeServiceIntents")
     if isinstance(runtime_service_intents, list) and runtime_service_intents:
-        env["RUDDER_RUNTIME_SERVICE_INTENTS_JSON"] = json.dumps(runtime_service_intents)
+        env["OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON"] = json.dumps(
+            runtime_service_intents
+        )
     _set_env(
-        env, "RUDDER_RUNTIME_PRIMARY_URL", workspace.get("rudderRuntimePrimaryUrl")
+        env, "OCTOPUS_RUNTIME_PRIMARY_URL", workspace.get("rudderRuntimePrimaryUrl")
     )
 
 

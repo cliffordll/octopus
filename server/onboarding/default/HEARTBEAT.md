@@ -1,4 +1,4 @@
-# HEARTBEAT.md -- Agent Heartbeat Checklist
+﻿# HEARTBEAT.md -- Agent Heartbeat Checklist
 
 Run this checklist on every heartbeat.
 
@@ -27,9 +27,9 @@ If approval context is set, review linked issues and close/comment.
 
 - Always checkout before working.
 - Do the work. Update status and comment when done.
-- If `RUDDER_WAKE_REASON=issue_passive_followup`, inspect current issue state first, then leave a close-out signal: progress comment, done, blocked with reason, or explicit handoff. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage.
+- If `OCTOPUS_WAKE_REASON=issue_passive_followup`, inspect current issue state first, then leave a close-out signal: progress comment, done, blocked with reason, or explicit handoff. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage.
 - If you are the reviewer, including for a `blocked` issue, record a structured review decision with `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...`. Use `blocked` only to confirm a human/external blocker, and name the next human action in the comment.
-- If `RUDDER_WAKE_REASON=issue_review_closeout_missing`, inspect current state and record exactly one structured review decision.
+- If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, inspect current state and record exactly one structured review decision.
 
 ## 6. Exit
 

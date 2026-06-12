@@ -23,7 +23,7 @@ async def prepare_managed_home(
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     configure_managed_profile_env(env, home)
-    env["RUDDER_OPERATOR_HOME"] = str(operator_home)
+    env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
     if linked:
         await context.on_log(
             "stdout",
@@ -134,8 +134,8 @@ def _default_home(runtime_type: str, context: RuntimeExecutionContext) -> Path:
 
 def _operator_home(env: dict[str, str]) -> Path:
     return Path(
-        _string(env.get("RUDDER_OPERATOR_HOME"))
-        or _string(os.environ.get("RUDDER_OPERATOR_HOME"))
+        _string(env.get("OCTOPUS_OPERATOR_HOME"))
+        or _string(os.environ.get("OCTOPUS_OPERATOR_HOME"))
         or _string(os.environ.get("HOME"))
         or _string(env.get("HOME"))
         or str(Path.home())

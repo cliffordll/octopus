@@ -314,7 +314,7 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
                 "args": [str(fake_claude)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
@@ -570,7 +570,7 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
                 "args": [str(fake_opencode)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
@@ -700,7 +700,7 @@ async def test_opencode_local_syncs_opencode_config_into_managed_home(
                 "args": [str(fake_opencode)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=_noop_log,

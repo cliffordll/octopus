@@ -175,7 +175,7 @@ Loading policy:
 - `POST /api/approvals/:approvalId/approve`
 - `POST /api/approvals/:approvalId/reject`
 
-When `CONTROL_PLANE_APPROVAL_ID` is set, read the approval and its linked issues first.
+When `OCTOPUS_APPROVAL_ID` is set, read the approval and its linked issues first.
 
 ## Agent Configuration and Instructions
 

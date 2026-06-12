@@ -489,7 +489,7 @@ class WorkspaceService:
             "rudderRuntimeServices": services,
             "env": workspace_env,
         }
-        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = _json_dump(services)
+        runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = _json_dump(services)
         return {
             "issueId": issue.id,
             "projectId": issue.project_id,
@@ -565,7 +565,7 @@ class WorkspaceService:
             "rudderRuntimeServices": [],
             "env": workspace_env,
         }
-        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = "[]"
+        runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = "[]"
         return {
             "conversationId": conversation_id,
             "issueId": None,
@@ -848,7 +848,7 @@ class WorkspaceService:
         )
         artifacts_dir = _string(workspace.get("orgArtifactsDir"))
         if not artifacts_dir and isinstance(workspace_env, dict):
-            artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
+            artifacts_dir = _string(workspace_env.get("OCTOPUS_ORG_ARTIFACTS_DIR"))
         artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
         if artifacts_dir:
             assert artifacts_root is not None
@@ -1188,22 +1188,22 @@ class WorkspaceService:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
         return {
-            "RUDDER_WORKSPACE_CWD": workspace["cwd"] or "",
-            "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
-            "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
-            "RUDDER_WORKSPACE_ID": workspace["id"] or "",
-            "RUDDER_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
-            "RUDDER_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
-            "RUDDER_WORKSPACE_BRANCH": workspace["branchName"] or "",
-            "RUDDER_WORKSPACE_WORKTREE_PATH": workspace["cwd"] or "",
-            "RUDDER_WORKSPACES_JSON": workspaces_json,
-            "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": "[]",
-            "RUDDER_RUNTIME_SERVICES_JSON": services_json,
-            "RUDDER_ORG_WORKSPACE_ROOT": str(org_root),
-            "RUDDER_ORG_AGENTS_DIR": str(agents_dir),
-            "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
-            "RUDDER_ORG_PLANS_DIR": str(plans_dir),
-            "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
+            "OCTOPUS_WORKSPACE_CWD": workspace["cwd"] or "",
+            "OCTOPUS_WORKSPACE_SOURCE": workspace["providerType"],
+            "OCTOPUS_WORKSPACE_STRATEGY": workspace["strategyType"],
+            "OCTOPUS_WORKSPACE_ID": workspace["id"] or "",
+            "OCTOPUS_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
+            "OCTOPUS_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
+            "OCTOPUS_WORKSPACE_BRANCH": workspace["branchName"] or "",
+            "OCTOPUS_WORKSPACE_WORKTREE_PATH": workspace["cwd"] or "",
+            "OCTOPUS_WORKSPACES_JSON": workspaces_json,
+            "OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON": "[]",
+            "OCTOPUS_RUNTIME_SERVICES_JSON": services_json,
+            "OCTOPUS_ORG_WORKSPACE_ROOT": str(org_root),
+            "OCTOPUS_ORG_AGENTS_DIR": str(agents_dir),
+            "OCTOPUS_ORG_SKILLS_DIR": str(skills_dir),
+            "OCTOPUS_ORG_PLANS_DIR": str(plans_dir),
+            "OCTOPUS_ORG_ARTIFACTS_DIR": str(artifacts_dir),
         }
 
     async def _find_reusable_execution_workspace(

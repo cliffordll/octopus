@@ -17,7 +17,7 @@ async def list_models(config: dict[str, Any] | None = None) -> list[dict[str, st
     config = config or {}
     command = (
         string(config.get("command"))
-        or os.environ.get("RUDDER_OPENCODE_COMMAND")
+        or os.environ.get("OCTOPUS_OPENCODE_COMMAND")
         or "opencode"
     )
     args = _string_list(config.get("extraArgs", config.get("args", [])))

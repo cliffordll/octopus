@@ -19,7 +19,7 @@ down_revision = "20260603_000016"
 branch_labels = None
 depends_on = None
 
-_CONTROL_PLANE_SKILL_KEY = "skills/control-plane"
+_OCTOPUS_SKILL_KEY = "skills/control-plane"
 
 
 def upgrade() -> None:
@@ -38,7 +38,7 @@ def upgrade() -> None:
               )
             """
         ),
-        {"skill_key": _CONTROL_PLANE_SKILL_KEY},
+        {"skill_key": _OCTOPUS_SKILL_KEY},
     ).mappings()
     now = datetime.now(UTC).isoformat()
     for row in rows:
@@ -55,7 +55,7 @@ def upgrade() -> None:
                 "id": str(uuid.uuid4()),
                 "org_id": row["org_id"],
                 "agent_id": row["agent_id"],
-                "skill_key": _CONTROL_PLANE_SKILL_KEY,
+                "skill_key": _OCTOPUS_SKILL_KEY,
                 "created_at": now,
             },
         )

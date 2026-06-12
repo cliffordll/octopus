@@ -34,7 +34,7 @@ control-plane agent me --json
 
 If this returns `{"error":"Agent authentication required"}`, treat it as a run-auth failure:
 
-- do not ask for `CONTROL_PLANE_API_KEY` inside the heartbeat
+- do not ask for `OCTOPUS_API_KEY` inside the heartbeat
 - do not fall back to manual filesystem creation
 - stop and report that injected agent authentication is missing or invalid for this run
 
@@ -54,20 +54,20 @@ control-plane agent config doc claude_local
 4. Compare existing agents and redacted configurations in your organization.
 
 ```sh
-control-plane agent list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane agent config list --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane agent config list --org-id "$OCTOPUS_ORG_ID" --json
 control-plane agent config get "<agent-id>" --json
 ```
 
 5. If the role needs organization skills on day one, inspect or import them before hiring.
 
 ```sh
-control-plane skill list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$CONTROL_PLANE_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$CONTROL_PLANE_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$CONTROL_PLANE_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
 ```
 
 6. Draft the hire payload.
@@ -106,7 +106,7 @@ Draft `promptTemplate` as a durable SOUL document, not a one-line command. Use t
 7. Submit the canonical hire request.
 
 ```sh
-control-plane agent hire --org-id "$CONTROL_PLANE_ORG_ID" --payload '{
+control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
   "role": "cto",
   "title": "Chief Technology Officer",
   "reportsTo": "<ceo-agent-id>",
@@ -147,11 +147,11 @@ control-plane approval resubmit "<approval-id>" --payload '{"title":"Revised tit
 control-plane approval issues "<approval-id>" --json
 ```
 
-When the board approves, you may be woken with `CONTROL_PLANE_APPROVAL_ID`:
+When the board approves, you may be woken with `OCTOPUS_APPROVAL_ID`:
 
 ```sh
-control-plane approval get "$CONTROL_PLANE_APPROVAL_ID" --json
-control-plane approval issues "$CONTROL_PLANE_APPROVAL_ID" --json
+control-plane approval get "$OCTOPUS_APPROVAL_ID" --json
+control-plane approval issues "$OCTOPUS_APPROVAL_ID" --json
 ```
 
 For each linked issue, either:
