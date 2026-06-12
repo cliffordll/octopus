@@ -112,6 +112,9 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(runRecordsRegion).queryByRole("region", { name: "心跳上下文" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "折叠运行记录" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "展开运行记录" })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("来源 assignment")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("来源 automation")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
   const summaryBlock = within(runRecordsRegion).getAllByText("输出摘要")[0].closest(".issue-run-record-summary");
   expect(summaryBlock).not.toHaveTextContent(longSummary);
   expect(summaryBlock).toHaveTextContent("展开");
@@ -134,9 +137,9 @@ it("shows existing run records without collapsing the section by default", async
 
   await ensureRunExpanded(runRecordsRegion, "run-visible");
   expect(await within(runRecordsRegion).findByRole("heading", { name: "心跳上下文" })).toBeInTheDocument();
-  expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*运行中/ })).toBeInTheDocument();
-  expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*成功/ })).not.toBeInTheDocument();
-  expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*补充关闭信号.*失败/ })).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*运行中/ })).toBeInTheDocument();
+  expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*成功/ })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*来源 automation.*触发原因 issue_passive_followup.*失败/ })).toBeInTheDocument();
   expect(runRecordsRegion).not.toHaveTextContent("未知来源");
   await ensureRunExpanded(runRecordsRegion, "run-second");
   expect((await within(runRecordsRegion).findAllByRole("heading", { name: "心跳上下文" })).length).toBeGreaterThanOrEqual(2);

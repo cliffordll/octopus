@@ -30,7 +30,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
-import { isPassiveFollowupRun, runDescriptor, runIssueLabel } from "../utils/runDisplay";
+import { isPassiveFollowupRun, runDescriptor, runIssueLabel, runWakeReason } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
@@ -450,52 +450,6 @@ function latestRunStatusText(run: HeartbeatRun | null | undefined): string {
 function previewRunSummary(summary: string): string {
   if (summary.length <= RUN_SUMMARY_PREVIEW_CHARS) return summary;
   return `${summary.slice(0, RUN_SUMMARY_PREVIEW_CHARS).trimEnd()}...`;
-}
-
-function sourceReasonLabel(source: string | null | undefined): string {
-  switch (source) {
-    case "assignment":
-      return "任务执行";
-    case "automation":
-      return "自动治理";
-    case "scheduler":
-      return "心跳调度";
-    case "on_demand":
-      return "按需唤醒";
-    case "manual":
-      return "手动触发";
-    case "recovery":
-      return "恢复重试";
-    default:
-      return source ? statusLabel(source) : "未知来源";
-  }
-}
-
-function wakeReasonLabel(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
-  switch (value.trim()) {
-    case "issue_passive_followup":
-      return "补充关闭信号";
-    case "issue_review_closeout_missing":
-      return "补充评审结论";
-    case "issue_convergence_review_requested":
-      return "收敛评审";
-    default:
-      return null;
-  }
-}
-
-function runReasonLabel(run: HeartbeatRun, orderedRuns: HeartbeatRun[]): string {
-  if (run.retryOfRunId) return `重试 ${run.retryOfRunId}`;
-  if ((run.processLossRetryCount ?? 0) > 0) return "进程恢复重试";
-  const wakeReason = wakeReasonLabel(run.contextSnapshot?.wakeReason);
-  if (wakeReason) return wakeReason;
-  const sameSourceRuns = orderedRuns.filter((item) => item.invocationSource === run.invocationSource);
-  const runId = heartbeatRunId(run);
-  const sourceIndex = sameSourceRuns.findIndex((item) => heartbeatRunId(item) === runId);
-  if (run.invocationSource === "assignment") return sourceIndex <= 0 ? "首次执行" : "再次执行";
-  if (run.triggerDetail?.trim()) return statusLabel(run.triggerDetail);
-  return sourceReasonLabel(run.invocationSource);
 }
 
 function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
@@ -1234,13 +1188,8 @@ function IssueRunsPanel({
       {displayRuns.map((run, index) => {
         const runId = heartbeatRunId(run);
         const displayRun = run;
-        const reasonRun = {
-          ...displayRun,
-          invocationSource: run.invocationSource ?? displayRun.invocationSource,
-          processLossRetryCount: run.processLossRetryCount ?? displayRun.processLossRetryCount,
-          retryOfRunId: run.retryOfRunId ?? displayRun.retryOfRunId,
-          triggerDetail: run.triggerDetail ?? displayRun.triggerDetail,
-        };
+        const source = displayRun.invocationSource?.trim();
+        const wakeReason = runWakeReason(displayRun);
         const summary = runSummary(displayRun);
         const summaryExpanded = expandedSummaryRunIds.has(runId);
         const summaryExpandable = summary.length > RUN_SUMMARY_PREVIEW_CHARS;
@@ -1260,7 +1209,8 @@ function IssueRunsPanel({
                   <div className="issue-run-record-title">
                     <strong>{runId}</strong>
                     <span className="issue-run-record-badges">
-                      <Badge>{runReasonLabel(reasonRun, displayRuns)}</Badge>
+                      {source && <Badge>来源 {source}</Badge>}
+                      {wakeReason && <Badge>触发原因 {wakeReason}</Badge>}
                       <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
                     </span>
                   </div>
