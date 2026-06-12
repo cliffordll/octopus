@@ -1,4 +1,4 @@
-# HEARTBEAT.md -- 智能体心跳检查清单（中文阅读版）
+﻿# HEARTBEAT.md -- 智能体心跳检查清单（中文阅读版）
 
 每次 heartbeat 都执行这份检查清单。
 
@@ -27,9 +27,9 @@
 
 - 工作前始终先 checkout。
 - 执行工作。完成后更新状态并评论。
-- 如果 `RUDDER_WAKE_REASON=issue_passive_followup`，先检查当前 issue 状态，然后留下关闭信号：进展评论、done、带原因的 blocked，或明确交接。如果被审查的 issue 被阻塞，评论要清楚到足以让 reviewer 判断下一步。
+- 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`，先检查当前 issue 状态，然后留下关闭信号：进展评论、done、带原因的 blocked，或明确交接。如果被审查的 issue 被阻塞，评论要清楚到足以让 reviewer 判断下一步。
 - 如果你是 reviewer，包括处理 `blocked` issue，也要用 `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...` 记录结构化审查结论。只在确认存在人工或外部阻塞时使用 `blocked`，并在评论中说明下一个人工动作。
-- 如果 `RUDDER_WAKE_REASON=issue_review_closeout_missing`，检查当前状态，并且只记录一个结构化审查结论。
+- 如果 `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`，检查当前状态，并且只记录一个结构化审查结论。
 
 ## 6. 退出
 

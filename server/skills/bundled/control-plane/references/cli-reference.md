@@ -5,9 +5,9 @@ Stable CLI contract for agents using the bundled `control-plane` skill. Prefer t
 ## Defaults
 
 - All commands support `--json`.
-- `--org-id` defaults to `CONTROL_PLANE_ORG_ID` when relevant.
-- `--run-id` defaults to `CONTROL_PLANE_RUN_ID` and is attached to mutating requests when available.
-- `issue checkout` defaults `--agent-id` from `CONTROL_PLANE_AGENT_ID`.
+- `--org-id` defaults to `OCTOPUS_ORG_ID` when relevant.
+- `--run-id` defaults to `OCTOPUS_RUN_ID` and is attached to mutating requests when available.
+- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID`.
 
 ## JSON Output Contract
 
@@ -67,7 +67,7 @@ If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: t
 
 If your issue comment cites a screenshot path or visual validation artifact, attach that file with `--image <path>` instead of leaving only the local path in the text.
 
-If `CONTROL_PLANE_WAKE_REASON=issue_passive_followup`, the run is close-out governance for the same issue. Inspect current issue state first, then leave a progress comment, completion, blocker, or explicit handoff.
+If `OCTOPUS_WAKE_REASON=issue_passive_followup`, the run is close-out governance for the same issue. Inspect current issue state first, then leave a progress comment, completion, blocker, or explicit handoff.
 
 ## Git Identity Policy
 

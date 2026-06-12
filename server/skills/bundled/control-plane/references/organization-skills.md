@@ -7,7 +7,7 @@ This workflow is now **CLI-first** for the bundled `control-plane` skill.
 For a skill that belongs only to the running agent, do not use organization import or scan commands. Use:
 
 ```bash
-control-plane agent skills create "$CONTROL_PLANE_AGENT_ID" --name "<name>" --description "<description>" --enable --json
+control-plane agent skills create "$OCTOPUS_AGENT_ID" --name "<name>" --description "<description>" --enable --json
 ```
 
 Agent-private skill creation writes under `AGENT_HOME/skills` and does not require organization skill mutation permission.
@@ -21,20 +21,20 @@ Agent-private skill creation writes under `AGENT_HOME/skills` and does not requi
 ## Core CLI Surface
 
 ```bash
-control-plane skill list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$CONTROL_PLANE_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$CONTROL_PLANE_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$CONTROL_PLANE_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
 control-plane agent skills enable "<agent-id>" "<selection-ref>" --json
 control-plane agent skills sync "<agent-id>" --desired-skills "<csv>" --json
 ```
 
 Defaults:
 
-- `--org-id` can come from `CONTROL_PLANE_ORG_ID`
-- mutating commands attach `CONTROL_PLANE_RUN_ID` automatically when present
+- `--org-id` can come from `OCTOPUS_ORG_ID`
+- mutating commands attach `OCTOPUS_RUN_ID` automatically when present
 
 ## Source Types
 
@@ -55,7 +55,7 @@ Preferred managed import:
 
 ```bash
 control-plane skill import \
-  --org-id "$CONTROL_PLANE_ORG_ID" \
+  --org-id "$OCTOPUS_ORG_ID" \
   --source "https://skills.sh/google-labs-code/stitch-skills/design-md" \
   --json
 ```
@@ -64,7 +64,7 @@ Equivalent key-style import:
 
 ```bash
 control-plane skill import \
-  --org-id "$CONTROL_PLANE_ORG_ID" \
+  --org-id "$OCTOPUS_ORG_ID" \
   --source "google-labs-code/stitch-skills/design-md" \
   --json
 ```
@@ -73,7 +73,7 @@ GitHub import:
 
 ```bash
 control-plane skill import \
-  --org-id "$CONTROL_PLANE_ORG_ID" \
+  --org-id "$OCTOPUS_ORG_ID" \
   --source "https://github.com/vercel-labs/agent-browser" \
   --json
 ```
@@ -82,7 +82,7 @@ Local skill scan:
 
 ```bash
 control-plane skill scan-local \
-  --org-id "$CONTROL_PLANE_ORG_ID" \
+  --org-id "$OCTOPUS_ORG_ID" \
   --roots "/abs/path/to/.agents,/abs/path/to/other-skill-root" \
   --json
 ```
@@ -91,7 +91,7 @@ Shared workspace scan:
 
 ```bash
 control-plane skill scan-projects \
-  --org-id "$CONTROL_PLANE_ORG_ID" \
+  --org-id "$OCTOPUS_ORG_ID" \
   --project-ids "<project-id-1>,<project-id-2>" \
   --json
 ```
@@ -108,20 +108,20 @@ Notes:
 List skills:
 
 ```bash
-control-plane skill list --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Read one skill:
 
 ```bash
-control-plane skill get "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Read `SKILL.md` or another file from the package:
 
 ```bash
-control-plane skill file "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --path SKILL.md --json
-control-plane skill file "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --path references/notes.md --json
+control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path references/notes.md --json
 ```
 
 ## Enable Skills On An Existing Agent

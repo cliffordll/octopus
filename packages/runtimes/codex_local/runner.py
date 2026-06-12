@@ -643,7 +643,7 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
     configure_managed_profile_env(env, managed_home)
     env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
     env.pop("AGENT_HOME", None)
-    env.pop("RUDDER_AGENT_ROOT", None)
+    env.pop("OCTOPUS_AGENT_ROOT", None)
     if linked:
         await on_log(
             "stdout",
@@ -706,8 +706,8 @@ def _append_git_config_env(env: dict[str, str], key: str, value: str) -> None:
 
 def _operator_home(env: dict[str, str]) -> Path:
     return Path(
-        _string(env.get("RUDDER_OPERATOR_HOME"))
-        or _string(os.environ.get("RUDDER_OPERATOR_HOME"))
+        _string(env.get("OCTOPUS_OPERATOR_HOME"))
+        or _string(os.environ.get("OCTOPUS_OPERATOR_HOME"))
         or _string(os.environ.get("HOME"))
         or _string(env.get("HOME"))
         or str(Path.home())

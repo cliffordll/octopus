@@ -8,6 +8,7 @@ import httpx
 
 from cli.__main__ import main
 from cli.client import ApiClient
+from cli.parser import build_parser
 
 
 def test_organization_list_json_output() -> None:
@@ -22,6 +23,13 @@ def test_organization_list_json_output() -> None:
 
     assert result == 0
     assert '"name": "Core"' in output.getvalue()
+
+
+def test_api_base_defaults_to_octopus_api_url(monkeypatch) -> None:
+    monkeypatch.setenv("OCTOPUS_API_URL", "http://octopus.test")
+    args = build_parser().parse_args(["organization", "list"])
+
+    assert args.api_base == "http://octopus.test"
 
 
 def test_organization_create_posts_name() -> None:

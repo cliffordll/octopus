@@ -5,8 +5,8 @@ Canonical CLI contract for the bundled `create-agent` skill. Prefer these comman
 ## Defaults
 
 - All commands support `--json`.
-- `--org-id` defaults to `CONTROL_PLANE_ORG_ID` when relevant.
-- Mutating commands attach `CONTROL_PLANE_RUN_ID` automatically when available.
+- `--org-id` defaults to `OCTOPUS_ORG_ID` when relevant.
+- Mutating commands attach `OCTOPUS_RUN_ID` automatically when available.
 - `agent config index` and `agent config doc` print plain text by default. With `--json`, they emit that text as a JSON string.
 
 ## Core CLI Surface
@@ -15,12 +15,12 @@ Canonical CLI contract for the bundled `create-agent` skill. Prefer these comman
 
 ```sh
 control-plane agent me --json
-control-plane agent list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane agent get "<agent-id-or-shortname>" --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 control-plane agent config index
 control-plane agent config doc "<agent-runtime-type>"
-control-plane agent config list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane agent config get "<agent-id-or-shortname>" --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane agent config list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane agent config get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Use these in order:
@@ -33,12 +33,12 @@ Use these in order:
 ### Organization skills
 
 ```sh
-control-plane skill list --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$CONTROL_PLANE_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$CONTROL_PLANE_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$CONTROL_PLANE_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$CONTROL_PLANE_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
 ```
 
 Use these before hiring when the new role needs `desiredSkills`.
@@ -52,7 +52,7 @@ Use these before hiring when the new role needs `desiredSkills`.
 ### Canonical hire flow
 
 ```sh
-control-plane agent hire --org-id "$CONTROL_PLANE_ORG_ID" --payload '{
+control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
   "role": "cto",
   "title": "Chief Technology Officer",
   "reportsTo": "<ceo-agent-id>",
@@ -92,7 +92,7 @@ Notes:
 
 - `approval comment` should use markdown and link the approval, pending agent, and source issue when available
 - `approval resubmit` is only for a revision-requested approval; update the payload instead of creating a second hire
-- if the run wakes with `CONTROL_PLANE_APPROVAL_ID`, treat that approval as the first task
+- if the run wakes with `OCTOPUS_APPROVAL_ID`, treat that approval as the first task
 
 ## Payload Notes
 
@@ -125,8 +125,8 @@ Issue linkage rule:
 Post-hire adjustments use the normal agent and skill surfaces:
 
 ```sh
-control-plane agent get "<agent-id-or-shortname>" --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 control-plane agent skills enable "<agent-id>" "<selection-ref>" --json
 control-plane agent skills sync "<agent-id>" --desired-skills "<csv>" --json
-control-plane agent local-cli "<agent-id-or-shortname>" --org-id "$CONTROL_PLANE_ORG_ID" --json
+control-plane agent local-cli "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 ```

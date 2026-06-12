@@ -27,10 +27,8 @@ def _set_actor_context(request: Request, settings: object) -> None:
     ):
         test_agent_id = request.headers.get("x-test-agent-id")
         test_org_id = request.headers.get("x-test-org-id")
-        run_id = (
-            request.headers.get("x-test-run-id")
-            or request.headers.get("x-rudder-run-id")
-            or request.headers.get("x-control-plane-run-id")
+        run_id = request.headers.get("x-test-run-id") or request.headers.get(
+            "x-octopus-run-id"
         )
         if test_agent_id and test_org_id:
             request.state.actor = {

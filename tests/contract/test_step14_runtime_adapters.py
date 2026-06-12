@@ -1157,7 +1157,7 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
                 "command": "codex-test",
                 "env": {
                     "CODEX_HOME": str(codex_home),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                     "GIT_AUTHOR_NAME": "Bad Author",
                     "GIT_AUTHOR_EMAIL": "agent@host.local",
                 },
@@ -1285,7 +1285,7 @@ async def test_codex_execute_injects_runtime_context_env(
         captured_env.update(kwargs["env"])
         return FakeCodexProcess()
 
-    monkeypatch.setenv("RUDDER_API_URL", "http://control.test")
+    monkeypatch.setenv("OCTOPUS_API_URL", "http://control.test")
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
@@ -1332,53 +1332,55 @@ async def test_codex_execute_injects_runtime_context_env(
                 "rudderRuntimePrimaryUrl": "http://svc",
             },
             env={
-                "RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
-                "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": '[{"serviceName":"preview"}]',
+                "OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
+                "OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON": '[{"serviceName":"preview"}]',
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
         )
     )
 
-    assert captured_env["RUDDER_AGENT_ID"] == "agent-14"
-    assert captured_env["RUDDER_ORG_ID"] == "org-14"
-    assert captured_env["RUDDER_RUN_ID"] == "run-14"
-    assert captured_env["RUDDER_API_URL"] == "http://control.test"
-    assert captured_env["RUDDER_TASK_ID"] == "task-1"
-    assert captured_env["RUDDER_WAKE_REASON"] == "assignment"
-    assert captured_env["RUDDER_WAKE_COMMENT_ID"] == "comment-1"
-    assert captured_env["RUDDER_APPROVAL_ID"] == "approval-1"
-    assert captured_env["RUDDER_APPROVAL_STATUS"] == "approved"
-    assert captured_env["RUDDER_LINKED_ISSUE_IDS"] == "issue-1,issue-2"
-    assert captured_env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
-    assert captured_env["RUDDER_WORKSPACE_SOURCE"] == "workspace"
-    assert captured_env["RUDDER_WORKSPACE_STRATEGY"] == "worktree"
-    assert captured_env["RUDDER_WORKSPACE_ID"] == "workspace-1"
-    assert captured_env["RUDDER_WORKSPACE_REPO_URL"] == "https://example.test/repo.git"
-    assert captured_env["RUDDER_WORKSPACE_REPO_REF"] == "main"
-    assert captured_env["RUDDER_WORKSPACE_BRANCH"] == "task-1"
-    assert captured_env["RUDDER_WORKSPACE_WORKTREE_PATH"] == "D:/worktrees/task-1"
+    assert captured_env["OCTOPUS_AGENT_ID"] == "agent-14"
+    assert captured_env["OCTOPUS_ORG_ID"] == "org-14"
+    assert captured_env["OCTOPUS_RUN_ID"] == "run-14"
+    assert captured_env["OCTOPUS_API_URL"] == "http://control.test"
+    assert captured_env["OCTOPUS_TASK_ID"] == "task-1"
+    assert captured_env["OCTOPUS_WAKE_REASON"] == "assignment"
+    assert captured_env["OCTOPUS_WAKE_COMMENT_ID"] == "comment-1"
+    assert captured_env["OCTOPUS_APPROVAL_ID"] == "approval-1"
+    assert captured_env["OCTOPUS_APPROVAL_STATUS"] == "approved"
+    assert captured_env["OCTOPUS_LINKED_ISSUE_IDS"] == "issue-1,issue-2"
+    assert captured_env["OCTOPUS_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+    assert captured_env["OCTOPUS_WORKSPACE_SOURCE"] == "workspace"
+    assert captured_env["OCTOPUS_WORKSPACE_STRATEGY"] == "worktree"
+    assert captured_env["OCTOPUS_WORKSPACE_ID"] == "workspace-1"
+    assert captured_env["OCTOPUS_WORKSPACE_REPO_URL"] == "https://example.test/repo.git"
+    assert captured_env["OCTOPUS_WORKSPACE_REPO_REF"] == "main"
+    assert captured_env["OCTOPUS_WORKSPACE_BRANCH"] == "task-1"
+    assert captured_env["OCTOPUS_WORKSPACE_WORKTREE_PATH"] == "D:/worktrees/task-1"
     assert captured_env["AGENT_HOME"] == "D:/agents/agent-14"
-    assert captured_env["RUDDER_AGENT_ROOT"] == "D:/agents/agent-14"
-    assert captured_env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+    assert captured_env["OCTOPUS_AGENT_ROOT"] == "D:/agents/agent-14"
+    assert captured_env["OCTOPUS_AGENT_INSTRUCTIONS_DIR"] == (
         "D:/agents/agent-14/instructions"
     )
-    assert captured_env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
-    assert captured_env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
-    assert captured_env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
-    assert captured_env["RUDDER_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
-    assert captured_env["RUDDER_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
-    assert captured_env["RUDDER_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
-    assert captured_env["RUDDER_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
-    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in captured_env
-    assert "RUDDER_RUN_ARTIFACTS_DIR" not in captured_env
-    assert captured_env["RUDDER_RUNTIME_SERVICES_JSON"] == (
+    assert captured_env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+    assert captured_env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
+    assert captured_env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+    assert captured_env["OCTOPUS_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
+    assert captured_env["OCTOPUS_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
+    assert captured_env["OCTOPUS_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
+    assert captured_env["OCTOPUS_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in captured_env
+    assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in captured_env
+    assert captured_env["OCTOPUS_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'
     )
-    assert captured_env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
-    assert captured_env["RUDDER_RUNTIME_SERVICE_INTENTS_JSON"] == (
+    assert captured_env["OCTOPUS_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
+    assert captured_env["OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON"] == (
         '[{"serviceName":"preview"}]'
     )
-    assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+    assert captured_env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
+    assert all(not key.startswith("RUDDER" + "_") for key in captured_env)
+    assert all(not key.startswith("CONTROL" + "_PLANE_") for key in captured_env)
 
 
 async def test_codex_execute_drops_inherited_sandbox_proxy_env(
@@ -1600,20 +1602,20 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
 
     for command in ("claude-test", "opencode-test"):
         env = captured[command]
-        assert env["RUDDER_AGENT_ID"] == "agent-14"
-        assert env["RUDDER_ORG_ID"] == "org-14"
-        assert env["RUDDER_RUN_ID"] == "run-14"
-        assert env["RUDDER_TASK_ID"] == "task-1"
-        assert env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
-        assert env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
+        assert env["OCTOPUS_AGENT_ID"] == "agent-14"
+        assert env["OCTOPUS_ORG_ID"] == "org-14"
+        assert env["OCTOPUS_RUN_ID"] == "run-14"
+        assert env["OCTOPUS_TASK_ID"] == "task-1"
+        assert env["OCTOPUS_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+        assert env["OCTOPUS_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
         assert env["AGENT_HOME"] == "D:/agents/agent-14"
-        assert env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+        assert env["OCTOPUS_AGENT_INSTRUCTIONS_DIR"] == (
             "D:/agents/agent-14/instructions"
         )
-        assert env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
-        assert env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
-        assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
-        assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+        assert env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+        assert env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
+        assert env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+        assert env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
 
 
 async def test_opencode_execute_materializes_database_provider_config(
@@ -1871,7 +1873,7 @@ def _runtime_context_for_env(
             },
             "rudderRuntimePrimaryUrl": "http://svc",
         },
-        env={"RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
+        env={"OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
         on_log=lambda stream, chunk: _noop_log(stream, chunk),
     )
 
