@@ -539,7 +539,9 @@ async def test_running_adapter_emits_progress_events_without_log_output(
 
     agent = await _seed_agent(session, name="SilentProgress")
     monkeypatch.setattr(
-        heartbeat_module, "get_runtime_adapter", lambda _runtime_type: SilentSlowAdapter()
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: SilentSlowAdapter(),
     )
     monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.01)
     heartbeat = HeartbeatService(session)
