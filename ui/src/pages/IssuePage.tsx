@@ -2044,6 +2044,35 @@ export function IssuePage() {
       ]);
     },
   });
+  const passiveFollowup = useMutation({
+    mutationFn: async () => {
+      if (!issue.data) throw new Error("任务未加载");
+      return issuesApi.passiveFollowup(issue.data.id);
+    },
+    onSuccess: async (run) => {
+      const runId = heartbeatRunId(run);
+      if (runId) {
+        setExecuteNotice(`已创建收尾跟进 ${runId}`);
+        localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
+        setCurrentRunId(runId);
+        queryClient.setQueryData<HeartbeatRun>(["heartbeat-run", runId], (current) => ({
+          ...current,
+          ...run,
+        }));
+        queryClient.setQueryData<HeartbeatRun[]>(["issue-heartbeat-runs", issueId], (current = []) => [
+          run,
+          ...current.filter((item) => heartbeatRunId(item) !== runId),
+        ]);
+      } else {
+        setExecuteNotice("已提交收尾跟进，正在刷新任务运行。");
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] }),
+        queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
+        queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
+      ]);
+    },
+  });
   const checkoutIssue = useMutation({
     mutationFn: () => {
       if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
@@ -2277,8 +2306,17 @@ export function IssuePage() {
             {needsCloseoutPrompt && (
               <p aria-label="需要收尾" className="issue-action-notice" role="status">
                 最新运行已成功，但任务仍未收口。若任务已经完成，请在任务阶段下拉中改成 done；否则补充 issue block 或 issue comment。
+                <button
+                  className="secondary small-button"
+                  disabled={passiveFollowup.isPending}
+                  type="button"
+                  onClick={() => passiveFollowup.mutate()}
+                >
+                  {passiveFollowup.isPending ? "提交中" : "立即收尾跟进"}
+                </button>
               </p>
             )}
+            {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
           </header>
 
           <main className="issue-detail-main">

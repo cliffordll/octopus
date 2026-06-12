@@ -1085,6 +1085,18 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
     createdAt: "2026-06-02T10:00:00Z",
     startedAt: "2026-06-02T10:01:00Z",
   };
+  const followupRun = {
+    id: "run-followup",
+    runId: "run-followup",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "automation",
+    runPurpose: "closeout_followup",
+    triggerDetail: "issue_passive_followup",
+    status: "queued",
+    createdAt: "2026-06-02T10:03:00Z",
+  };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
@@ -1099,6 +1111,7 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-closeout" && init?.method === "GET") return respond(run);
+    if (path === "/api/issues/issue-1/passive-followup" && init?.method === "POST") return respond(followupRun, 202);
     if (path === "/api/heartbeat-runs/run-closeout/events" && init?.method === "GET") {
       return respond([
         {
@@ -1124,6 +1137,15 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
   expect(prompt).toHaveTextContent("最新运行已成功，但任务仍未收口");
   expect(prompt).toHaveTextContent("任务阶段下拉");
   expect(prompt).toHaveTextContent("done");
+  await userEvent.click(screen.getByRole("button", { name: "立即收尾跟进" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/passive-followup",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  ));
+  expect(await screen.findByText("已创建收尾跟进 run-followup")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "标记任务完成" })).not.toBeInTheDocument();
 });
 
