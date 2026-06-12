@@ -454,6 +454,9 @@ async def test_backlog_issue_moved_to_todo_queues_assignee_wakeup(
 
     assert code == 200
     assert body["status"] == "todo"
+    tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
+    if tasks:
+        await asyncio.gather(*tasks)
     async with session_factory() as verify:
         wakeup = (
             await verify.execute(
@@ -468,13 +471,14 @@ async def test_backlog_issue_moved_to_todo_queues_assignee_wakeup(
             )
         ).scalar_one()
 
-    assert wakeup.source == "automation"
+    assert wakeup.source == "assignment"
     assert wakeup.reason == "issue_status_changed"
     assert wakeup.payload == {"issueId": issue_id, "mutation": "update"}
-    assert run.status == "queued"
-    assert run.invocation_source == "automation"
+    assert run.status != "queued"
+    assert run.invocation_source == "assignment"
     assert run.context_snapshot is not None
     assert run.context_snapshot["source"] == "issue.status_change"
+    assert run.context_snapshot["wakeSource"] == "assignment"
     assert run.context_snapshot["wakeReason"] == "issue_status_changed"
 
 
