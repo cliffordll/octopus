@@ -70,6 +70,9 @@ def apply_runtime_context_env(
     if agent_home:
         env["AGENT_HOME"] = agent_home
         env["OCTOPUS_AGENT_ROOT"] = agent_home
+    else:
+        env.pop("AGENT_HOME", None)
+        env.pop("OCTOPUS_AGENT_ROOT", None)
     _set_env(
         env,
         "OCTOPUS_AGENT_INSTRUCTIONS_DIR",
