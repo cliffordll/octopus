@@ -420,6 +420,11 @@ def _materialize_desired_skills(
 ) -> None:
     by_key = {skill_dir.name: skill_dir for skill_dir in available}
     explicit_by_key = {skill_dir.name: skill_dir for skill_dir in explicit_sources}
+    _prune_stale_managed_skills(
+        skills_home,
+        [*by_key.values(), *explicit_by_key.values()],
+        {_desired_runtime_name(key) for key in desired},
+    )
     for key in sorted(desired):
         runtime_name = _desired_runtime_name(key)
         source = by_key.get(runtime_name) or explicit_by_key.get(runtime_name)
@@ -434,6 +439,30 @@ def _materialize_desired_skills(
                 )
         except OSError as exc:
             warnings.append(f'Could not materialize skill "{key}": {exc}')
+
+
+def _prune_stale_managed_skills(
+    skills_home: Path, available: list[Path], desired_runtime_names: set[str]
+) -> None:
+    if not skills_home.is_dir():
+        return
+    available_sources = {source.resolve() for source in available}
+    for entry in skills_home.iterdir():
+        if entry.name in desired_runtime_names or entry.name in {
+            ".system",
+            "skills.json",
+        }:
+            continue
+        is_managed_copy = entry.is_dir() and entry.joinpath(_SOURCE_MARKER).is_file()
+        if not entry.is_symlink() and not is_managed_copy:
+            continue
+        source = _resolve_installed_target(entry).resolve()
+        if source not in available_sources:
+            continue
+        if entry.is_symlink() or entry.is_file():
+            entry.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(entry)
 
 
 def _ensure_skill_link_or_copy(source: Path, target: Path) -> bool:

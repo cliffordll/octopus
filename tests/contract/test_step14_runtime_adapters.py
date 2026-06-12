@@ -67,6 +67,27 @@ def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
     assert registry.get_runtime_adapter("gemini_local").type == "gemini_local"
 
 
+def test_supported_local_runtime_homes_are_isolated_per_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from packages.runtimes.paths import resolve_managed_runtime_home
+
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+
+    for runtime_type in ("codex_local", "opencode_local", "claude_local"):
+        first = resolve_managed_runtime_home(
+            runtime_type, org_id="org-14", agent_id="agent-a"
+        )
+        second = resolve_managed_runtime_home(
+            runtime_type, org_id="org-14", agent_id="agent-b"
+        )
+
+        assert first != second
+        assert first.parts[-2:] == ("agents", "agent-a")
+        assert second.parts[-2:] == ("agents", "agent-b")
+
+
 async def test_openclaw_gateway_runtime_metadata_reports_environment_support() -> None:
     from packages.runtimes.registry import get_runtime_metadata
 
@@ -794,7 +815,8 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     snapshot_code, snapshot = await _request(
         application, "GET", f"/api/agents/{agent['id']}/skills"
     )
-    target = codex_home / "skills" / "conversation-to-skill" / "SKILL.md"
+    agent_codex_home = codex_home / "agents" / agent["id"]
+    target = agent_codex_home / "skills" / "conversation-to-skill" / "SKILL.md"
     assert snapshot_code == 200
     assert target.exists() is False
 
@@ -811,7 +833,7 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     assert entries["conversation-to-skill"]["state"] == "installed"
     assert entries["conversation-to-skill"]["managed"] is True
     assert entries["conversation-to-skill"]["targetPath"] == str(
-        codex_home / "skills" / "conversation-to-skill"
+        agent_codex_home / "skills" / "conversation-to-skill"
     )
 
 
@@ -820,10 +842,20 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     codex_home = tmp_path / "codex-home"
-    skill_dir = codex_home / "skills" / "review"
+    source_skills_root = tmp_path / "source-skills"
+    skill_dir = source_skills_root / "review"
     skill_dir.mkdir(parents=True)
     skill_dir.joinpath("SKILL.md").write_text(
         "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    stale_source = source_skills_root / "debug"
+    stale_source.mkdir()
+    stale_source.joinpath("SKILL.md").write_text("# Debug\n", encoding="utf-8")
+    stale_target = codex_home / "agents" / "agent-14" / "skills" / "debug"
+    stale_target.mkdir(parents=True)
+    stale_target.joinpath("SKILL.md").write_text("# Debug\n", encoding="utf-8")
+    stale_target.joinpath(".octopus-source").write_text(
+        str(stale_source), encoding="utf-8"
     )
     captured_logs: list[tuple[str, str]] = []
     captured_env: dict[str, str] = {}
@@ -870,6 +902,8 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
             agent_name="Codex",
             config={
                 "command": "codex-test",
+                "skillsRootPath": str(source_skills_root),
+                "_octopus": {"desiredSkills": ["review"]},
                 "env": {
                     "CODEX_HOME": str(codex_home),
                     "OPENAI_API_KEY": "test-key",
@@ -879,7 +913,10 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
         )
     )
 
-    assert captured_env["CODEX_HOME"] == str(codex_home)
+    agent_codex_home = codex_home / "agents" / "agent-14"
+    assert captured_env["CODEX_HOME"] == str(agent_codex_home)
+    assert (agent_codex_home / "skills" / "review" / "SKILL.md").is_file()
+    assert stale_target.exists() is False
     assert result.usage_json == {
         "inputTokens": 10,
         "cachedInputTokens": 4,
@@ -1166,7 +1203,8 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
         )
     )
 
-    managed_home = codex_home / "home"
+    agent_codex_home = codex_home / "agents" / "agent-14"
+    managed_home = agent_codex_home / "home"
     assert captured_env["HOME"] == str(managed_home)
     assert captured_env["USERPROFILE"] == str(managed_home)
     assert "AGENT_HOME" not in captured_env
@@ -1182,9 +1220,9 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     )
     assert managed_home.joinpath(".config", "gh", "hosts.yml").exists()
     assert managed_home.joinpath(".npmrc").exists()
-    assert codex_home.joinpath("auth.json").exists()
-    assert codex_home.joinpath("cap_sid").exists()
-    assert codex_home.joinpath("config.toml").exists()
+    assert agent_codex_home.joinpath("auth.json").exists()
+    assert agent_codex_home.joinpath("cap_sid").exists()
+    assert agent_codex_home.joinpath("config.toml").exists()
     assert any("Shared 2 local CLI credential entries" in chunk for _, chunk in logs)
     assert any(
         "Shared 3 local Codex credential entries into managed CODEX_HOME" in chunk
@@ -1696,6 +1734,8 @@ async def test_opencode_execute_materializes_database_provider_config(
         / "organizations"
         / "org-14"
         / "opencode-home"
+        / "agents"
+        / "agent-14"
         / "home"
         / ".config"
         / "opencode"
@@ -1951,7 +1991,9 @@ async def test_agent_skills_enable_private_and_analytics_routes(
         f"/api/agents/{agent['id']}/skills/enable",
         json={"skills": ["agent:incident-notes"]},
     )
-    private_target = codex_home / "skills" / "incident-notes" / "SKILL.md"
+    private_target = (
+        codex_home / "agents" / agent["id"] / "skills" / "incident-notes" / "SKILL.md"
+    )
     private_entries = {
         entry["selectionKey"]: entry for entry in private_enabled["entries"]
     }

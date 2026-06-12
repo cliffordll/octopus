@@ -89,7 +89,11 @@ from .agent_instructions import (
     materialize_default_instructions_for_new_agent,
     normalize_instructions_paths,
 )
-from .organization_skills import OrganizationSkillService, organization_skills_root
+from .organization_skills import (
+    BUNDLED_SKILL_KEYS,
+    OrganizationSkillService,
+    organization_skills_root,
+)
 from .workspace_paths import agent_workspace_root
 
 _URL_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -98,7 +102,7 @@ _SENSITIVE_KEY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REDACTED = "***REDACTED***"
-_DEFAULT_ENABLED_SKILLS = ("skills/control-plane",)
+_DEFAULT_ENABLED_SKILLS = BUNDLED_SKILL_KEYS
 _CONFIG_REVISION_FIELDS: tuple[str, ...] = (
     "name",
     "role",
@@ -420,7 +424,16 @@ def _apply_desired_skills_to_entries(
             continue
         selection_key = entry.get("selectionKey")
         key = entry.get("key")
-        is_desired = selection_key in desired or key in desired
+        candidates = {
+            value
+            for value in (
+                selection_key,
+                key,
+                f"skills/{key}" if isinstance(key, str) else None,
+            )
+            if isinstance(value, str) and value
+        }
+        is_desired = not candidates.isdisjoint(desired)
         entry["desired"] = is_desired
         if is_desired and entry.get("state") == "available":
             entry["state"] = "configured"
@@ -532,12 +545,22 @@ async def prepare_agent_runtime_config(
 ) -> dict[str, Any]:
     await OrganizationSkillService(session).list(row.org_id)
     config = _runtime_config_with_context(row, base_config)
+    configured_skills = (
+        _string_list(extra_octopus.get("desiredSkills"))
+        if extra_octopus and "desiredSkills" in extra_octopus
+        else await list_enabled_skill_keys(session, row.id)
+    )
     if extra_octopus:
         runtime_context = config.get("_octopus")
         config["_octopus"] = {
             **(runtime_context if isinstance(runtime_context, dict) else {}),
             **extra_octopus,
         }
+    runtime_context = config.get("_octopus")
+    config["_octopus"] = {
+        **(runtime_context if isinstance(runtime_context, dict) else {}),
+        "desiredSkills": configured_skills,
+    }
     return config
 
 
@@ -1149,11 +1172,10 @@ class AgentService:
             and isinstance(skill.get("sourcePath"), str)
             and skill.get("sourcePath")
         ]
-        if not desired_sources:
-            return config
         runtime_context = config.get("_octopus")
         config["_octopus"] = {
             **(runtime_context if isinstance(runtime_context, dict) else {}),
+            "desiredSkills": desired_skills,
             "desiredSkillSources": desired_sources,
         }
         return config
