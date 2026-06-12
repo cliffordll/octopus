@@ -34,3 +34,19 @@ def test_database_url_env_override_is_preserved(
     monkeypatch.setenv("OCTOPUS_DATABASE_URL", database_url)
 
     assert Settings.from_env().database_url == database_url
+
+
+def test_graceful_shutdown_timeout_defaults_to_five_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS", raising=False)
+
+    assert Settings.from_env().graceful_shutdown_timeout_seconds == 5
+
+
+def test_graceful_shutdown_timeout_env_override_is_preserved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS", "2")
+
+    assert Settings.from_env().graceful_shutdown_timeout_seconds == 2

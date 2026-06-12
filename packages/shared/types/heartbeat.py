@@ -5,6 +5,7 @@ from typing import Any, NotRequired, TypedDict
 
 from packages.shared.constants.heartbeat import (
     HeartbeatInvocationSource,
+    HeartbeatRunPurpose,
     HeartbeatRunStatus,
     WakeupTriggerDetail,
 )
@@ -27,6 +28,7 @@ class HeartbeatRun(TypedDict):
     orgId: str
     agentId: str
     invocationSource: HeartbeatInvocationSource
+    runPurpose: HeartbeatRunPurpose
     triggerDetail: WakeupTriggerDetail | None
     status: HeartbeatRunStatus
     startedAt: str | None

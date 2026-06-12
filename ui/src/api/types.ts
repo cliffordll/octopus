@@ -1230,6 +1230,7 @@ export interface HeartbeatRun {
   projectId?: string | null;
   goalId?: string | null;
   invocationSource: string;
+  runPurpose?: "task_execution" | "closeout_followup" | "review" | "heartbeat";
   triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;

@@ -48,8 +48,28 @@ export function runWakeReason(run: Pick<HeartbeatRun, "contextSnapshot" | "trigg
   return null;
 }
 
-export function isPassiveFollowupRun(run: Pick<HeartbeatRun, "contextSnapshot" | "triggerDetail"> | null | undefined): boolean {
-  return runWakeReason(run) === "issue_passive_followup";
+export function isPassiveFollowupRun(run: Pick<HeartbeatRun, "runPurpose" | "contextSnapshot" | "triggerDetail"> | null | undefined): boolean {
+  return run?.runPurpose === "closeout_followup" || runWakeReason(run) === "issue_passive_followup";
+}
+
+export function runPurpose(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail"> | null | undefined): NonNullable<HeartbeatRun["runPurpose"]> {
+  if (run?.runPurpose) return run.runPurpose;
+  if (isPassiveFollowupRun(run)) return "closeout_followup";
+  if (run?.invocationSource === "review") return "review";
+  if (run?.invocationSource === "timer") return "heartbeat";
+  return "task_execution";
+}
+
+export function runPurposeLabel(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail"> | null | undefined): string {
+  const purpose = runPurpose(run);
+  if (purpose === "closeout_followup") return "收尾跟进";
+  if (purpose === "review") return "评审";
+  if (purpose === "heartbeat") return "心跳";
+  return "任务执行";
+}
+
+export function isTaskExecutionRun(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail"> | null | undefined): boolean {
+  return runPurpose(run) === "task_execution";
 }
 
 export function runDescriptor(run: HeartbeatRun | null | undefined): string {

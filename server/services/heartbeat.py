@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
+import os
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -24,6 +25,7 @@ from packages.database.queries.agent_state import (
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.heartbeat import (
     append_run_event,
+    claim_due_wakeup_request,
     claim_queued_run,
     create_run,
     create_wakeup_request,
@@ -32,6 +34,7 @@ from packages.database.queries.heartbeat import (
     has_active_timer_run,
     list_queued_agent_ids,
     list_queued_runs,
+    list_due_wakeup_request_ids,
     list_run_events,
     list_running_run_ids,
     list_runs,
@@ -55,6 +58,7 @@ from packages.shared.constants.heartbeat import (
     AGENT_RUN_CONCURRENCY_MIN,
     HEARTBEAT_INTERVAL_DEFAULT_SEC,
     HeartbeatInvocationSource,
+    HeartbeatRunPurpose,
     HeartbeatRunStatus,
     WakeupTriggerDetail,
 )
@@ -90,10 +94,8 @@ ISSUE_PASSIVE_FOLLOWUP_REASON = "issue_passive_followup"
 ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE = "passive_issue_followup"
 ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
 ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
-ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT = {
-    1: timedelta(minutes=2),
-    2: timedelta(minutes=5),
-}
+ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV = "OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS"
+ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
 
 
 class ProcessLostError(RuntimeError):
@@ -110,6 +112,30 @@ def _is_process_alive(pid: int) -> bool:
         return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
     except (psutil.NoSuchProcess, psutil.ZombieProcess, ValueError):
         return False
+
+
+def _issue_passive_followup_delay() -> timedelta:
+    raw_value = os.environ.get(ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV)
+    if raw_value is None:
+        return timedelta(seconds=ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS)
+    try:
+        seconds = max(0.0, float(raw_value))
+    except ValueError:
+        seconds = float(ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS)
+    return timedelta(seconds=seconds)
+
+
+def _run_purpose(
+    invocation_source: str, context_snapshot: dict[str, Any] | None
+) -> HeartbeatRunPurpose:
+    context = context_snapshot if isinstance(context_snapshot, dict) else {}
+    if context.get("wakeReason") == ISSUE_PASSIVE_FOLLOWUP_REASON:
+        return "closeout_followup"
+    if invocation_source == "review":
+        return "review"
+    if invocation_source == "timer":
+        return "heartbeat"
+    return "task_execution"
 
 
 def _run_log_dir() -> Path:
@@ -534,6 +560,7 @@ class HeartbeatService:
                 "org_id": agent.org_id,
                 "agent_id": agent.id,
                 "invocation_source": invocation_source,
+                "run_purpose": original.run_purpose,
                 "trigger_detail": trigger_detail,
                 "status": "queued",
                 "wakeup_request_id": wakeup.id,
@@ -653,6 +680,135 @@ class HeartbeatService:
             resumed.extend(await self.resume_queued_runs(agent_id))
         return resumed
 
+    async def materialize_due_scheduled_wakeups(self) -> set[str]:
+        now = datetime.now(UTC)
+        agent_ids: set[str] = set()
+        for wakeup_id in await list_due_wakeup_request_ids(
+            self._session, "scheduled", now
+        ):
+            wakeup = await claim_due_wakeup_request(
+                self._session, wakeup_id, "scheduled", now
+            )
+            if wakeup is None:
+                continue
+            agent = await get_agent_by_id(self._session, wakeup.agent_id)
+            if agent is None or agent.status in {"terminated", "pending_approval"}:
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": now,
+                        "error": "Agent is not invokable in its current state",
+                    },
+                )
+                continue
+            if agent.status == "paused":
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {"status": "scheduled", "claimed_at": None},
+                )
+                continue
+            if wakeup.reason != ISSUE_PASSIVE_FOLLOWUP_REASON:
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": now,
+                        "error": "Unsupported scheduled wakeup reason",
+                    },
+                )
+                continue
+            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+            issue_id = payload.get("issueId")
+            previous_run_id = payload.get("previousRunId")
+            issue = (
+                await self._session.get(IssueRow, issue_id)
+                if isinstance(issue_id, str)
+                else None
+            )
+            previous_run = (
+                await get_run(self._session, previous_run_id)
+                if isinstance(previous_run_id, str)
+                else None
+            )
+            if (
+                issue is None
+                or issue.org_id != wakeup.org_id
+                or issue.assignee_agent_id != agent.id
+                or issue.status not in {"todo", "in_progress"}
+                or previous_run is None
+                or await self._run_has_issue_closeout_signal(
+                    previous_run,
+                    issue.id,
+                    issue_has_reviewer=bool(
+                        issue.reviewer_agent_id or issue.reviewer_user_id
+                    ),
+                )
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {"status": "skipped", "finished_at": now},
+                )
+                continue
+            attempt = payload.get("attempt")
+            context_snapshot = await self._enrich_issue_context_snapshot(
+                {
+                    "triggeredBy": "system",
+                    "actorId": "heartbeat_closeout_governance",
+                    "forceFreshSession": False,
+                    "issueId": issue.id,
+                    "source": "issue.passive_followup",
+                    "wakeSource": ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE,
+                    "wakeReason": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                    "passiveFollowup": {
+                        "originRunId": payload.get("originRunId"),
+                        "previousRunId": previous_run.id,
+                        "attempt": attempt,
+                        "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
+                        "reason": payload.get("reason"),
+                        "queuedAt": now.isoformat(),
+                    },
+                }
+            )
+            run = await create_run(
+                self._session,
+                {
+                    "org_id": agent.org_id,
+                    "agent_id": agent.id,
+                    "invocation_source": wakeup.source,
+                    "run_purpose": "closeout_followup",
+                    "trigger_detail": wakeup.trigger_detail,
+                    "status": "queued",
+                    "wakeup_request_id": wakeup.id,
+                    "context_snapshot": context_snapshot,
+                },
+            )
+            run = await self._initialize_run_log(run)
+            await update_wakeup_request(
+                self._session,
+                wakeup.id,
+                {"status": "queued", "run_id": run.id, "error": None},
+            )
+            await self._append_event(
+                run,
+                1,
+                "lifecycle",
+                stream="system",
+                message="run queued",
+                level="info",
+                payload={
+                    "status": "queued",
+                    "source": wakeup.source,
+                    "triggerDetail": wakeup.trigger_detail,
+                },
+            )
+            agent_ids.add(agent.id)
+        return agent_ids
+
     async def claim_queued_for_dispatch(self, agent_id: str) -> list[str]:
         agent = await get_agent_by_id(self._session, agent_id)
         if agent is None or agent.status in (
@@ -730,6 +886,7 @@ class HeartbeatService:
                     "org_id": agent.org_id,
                     "agent_id": agent.id,
                     "invocation_source": payload["source"],
+                    "run_purpose": _run_purpose(payload["source"], context_snapshot),
                     "trigger_detail": payload["triggerDetail"],
                     "status": "queued",
                     "wakeup_request_id": wakeup.id,
@@ -836,6 +993,9 @@ class HeartbeatService:
                 "org_id": agent.org_id,
                 "agent_id": agent.id,
                 "invocation_source": payload.get("source", "on_demand"),
+                "run_purpose": _run_purpose(
+                    payload.get("source", "on_demand"), context_snapshot
+                ),
                 "trigger_detail": payload.get("triggerDetail", "manual"),
                 "status": "queued",
                 "wakeup_request_id": wakeup.id,
@@ -1211,7 +1371,9 @@ class HeartbeatService:
                 metadata={"error": message},
             )
             error_code = (
-                "process_lost" if isinstance(exc, ProcessLostError) else "adapter_failed"
+                "process_lost"
+                if isinstance(exc, ProcessLostError)
+                else "adapter_failed"
             )
             failed = await update_run(
                 self._session,
@@ -1424,49 +1586,38 @@ class HeartbeatService:
             )
             return
         next_attempt = current_attempt + 1
-        requested_at = (
-            datetime.now(UTC) + ISSUE_PASSIVE_FOLLOWUP_COOLDOWN_BY_ATTEMPT[next_attempt]
+        idempotency_key = f"{ISSUE_PASSIVE_FOLLOWUP_REASON}:{final.id}"
+        existing = await get_wakeup_by_idempotency_key(
+            self._session, agent.id, idempotency_key
         )
-        await self.wakeup(
-            agent.id,
-            {
-                "source": "automation",
-                "triggerDetail": "system",
-                "reason": ISSUE_PASSIVE_FOLLOWUP_REASON,
-                "idempotencyKey": f"{ISSUE_PASSIVE_FOLLOWUP_REASON}:{final.id}",
-                "requestedAt": requested_at,
-                "payload": {
-                    "issueId": issue.id,
-                    "originRunId": origin_run_id,
-                    "previousRunId": final.id,
-                    "attempt": next_attempt,
-                    "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
-                },
-                "contextSnapshot": {
-                    "issueId": issue.id,
-                    "source": "issue.passive_followup",
-                    "wakeSource": ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE,
-                    "wakeReason": ISSUE_PASSIVE_FOLLOWUP_REASON,
-                    "passiveFollowup": {
+        if existing is not None and existing.status not in {
+            "failed",
+            "cancelled",
+            "skipped",
+        }:
+            return
+        await create_wakeup_request(
+            self._session,
+            self._wakeup_values(
+                agent,
+                {
+                    "source": "automation",
+                    "triggerDetail": "system",
+                    "reason": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                    "idempotencyKey": idempotency_key,
+                    "requestedAt": datetime.now(UTC) + _issue_passive_followup_delay(),
+                    "payload": {
+                        "issueId": issue.id,
                         "originRunId": origin_run_id,
                         "previousRunId": final.id,
                         "attempt": next_attempt,
-                        "maxAttempts": ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS,
                         "reason": ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON,
-                        "queuedAt": datetime.now(UTC).isoformat(),
-                    },
-                    "issue": {
-                        "id": issue.id,
-                        "title": issue.title,
-                        "description": issue.description,
-                        "status": issue.status,
-                        "priority": issue.priority,
                     },
                 },
-            },
-            actor_type="system",
-            actor_id="heartbeat_closeout_governance",
-            execute_immediately=False,
+                actor_type="system",
+                actor_id="heartbeat_closeout_governance",
+                status="scheduled",
+            ),
         )
 
     async def _record_issue_closure_convergence_needed(
@@ -1845,6 +1996,7 @@ class HeartbeatService:
                     "org_id": org_id,
                     "agent_id": agent.id,
                     "invocation_source": deferred.source,
+                    "run_purpose": _run_purpose(deferred.source, context_snapshot),
                     "trigger_detail": deferred.trigger_detail,
                     "status": "queued",
                     "wakeup_request_id": deferred.id,
@@ -1896,10 +2048,7 @@ class HeartbeatService:
         *,
         issue: IssueRow | None = None,
     ) -> None:
-        is_passive_followup = (
-            context_snapshot.get("wakeReason") == ISSUE_PASSIVE_FOLLOWUP_REASON
-        )
-        if run.invocation_source != "assignment" and not is_passive_followup:
+        if run.invocation_source != "assignment":
             return
         issue_id = _issue_id_from_context(context_snapshot)
         if issue_id is None:
@@ -2141,6 +2290,7 @@ class HeartbeatService:
             "status": row.status,
             "agentId": row.agent_id,
             "invocationSource": row.invocation_source,
+            "runPurpose": row.run_purpose,
             "triggerDetail": row.trigger_detail,
             "retryOfRunId": row.retry_of_run_id,
             "processLossRetryCount": row.process_loss_retry_count,
@@ -2169,6 +2319,7 @@ def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
         "orgId": row.org_id,
         "agentId": row.agent_id,
         "invocationSource": cast(HeartbeatInvocationSource, row.invocation_source),
+        "runPurpose": cast(HeartbeatRunPurpose, row.run_purpose),
         "triggerDetail": cast(WakeupTriggerDetail | None, row.trigger_detail),
         "status": cast(HeartbeatRunStatus, row.status),
         "startedAt": row.started_at.isoformat() if row.started_at else None,
@@ -2283,7 +2434,9 @@ async def dispatch_all_queued_runs(
 ) -> None:
     async with session_factory() as session:
         async with session.begin():
-            agent_ids = await list_queued_agent_ids(session)
+            heartbeat = HeartbeatService(session)
+            scheduled_agent_ids = await heartbeat.materialize_due_scheduled_wakeups()
+            agent_ids = scheduled_agent_ids | await list_queued_agent_ids(session)
     await asyncio.gather(
         *(dispatch_queued_agent(session_factory, agent_id) for agent_id in agent_ids)
     )

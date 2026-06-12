@@ -538,8 +538,10 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
 | `OCTOPUS_HOME` | `~/.octopus` | Octopus instance home 根目录 |
 | `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离默认数据库和文件侧数据目录 |
+| `OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS` | `5` | server 收到停止信号后等待现有连接和任务结束的最长秒数 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 server 全局 heartbeat scheduler；UI 设置里的 `心跳` 不修改该环境变量 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
+| `OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS` | `1800` | 成功运行缺少 issue 收尾信号时，创建 passive follow-up 前等待的秒数 |
 | `OCTOPUS_STORAGE_PROVIDER` | `local_disk` | 文件存储 provider，可选 `local_disk`、`minio`、`s3` |
 | `OCTOPUS_STORAGE_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/data/storage` | local disk 存储目录 |
 | `OCTOPUS_RUN_LOG_DIR` | `<OCTOPUS_HOME>/instances/<instance_id>/data/run-logs` | heartbeat/runtime run 日志目录 |

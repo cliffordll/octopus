@@ -49,6 +49,9 @@ class IssueRunSummary(TypedDict):
     runId: str
     status: str
     agentId: str
+    invocationSource: str
+    runPurpose: str
+    triggerDetail: str | None
     createdAt: str
     startedAt: str | None
     finishedAt: str | None
