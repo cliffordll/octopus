@@ -89,7 +89,15 @@ async def test_agent_skills_analytics_counts_persisted_evidence(
                 invocation_source="manual",
                 status="succeeded",
                 context_snapshot={"desiredSkills": ["review"]},
-                result_json={"loadedSkills": ["review"]},
+                result_json={
+                    "loadedSkills": [
+                        {
+                            "key": "review",
+                            "runtimeName": "review",
+                            "name": "Review",
+                        }
+                    ]
+                },
                 created_at=now,
             )
         )
