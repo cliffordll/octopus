@@ -27,13 +27,16 @@
 
 - 工作前始终先 checkout。
 - 执行工作。完成后更新状态并评论。
-- 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`，先检查当前 issue 状态，然后留下关闭信号：进展评论、done、带原因的 blocked，或明确交接。如果被审查的 issue 被阻塞，评论要清楚到足以让 reviewer 判断下一步。
+- Close-out gate：退出活跃 issue heartbeat 前，必须先让匹配的控制平面 close-out 命令成功执行。
+- 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`，先检查当前 issue 状态，然后在退出前只执行一个 close-out 命令：`control-plane issue done ...`、`control-plane issue block ...` 或 `control-plane issue comment ...`。如果被审查的 issue 被阻塞，评论要清楚到足以让 reviewer 判断下一步。不要只用最终 assistant 总结结束这次唤醒。
 - 如果你是 reviewer，包括处理 `blocked` issue，也要用 `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...` 记录结构化审查结论。只在确认存在人工或外部阻塞时使用 `blocked`，并在评论中说明下一个人工动作。
-- 如果 `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`，检查当前状态，并且只记录一个结构化审查结论。
+- 如果 `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`，检查当前状态，并且在退出前执行一个 `control-plane issue review ... --json` 命令。不要用自由格式评论代替 reviewer 结论。
 
 ## 6. 退出
 
 - 退出前对 in_progress 工作发表评论。
 - reviewer 工作不能通过自由格式的接受或拒绝评论关闭；使用 `control-plane issue review`。
 - 一个成功的 `todo` 或 `in_progress` issue run 如果没有关闭信号，可能触发同一智能体的 passive follow-up。
+- 不要退出 `issue_passive_followup`，除非 `control-plane issue done`、`control-plane issue block` 或 `control-plane issue comment` 已成功。
+- 不要退出 `issue_review_closeout_missing`，除非 `control-plane issue review` 已成功。
 - 如果没有分配任务，干净退出。

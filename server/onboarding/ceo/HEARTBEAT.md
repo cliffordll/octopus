@@ -37,9 +37,10 @@ If `OCTOPUS_APPROVAL_ID` is set:
 - Never retry a 409 -- that task belongs to someone else.
 - Use `control-plane issue context "<issue-id-or-identifier>" --json` to load compact context.
 - Do the work. Use `control-plane issue comment`, `control-plane issue done`, or `control-plane issue block` to communicate outcome. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage.
-- If `OCTOPUS_WAKE_REASON=issue_passive_followup`, treat the wake as close-out governance, not a fresh assignment: inspect state and leave a progress comment, completion, blocker, or explicit handoff.
+- Close-out gate: Do not exit an active issue heartbeat until the matching control-plane close-out command has succeeded.
+- If `OCTOPUS_WAKE_REASON=issue_passive_followup`, treat the wake as close-out governance, not a fresh assignment: inspect state and execute exactly one close-out command before exiting: `control-plane issue done ...`, `control-plane issue block ...`, or `control-plane issue comment ...`. Do not exit this wake with only a final assistant summary.
 - If you are the reviewer, including for a `blocked` issue, record one structured decision with `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...`. Use `blocked` only to confirm a human/external blocker, and name the next human action in the comment.
-- If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, treat the wake as reviewer close-out governance and record one structured review decision.
+- If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, treat the wake as reviewer close-out governance and execute exactly one `control-plane issue review ... --json` command before exiting. Do not use a free-form comment as the reviewer outcome.
 
 ## 6. Delegation
 
@@ -60,6 +61,8 @@ If `OCTOPUS_APPROVAL_ID` is set:
 - Comment on any in_progress work before exiting.
 - Reviewer work is not closed by a free-form accept/reject comment; use `control-plane issue review`.
 - A successful `todo` or `in_progress` issue run without a close-out signal can trigger a same-agent passive follow-up.
+- Do not exit `issue_passive_followup` until `control-plane issue done`, `control-plane issue block`, or `control-plane issue comment` has succeeded.
+- Do not exit `issue_review_closeout_missing` until `control-plane issue review` has succeeded.
 - If no assignments and no valid mention-handoff, exit cleanly.
 
 ---

@@ -144,7 +144,25 @@ control-plane issue comments list "<issue-id-or-identifier>" --after "<last-comm
 
 **Step 8 — Communicate outcome.**
 
+**Close-out gate.** Do not exit an issue heartbeat until you have produced the
+durable close-out signal that matches your role and wake reason. A natural
+language summary in the final assistant message is not a close-out signal.
+Use the CLI command, check that it exits successfully, and only then exit.
+
 Before exiting an active `todo` or `in_progress` issue run, leave exactly one clear close-out signal. Use a progress comment if work remains, `issue done` if complete, `issue block` if blocked, or an explicit handoff comment when ownership changes. If the issue has a reviewer, `issue block` is also a reviewer handoff: write the blocker clearly enough for the reviewer to decide next steps. control plane may wake you again with `OCTOPUS_WAKE_REASON=issue_passive_followup` when a successful run exits without that signal.
+
+If `OCTOPUS_WAKE_REASON=issue_passive_followup`, this run exists only because
+the previous successful run did not leave a close-out signal. Do not do fresh
+implementation work first. Inspect current issue state, then execute exactly
+one of these commands before exiting:
+
+- work is complete: `control-plane issue done "<issue-id-or-identifier>" --comment "<markdown>" --json`
+- work is blocked: `control-plane issue block "<issue-id-or-identifier>" --comment "<markdown>" --json`
+- work remains open but has a clear next step: `control-plane issue comment "<issue-id-or-identifier>" --body "<markdown>" --json`
+
+For passive follow-up, a final assistant answer such as "done", "looks good",
+or "I will follow up" is not enough. Do not exit until one of the three CLI
+commands above succeeds.
 
 Before exiting a reviewer run or an inbox row with `relationship: "reviewer"`,
 leave exactly one structured reviewer decision. Do not rely on free-form
@@ -178,6 +196,13 @@ control-plane issue review "<issue-id-or-identifier>" --decision blocked --comme
 ```
 
 Use `blocked` to confirm a human/external blocker. The comment must name the next human action; control plane records a human handoff and removes the issue from repeated reviewer pickup until the board changes the issue.
+
+If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, your previous reviewer
+run succeeded without `control-plane issue review`. This is a correction run,
+not a new review assignment. Inspect current state and execute exactly one
+`control-plane issue review ... --decision approve|request_changes|needs_followup|blocked --comment ... --json`
+command before exiting. Do not use `control-plane issue comment` as the
+reviewer outcome in this wake.
 
 - progress-only update:
 
@@ -289,6 +314,10 @@ Planning rules:
 - Treat `issue_review_closeout_missing` as review close-out governance: inspect
   current state, including blocked handoffs, then record one structured review
   decision.
+- Do not exit `issue_passive_followup` until `control-plane issue done`,
+  `control-plane issue block`, or `control-plane issue comment` has succeeded.
+- Do not exit `issue_review_closeout_missing` until `control-plane issue review`
+  has succeeded.
 - A reviewer does not take over implementation unless explicitly asked.
 - A reviewer request for changes must use `control-plane issue review --decision
   request_changes`, not only a reject comment.
