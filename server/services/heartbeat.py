@@ -561,6 +561,49 @@ class HeartbeatService:
                 skipped = True
         return skipped
 
+    async def skip_queued_issue_review_wakeups(
+        self, issue_id: str, *, reason: str
+    ) -> bool:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or not issue.reviewer_agent_id:
+            return False
+        skipped = False
+        now = datetime.now(UTC)
+        for wakeup in await list_wakeup_requests_by_status(
+            self._session, issue.reviewer_agent_id, "queued"
+        ):
+            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+            if (
+                wakeup.org_id == issue.org_id
+                and wakeup.source == "review"
+                and wakeup.reason == "issue_review_requested"
+                and payload.get("issueId") == issue.id
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": now,
+                        "error": reason,
+                    },
+                )
+                if wakeup.run_id:
+                    run = await self._session.get(HeartbeatRunRow, wakeup.run_id)
+                    if run is not None and run.status == "queued":
+                        await update_run(
+                            self._session,
+                            run.id,
+                            {
+                                "status": "cancelled",
+                                "finished_at": now,
+                                "error": reason,
+                                "error_code": "cancelled",
+                            },
+                        )
+                skipped = True
+        return skipped
+
     async def _active_issue_followup_run(
         self, issue: IssueRow
     ) -> HeartbeatRunRow | None:

@@ -421,6 +421,48 @@ async def test_update_issue_to_in_review_queues_reviewer_wakeup(
     }
 
 
+async def test_update_issue_to_in_review_dispatches_reviewer_run(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(session, org_id, status="todo")
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Dispatch Reviewer",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "in_review", "reviewerAgentId": reviewer_id},
+    )
+
+    assert code == 200
+    assert body["status"] == "in_review"
+    tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
+    if tasks:
+        await asyncio.gather(*tasks)
+    async with session_factory() as verify:
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == reviewer_id)
+            )
+        ).scalar_one()
+    assert run.run_purpose == "review"
+    assert run.status != "queued"
+    assert run.started_at is not None
+
+
 async def test_backlog_issue_moved_to_todo_queues_assignee_wakeup(
     app: FastAPI,
     session: AsyncSession,
@@ -1161,6 +1203,90 @@ async def test_review_decision_route_applies_status_mapping(
     assert code == 200
     assert body["id"] == issue_id
     assert body["status"] == "done"
+
+
+async def test_review_decision_skips_queued_reviewer_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    wakeup_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Queued Reviewer",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Queued review",
+                status="in_review",
+                priority="medium",
+                reviewer_agent_id=reviewer_id,
+            )
+        )
+        session.add(
+            AgentWakeupRequest(
+                id=wakeup_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                source="review",
+                trigger_detail="system",
+                reason="issue_review_requested",
+                payload={"issueId": issue_id, "mutation": "status_to_in_review"},
+                status="queued",
+                run_id=run_id,
+                idempotency_key=f"issue:{issue_id}:review:status_to_in_review",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                invocation_source="review",
+                trigger_detail="system",
+                status="queued",
+                wakeup_request_id=wakeup_id,
+                run_purpose="review",
+                context_snapshot={
+                    "issueId": issue_id,
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_requested",
+                    "role": "reviewer",
+                },
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/review-decision",
+        json={"decision": "approve"},
+    )
+
+    assert code == 200
+    assert body["status"] == "done"
+    async with session_factory() as verify:
+        wakeup = await verify.get(AgentWakeupRequest, wakeup_id)
+        run = await verify.get(HeartbeatRun, run_id)
+    assert wakeup is not None
+    assert wakeup.status == "skipped"
+    assert wakeup.finished_at is not None
+    assert run is not None
+    assert run.status == "cancelled"
+    assert run.finished_at is not None
+    assert run.error == "review already resolved"
 
 
 async def test_org_issue_list_supports_step8_filters(

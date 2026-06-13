@@ -328,6 +328,54 @@ async def test_run_cost_can_be_recorded_from_runtime_result(
     assert created["outputTokens"] == 5
 
 
+async def test_run_cost_estimation_uses_agent_runtime_type_when_result_omits_it(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    _, factory = app
+    org_id, agent_id, _ = await _seed_org_agent_project(factory, prefix="run-estimated")
+    run_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add_all(
+            _llm_provider_model(
+                provider_id="global",
+                model_id="deepseek-v4-flash",
+                display_name="DeepSeek V4 Flash",
+                metadata={"pricing": {"inputCostPer1M": 0.14, "outputCostPer1M": 0.28}},
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                status="succeeded",
+                usage_json={"inputTokens": 1_000_000, "outputTokens": 2_000_000},
+                result_json={
+                    "provider": "global",
+                    "model": "global/deepseek-v4-flash",
+                    "costUsd": 0,
+                },
+            )
+        )
+        await session.commit()
+
+    from server.services.costs import CostService
+
+    async with factory() as session:
+        created = await CostService(session).record_run_cost_if_present(run_id)
+        await session.commit()
+
+    assert created is not None
+    assert created["sourceType"] == "run"
+    assert created["sourceId"] == run_id
+    assert created["runtimeType"] == "codex_local"
+    assert created["costCents"] == 70
+    assert created["costUsd"] == 0.7
+    assert created["metadata"] is not None
+    assert created["metadata"]["estimatedFromModelPricing"] is True
+
+
 async def test_chat_runtime_cost_is_recorded_from_runtime_result(
     app: tuple[FastAPI, async_sessionmaker],
     monkeypatch: pytest.MonkeyPatch,
