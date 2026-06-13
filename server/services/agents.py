@@ -374,7 +374,9 @@ def _skill_evidence_from_payload(
         ("loadedSkills", "loaded"),
         ("usedSkills", "used"),
     ):
-        evidence.extend(_skill_list_evidence(payload.get(key), cast(SkillEvidenceKind, kind)))
+        evidence.extend(
+            _skill_list_evidence(payload.get(key), cast(SkillEvidenceKind, kind))
+        )
 
     skills = payload.get("skills")
     if isinstance(skills, dict):
@@ -396,7 +398,9 @@ def _skill_evidence_from_payload(
     return evidence
 
 
-def _skill_list_evidence(value: object, kind: SkillEvidenceKind) -> list[tuple[str, SkillEvidenceKind]]:
+def _skill_list_evidence(
+    value: object, kind: SkillEvidenceKind
+) -> list[tuple[str, SkillEvidenceKind]]:
     if not isinstance(value, list):
         return []
     evidence: list[tuple[str, SkillEvidenceKind]] = []
