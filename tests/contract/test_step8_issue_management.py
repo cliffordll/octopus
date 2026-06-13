@@ -747,6 +747,51 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
     assert activity_rows[0].details["agentId"] == agent_id
 
 
+async def test_issue_execute_route_rejects_completed_issue(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Terminal Executor",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Finished task",
+        status="done",
+        assignee_agent_id=agent_id,
+    )
+
+    code, body = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+
+    assert code == 409
+    assert "Reopen the issue before execution" in body["detail"]
+    async with session_factory() as verify:
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.context_snapshot["issueId"].as_string()
+                        == issue_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert runs == []
+
+
 async def test_issue_execute_route_retries_after_terminal_execution_run(
     app: FastAPI,
     session: AsyncSession,

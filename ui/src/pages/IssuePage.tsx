@@ -75,7 +75,7 @@ function reviewDecisionLabel(decision: IssueReviewDecision): string {
     case "request_changes":
       return "请求修改";
     case "needs_followup":
-      return "需要跟进";
+      return "需要人工处理";
     case "blocked":
       return "标记阻塞";
   }
@@ -2013,6 +2013,7 @@ export function IssuePage() {
   const executeIssue = useMutation({
     mutationFn: async () => {
       if (!issue.data?.assigneeAgentId) throw new Error("请先分配负责人");
+      if (["done", "cancelled"].includes(issue.data.status)) throw new Error("请先重新打开任务，再启动执行");
       if (issue.data.status !== "in_progress") {
         await issuesApi.update(issue.data.id, { status: "in_progress" });
       }
@@ -2187,6 +2188,10 @@ export function IssuePage() {
       setExecuteNotice("请先分配负责人，再启动执行。");
       return;
     }
+    if (["done", "cancelled"].includes(issue.data.status)) {
+      setExecuteNotice("请先重新打开任务，再启动执行。");
+      return;
+    }
     setExecuteNotice(isRerunnableRun(latestRun?.status) ? "正在提交重新执行请求..." : "正在提交执行请求...");
     executeIssue.mutate();
   }
@@ -2231,9 +2236,11 @@ export function IssuePage() {
     ? "附件上传中，上传完成后再启动执行"
     : latestRunIsLive
       ? "当前任务已有运行在执行中，请等待结束后再重新执行"
-      : issue.data?.assigneeAgentId
-        ? ""
-        : "请先分配负责人";
+      : issue.data && ["done", "cancelled"].includes(issue.data.status)
+        ? "请先重新打开任务，再启动执行"
+        : issue.data?.assigneeAgentId
+          ? ""
+          : "请先分配负责人";
   return (
     <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
       {agents.error && <ErrorNotice error={agents.error} />}
