@@ -587,6 +587,74 @@ it("shows an issue and records comments and review decisions", async () => {
   );
 });
 
+it("suggests agents when adding issue comment mentions", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "需要评论提及",
+    description: "验证评论 @ 智能体",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([
+        { id: "agent-1", orgId: "org-1", name: "Builder", urlKey: "builder", role: "engineer", status: "idle" },
+        { id: "agent-2", orgId: "org-1", name: "Review Agent", urlKey: "reviewer", role: "qa", status: "idle" },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/comments" && init?.method === "POST") {
+      return respond({ id: "comment-1", issueId: "issue-1", body: JSON.parse(String(init.body)).body, authorAgentId: null, authorUserId: "user", createdAt: "", updatedAt: "" });
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const commentBox = await screen.findByLabelText("添加评论");
+  await userEvent.type(commentBox, "请 @rev");
+  const mentionList = await screen.findByRole("listbox", { name: "智能体提及候选" });
+  expect(mentionList).toBeInTheDocument();
+  await userEvent.click(within(mentionList).getByRole("option", { name: /Review Agent/ }));
+  expect(commentBox).toHaveValue("请 @reviewer ");
+  await userEvent.click(screen.getByRole("button", { name: "发送评论" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/issues/issue-1/comments",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ body: "请 @reviewer" }),
+    }),
+  );
+});
+
 it("executes an assigned issue through the issue execution route", async () => {
   let hasExecuted = false;
   const longAgentReply = `${"长回复内容。".repeat(130)}最终结论`;

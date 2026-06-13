@@ -4495,6 +4495,45 @@ button.danger {
   padding-top: 14px;
 }
 
+.issue-comment-mentions {
+  background: #0f1724;
+  border: 1px solid #263246;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 28%);
+  display: grid;
+  gap: 4px;
+  margin-top: -6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.issue-comment-mention-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: #d7deea;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.issue-comment-mention-option:hover,
+.issue-comment-mention-option:focus-visible {
+  background: #172033;
+}
+
+.issue-comment-mention-option span {
+  color: #8ea0b8;
+  font-size: 12px;
+}
+
 .issue-attachment-item {
   align-items: flex-start;
   background: #111722;
