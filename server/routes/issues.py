@@ -621,6 +621,15 @@ async def update_issue_route(
         and updated["status"] in {"in_review", "blocked"}
     )
     if (
+        actor.actor_type != "agent"
+        and "status" in payload
+        and updated["status"] in {"done", "blocked", "in_review"}
+    ):
+        await heartbeat.skip_scheduled_issue_passive_followups(
+            id,
+            reason="Issue status was manually closed after missing closeout",
+        )
+    if (
         status_changed_to_review
         or status_changed_to_blocked
         or reviewer_changed_in_reviewable
@@ -734,8 +743,19 @@ async def create_issue_comment_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
+    user_intervention_stopped_followup = (
+        actor.actor_type != "agent"
+        and await heartbeat.skip_scheduled_issue_passive_followups(
+            id,
+            reason="Issue has user comment after missing closeout",
+        )
+    )
     queued_assignee_wakeup = not (
-        actor.actor_type == "agent" and actor.actor_id == detail.get("assigneeAgentId")
+        user_intervention_stopped_followup
+        or (
+            actor.actor_type == "agent"
+            and actor.actor_id == detail.get("assigneeAgentId")
+        )
     )
     if queued_assignee_wakeup:
         await queue_issue_assignment_wakeup(
