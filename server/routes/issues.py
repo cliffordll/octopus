@@ -429,6 +429,11 @@ async def execute_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Issue must be assigned to an agent before execution",
         )
+    if detail["status"] in {"done", "cancelled"}:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Reopen the issue before execution",
+        )
     active = await heartbeat.get_active_for_issue(id)
     if active is not None:
         return active

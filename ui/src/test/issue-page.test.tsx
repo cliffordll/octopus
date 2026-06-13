@@ -550,9 +550,9 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
   expect(screen.getByRole("region", { name: "评审" })).toHaveTextContent("等待 Builder 给出 closeout");
-  expect(screen.getByRole("button", { name: "需要跟进" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "需要人工处理" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "标记阻塞" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "需要跟进" }));
+  await userEvent.click(screen.getByRole("button", { name: "需要人工处理" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/review-decision",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ decision: "needs_followup" }) }),

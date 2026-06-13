@@ -62,7 +62,9 @@ class IssueCheckoutConflictError(RuntimeError):
     pass
 
 
-def _apply_status_side_effects(values: dict[str, Any]) -> None:
+def _apply_status_side_effects(
+    values: dict[str, Any], *, previous_status: str | None = None
+) -> None:
     """Mirror upstream ``applyStatusSideEffects`` in ``issues.helpers.ts``.
 
     When ``status`` transitions to ``in_progress``/``done``/``cancelled`` and
@@ -78,8 +80,12 @@ def _apply_status_side_effects(values: dict[str, Any]) -> None:
         values["started_at"] = now
     if status == "done":
         values["completed_at"] = now
+    elif previous_status == "done":
+        values["completed_at"] = None
     if status == "cancelled":
         values["cancelled_at"] = now
+    elif previous_status == "cancelled":
+        values["cancelled_at"] = None
 
 
 ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
@@ -287,7 +293,7 @@ class IssueService:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
 
-        _apply_status_side_effects(values)
+        _apply_status_side_effects(values, previous_status=current.status)
 
         row = await update_issue(self._session, issue_id, values)
         if row is None:
