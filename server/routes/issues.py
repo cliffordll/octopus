@@ -698,6 +698,9 @@ async def update_issue_route(
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
         )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id:
+            _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 

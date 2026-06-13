@@ -28,7 +28,7 @@ from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionRes
 from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import Agent
 from server.services.agents import AgentService
-from server.services.heartbeat import HeartbeatService
+from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
 
 
 @pytest.fixture
@@ -260,6 +260,170 @@ async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     assert activity.details["reason"] == "run_succeeded"
 
 
+async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
+    session: AsyncSession,
+) -> None:
+    assignee = await _seed_agent(session, name="RepeatAssignee")
+    agent_service = AgentService(session)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        reviewer = await agent_service.create_agent(
+            assignee["orgId"],
+            {
+                "name": "RepeatReviewer",
+                "agentRuntimeConfig": {
+                    "command": sys.executable,
+                    "args": ["-c", "print('review-ready')"],
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+        issue = Issue(
+            org_id=assignee["orgId"],
+            title="Repeat review after changes",
+            status="in_progress",
+            priority="medium",
+            identifier="RUN-REPEAT",
+            assignee_agent_id=assignee["id"],
+            reviewer_agent_id=reviewer["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        first = await heartbeat.wakeup(
+            assignee["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "payload": {"issueId": issue.id},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeReason": "issue_execute",
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+        issue.status = "in_progress"
+        second = await heartbeat.wakeup(
+            assignee["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "payload": {"issueId": issue.id},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeReason": "issue_changes_requested",
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert first is not None and first["status"] == "succeeded"
+    assert second is not None and second["status"] == "succeeded"
+    reviewer_wakeups = (
+        (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == reviewer["id"],
+                    AgentWakeupRequest.reason == "issue_review_requested",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(reviewer_wakeups) == 2
+    assert {wakeup.payload["originRunId"] for wakeup in reviewer_wakeups} == {
+        first["id"],
+        second["id"],
+    }
+
+
+async def test_assignment_dispatch_immediately_dispatches_reviewer_run() -> None:
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            assignee = await _seed_agent(session, name="DispatchAssignee")
+            agent_service = AgentService(session)
+            heartbeat = HeartbeatService(session)
+            async with async_transaction(session):
+                reviewer = await agent_service.create_agent(
+                    assignee["orgId"],
+                    {
+                        "name": "DispatchReviewer",
+                        "agentRuntimeConfig": {
+                            "command": sys.executable,
+                            "args": ["-c", "print('review-ready')"],
+                        },
+                    },
+                    actor_type="board",
+                    actor_id="local-board",
+                )
+                issue = Issue(
+                    org_id=assignee["orgId"],
+                    title="Dispatch review after run",
+                    status="todo",
+                    priority="medium",
+                    identifier="RUN-DISPATCH",
+                    assignee_agent_id=assignee["id"],
+                    reviewer_agent_id=reviewer["id"],
+                )
+                session.add(issue)
+                await session.flush()
+                run = await heartbeat.wakeup(
+                    assignee["id"],
+                    {
+                        "source": "assignment",
+                        "triggerDetail": "system",
+                        "reason": "issue_execute",
+                        "payload": {"issueId": issue.id},
+                        "contextSnapshot": {
+                            "issueId": issue.id,
+                            "wakeReason": "issue_execute",
+                        },
+                    },
+                    actor_type="board",
+                    actor_id="local-board",
+                    execute_immediately=False,
+                )
+
+        assert run is not None and run["status"] == "queued"
+        await dispatch_queued_agent(factory, assignee["id"])
+
+        async with factory() as verify:
+            reviewer_run = (
+                await verify.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == reviewer["id"],
+                        HeartbeatRun.run_purpose == "review",
+                        HeartbeatRun.invocation_source == "review",
+                        HeartbeatRun.context_snapshot["wakeReason"].as_string()
+                        == "issue_review_requested",
+                    )
+                )
+            ).scalar_one()
+            assert reviewer_run.status == "succeeded"
+            assert reviewer_run.started_at is not None
+            assert reviewer_run.finished_at is not None
+            queued_reviewer_runs = (
+                await verify.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == reviewer["id"],
+                        HeartbeatRun.status == "queued",
+                    )
+                )
+            ).scalars()
+            assert list(queued_reviewer_runs) == []
+    finally:
+        await engine.dispose()
+
+
 async def test_wake_on_demand_false_skips_non_timer_wakeup(
     session: AsyncSession,
 ) -> None:
@@ -489,6 +653,83 @@ async def test_cancel_retry_and_timer_preserve_recovery_context(
     assert retried["contextSnapshot"] is not None
     assert retried["contextSnapshot"]["recovery"]["recoveryTrigger"] == "manual"
     assert timed[0]["invocationSource"] == "timer"
+
+
+async def test_manual_retry_preserves_review_invocation_source(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ReviewRetry")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        failed_review = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="review",
+            run_purpose="review",
+            trigger_detail="system",
+            status="failed",
+            error="review tool failed",
+            context_snapshot={
+                "issueId": str(uuid.uuid4()),
+                "wakeSource": "review",
+                "wakeReason": "issue_review_requested",
+                "role": "reviewer",
+            },
+        )
+        session.add(failed_review)
+        await session.flush()
+        retried = await heartbeat.retry_run(
+            failed_review.id,
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert retried is not None
+    assert retried["invocationSource"] == "review"
+    assert retried["runPurpose"] == "review"
+    assert retried["retryOfRunId"] == failed_review.id
+    assert retried["contextSnapshot"] is not None
+    assert retried["contextSnapshot"]["wakeReason"] == "issue_review_requested"
+
+
+async def test_manual_retry_preserves_passive_followup_invocation_source(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="FollowupRetry")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        failed_followup = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="automation",
+            run_purpose="closeout",
+            trigger_detail="system",
+            status="failed",
+            error="closeout tool failed",
+            context_snapshot={
+                "issueId": str(uuid.uuid4()),
+                "wakeSource": "automation",
+                "wakeReason": "issue_passive_followup",
+            },
+        )
+        session.add(failed_followup)
+        await session.flush()
+        retried = await heartbeat.retry_run(
+            failed_followup.id,
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert retried is not None
+    assert retried["invocationSource"] == "automation"
+    assert retried["runPurpose"] == "closeout"
+    assert retried["retryOfRunId"] == failed_followup.id
+    assert retried["contextSnapshot"] is not None
+    assert retried["contextSnapshot"]["wakeReason"] == "issue_passive_followup"
 
 
 async def test_orphaned_running_run_enqueues_automatic_recovery(

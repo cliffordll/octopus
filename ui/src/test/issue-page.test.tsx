@@ -793,8 +793,10 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runRecordsRegion).toHaveTextContent("任务执行");
   expect(runRecordsRegion).not.toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
+  expect(within(runRecordsRegion).queryByRole("button", { name: "取消运行 run-1" })).not.toBeInTheDocument();
   await ensureRunExpanded(runRecordsRegion, "run-1");
   expect(await screen.findByRole("region", { name: "执行输出" })).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "执行输出" })).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   expect(screen.queryByRole("button", { name: "折叠执行输出" })).not.toBeInTheDocument();
@@ -890,7 +892,7 @@ it("executes an assigned issue through the issue execution route", async () => {
     "/api/heartbeat-runs/run-1/log",
     expect.objectContaining({ method: "GET" }),
   );
-  await userEvent.click(screen.getByRole("button", { name: "取消运行" }));
+  await userEvent.click(within(screen.getByRole("region", { name: "执行输出" })).getByRole("button", { name: "取消运行 run-1" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-1/cancel",
     expect.objectContaining({ method: "POST" }),
@@ -1496,6 +1498,145 @@ it("allows re-executing an issue after the latest run failed", async () => {
   });
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/execute",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
+});
+
+it("retries failed reviewer and passive follow-up runs from their run records only", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-REVIEW",
+    title: "重新执行评审",
+    description: "只允许重试失败的 reviewer run",
+    status: "in_review",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: "reviewer-1",
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 14,
+    requestDepth: 0,
+    startedAt: null,
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const assignmentRun = {
+    id: "run-assignment",
+    orgId: "org-1",
+    agentId: "agent-1",
+    invocationSource: "assignment",
+    runPurpose: "task_execution",
+    status: "failed",
+    createdAt: "2026-06-13T10:00:00Z",
+  };
+  const reviewRun = {
+    id: "run-review",
+    orgId: "org-1",
+    agentId: "reviewer-1",
+    invocationSource: "review",
+    runPurpose: "review",
+    status: "failed",
+    error: "review tool failed",
+    createdAt: "2026-06-13T10:01:00Z",
+  };
+  const followupRun = {
+    id: "run-followup",
+    orgId: "org-1",
+    agentId: "agent-1",
+    invocationSource: "automation",
+    runPurpose: "closeout",
+    triggerDetail: "issue_passive_followup",
+    status: "cancelled",
+    contextSnapshot: { wakeReason: "issue_passive_followup" },
+    createdAt: "2026-06-13T10:02:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([
+        { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" },
+        { id: "reviewer-1", orgId: "org-1", name: "Reviewer", role: "engineer", status: "idle" },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") {
+      return respond([assignmentRun, reviewRun, followupRun]);
+    }
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-review" && init?.method === "GET") return respond(reviewRun);
+    if (path === "/api/heartbeat-runs/run-review/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-review/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-followup" && init?.method === "GET") return respond(followupRun);
+    if (path === "/api/heartbeat-runs/run-followup/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-followup/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-review/retry" && init?.method === "POST") {
+      return respond({
+        ...reviewRun,
+        id: "run-review-retry",
+        status: "queued",
+        retryOfRunId: "run-review",
+      });
+    }
+    if (path === "/api/heartbeat-runs/run-followup/retry" && init?.method === "POST") {
+      return respond({
+        ...followupRun,
+        id: "run-followup-retry",
+        status: "queued",
+        retryOfRunId: "run-followup",
+      });
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+  const runRecords = await expandRunRecords();
+  expect(within(runRecords).getAllByText("Reviewer 评审")).toHaveLength(1);
+  const reviewRecord = within(runRecords).getByRole("button", {
+    name: /run-review Reviewer 评审.*失败/,
+  });
+  expect(reviewRecord.closest("article")).toHaveClass("review");
+  expect(reviewRecord.querySelector(".issue-run-record-status")).toBeNull();
+  expect(reviewRecord.querySelector(".issue-run-record-badges .agent-run-status-pill")).toHaveTextContent("失败");
+  const followupRecord = within(runRecords).getByRole("button", {
+    name: /run-followup 收尾跟进.*已取消/,
+  });
+  expect(followupRecord.closest("article")).toHaveClass("followup");
+  expect(within(runRecords).queryByRole("button", { name: "重新执行 Reviewer 评审 run-review" })).not.toBeInTheDocument();
+  expect(within(runRecords).queryByRole("button", { name: "重新执行 收尾跟进 run-followup" })).not.toBeInTheDocument();
+  expect(within(runRecords).queryByRole("button", { name: "重新执行 Reviewer 评审 run-assignment" })).not.toBeInTheDocument();
+
+  await ensureRunExpanded(runRecords, "run-review");
+  let outputRegion = await screen.findByRole("region", { name: "执行输出" });
+  await userEvent.click(within(outputRegion).getByRole("button", { name: "重新执行 Reviewer 评审 run-review" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-review/retry",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
+
+  await ensureRunExpanded(runRecords, "run-followup");
+  outputRegion = (await screen.findAllByRole("region", { name: "执行输出" })).find((region) =>
+    within(region).queryByRole("button", { name: "重新执行 收尾跟进 run-followup" }),
+  ) as HTMLElement;
+  expect(outputRegion).toBeInTheDocument();
+  await userEvent.click(within(outputRegion).getByRole("button", { name: "重新执行 收尾跟进 run-followup" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-followup/retry",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
 });
