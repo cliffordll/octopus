@@ -836,8 +836,16 @@ class HeartbeatService:
             "recoveryTrigger": recovery_trigger,
             "recoveryMode": "continue_preferred",
         }
+        is_passive_followup = (
+            original.invocation_source == "automation"
+            and context_snapshot.get("wakeReason") == ISSUE_PASSIVE_FOLLOWUP_REASON
+        )
         invocation_source = (
-            "automation" if recovery_trigger == "automatic" else "on_demand"
+            "automation"
+            if recovery_trigger == "automatic" or is_passive_followup
+            else "review"
+            if original.invocation_source == "review"
+            else "on_demand"
         )
         trigger_detail = "system" if recovery_trigger == "automatic" else "manual"
         wakeup = await create_wakeup_request(
@@ -2237,8 +2245,12 @@ class HeartbeatService:
                 "source": "review",
                 "triggerDetail": "system",
                 "reason": "issue_review_requested",
-                "idempotencyKey": f"issue:{issue.id}:review:run_succeeded",
-                "payload": {"issueId": issue.id, "mutation": "run_succeeded"},
+                "idempotencyKey": (f"issue:{issue.id}:review:run_succeeded:{final.id}"),
+                "payload": {
+                    "issueId": issue.id,
+                    "mutation": "run_succeeded",
+                    "originRunId": final.id,
+                },
                 "contextSnapshot": {
                     "issueId": issue.id,
                     "source": "issue.run_succeeded",
@@ -2759,17 +2771,46 @@ async def dispatch_queued_agent(
     if not run_ids:
         return
 
-    async def execute(run_id: str) -> None:
+    async def execute(run_id: str) -> str | None:
         async with session_factory() as session:
             service = HeartbeatService(session, commit_process_metadata=True)
             try:
-                await service.execute_claimed_run(run_id)
+                final = await service.execute_claimed_run(run_id)
+                reviewer_agent_id: str | None = None
+                if (
+                    final is not None
+                    and final["status"] == "succeeded"
+                    and final["invocationSource"] == "assignment"
+                ):
+                    issue_id = _issue_id_from_context(final.get("contextSnapshot"))
+                    issue = await session.get(IssueRow, issue_id) if issue_id else None
+                    if (
+                        issue is not None
+                        and issue.status == "in_review"
+                        and issue.reviewer_agent_id
+                        and issue.reviewer_agent_id != agent_id
+                    ):
+                        reviewer_agent_id = issue.reviewer_agent_id
                 await session.commit()
+                return reviewer_agent_id
             except Exception:
                 await session.rollback()
                 raise
 
-    await asyncio.gather(*(execute(run_id) for run_id in run_ids))
+    next_agent_ids = {
+        reviewer_agent_id
+        for reviewer_agent_id in await asyncio.gather(
+            *(execute(run_id) for run_id in run_ids)
+        )
+        if reviewer_agent_id is not None
+    }
+    next_agent_ids.add(agent_id)
+    await asyncio.gather(
+        *(
+            dispatch_queued_agent(session_factory, next_agent_id)
+            for next_agent_id in next_agent_ids
+        )
+    )
 
 
 async def dispatch_all_queued_runs(

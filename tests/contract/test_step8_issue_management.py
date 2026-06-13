@@ -525,7 +525,7 @@ async def test_backlog_issue_moved_to_todo_queues_assignee_wakeup(
     assert run.context_snapshot["wakeReason"] == "issue_status_changed"
 
 
-async def test_review_returned_to_assignee_queues_changes_requested_wakeup(
+async def test_review_returned_to_assignee_dispatches_changes_requested_run(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -558,6 +558,9 @@ async def test_review_returned_to_assignee_queues_changes_requested_wakeup(
 
     assert code == 200
     assert body["status"] == "in_progress"
+    tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
+    if tasks:
+        await asyncio.gather(*tasks)
     async with session_factory() as verify:
         wakeup = (
             await verify.execute(
@@ -578,7 +581,8 @@ async def test_review_returned_to_assignee_queues_changes_requested_wakeup(
         "issueId": issue_id,
         "mutation": "review_changes_requested",
     }
-    assert run.status == "queued"
+    assert run.status != "queued"
+    assert run.started_at is not None
     assert run.invocation_source == "assignment"
     assert run.context_snapshot is not None
     assert run.context_snapshot["source"] == "issue.review_changes_requested"

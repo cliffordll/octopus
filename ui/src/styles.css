@@ -4935,6 +4935,28 @@ button.danger {
   border-color: #3a4d6b;
 }
 
+.issue-run-record-group.review .issue-run-record-main-row {
+  background: rgba(18, 51, 45, .38);
+  box-shadow: inset 3px 0 #2f9e7f;
+}
+
+.issue-run-record-group.review .issue-run-record-main-row:hover,
+.issue-run-record-group.review .issue-run-record-main-row.active {
+  background: rgba(23, 68, 58, .52);
+  border-color: #32685d;
+}
+
+.issue-run-record-group.followup .issue-run-record-main-row {
+  background: rgba(69, 50, 20, .32);
+  box-shadow: inset 3px 0 #c78b2a;
+}
+
+.issue-run-record-group.followup .issue-run-record-main-row:hover,
+.issue-run-record-group.followup .issue-run-record-main-row.active {
+  background: rgba(91, 65, 25, .46);
+  border-color: #765b31;
+}
+
 .issue-run-record-header {
   align-items: center;
   display: grid;
@@ -4990,6 +5012,24 @@ button.danger {
 .issue-run-record-badges .badge,
 .issue-run-record-badges .agent-run-status-pill {
   white-space: nowrap;
+}
+
+.issue-run-type-badge.review {
+  background: #12332d;
+  border-color: #256b5b;
+  color: #9fe3cf;
+}
+
+.issue-run-type-badge.followup {
+  background: rgba(165, 119, 42, .18);
+  border-color: rgba(245, 180, 83, .45);
+  color: #f6d08a;
+}
+
+.issue-run-type-badge.task {
+  background: rgba(47, 123, 214, .14);
+  border-color: rgba(96, 165, 250, .35);
+  color: #b8d8ff;
 }
 
 .issue-run-record-toggle {

@@ -1202,8 +1202,22 @@ function IssueRunsPanel({
         const visibleSummary = summaryExpanded || !summaryExpandable ? summary : previewRunSummary(summary);
         const isSelected = runId === currentRunId;
         const isExpanded = expandedRunIds.has(runId);
+        const isReviewRun = displayRun.invocationSource === "review";
+        const isPassiveFollowupRun =
+          displayRun.invocationSource === "automation" &&
+          wakeReason === "issue_passive_followup";
+        const runTypeClass = isReviewRun
+          ? "review"
+          : isPassiveFollowupRun
+            ? "followup"
+            : "task";
+        const runTypeLabel = isReviewRun
+          ? "Reviewer 评审"
+          : isPassiveFollowupRun
+            ? "收尾跟进"
+            : runPurposeLabel(displayRun);
         return (
-          <article className={`issue-run-record-group${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
+          <article className={`issue-run-record-group ${runTypeClass}${isSelected ? " active" : ""}${isExpanded ? " expanded" : ""}`} key={runId}>
             <div className={`issue-run-record-main-row${isSelected ? " active" : ""}`}>
               <button
                 className={`issue-run-record${isSelected ? " active" : ""}`}
@@ -1215,7 +1229,7 @@ function IssueRunsPanel({
                   <div className="issue-run-record-title">
                     <strong>{runId}</strong>
                     <span className="issue-run-record-badges">
-                      <Badge>{runPurposeLabel(displayRun)}</Badge>
+                      <span className={`badge issue-run-type-badge ${runTypeClass}`}>{runTypeLabel}</span>
                       {source && <Badge>来源 {source}</Badge>}
                       {wakeReason && <Badge>触发原因 {wakeReason}</Badge>}
                       <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
@@ -1397,17 +1411,23 @@ function WorkspaceOperationLogPanel({ operation }: { operation: WorkspaceOperati
 }
 
 function IssueRunOutputPanel({
+  cancelling,
   data,
   embedded = false,
   onCancel,
+  onRetry,
+  retrying,
   runId,
   streamActive,
   streamError,
   streamLog,
 }: {
+  cancelling: boolean;
   data: IssueRunPanelData;
   embedded?: boolean;
   onCancel: () => void;
+  onRetry: (run: HeartbeatRun) => void;
+  retrying: boolean;
   runId: string;
   streamActive: boolean;
   streamError: string | null;
@@ -1433,8 +1453,17 @@ function IssueRunOutputPanel({
     enabled: Boolean(runId),
     refetchInterval: () => isLiveRun(run?.status) ? LIVE_RUN_REFETCH_MS : false,
   });
-  const canCancel = isLiveRun(run?.status);
   const liveRun = isLiveRun(run?.status);
+  const wakeReason = runWakeReason(run);
+  const isReviewRun = run?.invocationSource === "review";
+  const isPassiveFollowupRun =
+    run?.invocationSource === "automation" &&
+    wakeReason === "issue_passive_followup";
+  const canRetryRun =
+    Boolean(run) &&
+    (isReviewRun || isPassiveFollowupRun) &&
+    ["failed", "timed_out", "cancelled"].includes(run.status);
+  const retryRunLabel = isReviewRun ? "Reviewer 评审" : "收尾跟进";
   const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
   const lastEvent = events.at(-1) ?? null;
   const hasVisibleRuntimeOutput = Boolean(
@@ -1469,7 +1498,28 @@ function IssueRunOutputPanel({
             <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
           </div>
           {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
-          {canCancel && <button className="secondary small-button" onClick={onCancel} type="button">取消运行</button>}
+          {liveRun && (
+            <button
+              aria-label={`取消运行 ${runId}`}
+              className="secondary small-button"
+              disabled={cancelling}
+              onClick={onCancel}
+              type="button"
+            >
+              {cancelling ? "取消中" : "取消运行"}
+            </button>
+          )}
+          {run && canRetryRun && (
+            <button
+              aria-label={`重新执行 ${retryRunLabel} ${runId}`}
+              className="secondary small-button"
+              disabled={retrying}
+              onClick={() => onRetry(run)}
+              type="button"
+            >
+              {retrying ? "提交中" : "重新执行"}
+            </button>
+          )}
         </div>
       </div>
       <>
@@ -1724,13 +1774,21 @@ function IssueRunDetailsPanel({
   issue,
   issueId,
   latestRunStatus,
+  onCancelRun,
+  onRetryRun,
   orgId,
+  cancellingRunId,
+  retryingRunId,
   runId,
 }: {
   issue: IssueDetail;
   issueId: string;
   latestRunStatus?: HeartbeatRun["status"];
+  onCancelRun: (run: HeartbeatRun) => void;
+  onRetryRun: (run: HeartbeatRun) => void;
   orgId: string;
+  cancellingRunId?: string;
+  retryingRunId?: string;
   runId: string;
 }) {
   const queryClient = useQueryClient();
@@ -1765,14 +1823,6 @@ function IssueRunDetailsPanel({
     queryKey: ["issue-heartbeat-context", issueId],
     queryFn: () => issuesApi.heartbeatContext(issueId),
     enabled: Boolean(issueId),
-  });
-  const cancelRun = useMutation({
-    mutationFn: () => heartbeatApi.cancel(runId),
-    onSuccess: (run) => {
-      queryClient.setQueryData(["heartbeat-run", runId], run);
-      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
-      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
-    },
   });
   useEffect(() => {
     if (!runId || !isLiveRun(runDetail.data?.status)) return;
@@ -1831,19 +1881,23 @@ function IssueRunDetailsPanel({
   return (
     <>
       <IssueRunOutputPanel
+        cancelling={cancellingRunId === runId}
         data={{
           events: runEvents,
           operations: runWorkspaceOperations,
           run: runDetail,
         }}
         embedded
-        onCancel={() => cancelRun.mutate()}
+        onCancel={() => {
+          if (runDetail.data) onCancelRun(runDetail.data);
+        }}
+        onRetry={onRetryRun}
+        retrying={retryingRunId === runId}
         runId={runId}
         streamActive={streamActive}
         streamError={streamError}
         streamLog={streamLog}
       />
-      {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
 
       <section aria-label="心跳上下文" className="issue-run-output-block">
         <div className="issue-run-output-heading">
@@ -2073,6 +2127,35 @@ export function IssuePage() {
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] }),
         queryClient.invalidateQueries({ queryKey: ["issue", issueId] }),
       ]);
+    },
+  });
+  const retryRun = useMutation({
+    mutationFn: (run: HeartbeatRun) => heartbeatApi.retry(heartbeatRunId(run)),
+    onSuccess: (run) => {
+      const retriedRunId = heartbeatRunId(run);
+      if (retriedRunId) {
+        localStorage.setItem(issueRunStorageKey(orgId, issueId), retriedRunId);
+        setCurrentRunId(retriedRunId);
+        setExpandedRunIds((current) => new Set(current).add(retriedRunId));
+        queryClient.setQueryData<HeartbeatRun[]>(["issue-heartbeat-runs", issueId], (current = []) => [
+          run,
+          ...current.filter((item) => heartbeatRunId(item) !== retriedRunId),
+        ]);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+    },
+  });
+  const cancelIssueRun = useMutation({
+    mutationFn: (run: HeartbeatRun) => heartbeatApi.cancel(heartbeatRunId(run)),
+    onSuccess: (run) => {
+      const cancelledRunId = heartbeatRunId(run);
+      queryClient.setQueryData(["heartbeat-run", cancelledRunId], run);
+      queryClient.setQueryData<HeartbeatRun[]>(["issue-heartbeat-runs", issueId], (current = []) =>
+        current.map((item) => heartbeatRunId(item) === cancelledRunId ? run : item),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
     },
   });
   const checkoutIssue = useMutation({
@@ -2456,15 +2539,29 @@ export function IssuePage() {
                 }}
                 renderRunDetails={(runId) => (
                   <IssueRunDetailsPanel
+                    cancellingRunId={
+                      cancelIssueRun.isPending && cancelIssueRun.variables
+                        ? heartbeatRunId(cancelIssueRun.variables)
+                        : undefined
+                    }
                     issue={issue.data}
                     issueId={issueId}
                     latestRunStatus={latestRun?.status}
+                    onCancelRun={(run) => cancelIssueRun.mutate(run)}
+                    onRetryRun={(run) => retryRun.mutate(run)}
                     orgId={orgId}
+                    retryingRunId={
+                      retryRun.isPending && retryRun.variables
+                        ? heartbeatRunId(retryRun.variables)
+                        : undefined
+                    }
                     runId={runId}
                   />
                 )}
                 runs={issueRuns.data ?? []}
               />
+              {cancelIssueRun.error && <ErrorNotice error={cancelIssueRun.error} />}
+              {retryRun.error && <ErrorNotice error={retryRun.error} />}
             </section>
 
             <IssueDocumentsPanel issueId={issueId} />
