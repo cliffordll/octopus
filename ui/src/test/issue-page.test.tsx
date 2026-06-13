@@ -1237,6 +1237,74 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
   expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
 
+it("does not show user cancelled task runs as page errors", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-2",
+    title: "取消后的任务",
+    description: "用户取消普通运行",
+    status: "in_progress",
+    priority: "medium",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 2,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-cancelled",
+    runId: "run-cancelled",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    runPurpose: "task_execution",
+    triggerDetail: "system",
+    status: "cancelled",
+    error: "run cancelled",
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+    finishedAt: "2026-06-02T10:02:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-cancelled" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-cancelled/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-cancelled/workspace-operations" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  await screen.findByRole("heading", { name: "取消后的任务" });
+  expect(screen.getByText("最新运行：已取消")).toBeInTheDocument();
+  expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
+});
+
 it("refreshes server registered work products when an issue run succeeds", async () => {
   const issue = {
     id: "issue-1",

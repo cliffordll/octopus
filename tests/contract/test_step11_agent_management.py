@@ -1542,7 +1542,7 @@ async def test_issue_passive_followup_endpoint_promotes_scheduled_wakeup(
 
     assert followup_code == 202
     assert followup["runPurpose"] == "closeout_followup"
-    assert followup["triggerDetail"] == "issue_passive_followup"
+    assert followup["triggerDetail"] == "manual"
     assert followup["contextSnapshot"]["passiveFollowup"]["previousRunId"] == run["id"]
     assert followup["status"] in {"queued", "running", "succeeded"}
 
@@ -1563,6 +1563,47 @@ async def test_issue_passive_followup_endpoint_promotes_scheduled_wakeup(
     assert len(wakeups) == 1
     assert wakeups[0].id == scheduled.id
     assert wakeups[0].run_id == followup["id"]
+
+
+async def test_heartbeat_run_list_normalizes_legacy_trigger_detail(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="legacy-trigger-detail")
+    agent_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Legacy Trigger Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="automation",
+                trigger_detail="issue_passive_followup",
+                status="succeeded",
+                run_purpose="closeout_followup",
+                context_snapshot={
+                    "issueId": str(uuid.uuid4()),
+                    "wakeReason": "issue_passive_followup",
+                },
+            )
+        )
+        await session.commit()
+
+    code, runs = await _request(app, "GET", f"/api/orgs/{org_id}/heartbeat-runs")
+
+    assert code == 200
+    legacy_run = next(row for row in runs if row["id"] == run_id)
+    assert legacy_run["triggerDetail"] is None
 
 
 async def test_issue_passive_followup_endpoint_creates_immediate_followup_without_scheduled_wakeup(
@@ -1720,6 +1761,328 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
         )
 
     assert rows == []
+
+
+async def test_user_comment_after_successful_issue_run_skips_passive_followup(
+    session_factory: async_sessionmaker,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="user-comment-closeout")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    finished_at = datetime(2026, 6, 12, 10, 0, tzinfo=UTC)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="User Comment Agent",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="User comment handled",
+                    status="in_progress",
+                    assignee_agent_id=agent_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    invocation_source="assignment",
+                    trigger_detail="system",
+                    status="succeeded",
+                    run_purpose="task_execution",
+                    context_snapshot={"issueId": issue_id},
+                    finished_at=finished_at,
+                ),
+                ActivityLog(
+                    org_id=org_id,
+                    actor_type="user",
+                    actor_id="user-1",
+                    action="issue.comment_added",
+                    entity_type="issue",
+                    entity_id=issue_id,
+                    created_at=finished_at + timedelta(minutes=1),
+                    details={"body": "I will handle the closeout manually."},
+                ),
+            ]
+        )
+        await session.flush()
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        rows = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_passive_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert rows == []
+
+
+async def test_scheduled_passive_followup_skips_after_user_comment(
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from packages.database.schema import Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    monkeypatch.setenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", "0")
+    org_id = await _seed_org(session_factory, key="scheduled-user-comment")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    finished_at = datetime(2026, 6, 12, 10, 0, tzinfo=UTC)
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Scheduled User Comment Agent",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Scheduled followup handled",
+                    status="in_progress",
+                    assignee_agent_id=agent_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    invocation_source="assignment",
+                    trigger_detail="system",
+                    status="succeeded",
+                    run_purpose="task_execution",
+                    context_snapshot={"issueId": issue_id},
+                    finished_at=finished_at,
+                ),
+            ]
+        )
+        await session.flush()
+        service = HeartbeatService(session)
+        await service._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="user",
+                actor_id="user-1",
+                action="issue.comment_added",
+                entity_type="issue",
+                entity_id=issue_id,
+                created_at=finished_at + timedelta(minutes=1),
+                details={"body": "Taking this over."},
+            )
+        )
+        await session.flush()
+        agent_ids = await service.materialize_due_scheduled_wakeups()
+        wakeup = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent_id,
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                )
+            )
+        ).scalar_one()
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == agent_id,
+                        HeartbeatRun.run_purpose == "closeout_followup",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert agent_ids == set()
+    assert wakeup.status == "skipped"
+    assert runs == []
+
+
+async def test_issue_comment_skips_scheduled_passive_followup_without_assignment_wakeup(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    monkeypatch.setenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", "9999")
+    org_id = await _seed_org(session_factory, key="comment-skips-closeout")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Comment Skips Closeout Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('comment skips closeout')"],
+            },
+        },
+    )
+    _, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Comment stops closeout", "status": "todo"},
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "update issues set assignee_agent_id = :agent_id where id = :issue_id"
+            ),
+            {"agent_id": agent["id"], "issue_id": issue["id"]},
+        )
+        await session.commit()
+
+    await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={
+            "source": "assignment",
+            "triggerDetail": "system",
+            "reason": "issue_execute",
+            "payload": {"issueId": issue["id"], "wakeReason": "issue_execute"},
+        },
+    )
+    await _wait_for_dispatch(app)
+
+    comment_code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue['id']}/comments",
+        json={"body": "任务结束，人工处理收尾。"},
+    )
+
+    assert comment_code == 200
+    async with session_factory() as session:
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent["id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    closeout_wakeups = [
+        wakeup for wakeup in wakeups if wakeup.reason == "issue_passive_followup"
+    ]
+    comment_wakeups = [
+        wakeup for wakeup in wakeups if wakeup.reason == "issue_comment_added"
+    ]
+
+    assert len(closeout_wakeups) == 1
+    assert closeout_wakeups[0].status == "skipped"
+    assert closeout_wakeups[0].error == "Issue has user comment after missing closeout"
+    assert comment_wakeups == []
+
+
+async def test_issue_passive_followup_endpoint_rejects_after_user_comment(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="manual-user-comment")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Manual User Comment Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('manual user comment')"],
+            },
+        },
+    )
+    _, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={"title": "Manual user comment handled", "status": "todo"},
+    )
+    async with session_factory() as session:
+        await session.execute(
+            text(
+                "update issues set assignee_agent_id = :agent_id where id = :issue_id"
+            ),
+            {"agent_id": agent["id"], "issue_id": issue["id"]},
+        )
+        await session.commit()
+
+    monkeypatch.setenv("OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS", "9999")
+    _, run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={
+            "source": "assignment",
+            "triggerDetail": "system",
+            "reason": "issue_execute",
+            "payload": {"issueId": issue["id"], "wakeReason": "issue_execute"},
+        },
+    )
+    await _wait_for_dispatch(app)
+    async with session_factory() as session:
+        finished_run = await session.get_one(HeartbeatRun, run["id"])
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="user",
+                actor_id="user-1",
+                action="issue.comment_added",
+                entity_type="issue",
+                entity_id=issue["id"],
+                created_at=(finished_run.finished_at or finished_run.created_at)
+                + timedelta(minutes=1),
+                details={"body": "I will close this out manually."},
+            )
+        )
+        await session.commit()
+
+    followup_code, followup = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue['id']}/passive-followup",
+    )
+
+    assert followup_code == 409
+    assert "user intervention" in followup["detail"]
 
 
 async def test_successful_issue_run_with_closeout_done_skips_passive_followup(

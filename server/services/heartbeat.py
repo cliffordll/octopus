@@ -96,6 +96,8 @@ ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
 ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
 ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV = "OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS"
 ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
+HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
+WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
 
 
 class ProcessLostError(RuntimeError):
@@ -415,18 +417,61 @@ class HeartbeatService:
         if agent is None:
             raise ValueError("Issue assignee is not invokable")
 
+        scheduled = await self._scheduled_issue_passive_followup(issue, agent)
+        if scheduled is not None:
+            previous_run = await self._previous_run_for_passive_followup(scheduled)
+            if (
+                previous_run is not None
+                and await self._issue_has_user_intervention_after(
+                    issue, previous_run.finished_at or previous_run.created_at
+                )
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    scheduled.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": datetime.now(UTC),
+                        "error": "Issue already has user intervention after the previous run",
+                    },
+                )
+                raise ValueError(
+                    "Issue already has user intervention after the previous run"
+                )
+
         active = await self._active_issue_followup_run(issue)
         if active is not None:
+            active_context = (
+                active.context_snapshot
+                if isinstance(active.context_snapshot, dict)
+                else {}
+            )
+            previous_run_id = _passive_followup_context(active_context).get(
+                "previousRunId"
+            )
+            previous_run = (
+                await get_run(self._session, previous_run_id)
+                if isinstance(previous_run_id, str)
+                else None
+            )
+            if (
+                previous_run is not None
+                and await self._issue_has_user_intervention_after(
+                    issue, previous_run.finished_at or previous_run.created_at
+                )
+            ):
+                raise ValueError(
+                    "Issue already has user intervention after the previous run"
+                )
             return await self._to_run_with_issue_context(active)
 
-        scheduled = await self._scheduled_issue_passive_followup(issue, agent)
         if scheduled is not None:
             await update_wakeup_request(
                 self._session,
                 scheduled.id,
                 {
                     "requested_at": datetime.now(UTC),
-                    "trigger_detail": ISSUE_PASSIVE_FOLLOWUP_REASON,
+                    "trigger_detail": "manual",
                     "error": None,
                 },
             )
@@ -435,6 +480,12 @@ class HeartbeatService:
         previous_run = await self._latest_issue_run_missing_closeout(issue)
         if previous_run is None:
             raise ValueError("Issue has no successful run that needs passive follow-up")
+        if await self._issue_has_user_intervention_after(
+            issue, previous_run.finished_at or previous_run.created_at
+        ):
+            raise ValueError(
+                "Issue already has user intervention after the previous run"
+            )
 
         context = (
             previous_run.context_snapshot
@@ -481,6 +532,35 @@ class HeartbeatService:
         )
         return await self._materialize_manual_passive_followup(wakeup.id)
 
+    async def skip_scheduled_issue_passive_followups(
+        self, issue_id: str, *, reason: str
+    ) -> bool:
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or not issue.assignee_agent_id:
+            return False
+        skipped = False
+        now = datetime.now(UTC)
+        for wakeup in await list_wakeup_requests_by_status(
+            self._session, issue.assignee_agent_id, "scheduled"
+        ):
+            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+            if (
+                wakeup.org_id == issue.org_id
+                and wakeup.reason == ISSUE_PASSIVE_FOLLOWUP_REASON
+                and payload.get("issueId") == issue.id
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": now,
+                        "error": reason,
+                    },
+                )
+                skipped = True
+        return skipped
+
     async def _active_issue_followup_run(
         self, issue: IssueRow
     ) -> HeartbeatRunRow | None:
@@ -508,6 +588,15 @@ class HeartbeatService:
                 return wakeup
         return None
 
+    async def _previous_run_for_passive_followup(
+        self, wakeup: AgentWakeupRequestRow
+    ) -> HeartbeatRunRow | None:
+        payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+        previous_run_id = payload.get("previousRunId")
+        if not isinstance(previous_run_id, str):
+            return None
+        return await get_run(self._session, previous_run_id)
+
     async def _latest_issue_run_missing_closeout(
         self, issue: IssueRow
     ) -> HeartbeatRunRow | None:
@@ -522,6 +611,8 @@ class HeartbeatService:
                 continue
             if not await self._run_has_issue_closeout_signal(
                 row, issue.id, issue_has_reviewer=issue_has_reviewer
+            ) and not await self._issue_has_user_intervention_after(
+                issue, row.finished_at or row.created_at
             ):
                 return row
         return None
@@ -882,6 +973,9 @@ class HeartbeatService:
                 or issue.assignee_agent_id != agent.id
                 or issue.status not in {"todo", "in_progress"}
                 or previous_run is None
+                or await self._issue_has_user_intervention_after(
+                    issue, previous_run.finished_at or previous_run.created_at
+                )
                 or await self._run_has_issue_closeout_signal(
                     previous_run,
                     issue.id,
@@ -1708,6 +1802,10 @@ class HeartbeatService:
             final, issue.id, issue_has_reviewer=issue_has_reviewer
         ):
             return
+        if await self._issue_has_user_intervention_after(
+            issue, final.finished_at or final.created_at
+        ):
+            return
         passive_followup = _passive_followup_context(context)
         raw_attempt = passive_followup.get("attempt")
         current_attempt = (
@@ -1966,6 +2064,36 @@ class HeartbeatService:
         if not isinstance(row, dict):
             return False
         return row.get("status") in {"done", "blocked", "in_review"}
+
+    async def _issue_has_user_intervention_after(
+        self, issue: IssueRow, after: datetime | None
+    ) -> bool:
+        if after is None:
+            return False
+        result = await self._session.execute(
+            select(ActivityLog.action, ActivityLog.details)
+            .where(
+                and_(
+                    ActivityLog.org_id == issue.org_id,
+                    ActivityLog.actor_type.in_(HUMAN_INTERVENTION_ACTOR_TYPES),
+                    ActivityLog.entity_type == "issue",
+                    ActivityLog.entity_id == issue.id,
+                    ActivityLog.created_at > after,
+                    ActivityLog.action.in_(("issue.comment_added", "issue.updated")),
+                )
+            )
+            .order_by(ActivityLog.created_at.desc())
+        )
+        for action, details in result.all():
+            if action == "issue.comment_added":
+                return True
+            if (
+                action == "issue.updated"
+                and isinstance(details, dict)
+                and details.get("status") in {"done", "blocked", "in_review"}
+            ):
+                return True
+        return False
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
@@ -2456,13 +2584,18 @@ class HeartbeatService:
 
 
 def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
+    trigger_detail = (
+        row.trigger_detail
+        if row.trigger_detail in WAKEUP_TRIGGER_DETAIL_VALUES
+        else None
+    )
     return {
         "id": row.id,
         "orgId": row.org_id,
         "agentId": row.agent_id,
         "invocationSource": cast(HeartbeatInvocationSource, row.invocation_source),
         "runPurpose": cast(HeartbeatRunPurpose, row.run_purpose),
-        "triggerDetail": cast(WakeupTriggerDetail | None, row.trigger_detail),
+        "triggerDetail": cast(WakeupTriggerDetail | None, trigger_detail),
         "status": cast(HeartbeatRunStatus, row.status),
         "startedAt": row.started_at.isoformat() if row.started_at else None,
         "finishedAt": row.finished_at.isoformat() if row.finished_at else None,
