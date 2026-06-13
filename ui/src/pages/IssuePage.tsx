@@ -282,6 +282,7 @@ function workProductSourceLabel(product: IssueWorkProduct): string {
 
 function activitySummary(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return issueCloseoutReviewSummary(event);
+  if (event.action === "issue.review_closeout_missing") return issueCloseoutReviewSummary(event);
   if (event.action === "issue.convergence_review_requested") return issueConvergenceReviewSummary(event);
   if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
   const details = event.details ?? {};
@@ -306,6 +307,8 @@ function activityTitle(event: ActivityEvent): string {
       return "评审任务";
     case "issue.closure_needs_operator_review":
       return "需要人工确认收口";
+    case "issue.review_closeout_missing":
+      return "缺少评审结论";
     case "issue.convergence_review_requested":
       return "需要收敛评审";
     case "heartbeat.invoked":
@@ -319,6 +322,7 @@ function activityTitle(event: ActivityEvent): string {
 
 function activityIcon(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return "!";
+  if (event.action === "issue.review_closeout_missing") return "!";
   if (event.action === "issue.convergence_review_requested") return "!";
   if (event.action.includes("executed") || event.action.includes("heartbeat")) return "R";
   if (event.action.includes("status")) return "S";
@@ -328,6 +332,7 @@ function activityIcon(event: ActivityEvent): string {
 
 function activityTone(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return "needs-attention";
+  if (event.action === "issue.review_closeout_missing") return "needs-attention";
   if (event.action === "issue.convergence_review_requested") return "needs-review";
   if (event.action.includes("heartbeat") || event.action === "issue.executed") return "run";
   if (event.action.includes("review")) return "review";
@@ -353,6 +358,9 @@ function issueCloseoutReviewSummary(event: ActivityEvent): string {
   const attempts = activityNumber(event, "attempts");
   const maxAttempts = activityNumber(event, "maxAttempts");
   const attemptText = attempts !== null && maxAttempts !== null ? ` ${attempts}/${maxAttempts} 次` : "";
+  if (event.action === "issue.review_closeout_missing") {
+    return `Reviewer 收口已尝试${attemptText}，但仍未提交结构化评审结论。`;
+  }
   return `自动收口已尝试${attemptText}，智能体仍未明确完成、阻塞或提交评审。`;
 }
 
@@ -364,7 +372,11 @@ function issueConvergenceReviewSummary(event: ActivityEvent): string {
 }
 
 function issueCloseoutReviewActivity(issue: IssueDetail, events: ActivityEvent[] | undefined): ActivityEvent | null {
-  if (issue.status !== "in_progress" || !Array.isArray(events)) return null;
+  if (!Array.isArray(events)) return null;
+  if (issue.status === "in_review") {
+    return events.find((event) => event.action === "issue.review_closeout_missing") ?? null;
+  }
+  if (issue.status !== "in_progress") return null;
   return events.find((event) => event.action === "issue.closure_needs_operator_review") ?? null;
 }
 
@@ -613,15 +625,32 @@ function numericUsageValue(run: HeartbeatRun, key: string): number {
   return 0;
 }
 
+function runHasReportedUsage(run: HeartbeatRun): boolean {
+  const usage = run.usageJson;
+  if (!usage || typeof usage !== "object") return false;
+  if (["costCents", "costUsd", "inputTokens", "outputTokens", "cachedInputTokens", "totalTokens"].some((key) => numericUsageValue(run, key) > 0)) {
+    return true;
+  }
+  const stdout = typeof run.resultJson?.stdout === "string" ? run.resultJson.stdout : "";
+  return stdout.includes('"type":"step_finish"') || stdout.includes('"type":"turn.completed"');
+}
+
 function issueRunCostSummary(runs: HeartbeatRun[]): {
   cachedInputTokens: number;
   inputTokens: number;
   outputTokens: number;
+  reportedRuns: number;
   totalCostCents: number;
   totalTokens: number;
+  unreportedRuns: number;
 } {
   return runs.reduce(
     (summary, run) => {
+      if (runHasReportedUsage(run)) {
+        summary.reportedRuns += 1;
+      } else if (run.usageJson || ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status)) {
+        summary.unreportedRuns += 1;
+      }
       const costCents = numericUsageValue(run, "costCents");
       const costUsd = numericUsageValue(run, "costUsd");
       const inputTokens = numericUsageValue(run, "inputTokens");
@@ -634,7 +663,7 @@ function issueRunCostSummary(runs: HeartbeatRun[]): {
       summary.cachedInputTokens += numericUsageValue(run, "cachedInputTokens");
       return summary;
     },
-    { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, totalCostCents: 0, totalTokens: 0 },
+    { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reportedRuns: 0, totalCostCents: 0, totalTokens: 0, unreportedRuns: 0 },
   );
 }
 
@@ -799,6 +828,9 @@ function IssuePropertiesPanel({
 
 function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
   const costSummary = issueRunCostSummary(runs);
+  const hasReportedUsage = costSummary.reportedRuns > 0;
+  const usageValue = (value: number) => hasReportedUsage ? value.toLocaleString() : "未上报";
+  const costValue = hasReportedUsage ? formatMoneyCents(costSummary.totalCostCents) : "未上报";
   return (
     <section aria-label="任务成本" className="panel issue-cost-card">
       <div className="panel-heading">
@@ -808,11 +840,14 @@ function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
         </div>
       </div>
       <div className="issue-property-list">
-        <div className="issue-property-row"><span>成本</span><strong>{formatMoneyCents(costSummary.totalCostCents)}</strong></div>
-        <div className="issue-property-row"><span>Total tokens</span><strong>{costSummary.totalTokens.toLocaleString()}</strong></div>
-        <div className="issue-property-row"><span>输入</span><strong>{costSummary.inputTokens.toLocaleString()}</strong></div>
-        <div className="issue-property-row"><span>输出</span><strong>{costSummary.outputTokens.toLocaleString()}</strong></div>
-        <div className="issue-property-row"><span>已缓存</span><strong>{costSummary.cachedInputTokens.toLocaleString()}</strong></div>
+        <div className="issue-property-row"><span>成本</span><strong>{costValue}</strong></div>
+        <div className="issue-property-row"><span>Total tokens</span><strong>{usageValue(costSummary.totalTokens)}</strong></div>
+        <div className="issue-property-row"><span>输入</span><strong>{usageValue(costSummary.inputTokens)}</strong></div>
+        <div className="issue-property-row"><span>输出</span><strong>{usageValue(costSummary.outputTokens)}</strong></div>
+        <div className="issue-property-row"><span>已缓存</span><strong>{usageValue(costSummary.cachedInputTokens)}</strong></div>
+        {!hasReportedUsage && costSummary.unreportedRuns > 0 && (
+          <p className="muted">当前运行未上报 token/cost 事件。</p>
+        )}
       </div>
     </section>
   );
