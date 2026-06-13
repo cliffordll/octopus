@@ -137,12 +137,16 @@ class CostService:
             return None
         result = run.result_json if isinstance(run.result_json, dict) else {}
         usage = run.usage_json if isinstance(run.usage_json, dict) else {}
+        runtime_type = _string(result.get("runtimeType"))
+        if runtime_type is None:
+            agent = await get_agent_by_id(self._session, run.agent_id)
+            runtime_type = agent.agent_runtime_type if agent is not None else None
         return await self.record_runtime_result_cost_if_present(
             org_id=run.org_id,
             agent_id=run.agent_id,
             source_type="run",
             source_id=run.id,
-            runtime_type=_string(result.get("runtimeType")),
+            runtime_type=runtime_type,
             result_json=result,
             usage_json=usage,
             occurred_at=run.finished_at or run.started_at or run.created_at,

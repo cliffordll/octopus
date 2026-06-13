@@ -292,6 +292,13 @@ async def create_issue_route(
         actor_id=actor.actor_id,
         actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
     )
+    reviewer_agent_id = issue.get("reviewerAgentId")
+    if (
+        reviewer_agent_id
+        and issue["status"] in {"in_review", "blocked"}
+        and not (actor.actor_type == "agent" and actor.actor_id == reviewer_agent_id)
+    ):
+        _schedule_dispatch(request, reviewer_agent_id)
     return issue
 
 
@@ -661,6 +668,11 @@ async def update_issue_route(
             actor_id=actor.actor_id,
             actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
         )
+        reviewer_agent_id = updated.get("reviewerAgentId")
+        if reviewer_agent_id and not (
+            actor.actor_type == "agent" and actor.actor_id == reviewer_agent_id
+        ):
+            _schedule_dispatch(request, reviewer_agent_id)
     if status_changed_from_backlog:
         await queue_issue_assignment_wakeup(
             heartbeat,
@@ -809,6 +821,7 @@ async def record_issue_review_decision_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
@@ -844,6 +857,10 @@ async def record_issue_review_decision_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
+    await heartbeat.skip_queued_issue_review_wakeups(
+        id,
+        reason="review already resolved",
+    )
     return updated
 
 
