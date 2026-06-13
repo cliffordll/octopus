@@ -1858,6 +1858,11 @@ class HeartbeatService:
             final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
         )
         if context.get("wakeReason") == "issue_review_closeout_missing":
+            issue_id = _issue_id_from_context(context)
+            if issue_id is not None:
+                issue = await self._session.get(IssueRow, issue_id)
+                if issue is not None and issue.org_id == final.org_id:
+                    await self._record_issue_review_closeout_missing(final, issue, context)
             return
         issue_id = _issue_id_from_context(context)
         if issue_id is None:
@@ -2086,6 +2091,44 @@ class HeartbeatService:
             actor_type="system",
             actor_id="issue_review_closeout_governance",
             execute_immediately=False,
+        )
+
+    async def _record_issue_review_closeout_missing(
+        self, final: HeartbeatRunRow, issue: IssueRow, context: dict[str, Any]
+    ) -> None:
+        if await self._run_has_issue_activity(
+            final, issue.id, ("issue.review_decision_recorded",)
+        ):
+            return
+        review_closeout = context.get("reviewCloseout")
+        review_closeout = review_closeout if isinstance(review_closeout, dict) else {}
+        raw_attempt = review_closeout.get("attempt")
+        raw_max_attempts = review_closeout.get("maxAttempts")
+        attempts = raw_attempt if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool) else 1
+        max_attempts = raw_max_attempts if isinstance(raw_max_attempts, int) and not isinstance(raw_max_attempts, bool) else 1
+        origin_run_id = review_closeout.get("originRunId")
+        previous_run_id = review_closeout.get("previousRunId")
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="issue_review_closeout_governance",
+            action="issue.review_closeout_missing",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "issueTitle": issue.title,
+                "reviewerAgentId": issue.reviewer_agent_id,
+                "reviewerUserId": issue.reviewer_user_id,
+                "originRunId": origin_run_id if isinstance(origin_run_id, str) else final.id,
+                "previousRunId": previous_run_id if isinstance(previous_run_id, str) else final.id,
+                "attempts": attempts,
+                "maxAttempts": max_attempts,
+                "reason": "review_outcome_missing",
+            },
         )
 
     async def _run_has_issue_closeout_signal(

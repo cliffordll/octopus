@@ -2584,6 +2584,99 @@ async def test_successful_reviewer_run_without_decision_queues_review_closeout(
     }
 
 
+async def test_review_closeout_missing_run_without_decision_records_activity(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import ActivityLog, Agent, AgentWakeupRequest, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="review-closeout-still-missing")
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    origin_run_id = str(uuid.uuid4())
+    closeout_run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Review Closeout Agent",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Still needs review decision",
+                status="in_review",
+                reviewer_agent_id=reviewer_id,
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=closeout_run_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                invocation_source="review",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={
+                    "issueId": issue_id,
+                    "role": "reviewer",
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_closeout_missing",
+                    "reviewCloseout": {
+                        "originRunId": origin_run_id,
+                        "previousRunId": origin_run_id,
+                        "attempt": 1,
+                        "maxAttempts": 1,
+                    },
+                },
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+        await HeartbeatService(session)._queue_issue_passive_followup_if_needed(
+            await session.get_one(Agent, reviewer_id),
+            await session.get_one(HeartbeatRun, closeout_run_id),
+        )
+        activities = (
+            (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.org_id == org_id,
+                        ActivityLog.entity_type == "issue",
+                        ActivityLog.entity_id == issue_id,
+                        ActivityLog.action == "issue.review_closeout_missing",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == reviewer_id,
+                        AgentWakeupRequest.reason == "issue_review_closeout_missing",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(activities) == 1
+    assert activities[0].run_id == closeout_run_id
+    assert activities[0].details["originRunId"] == origin_run_id
+    assert activities[0].details["attempts"] == 1
+    assert activities[0].details["maxAttempts"] == 1
+    assert wakeups == []
+
+
 async def test_issue_wakeup_defers_while_execution_locked_and_promotes_on_release(
     session_factory: async_sessionmaker,
 ) -> None:

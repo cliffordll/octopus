@@ -1118,6 +1118,153 @@ it("surfaces operator closeout review activity on the issue page", async () => {
   expect(screen.getByText(/Run run-closeout/)).toHaveClass("muted");
 });
 
+it("surfaces missing reviewer closeout decisions on the issue page", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "缺少评审结论",
+    description: "Reviewer 成功运行但没有结论",
+    status: "in_review",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: "agent-2",
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([
+        { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" },
+        { id: "agent-2", orgId: "org-1", name: "Reviewer", role: "qa", status: "idle" },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") {
+      return respond([
+        {
+          id: "activity-review-closeout",
+          orgId: "org-1",
+          action: "issue.review_closeout_missing",
+          actorType: "system",
+          actorId: "issue_review_closeout_governance",
+          entityType: "issue",
+          entityId: "issue-1",
+          agentId: "agent-2",
+          runId: "run-review-closeout",
+          details: {
+            attempts: 1,
+            maxAttempts: 1,
+            reason: "review_outcome_missing",
+          },
+          createdAt: "2026-06-08T10:10:00Z",
+        },
+      ]);
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByRole("heading", { name: "缺少评审结论" })).toBeInTheDocument();
+  expect(await screen.findByRole("status", { name: "需要人工确认收口" })).toHaveTextContent(
+    "Reviewer 收口已尝试 1/1 次",
+  );
+  const activityRegion = await screen.findByRole("region", { name: "动态" });
+  expect(activityRegion).toHaveTextContent("缺少评审结论");
+  expect(activityRegion).toHaveTextContent("Reviewer 收口已尝试 1/1 次");
+  expect(within(activityRegion).getByText("缺少评审结论").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
+});
+
+it("shows unreported usage instead of zero when runs omit token events", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "未上报 token",
+    description: "runtime 没有 token 事件",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const run = {
+    id: "run-no-usage",
+    runId: "run-no-usage",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    status: "succeeded",
+    usageJson: { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0 },
+    resultJson: {
+      stdout: '{"type":"step_start"}\n{"type":"text","part":{"text":"done"}}',
+      summary: "done",
+    },
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:01:00Z",
+    finishedAt: "2026-06-02T10:02:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") return respond([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  const costPanel = await screen.findByRole("region", { name: "任务成本" });
+  expect(within(costPanel).getAllByText("未上报").length).toBeGreaterThanOrEqual(4);
+  expect(costPanel).toHaveTextContent("当前运行未上报 token/cost 事件。");
+});
+
 it("prompts for explicit closeout when the latest run succeeded without a closeout signal", async () => {
   const issue = {
     id: "issue-1",
