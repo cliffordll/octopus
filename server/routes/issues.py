@@ -857,7 +857,7 @@ async def record_issue_review_decision_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await heartbeat.skip_queued_issue_review_wakeups(
+    await heartbeat.cancel_open_issue_review_wakeups(
         id,
         reason="review already resolved",
     )

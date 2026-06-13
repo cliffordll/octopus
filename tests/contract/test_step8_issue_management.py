@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -1287,6 +1288,97 @@ async def test_review_decision_skips_queued_reviewer_wakeup(
     assert run.status == "cancelled"
     assert run.finished_at is not None
     assert run.error == "review already resolved"
+
+
+async def test_review_decision_cancels_running_reviewer_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    wakeup_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=reviewer_id,
+                org_id=org_id,
+                name="Running Reviewer",
+                role="engineer",
+                status="running",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Running review",
+                status="in_review",
+                priority="medium",
+                reviewer_agent_id=reviewer_id,
+            )
+        )
+        session.add(
+            AgentWakeupRequest(
+                id=wakeup_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                source="review",
+                trigger_detail="system",
+                reason="issue_review_requested",
+                payload={"issueId": issue_id, "mutation": "status_to_in_review"},
+                status="claimed",
+                run_id=run_id,
+                claimed_at=datetime.now(UTC),
+                idempotency_key=f"issue:{issue_id}:review:status_to_in_review",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=reviewer_id,
+                invocation_source="review",
+                trigger_detail="system",
+                status="running",
+                wakeup_request_id=wakeup_id,
+                run_purpose="review",
+                started_at=datetime.now(UTC),
+                context_snapshot={
+                    "issueId": issue_id,
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_requested",
+                    "role": "reviewer",
+                },
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/review-decision",
+        json={"decision": "approve"},
+    )
+
+    assert code == 200
+    assert body["status"] == "done"
+    async with session_factory() as verify:
+        wakeup = await verify.get(AgentWakeupRequest, wakeup_id)
+        run = await verify.get(HeartbeatRun, run_id)
+        reviewer = await verify.get(Agent, reviewer_id)
+    assert wakeup is not None
+    assert wakeup.status == "cancelled"
+    assert wakeup.finished_at is not None
+    assert wakeup.error == "review already resolved"
+    assert run is not None
+    assert run.status == "cancelled"
+    assert run.finished_at is not None
+    assert run.error == "review already resolved"
+    assert run.error_code == "cancelled"
+    assert reviewer is not None
+    assert reviewer.status == "idle"
 
 
 async def test_org_issue_list_supports_step8_filters(

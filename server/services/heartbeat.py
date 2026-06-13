@@ -561,48 +561,73 @@ class HeartbeatService:
                 skipped = True
         return skipped
 
-    async def skip_queued_issue_review_wakeups(
+    async def cancel_open_issue_review_wakeups(
         self, issue_id: str, *, reason: str
     ) -> bool:
         issue = await self._session.get(IssueRow, issue_id)
         if issue is None or not issue.reviewer_agent_id:
             return False
-        skipped = False
+        cancelled_any = False
         now = datetime.now(UTC)
-        for wakeup in await list_wakeup_requests_by_status(
-            self._session, issue.reviewer_agent_id, "queued"
-        ):
-            payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
-            if (
-                wakeup.org_id == issue.org_id
-                and wakeup.source == "review"
-                and wakeup.reason == "issue_review_requested"
-                and payload.get("issueId") == issue.id
+        for status in ("queued", "claimed"):
+            for wakeup in await list_wakeup_requests_by_status(
+                self._session, issue.reviewer_agent_id, status
             ):
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {
-                        "status": "skipped",
-                        "finished_at": now,
-                        "error": reason,
-                    },
-                )
-                if wakeup.run_id:
-                    run = await self._session.get(HeartbeatRunRow, wakeup.run_id)
-                    if run is not None and run.status == "queued":
-                        await update_run(
-                            self._session,
-                            run.id,
-                            {
-                                "status": "cancelled",
-                                "finished_at": now,
-                                "error": reason,
-                                "error_code": "cancelled",
-                            },
-                        )
-                skipped = True
-        return skipped
+                payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
+                if (
+                    wakeup.org_id == issue.org_id
+                    and wakeup.source == "review"
+                    and wakeup.reason == "issue_review_requested"
+                    and payload.get("issueId") == issue.id
+                ):
+                    await update_wakeup_request(
+                        self._session,
+                        wakeup.id,
+                        {
+                            "status": "skipped" if status == "queued" else "cancelled",
+                            "finished_at": now,
+                            "error": reason,
+                        },
+                    )
+                    if wakeup.run_id:
+                        run = await self._session.get(HeartbeatRunRow, wakeup.run_id)
+                        if run is not None and run.status in {"queued", "running"}:
+                            was_running = run.status == "running"
+                            cancellation = self._cancel_events.get(run.id)
+                            if cancellation is not None:
+                                cancellation.set()
+                            cancelled = await update_run(
+                                self._session,
+                                run.id,
+                                {
+                                    "status": "cancelled",
+                                    "finished_at": now,
+                                    "error": reason,
+                                    "error_code": "cancelled",
+                                },
+                            )
+                            if was_running and cancelled is not None:
+                                await self._append_event(
+                                    cancelled,
+                                    await self._next_event_sequence(run.id),
+                                    "lifecycle",
+                                    message=reason,
+                                    level="warning",
+                                )
+                                await WorkspaceService(
+                                    self._session
+                                ).mark_run_workspace_interrupted(
+                                    run.id, reason="cancelled", message=reason
+                                )
+                                agent = await get_agent_by_id(
+                                    self._session, run.agent_id
+                                )
+                                if agent is not None and agent.status == "running":
+                                    await update_agent(
+                                        self._session, agent.id, {"status": "idle"}
+                                    )
+                    cancelled_any = True
+        return cancelled_any
 
     async def _active_issue_followup_run(
         self, issue: IssueRow

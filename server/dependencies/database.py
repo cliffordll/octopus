@@ -75,10 +75,37 @@ async def _run_shielded_cleanup(
     timeout_seconds: float,
 ) -> BaseException | None:
     with CancelScope(shield=True):
+        cleanup_coro = operation()
+        cleanup_task = asyncio.ensure_future(cleanup_coro)
         try:
-            await asyncio.wait_for(operation(), timeout=timeout_seconds)
+            await asyncio.wait_for(
+                asyncio.shield(cleanup_task),
+                timeout=timeout_seconds,
+            )
             return None
+        except asyncio.CancelledError:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(cleanup_task),
+                    timeout=timeout_seconds,
+                )
+            except TimeoutError:
+                cleanup_task.cancel()
+                await asyncio.gather(cleanup_task, return_exceptions=True)
+                logger.warning(
+                    "Timed out while trying to %s after cancellation",
+                    action,
+                )
+            except BaseException:
+                logger.warning(
+                    "Failed to %s after cancellation",
+                    action,
+                    exc_info=True,
+                )
+            raise
         except TimeoutError as exc:
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
             logger.warning(
                 "Timed out while trying to %s after %.1f seconds",
                 action,
