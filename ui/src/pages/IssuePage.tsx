@@ -58,6 +58,21 @@ function agentName(agentId: string | null | undefined, agentsById: Map<string, A
   return agentsById.get(agentId)?.name ?? agentId;
 }
 
+function agentMentionToken(agent: Agent): string {
+  const candidates = [agent.urlKey, agent.name, agent.id];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(candidate)) return candidate;
+  }
+  return agent.id;
+}
+
+function mentionQueryAtCursor(value: string, cursor: number): { start: number; query: string } | null {
+  const prefix = value.slice(0, cursor);
+  const match = /(^|\s)@([A-Za-z0-9_.-]*)$/.exec(prefix);
+  if (!match) return null;
+  return { start: prefix.length - match[2].length - 1, query: match[2].toLowerCase() };
+}
+
 function issueRunStorageKey(orgId: string, issueId: string): string {
   return `octopus:issue-run:${orgId}:${issueId}`;
 }
@@ -1934,6 +1949,7 @@ function IssueRunDetailsPanel({
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
   const [comment, setComment] = useState("");
+  const [mentionQuery, setMentionQuery] = useState<{ start: number; query: string } | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentUploadNotice, setAttachmentUploadNotice] = useState("");
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -1945,6 +1961,7 @@ export function IssuePage() {
     return localStorage.getItem(issueRunStorageKey(orgId, issueId)) ?? "";
   });
   const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(() => new Set());
+  const commentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoExpandedLiveRunRef = useRef("");
   const refreshedTerminalRunRef = useRef("");
   const queryClient = useQueryClient();
@@ -2030,6 +2047,7 @@ export function IssuePage() {
     mutationFn: () => issuesApi.addComment(issueId, { body: comment.trim() }),
     onSuccess: () => {
       setComment("");
+      setMentionQuery(null);
       void queryClient.invalidateQueries({ queryKey: ["comments", issueId] });
     },
   });
@@ -2225,6 +2243,28 @@ export function IssuePage() {
     event.preventDefault();
     if (comment.trim()) addComment.mutate();
   }
+  function updateCommentMention(value: string, cursor: number | null | undefined) {
+    const position = typeof cursor === "number" ? cursor : value.length;
+    setMentionQuery(mentionQueryAtCursor(value, position));
+  }
+  function changeComment(value: string, cursor: number | null | undefined) {
+    setComment(value);
+    updateCommentMention(value, cursor);
+  }
+  function insertMention(agent: Agent) {
+    if (!mentionQuery) return;
+    const textarea = commentTextareaRef.current;
+    const cursor = textarea?.selectionStart ?? comment.length;
+    const token = agentMentionToken(agent);
+    const nextComment = `${comment.slice(0, mentionQuery.start)}@${token} ${comment.slice(cursor)}`;
+    const nextCursor = mentionQuery.start + token.length + 2;
+    setComment(nextComment);
+    setMentionQuery(null);
+    window.setTimeout(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
   const timelineItems = issueTimelineItems(issueActivity.data, comments.data);
   function selectAttachment(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
@@ -2281,6 +2321,15 @@ export function IssuePage() {
   if (issue.error) return <ErrorNotice error={issue.error} />;
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   const agentsById = new Map(agentList.map((agent) => [agent.id, agent]));
+  const mentionCandidates = mentionQuery
+    ? agentList
+        .filter((agent) => {
+          const query = mentionQuery.query;
+          if (!query) return true;
+          return [agent.name, agent.urlKey, agent.id].some((value) => typeof value === "string" && value.toLowerCase().includes(query));
+        })
+        .slice(0, 8)
+    : [];
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
@@ -2672,8 +2721,42 @@ export function IssuePage() {
               <form className="form issue-comment-form" onSubmit={submitComment}>
                 <label>
                   添加评论
-                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} required />
+                  <textarea
+                    ref={commentTextareaRef}
+                    aria-controls={mentionCandidates.length ? "issue-comment-mention-list" : undefined}
+                    aria-expanded={mentionCandidates.length ? "true" : "false"}
+                    value={comment}
+                    onChange={(event) => changeComment(event.target.value, event.target.selectionStart)}
+                    onClick={(event) => updateCommentMention(event.currentTarget.value, event.currentTarget.selectionStart)}
+                    onKeyUp={(event) => updateCommentMention(event.currentTarget.value, event.currentTarget.selectionStart)}
+                    required
+                  />
                 </label>
+                {mentionCandidates.length > 0 && (
+                  <div
+                    aria-label="智能体提及候选"
+                    className="issue-comment-mentions"
+                    id="issue-comment-mention-list"
+                    role="listbox"
+                  >
+                    {mentionCandidates.map((agent) => {
+                      const token = agentMentionToken(agent);
+                      return (
+                        <button
+                          aria-label={`${agent.name} @${token}`}
+                          className="issue-comment-mention-option"
+                          key={agent.id}
+                          onClick={() => insertMention(agent)}
+                          role="option"
+                          type="button"
+                        >
+                          <strong>{agent.name}</strong>
+                          <span>@{token}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="issue-comment-actions">
                   <div className="issue-attachment-menu-anchor">
                     <button
