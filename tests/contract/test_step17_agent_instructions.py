@@ -36,12 +36,12 @@ def test_closeout_governance_instructions_are_hard_gated() -> None:
     control_plane_skill = (
         repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
     ).read_text(encoding="utf-8")
-    default_heartbeat = (repo_root / "server" / "onboarding" / "default" / "HEARTBEAT.md").read_text(
-        encoding="utf-8"
-    )
-    ceo_heartbeat = (repo_root / "server" / "onboarding" / "ceo" / "HEARTBEAT.md").read_text(
-        encoding="utf-8"
-    )
+    default_heartbeat = (
+        repo_root / "server" / "onboarding" / "default" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+    ceo_heartbeat = (
+        repo_root / "server" / "onboarding" / "ceo" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
 
     for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
         assert "Close-out gate" in content

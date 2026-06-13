@@ -2587,7 +2587,13 @@ async def test_successful_reviewer_run_without_decision_queues_review_closeout(
 async def test_review_closeout_missing_run_without_decision_records_activity(
     session_factory: async_sessionmaker,
 ) -> None:
-    from packages.database.schema import ActivityLog, Agent, AgentWakeupRequest, HeartbeatRun, Issue
+    from packages.database.schema import (
+        ActivityLog,
+        Agent,
+        AgentWakeupRequest,
+        HeartbeatRun,
+        Issue,
+    )
     from server.services.heartbeat import HeartbeatService
 
     org_id = await _seed_org(session_factory, key="review-closeout-still-missing")
