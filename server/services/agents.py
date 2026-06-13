@@ -374,10 +374,7 @@ def _skill_evidence_from_payload(
         ("loadedSkills", "loaded"),
         ("usedSkills", "used"),
     ):
-        evidence.extend(
-            (skill, cast(SkillEvidenceKind, kind))
-            for skill in _string_list(payload.get(key))
-        )
+        evidence.extend(_skill_list_evidence(payload.get(key), cast(SkillEvidenceKind, kind)))
 
     skills = payload.get("skills")
     if isinstance(skills, dict):
@@ -396,6 +393,23 @@ def _skill_evidence_from_payload(
                 if normalized:
                     evidence.append((normalized, cast(SkillEvidenceKind, kind)))
 
+    return evidence
+
+
+def _skill_list_evidence(value: object, kind: SkillEvidenceKind) -> list[tuple[str, SkillEvidenceKind]]:
+    if not isinstance(value, list):
+        return []
+    evidence: list[tuple[str, SkillEvidenceKind]] = []
+    for item in value:
+        if isinstance(item, str):
+            normalized = item.strip()
+        elif isinstance(item, dict):
+            raw = item.get("key") or item.get("runtimeName") or item.get("name")
+            normalized = raw.strip() if isinstance(raw, str) else ""
+        else:
+            normalized = ""
+        if normalized:
+            evidence.append((normalized, kind))
     return evidence
 
 
