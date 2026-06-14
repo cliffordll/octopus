@@ -139,6 +139,7 @@ def _passive_followup_issue_prompt(
                     f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
                     f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
                     f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
                     "",
                     "A final assistant message is not a close-out signal. Do not exit until one command above succeeds.",
                 ]
@@ -205,6 +206,7 @@ def _assignment_issue_prompt(
                     f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
                     f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
                     f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
                     "",
                     "Do not exit until one command above succeeds.",
                 ]

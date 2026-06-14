@@ -35,7 +35,7 @@ Direct API fallback is allowed for heartbeat close-out only when a required CLI 
 | `control-plane issue update <issue> ... [--image <path>]` | Apply generic issue updates when workflow commands are not enough, optionally uploading images for the update comment. | yes | no | no | attached when available |
 | `control-plane issue review <issue> --decision <decision> --comment <text>` | Record a structured reviewer decision with a required comment. | yes | no | no | attached when available |
 | `control-plane issue commit <issue> --sha <sha> --message <subject>` | Report a code commit created during issue work as structured issue activity. | yes | no | no | attached when available |
-| `control-plane issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment, optionally uploading images. | yes | no | no | attached when available |
+| `control-plane issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment; when the issue has a reviewer, submit it to review instead. | yes | no | no | attached when available |
 | `control-plane issue block <issue> --comment <text> [--image <path>]` | Mark an issue blocked with a required blocker comment, optionally uploading images. | yes | no | no | attached when available |
 | `control-plane issue release <issue>` | Release an issue back to todo and clear ownership. | yes | no | no | attached when available |
 | `control-plane issue documents list <issue>` | List issue documents. | no | no | no | no |
@@ -60,6 +60,11 @@ Before a successful `todo` or `in_progress` issue run exits, leave one close-out
 - work is complete: `control-plane issue done <issue> --comment <text> [--image <path>]`
 - work is blocked: `control-plane issue block <issue> --comment <text> [--image <path>]`
 - ownership changes: add an explicit handoff comment before or with the assignee update
+
+If the issue has a reviewer, `issue done` means the assignee is ready for
+review. The control plane moves the issue to `in_review` and wakes the
+reviewer; only `control-plane issue review --decision approve` marks the issue
+done.
 
 If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: the reviewer should confirm the blocker, request changes, approve, or keep explicit follow-up open with `control-plane issue review`.
 

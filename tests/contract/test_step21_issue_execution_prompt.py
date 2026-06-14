@@ -32,6 +32,10 @@ def test_runtime_prompt_appends_issue_context_to_agent_instructions() -> None:
     assert 'control-plane issue done "issue-hello"' in prompt
     assert 'control-plane issue block "issue-hello"' in prompt
     assert 'control-plane issue comment "issue-hello"' in prompt
+    assert (
+        "If the issue has a reviewer, `issue done` submits the work for review"
+        in prompt
+    )
 
 
 def test_runtime_prompt_hard_gates_passive_followup_closeout() -> None:
@@ -63,6 +67,10 @@ def test_runtime_prompt_hard_gates_passive_followup_closeout() -> None:
     assert 'control-plane issue done "OCT-17"' in prompt
     assert 'control-plane issue block "OCT-17"' in prompt
     assert 'control-plane issue comment "OCT-17"' in prompt
+    assert (
+        "If the issue has a reviewer, `issue done` submits the work for review"
+        in prompt
+    )
     assert "Do not exit" in prompt
 
 
