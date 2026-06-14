@@ -63,8 +63,11 @@ Before a successful `todo` or `in_progress` issue run exits, leave one close-out
 
 If the issue has a reviewer, `issue done` means the assignee is ready for
 review. The control plane moves the issue to `in_review` and wakes the
-reviewer; only `control-plane issue review --decision approve` marks the issue
-done.
+reviewer agent when `reviewerAgentId` is configured; only
+`control-plane issue review --decision approve` marks the issue done. A
+`reviewerUserId` assignment enters human review without creating an agent run.
+Without either reviewer field, `issue done` marks the issue `done` directly,
+and a direct attempt to set `in_review` is rejected.
 
 If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: the reviewer should confirm the blocker, request changes, approve, or keep explicit follow-up open with `control-plane issue review`.
 

@@ -48,7 +48,6 @@
 - 当前 run 给 issue 发了评论：`activity_log.action = issue.comment_added`
 - 当前 run 把 issue 改成 `done`：`activity_log.action = issue.updated` 且 `activity_log.details.status = done`
 - 当前 run 把 issue 改成 `blocked`：`activity_log.action = issue.updated` 且 `activity_log.details.status = blocked`
-- 当前 run 把 issue 改成 `in_review`：`activity_log.action = issue.updated` 且 `activity_log.details.status = in_review`
 
 有 reviewer 的 issue，要求更严格：
 
@@ -58,6 +57,39 @@
 - reviewer run 记录了明确评审结论：`activity_log.action = issue.review_decision_recorded`
 
 有 reviewer 时，普通评论不能替代评审流程。这样可以避免任务绕过评审。
+
+## Reviewer 配置与触发流程
+
+`in_review` 不是一个可以单独设置的普通状态。任务进入 `in_review` 时必须已经配置 reviewer，否则 server 返回 `422`：
+
+```text
+in_review requires reviewerAgentId or reviewerUserId
+```
+
+reviewer 类型决定后续是否创建 agent run：
+
+| Reviewer 配置 | `issue done` 的结果 | 是否创建 reviewer agent run |
+| --- | --- | --- |
+| 未配置 | issue 进入 `done` | 否 |
+| `reviewerAgentId` | issue 进入 `in_review` | 是，创建 `issue_review_requested` wakeup 并调度 reviewer |
+| `reviewerUserId` | issue 进入 `in_review` | 否，等待人工 reviewer |
+
+完整触发流程：
+
+1. 先给 issue 配置 `reviewerAgentId` 或 `reviewerUserId`
+2. assignee 完成工作并执行 `control-plane issue done ...`
+3. server 把有 reviewer 的任务转换为 `in_review`
+4. 如果配置的是 `reviewerAgentId`，server 创建 reviewer wakeup 并调度 reviewer run
+5. reviewer 用结构化评审结论推进任务
+
+以下操作不会触发 reviewer agent：
+
+- issue 没有 `reviewerAgentId`
+- 只配置了 `reviewerUserId`
+- issue 没有进入 `in_review` 或 `blocked`
+- reviewer agent 自己执行了会导致自我唤醒的状态变更
+
+如果 issue 已经处于 `in_review`，不能清空最后一个 reviewer。应先通过评审结论把任务退回或完成，再修改 reviewer 配置。
 
 ## 有 Reviewer 时的收尾规则
 
@@ -71,8 +103,8 @@ assignee 完成工作时，不应该直接把 issue 改成 `done`。正确结果
 - assignee 调用 `control-plane issue done ...`
 - server 识别到这个 issue 有 reviewer
 - issue 实际进入 `in_review`
-- server 创建 `issue_review_requested`
-- reviewer agent 执行 reviewer run
+- 配置了 `reviewerAgentId` 时，server 创建 `issue_review_requested`
+- reviewer agent 执行 reviewer run；如果配置的是 `reviewerUserId`，则等待人工评审
 - reviewer 用 `control-plane issue review ... --decision approve|request_changes|needs_followup|blocked` 留下结构化结论
 
 这样可以避免 “assignee 说完成了，所以任务直接 done，但 reviewer 没有执行” 的问题。
@@ -82,8 +114,8 @@ assignee 完成工作时，不应该直接把 issue 改成 `done`。正确结果
 | 角色 | 动作 | 结果 |
 | --- | --- | --- |
 | assignee | `issue comment` | 留下进展，issue 仍保持打开 |
-| assignee | `issue done` | 交给 reviewer，issue 进入 `in_review` |
-| assignee | `issue block` | issue 进入 `blocked`，reviewer 可以被唤醒做阻塞确认 |
+| assignee | `issue done` | 有 reviewer 时进入 `in_review`；无 reviewer 时进入 `done` |
+| assignee | `issue block` | issue 进入 `blocked`；配置了 reviewer agent 时可以触发阻塞确认 |
 | reviewer | `issue review --decision approve` | issue 进入 `done` |
 | reviewer | `issue review --decision request_changes` | issue 回到 `in_progress`，交还 assignee |
 | reviewer | `issue review --decision blocked` | issue 进入 `blocked` |

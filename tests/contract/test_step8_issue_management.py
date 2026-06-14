@@ -379,6 +379,53 @@ async def test_create_in_review_issue_queues_reviewer_wakeup(
     assert run.context_snapshot["role"] == "reviewer"
 
 
+async def test_create_in_review_issue_requires_reviewer(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Missing reviewer",
+            "status": "in_review",
+            "originKind": "manual",
+        },
+    )
+
+    assert code == 422
+    assert body["detail"] == "in_review requires reviewerAgentId or reviewerUserId"
+
+
+async def test_create_in_review_issue_with_user_reviewer_does_not_queue_agent(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Human review",
+            "status": "in_review",
+            "reviewerUserId": str(uuid.uuid4()),
+            "originKind": "manual",
+        },
+    )
+
+    assert code == 200
+    assert body["status"] == "in_review"
+    async with session_factory() as verify:
+        wakeups = (await verify.execute(select(AgentWakeupRequest))).scalars().all()
+    assert wakeups == []
+
+
 async def test_update_issue_to_in_review_queues_reviewer_wakeup(
     app: FastAPI,
     session: AsyncSession,
@@ -420,6 +467,45 @@ async def test_update_issue_to_in_review_queues_reviewer_wakeup(
         "issueId": issue_id,
         "mutation": "status_to_in_review",
     }
+
+
+async def test_update_issue_to_in_review_requires_reviewer(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, status="todo")
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "in_review"},
+    )
+
+    assert code == 422
+    assert body["detail"] == "in_review requires reviewerAgentId or reviewerUserId"
+
+
+async def test_update_in_review_issue_cannot_clear_last_reviewer(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(session, org_id, status="in_review")
+    async with async_transaction(session):
+        issue = await session.get_one(Issue, issue_id)
+        issue.reviewer_agent_id = str(uuid.uuid4())
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"reviewerAgentId": None},
+    )
+
+    assert code == 422
+    assert body["detail"] == "in_review requires reviewerAgentId or reviewerUserId"
 
 
 async def test_update_issue_to_in_review_dispatches_reviewer_run(
@@ -1625,6 +1711,9 @@ async def test_review_decision_route_writes_activity(
 ) -> None:
     org_id = await _seed_org(session)
     issue_id = await _seed_issue(session, org_id, status="in_review")
+    async with async_transaction(session):
+        issue = await session.get_one(Issue, issue_id)
+        issue.reviewer_user_id = str(uuid.uuid4())
 
     code, _ = await _request(
         app,

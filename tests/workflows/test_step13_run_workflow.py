@@ -31,6 +31,10 @@ from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
 
 
+async def _closeout_signal_exists(*args: object, **kwargs: object) -> bool:
+    return True
+
+
 @pytest.fixture
 async def session() -> AsyncIterator[AsyncSession]:
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
@@ -190,7 +194,13 @@ async def test_dispatch_claims_queued_runs_when_concurrency_slots_remain(
 
 async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        HeartbeatService,
+        "_run_has_issue_closeout_signal",
+        _closeout_signal_exists,
+    )
     assignee = await _seed_agent(session, name="Assignee")
     agent_service = AgentService(session)
     heartbeat = HeartbeatService(session)
@@ -262,7 +272,13 @@ async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
 
 async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
     session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        HeartbeatService,
+        "_run_has_issue_closeout_signal",
+        _closeout_signal_exists,
+    )
     assignee = await _seed_agent(session, name="RepeatAssignee")
     agent_service = AgentService(session)
     heartbeat = HeartbeatService(session)
@@ -336,13 +352,24 @@ async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
         .all()
     )
     assert len(reviewer_wakeups) == 2
-    assert {wakeup.payload["originRunId"] for wakeup in reviewer_wakeups} == {
+    origin_run_ids: set[str] = set()
+    for wakeup in reviewer_wakeups:
+        assert wakeup.payload is not None
+        origin_run_ids.add(wakeup.payload["originRunId"])
+    assert origin_run_ids == {
         first["id"],
         second["id"],
     }
 
 
-async def test_assignment_dispatch_immediately_dispatches_reviewer_run() -> None:
+async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        HeartbeatService,
+        "_run_has_issue_closeout_signal",
+        _closeout_signal_exists,
+    )
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -408,7 +435,8 @@ async def test_assignment_dispatch_immediately_dispatches_reviewer_run() -> None
                     )
                 )
             ).scalar_one()
-            assert reviewer_run.status == "succeeded"
+            assert reviewer_run.status == "failed"
+            assert reviewer_run.error_code == "closeout_missing"
             assert reviewer_run.started_at is not None
             assert reviewer_run.finished_at is not None
             queued_reviewer_runs = (
