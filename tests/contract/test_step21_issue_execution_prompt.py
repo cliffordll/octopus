@@ -103,3 +103,37 @@ def test_runtime_prompt_hard_gates_missing_review_closeout() -> None:
     assert 'control-plane issue review "OCT-18"' in prompt
     assert "--decision approve|request_changes|needs_followup|blocked" in prompt
     assert "Do not exit" in prompt
+
+
+def test_runtime_prompt_hard_gates_requested_issue_review() -> None:
+    prompt = runtime_prompt_from_config(
+        {
+            "promptTemplate": "# Base\n\nYou are a reviewer.",
+            "_octopus": {
+                "agentId": "agent-3",
+                "agentName": "reviewer-2",
+                "context": {
+                    "wakeSource": "review",
+                    "wakeReason": "issue_review_requested",
+                    "role": "reviewer",
+                    "issue": {
+                        "id": "issue-review-requested",
+                        "identifier": "OCT-21",
+                        "title": "评审富贵树文章",
+                        "description": "检查文章质量并给出结构化评审结论。",
+                        "status": "in_review",
+                        "priority": "medium",
+                    },
+                },
+            },
+        }
+    )
+
+    assert "You have been assigned to review an issue" in prompt
+    assert "评审富贵树文章" in prompt
+    assert "检查文章质量" in prompt
+    assert "## Review Gate" in prompt
+    assert 'control-plane issue review "OCT-21"' in prompt
+    assert "--decision approve|request_changes|needs_followup|blocked" in prompt
+    assert "Do not take over implementation" in prompt
+    assert "Do not exit" in prompt

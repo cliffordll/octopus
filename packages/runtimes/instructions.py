@@ -102,6 +102,15 @@ def _heartbeat_prompt(config: dict[str, Any]) -> str:
             agent_name=_string(octopus.get("agentName")) or "",
             issue=issue,
         )
+    if wake_reason in {
+        "issue_review_requested",
+        "issue_convergence_review_requested",
+    }:
+        return _requested_issue_review_prompt(
+            agent_id=_string(octopus.get("agentId")) or "",
+            agent_name=_string(octopus.get("agentName")) or "",
+            issue=issue,
+        )
     if wake_source != "assignment" and wake_reason not in {
         "issue_assigned",
         "issue_execute",
@@ -172,6 +181,36 @@ def _review_closeout_issue_prompt(
                     f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
                     "",
                     "Do not use `control-plane issue comment` as a substitute for reviewer close-out. Do not exit until `control-plane issue review` succeeds.",
+                ]
+            ),
+        ]
+    )
+
+
+def _requested_issue_review_prompt(
+    *, agent_id: str, agent_name: str, issue: dict[str, Any]
+) -> str:
+    issue_ref = _issue_ref(issue)
+    return _join_prompt_sections(
+        [
+            _issue_header_prompt(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                issue=issue,
+                intro="You have been assigned to review an issue.",
+            ),
+            "\n".join(
+                [
+                    "Inspect the issue, its work products, and relevant evidence before deciding.",
+                    "Do not take over implementation unless explicitly asked.",
+                    "",
+                    "## Review Gate",
+                    "",
+                    "Before exiting, execute exactly one reviewer decision command and confirm it succeeded:",
+                    f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
+                    "",
+                    "Do not use `control-plane issue comment` as a substitute for the structured reviewer decision.",
+                    "A final assistant message is not a review decision. Do not exit until `control-plane issue review` succeeds.",
                 ]
             ),
         ]
