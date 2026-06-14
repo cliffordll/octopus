@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import stat
+import sys
 from typing import Any
 
 from .paths import ensure_managed_runtime_home
@@ -50,6 +52,55 @@ def configure_managed_profile_env(env: dict[str, str], home: Path) -> None:
         "XDG_DATA_HOME",
     ):
         Path(env[key]).mkdir(parents=True, exist_ok=True)
+
+
+def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
+    shim_dir = home / ".octopus" / "bin"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    repo_root = Path(__file__).resolve().parents[2]
+    python_executable = Path(sys.executable).resolve()
+    pythonpath = str(repo_root)
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath = f"{pythonpath}{os.pathsep}{existing_pythonpath}"
+    env["PYTHONPATH"] = pythonpath
+
+    unix_shim = shim_dir / "control-plane"
+    unix_shim.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env sh",
+                f'PYTHONPATH="{pythonpath}" exec "{python_executable}" -m cli "$@"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    unix_shim.chmod(unix_shim.stat().st_mode | stat.S_IEXEC)
+
+    windows_shim = shim_dir / "control-plane.cmd"
+    windows_shim.write_text(
+        "\r\n".join(
+            [
+                "@echo off",
+                f'set "PYTHONPATH={pythonpath}"',
+                f'"{python_executable}" -m cli %*',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    path = env.get("PATH", "")
+    entries = [entry for entry in path.split(os.pathsep) if entry]
+    shim_text = str(shim_dir)
+    entries = [
+        entry
+        for entry in entries
+        if os.path.normcase(entry) != os.path.normcase(shim_text)
+    ]
+    env["PATH"] = os.pathsep.join([shim_text, *entries])
+    return shim_dir
 
 
 def desired_skills_from_config(config: dict[str, Any]) -> list[str]:

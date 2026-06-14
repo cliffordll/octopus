@@ -19,6 +19,7 @@ from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     configure_managed_profile_env,
     desired_skills_from_config,
+    ensure_control_plane_cli_shim,
     materialize_runtime_skills,
 )
 from ..provider_config import apply_provider_env, model_for_cli
@@ -83,8 +84,10 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     else:
         env["CODEX_HOME"] = str(_default_codex_home(context))
-    await _prepare_managed_home(env, context.on_log)
+    managed_home = await _prepare_managed_home(env, context.on_log)
     _prepare_managed_git_config(env)
+    if managed_home is not None:
+        ensure_control_plane_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     materialize_runtime_skills(
         runtime_type="codex_local",
@@ -646,10 +649,10 @@ def _default_codex_home(context: RuntimeExecutionContext) -> Path:
     )
 
 
-async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
+async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> Path | None:
     codex_home = _string(env.get("CODEX_HOME"))
     if not codex_home:
-        return
+        return None
     codex_home_path = Path(codex_home).expanduser()
     managed_home = Path(codex_home).expanduser() / "home"
     managed_home.mkdir(parents=True, exist_ok=True)
@@ -680,6 +683,7 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
                 f"CODEX_HOME {codex_home_path}: {', '.join(linked_codex)}\n"
             ),
         )
+    return managed_home
 
 
 def _prepare_managed_git_config(env: dict[str, str]) -> None:

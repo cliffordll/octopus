@@ -58,6 +58,58 @@
 
 有 reviewer 时，普通评论不能替代评审流程。这样可以避免任务绕过评审。
 
+## Closeout 命令如何生效
+
+智能体不能只在最后回复里写“完成了”。它必须调用控制面命令，让 server 写入可追踪的数据。
+
+完整链路是：
+
+1. server 给智能体的运行提示里写明 closeout 要求
+2. 本地 runtime 启动时，把 `control-plane` 命令放进智能体的 `PATH`
+3. 智能体执行 `control-plane issue done`、`control-plane issue block`、`control-plane issue comment` 或 `control-plane issue review`
+4. CLI 从环境变量读取当前上下文
+5. CLI 请求 server 的 issue 接口
+6. server 写入 issue 状态、评论或评审结论
+7. server 同时写入 `activity_log`
+8. run 结束时，heartbeat finalize 读取这些事件，判断 closeout 是否完成
+
+关键环境变量：
+
+| 环境变量 | 用途 |
+| --- | --- |
+| `OCTOPUS_AGENT_ID` | 当前执行智能体 |
+| `OCTOPUS_ORG_ID` | 当前组织 |
+| `OCTOPUS_RUN_ID` | 当前 heartbeat run |
+| `OCTOPUS_API_URL` | control-plane server 地址 |
+| `OCTOPUS_API_KEY` | 需要认证时使用的 key |
+
+CLI 会把这些信息转成请求 header，尤其是当前 run id。这样 server 写入 `activity_log.run_id` 时，才能把 closeout 信号归到正确的 run 上。
+
+常用命令：
+
+```bash
+control-plane issue comment "11C5D5-17" --body "已完成主要修改，等待用户确认。" --json
+control-plane issue done "11C5D5-17" --comment "已完成并验证。" --json
+control-plane issue block "11C5D5-17" --comment "缺少外部凭证，暂时阻塞。" --json
+control-plane issue review "11C5D5-17" --decision approve --comment "评审通过。" --json
+```
+
+这些命令里的 issue 可以是数据库 UUID，也可以是用户看到的编号，例如 `11C5D5-17`。系统会解析成真实的 `issues.id` 后再写入数据。
+
+命令成功后，通常会产生这些事件：
+
+| 命令 | 主要写入 | closeout 判断使用的事件 |
+| --- | --- | --- |
+| `issue comment` | `issue_comments` | `activity_log.action = issue.comment_added` |
+| `issue done` | `issues.status = done`，可附带评论 | `activity_log.action = issue.updated`，`details.status = done` |
+| `issue block` | `issues.status = blocked`，可附带评论 | `activity_log.action = issue.updated`，`details.status = blocked` |
+| `issue review --decision approve` | `issues.status = done` | `activity_log.action = issue.review_decision_recorded` |
+| `issue review --decision request_changes` | `issues.status = in_progress` | `activity_log.action = issue.review_decision_recorded` |
+| `issue review --decision blocked` | `issues.status = blocked` | `activity_log.action = issue.review_decision_recorded` |
+| `issue review --decision needs_followup` | 保持评审跟进 | `activity_log.action = issue.review_decision_recorded` |
+
+如果命令没有执行成功，或者执行成功但没有带上当前 `OCTOPUS_RUN_ID`，heartbeat finalize 就看不到属于当前 run 的 closeout 信号。
+
 ## 用户人工介入后怎么处理
 
 人工介入不等于“这个 run 已经收尾”，但它代表 issue 已经回到用户手里。
@@ -150,8 +202,22 @@ $env:OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS = "600"
 2. 智能体发了评论，但评论没有关联到当前 run
 3. 有 reviewer 的 issue 只发了普通评论，没有进入评审或记录评审结论
 4. follow-up run 没识别出自己是收尾任务，又按普通任务跑完了
+5. runtime 里没有可执行的 `control-plane` 命令
+6. CLI 没有实现 skill 要求的 `issue done` / `issue block` / `issue review --comment`
+7. CLI 没有把 `OCTOPUS_RUN_ID` 传给 server，导致事件没有归属到当前 run
+8. 智能体使用了 `11C5D5-17` 这样的 issue 编号，但 server 只按 UUID 查找 issue
 
 这些情况下，系统仍然看不到明确收尾信号，就可能继续安排 follow-up。
+
+因此，排查 closeout 时不要只看智能体最终回复，要按这条链路查：
+
+1. run 日志里是否真的执行了 `control-plane ...`
+2. `control-plane` 是否在 runtime 的 `PATH` 上
+3. 命令是否返回成功 JSON
+4. 请求是否带上当前 `OCTOPUS_AGENT_ID`、`OCTOPUS_ORG_ID`、`OCTOPUS_RUN_ID`
+5. server 是否写入了当前 issue 的 `activity_log`
+6. `activity_log.run_id` 是否等于当前 `heartbeat_runs.id`
+7. issue 编号是否被解析到了正确的 `issues.id`
 
 反复触发时重点看这些数据：
 

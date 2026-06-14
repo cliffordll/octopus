@@ -86,7 +86,9 @@ async def list_agent_inbox_issues(
 
 
 async def get_issue_by_id(session: AsyncSession, issue_id: str) -> Issue | None:
-    result = await session.execute(select(Issue).where(Issue.id == issue_id))
+    result = await session.execute(
+        select(Issue).where(or_(Issue.id == issue_id, Issue.identifier == issue_id))
+    )
     return result.scalar_one_or_none()
 
 
@@ -102,7 +104,10 @@ async def update_issue(
     values["updated_at"] = datetime.now(UTC)
 
     result = await session.execute(
-        update(Issue).where(Issue.id == issue_id).values(**values).returning(Issue)
+        update(Issue)
+        .where(or_(Issue.id == issue_id, Issue.identifier == issue_id))
+        .values(**values)
+        .returning(Issue)
     )
     return result.scalar_one_or_none()
 
