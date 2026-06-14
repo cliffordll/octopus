@@ -26,6 +26,7 @@ from packages.runtimes.opencode_local.runner import (
     _read_stdout as read_opencode_stdout,
 )
 from packages.runtimes.opencode_local.runner import execute as execute_opencode_local
+from packages.runtimes.process.runner import execute as execute_process
 from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
 
@@ -159,6 +160,58 @@ async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
     assert events == [{"type": "assistant_delta", "delta": long_text}]
     assert {stream for stream, _ in logs} == {"stdout"}
     assert "".join(chunk for _, chunk in logs) == payload
+
+
+async def test_process_timeout_drains_original_communication_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    communicate_calls = 0
+    communicate_cancelled = False
+    killed = asyncio.Event()
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            nonlocal communicate_calls, communicate_cancelled
+            communicate_calls += 1
+            try:
+                await killed.wait()
+            except asyncio.CancelledError:
+                communicate_cancelled = True
+                raise
+            return b"", b"terminated"
+
+        def kill(self) -> None:
+            killed.set()
+
+        async def wait(self) -> int:
+            await killed.wait()
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.process.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_process(
+        RuntimeExecutionContext(
+            run_id="run-process-timeout",
+            agent_id="agent-process-timeout",
+            org_id="org-process-timeout",
+            agent_name="Process Timeout",
+            config={"command": "process-test", "timeoutSec": 0.01},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.timed_out is True
+    assert communicate_calls == 1
+    assert communicate_cancelled is False
 
 
 async def test_opencode_prompt_includes_bash_tool_schema_guidance(

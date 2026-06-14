@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import shutil
 import tempfile
@@ -210,15 +209,14 @@ async def _run_once(
                 raise TimeoutError
             stdout, stderr = communication.result()
         elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=timeout_sec
+            )
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await communication
         await process.wait()
         return _result(
             process.returncode,
@@ -229,12 +227,9 @@ async def _run_once(
             loaded_skills=loaded_skills,
         )
     except asyncio.CancelledError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
-            process.kill()
-            await process.communicate()
-            await process.wait()
+        process.kill()
+        await communication
+        await process.wait()
         raise
 
     stdout_text = stdout.decode(errors="replace")
