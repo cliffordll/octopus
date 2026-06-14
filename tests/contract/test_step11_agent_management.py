@@ -1375,7 +1375,8 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     await _wait_for_dispatch(app)
 
     _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
-    assert detail["status"] == "succeeded"
+    assert detail["status"] == "failed"
+    assert detail["errorCode"] == "closeout_missing"
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
     assert issue_after["status"] == "in_progress"
@@ -1454,7 +1455,8 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         assert issue_row is not None
         assert followup_run.invocation_source == "automation"
         assert followup_run.run_purpose == "closeout_followup"
-        assert followup_run.status in {"running", "succeeded"}
+        assert followup_run.status == "failed"
+        assert followup_run.error_code == "closeout_missing"
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -1761,6 +1763,71 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
         )
 
     assert rows == []
+
+
+async def test_successful_issue_run_without_closeout_is_failed_and_records_event(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="issue-run-closeout-required")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Missing Closeout Agent",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Missing closeout",
+                    status="in_progress",
+                    assignee_agent_id=agent_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    invocation_source="assignment",
+                    trigger_detail="system",
+                    status="succeeded",
+                    run_purpose="task_execution",
+                    context_snapshot={
+                        "issueId": issue_id,
+                        "wakeReason": "issue_execute",
+                    },
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        final = await HeartbeatService(session)._enforce_closeout_governance_success(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one()
+
+    assert final.status == "failed"
+    assert final.error_code == "closeout_missing"
+    assert "control-plane issue done" in (final.error or "")
+    assert activity.run_id == run_id
+    assert activity.details["originRunId"] == run_id
+    assert activity.details["attempts"] == 1
 
 
 async def test_user_comment_after_successful_issue_run_skips_passive_followup(
@@ -2510,6 +2577,81 @@ async def test_passive_followup_exhaustion_with_reviewer_queues_convergence_revi
     assert activity.details["previousRunId"] == run_id
 
 
+async def test_successful_passive_followup_without_closeout_is_failed_and_escalated(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="passive-closeout-false-success")
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    origin_run_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="False Success Closeout Agent",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="False success closeout",
+                    status="in_progress",
+                    assignee_agent_id=agent_id,
+                ),
+                HeartbeatRun(
+                    id=run_id,
+                    org_id=org_id,
+                    agent_id=agent_id,
+                    invocation_source="automation",
+                    trigger_detail="system",
+                    status="succeeded",
+                    run_purpose="closeout_followup",
+                    context_snapshot={
+                        "issueId": issue_id,
+                        "wakeReason": "issue_passive_followup",
+                        "passiveFollowup": {
+                            "originRunId": origin_run_id,
+                            "previousRunId": origin_run_id,
+                            "attempt": 1,
+                            "maxAttempts": 2,
+                            "reason": "missing_closure",
+                        },
+                    },
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        final = await HeartbeatService(session)._enforce_closeout_governance_success(
+            await session.get_one(Agent, agent_id),
+            await session.get_one(HeartbeatRun, run_id),
+        )
+        issue = await session.get_one(Issue, issue_id)
+        activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one()
+
+    assert final.status == "failed"
+    assert final.error_code == "closeout_missing"
+    assert "control-plane issue done" in (final.error or "")
+    assert issue.status == "in_progress"
+    assert activity.run_id == run_id
+    assert activity.details["originRunId"] == origin_run_id
+    assert activity.details["attempts"] == 1
+
+
 async def test_successful_reviewer_run_without_decision_queues_review_closeout(
     session_factory: async_sessionmaker,
 ) -> None:
@@ -2681,6 +2823,79 @@ async def test_review_closeout_missing_run_without_decision_records_activity(
     assert activities[0].details["attempts"] == 1
     assert activities[0].details["maxAttempts"] == 1
     assert wakeups == []
+
+
+async def test_review_closeout_missing_success_without_decision_is_failed(
+    session_factory: async_sessionmaker,
+) -> None:
+    from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
+    from server.services.heartbeat import HeartbeatService
+
+    org_id = await _seed_org(session_factory, key="review-closeout-false-success")
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    origin_run_id = str(uuid.uuid4())
+    closeout_run_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=reviewer_id,
+                    org_id=org_id,
+                    name="Review False Success Agent",
+                    role="engineer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    title="Review false success",
+                    status="in_review",
+                    reviewer_agent_id=reviewer_id,
+                ),
+                HeartbeatRun(
+                    id=closeout_run_id,
+                    org_id=org_id,
+                    agent_id=reviewer_id,
+                    invocation_source="review",
+                    trigger_detail="system",
+                    status="succeeded",
+                    run_purpose="review",
+                    context_snapshot={
+                        "issueId": issue_id,
+                        "role": "reviewer",
+                        "wakeSource": "review",
+                        "wakeReason": "issue_review_closeout_missing",
+                        "reviewCloseout": {
+                            "originRunId": origin_run_id,
+                            "previousRunId": origin_run_id,
+                            "attempt": 1,
+                            "maxAttempts": 1,
+                        },
+                    },
+                    finished_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        await session.flush()
+        final = await HeartbeatService(session)._enforce_closeout_governance_success(
+            await session.get_one(Agent, reviewer_id),
+            await session.get_one(HeartbeatRun, closeout_run_id),
+        )
+        activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue_id,
+                    ActivityLog.action == "issue.review_closeout_missing",
+                )
+            )
+        ).scalar_one()
+
+    assert final.status == "failed"
+    assert final.error_code == "closeout_missing"
+    assert "control-plane issue review" in (final.error or "")
+    assert activity.run_id == closeout_run_id
+    assert activity.details["originRunId"] == origin_run_id
 
 
 async def test_issue_wakeup_defers_while_execution_locked_and_promotes_on_release(
