@@ -673,7 +673,10 @@ class HeartbeatService:
             if (
                 row.agent_id != issue.assignee_agent_id
                 or row.run_purpose != "task_execution"
-                or row.status != "succeeded"
+                or not (
+                    row.status == "succeeded"
+                    or (row.status == "failed" and row.error_code == "closeout_missing")
+                )
                 or _issue_id_from_context(row.context_snapshot) != issue.id
             ):
                 continue
@@ -1625,6 +1628,9 @@ class HeartbeatService:
                 },
             )
             assert final is not None
+            if final_status == "succeeded":
+                final = await self._enforce_closeout_governance_success(agent, final)
+                final_status = cast(HeartbeatRunStatus, final.status)
             try:
                 await CostService(self._session).record_run_cost_if_present(final.id)
             except Exception as exc:
@@ -1645,7 +1651,7 @@ class HeartbeatService:
                     if final_status == "succeeded"
                     else final_status,
                     "finished_at": datetime.now(UTC),
-                    "error": result.error_message,
+                    "error": final.error or result.error_message,
                 },
             )
             await self._update_runtime_state(agent, final)
@@ -1655,7 +1661,20 @@ class HeartbeatService:
                 {"status": "idle" if final_status == "succeeded" else "error"},
             )
             await self._release_issue_execution(final)
-            if final_status == "succeeded":
+            context_after_final = (
+                final.context_snapshot
+                if isinstance(final.context_snapshot, dict)
+                else {}
+            )
+            should_check_followup_after_closeout_failure = (
+                final.error_code == "closeout_missing"
+                and context_after_final.get("wakeReason")
+                not in {ISSUE_PASSIVE_FOLLOWUP_REASON, "issue_review_closeout_missing"}
+            )
+            if (
+                final_status == "succeeded"
+                or should_check_followup_after_closeout_failure
+            ):
                 await self._queue_issue_passive_followup_if_needed(agent, final)
             await self._append_event(
                 final,
@@ -1942,6 +1961,89 @@ class HeartbeatService:
                 status="scheduled",
             ),
         )
+
+    async def _enforce_closeout_governance_success(
+        self, agent: AgentRow, final: HeartbeatRunRow
+    ) -> HeartbeatRunRow:
+        context = (
+            final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
+        )
+        wake_reason = context.get("wakeReason")
+        issue_id = _issue_id_from_context(context)
+        if issue_id is None:
+            return final
+        issue = await self._session.get(IssueRow, issue_id)
+        if issue is None or issue.org_id != final.org_id:
+            return final
+        if self._is_reviewer_issue_run(agent, final, issue, context):
+            if await self._run_has_issue_activity(
+                final, issue.id, ("issue.review_decision_recorded",)
+            ):
+                return final
+            await self._record_issue_review_closeout_missing(final, issue, context)
+            return await self._mark_closeout_governance_failed(
+                final,
+                "Reviewer issue run exited without `control-plane issue review`.",
+            )
+        if wake_reason == "issue_review_closeout_missing":
+            if await self._run_has_issue_activity(
+                final, issue.id, ("issue.review_decision_recorded",)
+            ):
+                return final
+            await self._record_issue_review_closeout_missing(final, issue, context)
+            return await self._mark_closeout_governance_failed(
+                final,
+                "Reviewer close-out run exited without `control-plane issue review`.",
+            )
+        if issue.assignee_agent_id != agent.id or issue.status not in {
+            "todo",
+            "in_progress",
+        }:
+            return final
+        issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
+        if await self._run_has_issue_closeout_signal(
+            final, issue.id, issue_has_reviewer=issue_has_reviewer
+        ):
+            return final
+        passive_followup = _passive_followup_context(context)
+        raw_attempt = passive_followup.get("attempt")
+        attempts = (
+            raw_attempt
+            if isinstance(raw_attempt, int) and not isinstance(raw_attempt, bool)
+            else 1
+        )
+        raw_origin_run_id = passive_followup.get("originRunId")
+        origin_run_id = (
+            raw_origin_run_id if isinstance(raw_origin_run_id, str) else final.id
+        )
+        await self._record_issue_closure_convergence_needed(
+            final,
+            issue,
+            origin_run_id=origin_run_id,
+            attempts=attempts,
+        )
+        return await self._mark_closeout_governance_failed(
+            final,
+            (
+                "Issue run exited without `control-plane issue done`, "
+                "`control-plane issue block`, or `control-plane issue comment`."
+            ),
+        )
+
+    async def _mark_closeout_governance_failed(
+        self, final: HeartbeatRunRow, message: str
+    ) -> HeartbeatRunRow:
+        updated = await update_run(
+            self._session,
+            final.id,
+            {
+                "status": "failed",
+                "error": message,
+                "error_code": "closeout_missing",
+            },
+        )
+        assert updated is not None
+        return updated
 
     async def _record_issue_closure_convergence_needed(
         self,

@@ -1578,7 +1578,7 @@ function IssueRunOutputPanel({
           {data.operations.error && <ErrorNotice error={data.operations.error} />}
           {runLog.error && <ErrorNotice error={runLog.error} />}
           {streamError && <p className="error-notice">{streamError}</p>}
-      {liveLogDelta && (
+      {viewMode === "raw" && liveLogDelta && (
         <section className="issue-run-output-block">
           <div className="issue-run-output-heading">
             <div>

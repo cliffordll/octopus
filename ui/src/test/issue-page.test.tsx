@@ -872,13 +872,8 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runLogBlock).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   await userEvent.click(screen.getByRole("button", { name: /展开关键事件/ }));
   expect(await screen.findByText("Stream 正在输出")).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
-  expect(screen.queryByRole("button", { name: "实时日志增量" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("heading", { name: "实时日志增量" }));
-  expect(screen.getByText("实时日志增量已折叠。")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "执行输出" })).not.toHaveTextContent("stream log chunk");
-  await userEvent.click(screen.getByRole("heading", { name: "实时日志增量" }));
-  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
+  expect(screen.queryByRole("heading", { name: "实时日志增量" })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "执行输出" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "关键事件" })).toBeInTheDocument();
   expect(screen.queryByText("关键事件已折叠。")).not.toBeInTheDocument();
@@ -889,6 +884,11 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("persisted run log");
   await userEvent.click(screen.getByRole("button", { name: "Raw" }));
   expect(screen.getByRole("heading", { name: "实时日志增量" })).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
+  await userEvent.click(screen.getByRole("heading", { name: "实时日志增量" }));
+  expect(screen.getByText("实时日志增量已折叠。")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "执行输出" })).not.toHaveTextContent("stream log chunk");
+  await userEvent.click(screen.getByRole("heading", { name: "实时日志增量" }));
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("stream log chunk");
   expect(screen.getByRole("heading", { name: "Raw 数据" })).toBeInTheDocument();
   const outputHeadings = within(screen.getByRole("region", { name: "执行输出" })).getAllByRole("heading").map((heading) => heading.textContent);
