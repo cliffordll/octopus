@@ -58,6 +58,14 @@ _REVIEW_DECISION_STATUS_MAP = {
 }
 
 
+def _require_reviewer_for_in_review(values: Mapping[str, Any]) -> None:
+    if values.get("status") != "in_review":
+        return
+    if values.get("reviewer_agent_id") or values.get("reviewer_user_id"):
+        return
+    raise ValueError("in_review requires reviewerAgentId or reviewerUserId")
+
+
 class IssueCheckoutConflictError(RuntimeError):
     pass
 
@@ -199,6 +207,7 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        _require_reviewer_for_in_review(values)
         await self._apply_parent_values(
             org_id,
             values,
@@ -296,6 +305,16 @@ class IssueService:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
 
+        effective_values = {
+            "status": values.get("status", current.status),
+            "reviewer_agent_id": values.get(
+                "reviewer_agent_id", current.reviewer_agent_id
+            ),
+            "reviewer_user_id": values.get(
+                "reviewer_user_id", current.reviewer_user_id
+            ),
+        }
+        _require_reviewer_for_in_review(effective_values)
         _apply_status_side_effects(values, previous_status=current.status)
 
         row = await update_issue(self._session, issue_id, values)

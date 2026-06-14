@@ -99,6 +99,15 @@ async def app(
         "get_runtime_adapter",
         lambda runtime_type: ClosedLoopAdapter(),
     )
+
+    async def closeout_signal_exists(*args: object, **kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        heartbeat_module.HeartbeatService,
+        "_run_has_issue_closeout_signal",
+        closeout_signal_exists,
+    )
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

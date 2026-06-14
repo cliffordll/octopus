@@ -151,6 +151,11 @@ Use the CLI command, check that it exits successfully, and only then exit.
 
 Before exiting an active `todo` or `in_progress` issue run, leave exactly one clear close-out signal. Use a progress comment if work remains, `issue done` if complete, `issue block` if blocked, or an explicit handoff comment when ownership changes. If the issue has a reviewer, `issue done` submits the work for review: control plane moves the issue to `in_review` and wakes the reviewer; only a structured reviewer decision can mark the issue done. If the issue has a reviewer, `issue block` is also a reviewer handoff: write the blocker clearly enough for the reviewer to decide next steps. control plane may wake you again with `OCTOPUS_WAKE_REASON=issue_passive_followup` when a successful run exits without that signal.
 
+Do not claim that review was triggered unless the issue has
+`reviewerAgentId`. Without either reviewer field, `issue done` marks the issue
+`done` directly and `in_review` is rejected. `reviewerUserId` routes the issue
+to human review but does not create a reviewer agent run.
+
 If `OCTOPUS_WAKE_REASON=issue_passive_followup`, this run exists only because
 the previous successful run did not leave a close-out signal. Do not do fresh
 implementation work first. Inspect current issue state, then execute exactly
