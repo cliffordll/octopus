@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
@@ -40,6 +40,7 @@ from packages.shared.types.issue import (
     IssueDocument,
     IssueDocumentSummary,
     IssueListItem,
+    UpdateIssuePayload,
 )
 from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.types.workspace import IssueWorkProduct
@@ -587,6 +588,27 @@ async def update_issue_route(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only the checkout owner can mark issue done",
             )
+        assignee_done_requested_review = (
+            actor.actor_type == "agent"
+            and payload.get("status") == "done"
+            and detail.get("assigneeAgentId") == actor.actor_id
+            and (
+                bool(detail.get("reviewerUserId"))
+                or (
+                    bool(detail.get("reviewerAgentId"))
+                    and detail.get("reviewerAgentId") != actor.actor_id
+                )
+            )
+        )
+        if assignee_done_requested_review:
+            payload = cast(
+                UpdateIssuePayload,
+                {
+                    **payload,
+                    "status": "in_review",
+                    "requestedStatus": "done",
+                },
+            )
         updated = await service.update_issue(
             id,
             payload,
@@ -647,7 +669,9 @@ async def update_issue_route(
         or reviewer_changed_in_reviewable
     ):
         mutation = (
-            "status_to_in_review"
+            "assignee_done"
+            if assignee_done_requested_review
+            else "status_to_in_review"
             if status_changed_to_review
             else "status_to_blocked"
             if status_changed_to_blocked
@@ -660,7 +684,9 @@ async def update_issue_route(
             updated,
             mutation=mutation,
             context_source=(
-                "issue.status_change"
+                "issue.assignee_done"
+                if assignee_done_requested_review
+                else "issue.status_change"
                 if status_changed_to_review or status_changed_to_blocked
                 else "issue.reviewer_change"
             ),

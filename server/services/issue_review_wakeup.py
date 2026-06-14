@@ -17,6 +17,7 @@ IssueReviewWakeupMutation = Literal[
     "reviewer_changed_in_review",
     "reviewer_changed_blocked",
     "create_in_review",
+    "assignee_done",
 ]
 
 

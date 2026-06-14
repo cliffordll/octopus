@@ -738,6 +738,96 @@ async def test_issue_closeout_routes_accept_identifier_refs(
     assert activities[-1].run_id == "run-identifier-closeout"
 
 
+async def test_assignee_done_with_reviewer_requests_review_instead_of_closing(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="reviewer-done")
+    assignee_id = str(uuid.uuid4())
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=assignee_id,
+                    org_id=org_id,
+                    name="Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=reviewer_id,
+                    org_id=org_id,
+                    name="Reviewer",
+                    role="reviewer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    identifier="REV-17",
+                    title="Needs review",
+                    status="in_progress",
+                    priority="medium",
+                    assignee_agent_id=assignee_id,
+                    reviewer_agent_id=reviewer_id,
+                    checkout_run_id="run-assignee-done",
+                    execution_run_id="run-assignee-done",
+                ),
+            ]
+        )
+        await session.commit()
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "done", "comment": "Ready for review."},
+        headers={
+            "x-test-agent-id": assignee_id,
+            "x-test-org-id": org_id,
+            "x-test-run-id": "run-assignee-done",
+        },
+    )
+
+    assert code == 200
+    assert body["status"] == "in_review"
+    async with session_factory() as session:
+        issue = await session.get_one(Issue, issue_id)
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == reviewer_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        activities = (
+            (
+                await session.execute(
+                    select(ActivityLog).where(ActivityLog.entity_id == issue_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert issue.status == "in_review"
+    assert issue.completed_at is None
+    assert len(wakeups) == 1
+    assert wakeups[0].reason == "issue_review_requested"
+    assert wakeups[0].source == "review"
+    assert wakeups[0].payload["mutation"] == "assignee_done"
+    assert activities[-1].action == "issue.updated"
+    assert activities[-1].run_id == "run-assignee-done"
+    assert activities[-1].details["status"] == "in_review"
+    assert activities[-1].details["requestedStatus"] == "done"
+
+
 async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     app: FastAPI,
     session_factory: async_sessionmaker,

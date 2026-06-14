@@ -149,7 +149,7 @@ durable close-out signal that matches your role and wake reason. A natural
 language summary in the final assistant message is not a close-out signal.
 Use the CLI command, check that it exits successfully, and only then exit.
 
-Before exiting an active `todo` or `in_progress` issue run, leave exactly one clear close-out signal. Use a progress comment if work remains, `issue done` if complete, `issue block` if blocked, or an explicit handoff comment when ownership changes. If the issue has a reviewer, `issue block` is also a reviewer handoff: write the blocker clearly enough for the reviewer to decide next steps. control plane may wake you again with `OCTOPUS_WAKE_REASON=issue_passive_followup` when a successful run exits without that signal.
+Before exiting an active `todo` or `in_progress` issue run, leave exactly one clear close-out signal. Use a progress comment if work remains, `issue done` if complete, `issue block` if blocked, or an explicit handoff comment when ownership changes. If the issue has a reviewer, `issue done` submits the work for review: control plane moves the issue to `in_review` and wakes the reviewer; only a structured reviewer decision can mark the issue done. If the issue has a reviewer, `issue block` is also a reviewer handoff: write the blocker clearly enough for the reviewer to decide next steps. control plane may wake you again with `OCTOPUS_WAKE_REASON=issue_passive_followup` when a successful run exits without that signal.
 
 If `OCTOPUS_WAKE_REASON=issue_passive_followup`, this run exists only because
 the previous successful run did not leave a close-out signal. Do not do fresh
@@ -215,6 +215,10 @@ control-plane issue comment "<issue-id-or-identifier>" --body "<markdown>" [--im
 ```bash
 control-plane issue done "<issue-id-or-identifier>" --comment "<markdown>" [--image "<path>"] --json
 ```
+
+If the issue has a reviewer, this command means "ready for review" and moves
+the issue to `in_review`; it does not bypass the reviewer or directly complete
+the issue.
 
 - blocker:
 
