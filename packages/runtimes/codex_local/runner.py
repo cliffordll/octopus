@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import re
@@ -249,15 +248,14 @@ async def _run_attempt(
                 raise TimeoutError
             stdout, stderr = communication.result()
         elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=timeout_sec
+            )
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await communication
         await process.wait()
         stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
         result = RuntimeExecutionResult(
@@ -279,11 +277,8 @@ async def _run_attempt(
             raw_stderr=stderr.decode(errors="replace"),
         )
     except asyncio.CancelledError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        await process.communicate()
+        await communication
         await process.wait()
         raise
 
