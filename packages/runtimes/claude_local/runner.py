@@ -14,6 +14,7 @@ from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
+    ensure_control_plane_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -80,11 +81,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         api_key_env="ANTHROPIC_API_KEY",
         base_url_env="ANTHROPIC_BASE_URL",
     )
-    await prepare_managed_home(
+    home = await prepare_managed_home(
         runtime_type="claude_local",
         context=context,
         env=env,
     )
+    ensure_control_plane_cli_shim(env, home)
     apply_runtime_context_env(env, context)
     skills_root = Path(tempfile.mkdtemp(prefix="octopus-claude-skills-"))
     loaded_skills = materialize_runtime_skills(

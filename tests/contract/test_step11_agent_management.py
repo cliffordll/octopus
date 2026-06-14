@@ -634,6 +634,8 @@ def app(
                 "id": actor_id,
                 "agentId": actor_id,
                 "orgId": request.headers["x-test-org-id"],
+                "runId": request.headers.get("x-test-run-id")
+                or request.headers.get("x-octopus-run-id"),
             }
         return await call_next(request)
 
@@ -677,6 +679,63 @@ async def _seed_org(
         session.add(org)
         await session.commit()
         return org.id
+
+
+async def test_issue_closeout_routes_accept_identifier_refs(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="identifier-closeout")
+    agent_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Closer",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            Issue(
+                id=str(uuid.uuid4()),
+                org_id=org_id,
+                identifier="IDC-17",
+                title="Close by identifier",
+                status="in_progress",
+                priority="medium",
+                assignee_agent_id=agent_id,
+            )
+        )
+        await session.commit()
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        "/api/issues/IDC-17",
+        json={"status": "done", "comment": "Finished from CLI."},
+        headers={
+            "x-test-agent-id": agent_id,
+            "x-test-org-id": org_id,
+            "x-test-run-id": "run-identifier-closeout",
+        },
+    )
+
+    assert code == 200
+    assert body["status"] == "done"
+    async with session_factory() as session:
+        activities = (
+            (
+                await session.execute(
+                    select(ActivityLog).where(ActivityLog.entity_id == body["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert activities[-1].action == "issue.updated"
+    assert activities[-1].run_id == "run-identifier-closeout"
 
 
 async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(

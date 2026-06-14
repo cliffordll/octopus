@@ -159,14 +159,17 @@ class IssueService:
         return await self._to_detail(row)
 
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
-        rows = await list_issue_comments(self._session, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            return []
+        rows = await list_issue_comments(self._session, issue.id)
         return list(rows)
 
     async def list_attachments(self, issue_id: str) -> list[IssueAttachmentType]:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             raise ValueError("Issue not found")
-        rows = await list_issue_attachments(self._session, issue_id)
+        rows = await list_issue_attachments(self._session, issue.id)
         return [_to_attachment(row, asset) for row, asset in rows]
 
     async def get_attachment(self, attachment_id: str) -> IssueAttachmentType | None:
@@ -491,7 +494,7 @@ class IssueService:
         result = await self._session.execute(
             update(Issue)
             .where(
-                Issue.id == issue_id,
+                Issue.id == current.id,
                 Issue.status.in_(expected_statuses),
                 assignee_matches,
                 run_lock_matches,
@@ -580,7 +583,7 @@ class IssueService:
 
         values: dict[str, Any] = {
             "org_id": issue.org_id,
-            "issue_id": issue_id,
+            "issue_id": issue.id,
             "body": payload["body"],
         }
         if actor_type == "agent":
@@ -596,7 +599,7 @@ class IssueService:
             actor_id=actor_id,
             action="issue.comment_added",
             entity_type="issue",
-            entity_id=issue_id,
+            entity_id=issue.id,
             run_id=run_id,
             details=dict(payload),
         )

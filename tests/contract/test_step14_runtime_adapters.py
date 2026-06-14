@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -1654,6 +1655,73 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
         assert env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
         assert env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
         assert env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
+
+
+async def test_local_runtimes_expose_control_plane_cli_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+    captured: dict[str, dict[str, str]] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful local process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        captured[command] = dict(kwargs["env"])
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.claude_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_claude_local(
+        _runtime_context_for_env(
+            command="claude-shim-test",
+            config={"command": "claude-shim-test"},
+        )
+    )
+    await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-shim-test",
+            config={"command": "opencode-shim-test", "model": "openai/gpt-5"},
+        )
+    )
+    await execute_codex_local(
+        _runtime_context_for_env(
+            command="codex-shim-test",
+            config={"command": "codex-shim-test"},
+        )
+    )
+
+    for command in ("claude-shim-test", "opencode-shim-test", "codex-shim-test"):
+        env = captured[command]
+        path_entries = env["PATH"].split(os.pathsep)
+        shim_dir = Path(path_entries[0])
+        assert (shim_dir / "control-plane").is_file()
+        if os.name == "nt":
+            assert (shim_dir / "control-plane.cmd").is_file()
 
 
 async def test_opencode_execute_materializes_database_provider_config(
