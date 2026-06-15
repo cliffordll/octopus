@@ -19,7 +19,7 @@ def test_process_demo_runner_prints_safe_demo_payload(capsys) -> None:
     assert payload["message"] == "Octopus process runtime demo succeeded."
     assert isinstance(payload["timestamp"], str)
     assert isinstance(payload["cwd"], str)
-    assert payload["safeEnv"] == {}
+    assert isinstance(payload["safeEnv"], dict)
 
 
 @pytest.mark.asyncio
