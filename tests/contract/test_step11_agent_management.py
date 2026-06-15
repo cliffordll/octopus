@@ -829,6 +829,101 @@ async def test_assignee_done_with_reviewer_requests_review_instead_of_closing(
     assert activities[-1].details["requestedStatus"] == "done"
 
 
+async def test_repeated_assignee_done_requests_new_reviewer_wakeup(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="reviewer-done-repeat")
+    assignee_id = str(uuid.uuid4())
+    reviewer_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add_all(
+            [
+                Agent(
+                    id=assignee_id,
+                    org_id=org_id,
+                    name="Assignee",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id=reviewer_id,
+                    org_id=org_id,
+                    name="Reviewer",
+                    role="reviewer",
+                    status="idle",
+                ),
+                Issue(
+                    id=issue_id,
+                    org_id=org_id,
+                    identifier="REV-18",
+                    title="Repeated review",
+                    status="in_progress",
+                    priority="medium",
+                    assignee_agent_id=assignee_id,
+                    reviewer_agent_id=reviewer_id,
+                ),
+            ]
+        )
+        await session.commit()
+
+    first_code, first_body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "done", "comment": "First pass ready."},
+        headers={
+            "x-test-agent-id": assignee_id,
+            "x-test-org-id": org_id,
+            "x-test-run-id": "run-assignee-done-1",
+        },
+    )
+
+    assert first_code == 200
+    assert first_body["status"] == "in_review"
+    await _wait_for_dispatch(app)
+    async with session_factory() as session:
+        issue = await session.get_one(Issue, issue_id)
+        issue.status = "in_progress"
+        await session.commit()
+
+    second_code, second_body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "done", "comment": "Second pass ready."},
+        headers={
+            "x-test-agent-id": assignee_id,
+            "x-test-org-id": org_id,
+            "x-test-run-id": "run-assignee-done-2",
+        },
+    )
+
+    assert second_code == 200
+    assert second_body["status"] == "in_review"
+    await _wait_for_dispatch(app)
+    async with session_factory() as session:
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest)
+                    .where(AgentWakeupRequest.agent_id == reviewer_id)
+                    .order_by(AgentWakeupRequest.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(wakeups) == 2
+    assert [wakeup.payload["mutation"] for wakeup in wakeups] == [
+        "assignee_done",
+        "assignee_done",
+    ]
+    assert wakeups[0].idempotency_key != wakeups[1].idempotency_key
+
+
 async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     app: FastAPI,
     session_factory: async_sessionmaker,
