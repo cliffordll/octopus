@@ -6,7 +6,6 @@ import json
 import os
 from typing import Any
 
-from anyio import CancelScope
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -51,6 +50,12 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.chats import get_chat_service
+from ..dependencies.database import (
+    REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+    _close_session,
+    _invalidate_session,
+    _run_shielded_cleanup,
+)
 from ..services.chat_generation_locks import (
     cancel_active_chat_generation,
     claim_chat_generation,
@@ -437,10 +442,12 @@ async def add_chat_message_stream_route(
     body: dict[str, Any] = Body(...),
 ) -> StreamingResponse:
     session_factory = request.app.state.session_factory
-    async with session_factory() as session:
-        async with session.begin():
-            service = ChatService(session)
-            await _get_conversation_or_404(id, request=request, service=service)
+    session = session_factory()
+    try:
+        service = ChatService(session)
+        await _get_conversation_or_404(id, request=request, service=service)
+    finally:
+        await _close_session(session)
     try:
         payload = validate_add_chat_message(body)
     except ValueError as exc:
@@ -473,16 +480,26 @@ async def add_chat_message_stream_route(
                     on_stream_event=on_stream_event,
                     commit_after_user_message=True,
                 )
-                with CancelScope(shield=True):
-                    await session.commit()
+                error = await _run_shielded_cleanup(
+                    "commit chat stream database session",
+                    session.commit,
+                    timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+                )
+                if error is not None:
+                    await _invalidate_session(session)
+                    raise error
                 return result
             except BaseException:
-                with CancelScope(shield=True):
-                    await session.rollback()
+                error = await _run_shielded_cleanup(
+                    "roll back chat stream database session",
+                    session.rollback,
+                    timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+                )
+                if error is not None:
+                    await _invalidate_session(session)
                 raise
             finally:
-                with CancelScope(shield=True):
-                    await session.close()
+                await _close_session(session)
 
         async def cancel_reply_task() -> None:
             cancel_event.set()

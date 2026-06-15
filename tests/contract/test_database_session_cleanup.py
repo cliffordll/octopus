@@ -12,6 +12,7 @@ from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import _dispose_engine
 from server.routes import agents as agent_routes
+from server.routes import chats as chat_routes
 
 
 class BrokenTransaction:
@@ -134,3 +135,10 @@ def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
 
     assert "async with session_factory() as session" not in source
     assert "_close_session(session)" in source
+
+
+def test_chat_message_stream_uses_shielded_session_cleanup() -> None:
+    source = inspect.getsource(chat_routes.add_chat_message_stream_route)
+
+    assert "async with session_factory() as session" not in source
+    assert source.count("_close_session(session)") >= 2
