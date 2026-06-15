@@ -1,4 +1,4 @@
-# Step 14: Runtime Adapter 扩展
+﻿# Step 14: Runtime Adapter 扩展
 
 状态：已完成
 
@@ -115,7 +115,7 @@ Step 19 负责 cost/activity 查询；Step 20 负责 budget、quota 和治理联
 - `codex_local` 执行时已补齐 managed `CODEX_HOME` 默认注入：未显式配置 `env.CODEX_HOME` 时，运行时使用 `.octopus/instances/<instanceId>/organizations/<orgId>/codex-home/agents/<agentId>`，与 skills sync 的默认 materialization 位置一致。
 - `codex_local` 执行时已补齐 managed runtime `HOME/USERPROFILE`：默认指向 `CODEX_HOME/home`，并从 operator home 同步常见本地 CLI 凭据目录/文件（如 `.ssh`、`.npmrc`、`.config/gh`），避免 Codex 直接污染或误读用户全局 home。
 - `codex_local` heartbeat run 已把 `sessionIdBefore` 注入 runtime context；执行时会先使用 `codex exec ... resume <sessionId> -`，如果上游兼容 unknown session/rollout missing 错误出现，则记录日志并用 fresh session 自动重试一次。
-- `codex_local`、`claude_local`、`opencode_local` 已注入上游兼容 runtime env/context：基础 `RUDDER_AGENT_ID`、`RUDDER_ORG_ID`、`RUDDER_RUN_ID`、`RUDDER_API_URL`，wake/task/approval 字段，workspace 字段，agent/org workspace 路径字段，以及 runtime service JSON/primary URL。
+- `codex_local`、`claude_local`、`opencode_local` 已注入上游兼容 runtime env/context：基础 `OCTOPUS_AGENT_ID`、`OCTOPUS_ORG_ID`、`OCTOPUS_RUN_ID`、`OCTOPUS_API_URL`，wake/task/approval 字段，workspace 字段，agent/org workspace 路径字段，以及 runtime service JSON/primary URL。
 - `codex_local` 执行结果已返回当前 `CODEX_HOME/skills/<slug>/SKILL.md` 中可发现的 `loadedSkills` 元数据，并在 `usageJson`/`resultJson` 中补齐 `billingType` 与 `biller` 基础归一化；`biller` 按上游规则识别 `OPENROUTER_API_KEY` 与 OpenRouter base URL。
 - `codex_local` 已准备 managed Git config：运行时设置 `GIT_CONFIG_GLOBAL` 指向 managed `HOME/.gitconfig`，强制 `user.useConfigOnly=true`，清理不安全 `.local` author/committer env，并注入 gh credential helper policy，避免 Codex git commit 退回到 hostname `.local` 作者。
 - `codex_local` 已过滤 Codex telemetry/analytics 类 benign stderr 噪声，并按上游逻辑抑制 closed stdin tool-session lifecycle warning，避免把该类工具会话告警误报为业务失败原因。
@@ -183,7 +183,7 @@ Step 14 剩余工作必须先补齐控制面可调用的服务端契约，再深
 ## 不包含
 
 - `gemini_local`、`cursor`、`pi_local` 本步骤不做。
-- `openclaw_gateway`、`hermes_local` 本步骤不做完整执行实现。
+- `openclaw_gateway`、`hermes_local` 本步骤不做完整执行实现；`openclaw_gateway` 已在后续 OpenClaw Gateway 工作中升级为真实 WebSocket Gateway runtime，Step 14 的该条只描述当阶段边界。
 - Workspace 生命周期与产物持久化，归 Step 15。
 - Workspace runtime service 建立、复用、释放和停止，归 Step 15。
 - Cost/activity 查询归 Step 21；budget 治理归 Step 22。
@@ -195,7 +195,7 @@ Step 14 剩余工作必须先补齐控制面可调用的服务端契约，再深
 ## 验收
 
 - `http` adapter 可以通过 heartbeat run 执行，并将成功、非 2xx、超时和网络错误写入兼容 run 结果。
-- Runtime environment test API 对 `process`、`codex_local`、`http`、`claude_local`、`opencode_local` 有真实 probe 结果；对 `gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 返回可解释的未纳入结果。
+- Runtime environment test API 对 `process`、`codex_local`、`http`、`claude_local`、`opencode_local` 有真实 probe 结果；对 `gemini_local`、`cursor`、`pi_local`、`openclaw_gateway`、`hermes_local` 在 Step 14 当阶段返回可解释的未纳入结果。`openclaw_gateway` 的后续真实 probe 由 OpenClaw Gateway 实现覆盖。
 - `codex_local`、`claude_local` 与 `opencode_local` 的执行、取消、日志、进程元数据、session、usage、loaded skills、认证错误、模型错误和失败行为复用 Step 11/13 的 adapter contract 与 run 状态机。
 - Runtime model discovery 对 `codex_local` 与 `opencode_local` 有上游兼容发现与缓存，对 `claude_local` 有上游静态模型列表，对未纳入 runtime 有明确未支持结果。
 - Skills snapshot、sync、enable、private skill、analytics 对已纳入 runtime 有上游兼容响应结构和 activity 副作用。

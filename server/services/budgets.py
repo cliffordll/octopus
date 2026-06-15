@@ -200,6 +200,12 @@ class BudgetService:
             "spentMonthlyCents": org.spent_monthly_cents,
         }
 
+    async def get_agent_org_id(self, agent_id: str) -> str:
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None:
+            raise LookupError("Agent not found")
+        return agent.org_id
+
     async def update_agent_budget(self, agent_id: str, amount: int) -> dict[str, int]:
         agent = await update_agent(
             self._session, agent_id, {"budget_monthly_cents": amount}

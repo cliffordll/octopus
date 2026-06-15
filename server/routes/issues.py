@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import re
+from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from packages.shared.api_paths.issue_attachments import (
@@ -24,18 +26,21 @@ from packages.shared.api_paths.issues import (
     ISSUE_EXECUTE_PATH,
     ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
+    ISSUE_PASSIVE_FOLLOWUP_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ISSUE_WORK_PRODUCTS_PATH,
     ORG_ISSUE_LIST_PATH,
     WORK_PRODUCT_DETAIL_PATH,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
+from packages.shared.types.agent import Agent
 from packages.shared.types.issue import (
     DocumentRevision,
     IssueDetail,
     IssueDocument,
     IssueDocumentSummary,
     IssueListItem,
+    UpdateIssuePayload,
 )
 from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.types.workspace import IssueWorkProduct
@@ -53,6 +58,8 @@ from packages.shared.validators.work_product import (
     validate_create_issue_work_product,
     validate_update_issue_work_product,
 )
+from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.heartbeat import get_wakeup_by_idempotency_key
 
 from ..dependencies.access import (
     assert_organization_access,
@@ -60,19 +67,23 @@ from ..dependencies.access import (
     require_board_access,
     require_organization_access,
 )
+from ..dependencies.agents import get_agent_service
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..dependencies.issues import get_issue_service
 from ..dependencies.documents import get_document_service
+from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
+from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..services.documents import DocumentService
 from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
+_MENTION_PATTERN = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -87,6 +98,96 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
     tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
     task.add_done_callback(tasks.discard)
+
+
+def _mentioned_tokens(body: str) -> set[str]:
+    return {match.group(1).strip().lower() for match in _MENTION_PATTERN.finditer(body)}
+
+
+def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
+    if wakeup is None:
+        return "Issue assignee is not invokable"
+    if wakeup.status == "deferred_agent_paused":
+        return (
+            "Issue execution was deferred because the assignee agent is paused. "
+            "Resume the agent to continue."
+        )
+    if wakeup.status == "deferred_issue_execution":
+        return (
+            "Issue execution was deferred because the issue already has an active "
+            "execution run. It will continue after the active run finishes."
+        )
+    if wakeup.status == "skipped" and wakeup.error == "heartbeat.wakeOnDemand.disabled":
+        return (
+            "Issue execution was skipped because the assignee agent has on-demand "
+            "wakeup disabled."
+        )
+    if wakeup.status == "skipped" and wakeup.error:
+        return f"Issue execution was skipped: {wakeup.error}"
+    return "Issue assignee is not invokable"
+
+
+async def _mentioned_agents(
+    agent_service: AgentService, org_id: str, body: str
+) -> list[Agent]:
+    tokens = _mentioned_tokens(body)
+    if not tokens:
+        return []
+    agents = await agent_service.list_for_org(org_id)
+    mentioned: list[Agent] = []
+    for agent in agents:
+        aliases = {
+            value.lower()
+            for value in (agent["id"], agent["name"], agent["urlKey"])
+            if isinstance(value, str) and value
+        }
+        if tokens & aliases:
+            mentioned.append(agent)
+    return mentioned
+
+
+async def _queue_issue_comment_mention_wakeup(
+    heartbeat: HeartbeatService,
+    issue: IssueDetail,
+    *,
+    mentioned_agent_id: str,
+    comment_id: str,
+    comment_body: str,
+    actor_type: str,
+    actor_id: str,
+) -> None:
+    payload: WakeAgentPayload = {
+        "source": "on_demand",
+        "triggerDetail": "system",
+        "reason": "issue_comment_mentioned",
+        "payload": {
+            "issueId": issue["id"],
+            "mutation": "comment_mention",
+            "commentId": comment_id,
+        },
+        "contextSnapshot": {
+            "issueId": issue["id"],
+            "source": "issue.comment",
+            "wakeSource": "mention",
+            "wakeReason": "issue_comment_mentioned",
+            "commentId": comment_id,
+            "commentBody": comment_body,
+            "issue": {
+                "id": issue["id"],
+                "title": issue["title"],
+                "description": issue.get("description"),
+                "status": issue["status"],
+                "priority": issue["priority"],
+            },
+        },
+    }
+    await heartbeat.wakeup(
+        mentioned_agent_id,
+        payload,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        execute_immediately=False,
+    )
 
 
 @router.get(ISSUE_LIST_MISSING_ORG_PATH)
@@ -192,6 +293,13 @@ async def create_issue_route(
         actor_id=actor.actor_id,
         actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
     )
+    reviewer_agent_id = issue.get("reviewerAgentId")
+    if (
+        reviewer_agent_id
+        and issue["status"] in {"in_review", "blocked"}
+        and not (actor.actor_type == "agent" and actor.actor_id == reviewer_agent_id)
+    ):
+        _schedule_dispatch(request, reviewer_agent_id)
     return issue
 
 
@@ -302,6 +410,9 @@ async def checkout_issue_route(
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
     )
+    assignee_agent_id = updated.get("assigneeAgentId")
+    if assignee_agent_id and updated["status"] != "backlog":
+        _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 
@@ -311,6 +422,7 @@ async def execute_issue_route(
     request: Request,
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    session: AsyncSession = Depends(get_session),
 ) -> HeartbeatRun | JSONResponse:
     detail = await service.get_by_id(id)
     if detail is None:
@@ -325,16 +437,22 @@ async def execute_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Issue must be assigned to an agent before execution",
         )
+    if detail["status"] in {"done", "cancelled"}:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Reopen the issue before execution",
+        )
     active = await heartbeat.get_active_for_issue(id)
     if active is not None:
         return active
 
     actor = require_actor_identity(request)
+    idempotency_key = f"issue:{id}:execute"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
         "reason": "issue_execute",
-        "idempotencyKey": f"issue:{id}:execute",
+        "idempotencyKey": idempotency_key,
         "payload": {"issueId": id, "mutation": "execute"},
         "contextSnapshot": {
             "issueId": id,
@@ -350,23 +468,91 @@ async def execute_issue_route(
             },
         },
     }
-    run = await heartbeat.wakeup(
-        assignee_agent_id,
-        payload,
-        actor_type="agent" if actor.actor_type == "agent" else "user",
-        actor_id=actor.actor_id,
-        execute_immediately=False,
-    )
+    try:
+        run = await heartbeat.wakeup(
+            assignee_agent_id,
+            payload,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+            execute_immediately=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if run is None:
+        wakeup = await get_wakeup_by_idempotency_key(
+            session, assignee_agent_id, idempotency_key
+        )
+        if wakeup is not None:
+            return JSONResponse(
+                status_code=http_status.HTTP_202_ACCEPTED,
+                content={
+                    "status": wakeup.status,
+                    "detail": _issue_execute_unavailable_detail(wakeup),
+                },
+            )
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail="Issue assignee is not invokable",
+            detail=_issue_execute_unavailable_detail(wakeup),
         )
     enriched = await heartbeat.get(run["id"])
     assert enriched is not None
+    await insert_activity_log(
+        session,
+        org_id=detail["orgId"],
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        action="issue.executed",
+        entity_type="issue",
+        entity_id=id,
+        agent_id=assignee_agent_id,
+        run_id=enriched["id"],
+        details={
+            "agentId": assignee_agent_id,
+            "runId": enriched["id"],
+            "reason": "issue_execute",
+            "status": enriched["status"],
+        },
+    )
     if enriched["status"] == "queued":
         _schedule_dispatch(request, enriched["agentId"])
     return JSONResponse(enriched, status_code=http_status.HTTP_202_ACCEPTED)
+
+
+@router.post(ISSUE_PASSIVE_FOLLOWUP_PATH)
+async def request_issue_passive_followup_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> JSONResponse:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    assert_organization_access(request, detail["orgId"])
+    actor = require_actor_identity(request)
+    try:
+        run = await heartbeat.request_issue_passive_followup(
+            id,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if run is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    if run["status"] == "queued":
+        _schedule_dispatch(request, run["agentId"])
+    return JSONResponse(run, status_code=http_status.HTTP_202_ACCEPTED)
 
 
 @router.patch(ISSUE_DETAIL_PATH)
@@ -401,6 +587,27 @@ async def update_issue_route(
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Only the checkout owner can mark issue done",
+            )
+        assignee_done_requested_review = (
+            actor.actor_type == "agent"
+            and payload.get("status") == "done"
+            and detail.get("assigneeAgentId") == actor.actor_id
+            and (
+                bool(detail.get("reviewerUserId"))
+                or (
+                    bool(detail.get("reviewerAgentId"))
+                    and detail.get("reviewerAgentId") != actor.actor_id
+                )
+            )
+        )
+        if assignee_done_requested_review:
+            payload = cast(
+                UpdateIssuePayload,
+                {
+                    **payload,
+                    "status": "in_review",
+                    "requestedStatus": "done",
+                },
             )
         updated = await service.update_issue(
             id,
@@ -448,12 +655,23 @@ async def update_issue_route(
         and updated["status"] in {"in_review", "blocked"}
     )
     if (
+        actor.actor_type != "agent"
+        and "status" in payload
+        and updated["status"] in {"done", "blocked", "in_review"}
+    ):
+        await heartbeat.skip_scheduled_issue_passive_followups(
+            id,
+            reason="Issue status was manually closed after missing closeout",
+        )
+    if (
         status_changed_to_review
         or status_changed_to_blocked
         or reviewer_changed_in_reviewable
     ):
         mutation = (
-            "status_to_in_review"
+            "assignee_done"
+            if assignee_done_requested_review
+            else "status_to_in_review"
             if status_changed_to_review
             else "status_to_blocked"
             if status_changed_to_blocked
@@ -466,7 +684,9 @@ async def update_issue_route(
             updated,
             mutation=mutation,
             context_source=(
-                "issue.status_change"
+                "issue.assignee_done"
+                if assignee_done_requested_review
+                else "issue.status_change"
                 if status_changed_to_review or status_changed_to_blocked
                 else "issue.reviewer_change"
             ),
@@ -474,6 +694,11 @@ async def update_issue_route(
             actor_id=actor.actor_id,
             actor_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
         )
+        reviewer_agent_id = updated.get("reviewerAgentId")
+        if reviewer_agent_id and not (
+            actor.actor_type == "agent" and actor.actor_id == reviewer_agent_id
+        ):
+            _schedule_dispatch(request, reviewer_agent_id)
     if status_changed_from_backlog:
         await queue_issue_assignment_wakeup(
             heartbeat,
@@ -481,11 +706,14 @@ async def update_issue_route(
             reason="issue_status_changed",
             mutation="update",
             context_source="issue.status_change",
-            source="automation",
-            wake_source="automation",
+            source="assignment",
+            wake_source="assignment",
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
         )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id:
+            _schedule_dispatch(request, assignee_agent_id)
     if status_returned_from_review_to_assignee:
         await queue_issue_assignment_wakeup(
             heartbeat,
@@ -496,6 +724,9 @@ async def update_issue_route(
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
         )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id:
+            _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 
@@ -532,6 +763,8 @@ async def create_issue_comment_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    agent_service: AgentService = Depends(get_agent_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     detail = await service.get_by_id(id)
@@ -556,6 +789,51 @@ async def create_issue_comment_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
+    user_intervention_stopped_followup = (
+        actor.actor_type != "agent"
+        and await heartbeat.skip_scheduled_issue_passive_followups(
+            id,
+            reason="Issue has user comment after missing closeout",
+        )
+    )
+    queued_assignee_wakeup = not (
+        user_intervention_stopped_followup
+        or (
+            actor.actor_type == "agent"
+            and actor.actor_id == detail.get("assigneeAgentId")
+        )
+    )
+    if queued_assignee_wakeup:
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            detail,
+            reason="issue_comment_added",
+            mutation="comment",
+            context_source="issue.comment",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+            extra_payload={"commentId": comment.id},
+            extra_context={"commentId": comment.id, "commentBody": comment.body},
+        )
+    for mentioned in await _mentioned_agents(
+        agent_service, detail["orgId"], comment.body
+    ):
+        mentioned_agent_id = mentioned["id"]
+        if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
+            continue
+        if queued_assignee_wakeup and mentioned_agent_id == detail.get(
+            "assigneeAgentId"
+        ):
+            continue
+        await _queue_issue_comment_mention_wakeup(
+            heartbeat,
+            detail,
+            mentioned_agent_id=mentioned_agent_id,
+            comment_id=comment.id,
+            comment_body=comment.body,
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
     return {
         "id": comment.id,
         "issueId": comment.issue_id,
@@ -572,6 +850,7 @@ async def record_issue_review_decision_route(
     id: str,
     request: Request,
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
     body: dict[str, Any] = Body(...),
 ) -> IssueDetail:
     detail = await service.get_by_id(id)
@@ -607,6 +886,10 @@ async def record_issue_review_decision_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
+    await heartbeat.cancel_open_issue_review_wakeups(
+        id,
+        reason="review already resolved",
+    )
     return updated
 
 

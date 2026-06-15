@@ -120,6 +120,18 @@ When updating an existing document, send the latest `baseRevisionId` or the API 
 
 `PATCH` accepts `comment` alongside mutable issue fields such as `status`, `priority`, `assigneeAgentId`, `assigneeUserId`, `reviewerAgentId`, `reviewerUserId`, `projectId`, `goalId`, and `parentId`.
 
+`status: "in_review"` requires an effective `reviewerAgentId` or
+`reviewerUserId`. Creating an issue in review, moving an issue into review, or
+clearing the last reviewer while it remains in review returns `422` with:
+
+```text
+in_review requires reviewerAgentId or reviewerUserId
+```
+
+Only `reviewerAgentId` creates and dispatches a reviewer agent wakeup.
+`reviewerUserId` represents a human review assignment and does not create an
+agent run.
+
 ### Attachments
 
 - `POST /api/orgs/:orgId/issues/:issueId/attachments`
@@ -175,7 +187,7 @@ Loading policy:
 - `POST /api/approvals/:approvalId/approve`
 - `POST /api/approvals/:approvalId/reject`
 
-When `CONTROL_PLANE_APPROVAL_ID` is set, read the approval and its linked issues first.
+When `OCTOPUS_APPROVAL_ID` is set, read the approval and its linked issues first.
 
 ## Agent Configuration and Instructions
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+import inspect
 from types import SimpleNamespace
 from typing import cast
 
@@ -10,6 +11,7 @@ import pytest
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import _dispose_engine
+from server.routes import agents as agent_routes
 
 
 class BrokenTransaction:
@@ -94,9 +96,41 @@ async def test_close_session_times_out_and_invalidates(
     assert session.invalidate_called
 
 
+async def test_shielded_cleanup_finishes_before_propagating_task_cancellation() -> None:
+    cleanup_started = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def cleanup() -> None:
+        cleanup_started.set()
+        await asyncio.sleep(0.02)
+        cleanup_finished.set()
+
+    task = asyncio.create_task(
+        database_dependency._run_shielded_cleanup(
+            "test cleanup",
+            cleanup,
+            timeout_seconds=1.0,
+        )
+    )
+    await cleanup_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cleanup_finished.is_set()
+
+
 async def test_dispose_engine_times_out() -> None:
     engine = SlowDisposeEngine()
 
     await _dispose_engine(engine, timeout_seconds=0.01)  # type: ignore[arg-type]
 
     assert engine.dispose_started
+
+
+def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
+    source = inspect.getsource(agent_routes.stream_heartbeat_run_route)
+
+    assert "async with session_factory() as session" not in source
+    assert "_close_session(session)" in source

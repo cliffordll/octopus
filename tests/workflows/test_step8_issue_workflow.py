@@ -185,7 +185,12 @@ async def test_review_approve_moves_issue_to_done(session: AsyncSession) -> None
     async with async_transaction(session):
         created = await service.create_issue(
             org.id,
-            {"title": "Review approve", "status": "in_review", "originKind": "manual"},
+            {
+                "title": "Review approve",
+                "status": "in_review",
+                "originKind": "manual",
+                "reviewerUserId": "reviewer-1",
+            },
             actor_type="board",
             actor_id="user-1",
         )
@@ -226,6 +231,7 @@ async def test_review_request_changes_moves_issue_back_to_in_progress(
                 "title": "Review changes",
                 "status": "in_review",
                 "originKind": "manual",
+                "reviewerUserId": "reviewer-2",
             },
             actor_type="board",
             actor_id="user-1",
@@ -256,6 +262,7 @@ async def test_review_needs_followup_keeps_status_and_writes_intervention_activi
                 "title": "Needs followup",
                 "status": "in_review",
                 "originKind": "manual",
+                "reviewerUserId": "reviewer-3",
             },
             actor_type="board",
             actor_id="user-1",

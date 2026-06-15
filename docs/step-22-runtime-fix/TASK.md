@@ -1,4 +1,4 @@
-# Step 22: Runtime & Closed-loop Alignment Fix
+﻿# Step 22: Runtime & Closed-loop Alignment Fix
 
 状态：已完成
 
@@ -43,7 +43,7 @@
 - 为 `opencode_local`、`codex_local`、`claude_local` 建立 runtime tool capability 描述边界。
 - 在 runtime prompt/instructions/context 中注入可用工具、关键参数、禁止猜测 schema 的说明。
 - 在 runtime prompt 中注入 workspace output contract：可以读取任务要求的外部源码路径，但持久产物必须写入 Octopus 受管 worktree 或组织 artifacts 目录，避免写到外部源码目录后 UI 无法展示。
-- 在 runtime prompt/env 中注入 issue/run 专属产物目录：`RUDDER_ISSUE_ARTIFACTS_DIR` 与 `RUDDER_RUN_ARTIFACTS_DIR`。单次执行产生的持久文件优先写入 run 目录；跨 run 共享的任务级文件写入 issue 目录。
+- 在 runtime prompt/env 中注入 issue/run 专属产物目录：`OCTOPUS_ISSUE_ARTIFACTS_DIR` 与 `OCTOPUS_RUN_ARTIFACTS_DIR`。单次执行产生的持久文件优先写入 run 目录；跨 run 共享的任务级文件写入 issue 目录。
 - 明确 `opencode_local` 内置 `bash` 工具调用必须携带 `description` 和 `command`，避免只传 `command` 造成 schema error。
 - 将工具 schema error 从 adapter 崩溃中区分出来，保留原始 tool name、缺失字段、input 和可读诊断。
 - 对 OpenCode tool error 做结果归一化：如果 run 后续仍能继续并产生有效结果，不应仅因早期 tool error 直接覆盖最终 run error；如果进程终态失败，则错误摘要应指向首个阻断性错误和退出原因。

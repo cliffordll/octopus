@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 
 import httpx
+import pytest
 
 from cli.__main__ import main
 from cli.client import ApiClient
@@ -253,6 +254,100 @@ def test_issue_comment_and_review_post_payloads() -> None:
     assert requests[1].read() == b'{"body":"Compatible"}'
     assert requests[2].url.path == "/api/issues/issue-1/review-decision"
     assert requests[2].read() == b'{"decision":"approve"}'
+
+
+def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "status": "done"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    output = io.StringIO()
+
+    assert (
+        main(
+            [
+                "issue",
+                "done",
+                "issue-1",
+                "--comment",
+                "Implemented and verified.",
+                "--json",
+            ],
+            client=client,
+            stdout=output,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "block",
+                "issue-2",
+                "--comment",
+                "Waiting for credentials.",
+                "--json",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "review",
+                "issue-3",
+                "--decision",
+                "approve",
+                "--comment",
+                "Review passed.",
+                "--json",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].method == "PATCH"
+    assert requests[0].url.path == "/api/issues/issue-1"
+    assert requests[0].read() == (
+        b'{"status":"done","comment":"Implemented and verified."}'
+    )
+    assert requests[1].method == "PATCH"
+    assert requests[1].url.path == "/api/issues/issue-2"
+    assert requests[1].read() == (
+        b'{"status":"blocked","comment":"Waiting for credentials."}'
+    )
+    assert requests[2].method == "POST"
+    assert requests[2].url.path == "/api/issues/issue-3/review-decision"
+    assert requests[2].read() == (b'{"decision":"approve","note":"Review passed."}')
+    assert output.getvalue().strip().startswith("{")
+
+
+def test_api_client_attaches_runtime_actor_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_AGENT_ID", "agent-1")
+    monkeypatch.setenv("OCTOPUS_ORG_ID", "org-1")
+    monkeypatch.setenv("OCTOPUS_RUN_ID", "run-1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-test-agent-id"] == "agent-1"
+        assert request.headers["x-test-org-id"] == "org-1"
+        assert request.headers["x-octopus-run-id"] == "run-1"
+        return httpx.Response(200, json={"id": "issue-1"})
+
+    assert (
+        main(
+            ["issue", "comment", "issue-1", "--body", "Progress"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
 
 
 def test_issue_attachment_commands_use_storage_routes(tmp_path) -> None:

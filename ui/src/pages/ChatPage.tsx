@@ -59,6 +59,11 @@ function proposalText(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function issueProposalRequiresLabelSelection(proposal: Record<string, unknown>): boolean {
+  if (proposal.requiresLabelSelection === true) return true;
+  return Array.isArray(proposal.labelIds) && proposal.labelIds.length === 0;
+}
+
 const missingAssistantReplyMessage = "智能体没有返回消息。请检查所选智能体运行配置后重试。";
 
 function skillLabel(entry: Record<string, unknown>) {
@@ -247,6 +252,16 @@ export function ChatPage() {
       void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["issue", issue.id] });
+    },
+    onError: (error) => {
+      setSendNotice(displayError(error));
+    },
+  });
+  const updatePlanMode = useMutation({
+    mutationFn: (planMode: boolean) => chatsApi.update(chatId, { planMode }),
+    onSuccess: (updatedChat) => {
+      queryClient.setQueryData(["chat", chatId], updatedChat);
+      void queryClient.invalidateQueries({ queryKey: ["chats", orgId] });
     },
     onError: (error) => {
       setSendNotice(displayError(error));
@@ -548,8 +563,8 @@ export function ChatPage() {
           {messages.error && <ErrorNotice error={messages.error} />}
           <form aria-label="发送消息" className="form chat-composer" onSubmit={submit}>
             <label className="chat-message-input">
-              消息
               <textarea
+                aria-label="消息输入"
                 placeholder="输入消息，Enter 发送，Shift+Enter 换行"
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
@@ -563,6 +578,7 @@ export function ChatPage() {
               </div>
             )}
             {selectedAgentSkills.error && <ErrorNotice error={selectedAgentSkills.error} />}
+            {updatePlanMode.error && <ErrorNotice error={updatePlanMode.error} />}
             <div className="chat-context-controls chat-context-controls-readonly" aria-label="当前对话上下文">
               <label aria-label="当前项目">
                 <select aria-label="项目" disabled value={projectContext?.entityId ?? ""}>
@@ -582,6 +598,16 @@ export function ChatPage() {
                     {chatIssueCreationModeLabel(chat.data?.issueCreationMode)}
                   </option>
                 </select>
+              </label>
+              <label className="chat-plan-mode-toggle">
+                <input
+                  aria-label="计划模式"
+                  checked={Boolean(chat.data?.planMode)}
+                  disabled={updatePlanMode.isPending}
+                  onChange={(event) => updatePlanMode.mutate(event.target.checked)}
+                  type="checkbox"
+                />
+                计划模式
               </label>
               <details
                 className="chat-skill-dropdown"
@@ -610,10 +636,23 @@ export function ChatPage() {
                 发送
               </button>
             </div>
+            <ChatIssueCreationHelp />
           </form>
         </section>
       )}
     </ChatsWorkspace>
+  );
+}
+
+function ChatIssueCreationHelp() {
+  return (
+    <details className="chat-context-help">
+      <summary>任务创建规则</summary>
+      <div>
+        <p>计划模式默认关闭；打开后，任务建议会先停留在规划和修改方案阶段，不会自动创建任务。</p>
+        <p>任务创建模式由对话设置决定；智能体只提交任务建议，不能在回复里自行切换自动创建。</p>
+      </div>
+    </details>
   );
 }
 
@@ -633,6 +672,7 @@ function IssueProposalCard({
   const title = proposalText(proposal.title) || "未命名任务";
   const description = proposalText(proposal.description);
   const priority = proposalText(proposal.priority) || "medium";
+  const requiresLabelSelection = issueProposalRequiresLabelSelection(proposal);
   return (
     <div className="chat-issue-proposal-card">
       <div>
@@ -640,6 +680,7 @@ function IssueProposalCard({
         <strong>{title}</strong>
         {description && <p>{description}</p>}
         <small>优先级：{priority}</small>
+        {requiresLabelSelection && <small>需要人工选择标签，审批后创建任务。</small>}
       </div>
       <button disabled={hasLinkedIssue || pending} onClick={() => onCreate(messageId)} type="button">
         {hasLinkedIssue ? "已有关联任务" : pending ? "创建中..." : "创建任务"}

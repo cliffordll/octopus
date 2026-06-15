@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from ..constants.agent import AgentRole, AgentRuntimeType, AgentStatus, PauseReason
+from ..constants.issue import IssuePriority, IssueStatus
 from .approval import ApprovalDetail
 
 
@@ -53,6 +54,24 @@ class AgentAccessState(TypedDict):
 class AgentDetail(Agent):
     chainOfCommand: list[AgentChainOfCommandEntry]
     access: AgentAccessState
+
+
+AgentInboxRelationship = Literal["assignee", "reviewer", "mentioned"]
+
+
+class AgentInboxItem(TypedDict):
+    relationship: AgentInboxRelationship
+    issueId: str
+    identifier: str | None
+    title: str
+    status: IssueStatus
+    priority: IssuePriority
+    checkoutRunId: str | None
+    executionRunId: str | None
+    wakeReason: str | None
+    wakeCommentId: str | None
+    commentPreview: str | None
+    updatedAt: str
 
 
 class CreateAgentPayload(TypedDict, total=False):

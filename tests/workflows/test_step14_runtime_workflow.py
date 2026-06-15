@@ -314,7 +314,7 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
                 "args": [str(fake_claude)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
@@ -324,7 +324,8 @@ async def test_claude_local_uses_managed_home_and_syncs_credentials(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        "octopus-home/instances/test/organizations/org-claude/claude-home/home"
+        "octopus-home/instances/test/organizations/org-claude/"
+        "claude-home/agents/agent-claude/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] is None
@@ -525,7 +526,8 @@ async def test_opencode_local_injects_desired_skills_into_managed_home(
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
+        "octopus-home/instances/test/organizations/org-opencode/"
+        "opencode-home/agents/agent-opencode/home"
     )
     assert capture["skillText"] == "# Review\n\nReview code changes."
     assert result.result_json is not None
@@ -570,7 +572,7 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
                 "args": [str(fake_opencode)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
@@ -580,7 +582,8 @@ async def test_opencode_local_syncs_credentials_into_managed_home(tmp_path) -> N
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     normalized_home = capture["home"].replace("\\", "/")
     assert normalized_home.endswith(
-        "octopus-home/instances/test/organizations/org-opencode/opencode-home/home"
+        "octopus-home/instances/test/organizations/org-opencode/"
+        "opencode-home/agents/agent-opencode/home"
     )
     assert capture["userProfile"] == capture["home"]
     assert capture["agentHome"] is None
@@ -700,7 +703,7 @@ async def test_opencode_local_syncs_opencode_config_into_managed_home(
                 "args": [str(fake_opencode)],
                 "env": {
                     "OCTOPUS_TEST_CAPTURE": str(capture_path),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                 },
             },
             on_log=_noop_log,

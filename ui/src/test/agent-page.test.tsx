@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+﻿import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -41,6 +41,24 @@ it("controls an agent from its overview and shows runtime status", async () => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: "succeeded", sessionDisplayId: "session-1", totalInputTokens: 10, totalOutputTokens: 5, totalCostCents: 1 });
+    }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") {
+      return respond([
+        {
+          relationship: "assignee",
+          issueId: "issue-1",
+          identifier: "OCT-1",
+          title: "Wire inbox",
+          status: "in_progress",
+          priority: "medium",
+          checkoutRunId: null,
+          executionRunId: null,
+          wakeReason: "issue_comment_added",
+          wakeCommentId: "comment-1",
+          commentPreview: "Please update the implementation plan before continuing.",
+          updatedAt: "2026-06-11T00:00:00Z",
+        },
+      ]);
     }
     if (path === "/api/agents/agent-1/instructions-bundle" && init?.method === "GET") {
       return respond({
@@ -152,6 +170,9 @@ it("controls an agent from its overview and shows runtime status", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1");
   const heading = await screen.findByRole("heading", { name: "Builder" });
+  expect(await screen.findByRole("heading", { name: "待办收件箱" })).toBeInTheDocument();
+  expect(screen.getByText("Wire inbox")).toBeInTheDocument();
+  expect(screen.getByText("Please update the implementation plan before continuing.")).toBeInTheDocument();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
@@ -179,6 +200,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(tabs).getByRole("link", { name: "技能" })).toHaveAttribute(
     "href",
     "/orgs/org-1/agents/agent-1/skills",
+  );
+  expect(within(tabs).getByRole("link", { name: "预算" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/agents/agent-1/budget",
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "说明" }));
   const instructionsPanel = screen.getByRole("region", { name: "Managed Instructions" });
@@ -231,6 +256,16 @@ it("controls an agent from its overview and shows runtime status", async () => {
   await userEvent.click(within(tabs).getByRole("link", { name: "记忆" }));
   const memoryPanel = screen.getByRole("region", { name: "Agent Memory" });
   expect(await within(memoryPanel).findByRole("heading", { name: "记忆" })).toBeInTheDocument();
+  await userEvent.type(within(memoryPanel).getByLabelText("文件路径"), "2026-06-08.md");
+  await userEvent.click(within(memoryPanel).getByRole("button", { name: "新建" }));
+  expect(await within(memoryPanel).findByText("文件已存在：2026-06-08.md")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/agents/agent-1/memory/file",
+    expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ layer: "memory", path: "2026-06-08.md", content: "" }),
+    }),
+  );
   await userEvent.click(within(memoryPanel).getByRole("button", { name: /2026-06-08\.md/ }));
   const memoryContent = screen.getByRole("article", { name: "记忆文件内容" });
   expect(await within(memoryContent).findByDisplayValue(/Daily memory note/)).toBeInTheDocument();
@@ -336,6 +371,7 @@ it("assigns a task to the current agent from a modal", async () => {
     if (path === "/api/agents/agent-1/runtime-state" && init?.method === "GET") {
       return respond({ lastRunStatus: null, sessionDisplayId: null, totalInputTokens: 0, totalOutputTokens: 0, totalCostCents: 0 });
     }
+    if (path === "/api/agents/agent-1/inbox-lite" && init?.method === "GET") return respond([]);
     if (path === "/api/orgs/org-1/issues" && init?.method === "POST") return respond(createdIssue, 201);
     if (path === "/api/issues/issue-1" && init?.method === "GET") return respond(createdIssue);
     if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
@@ -415,6 +451,28 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
       return respond([
         {
+          id: "run-timer",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "running",
+          invocationSource: "timer",
+          triggerDetail: "heartbeat_timer",
+          createdAt: "2026-05-28T23:58:00Z",
+          startedAt: "2026-05-28T23:59:00Z",
+        },
+        {
+          id: "run-assignment",
+          orgId: "org-1",
+          agentId: "agent-1",
+          issueId: "issue-1",
+          issueIdentifier: "OCT-1",
+          issueTitle: "排查队列",
+          status: "queued",
+          invocationSource: "assignment",
+          triggerDetail: "issue_assigned",
+          createdAt: "2026-05-28T23:57:00Z",
+        },
+        {
           id: "run-1",
           orgId: "org-1",
           agentId: "agent-1",
@@ -429,7 +487,41 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
           usageJson: { inputTokens: 10, outputTokens: 2 },
           createdAt: "2026-05-29T01:00:00Z",
         },
+        {
+          id: "run-automation",
+          orgId: "org-1",
+          agentId: "agent-1",
+          status: "running",
+          invocationSource: "automation",
+          triggerDetail: "issue_passive_followup",
+          createdAt: "2026-05-28T23:56:00Z",
+        },
       ]);
+    }
+    if (path === "/api/heartbeat-runs/run-automation" && init?.method === "GET") {
+      return respond({
+        id: "run-automation",
+        orgId: "org-1",
+        agentId: "agent-1",
+        status: "running",
+        invocationSource: "automation",
+        triggerDetail: "issue_passive_followup",
+        createdAt: "2026-05-28T23:56:00Z",
+      });
+    }
+    if (path === "/api/heartbeat-runs/run-automation/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-automation/log" && init?.method === "GET") return respond({ content: "", endOffset: 0, eof: true });
+    if (path === "/api/heartbeat-runs/run-automation/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-automation/cancel" && init?.method === "POST") {
+      return respond({
+        id: "run-automation",
+        orgId: "org-1",
+        agentId: "agent-1",
+        status: "cancelled",
+        invocationSource: "automation",
+        triggerDetail: "issue_passive_followup",
+        createdAt: "2026-05-28T23:56:00Z",
+      });
     }
     return respond({ ...agent, name: "Builder 2" });
   });
@@ -444,8 +536,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.clear(screen.getByLabelText("月度预算（美元）"));
-  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
@@ -457,18 +548,174 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     }),
   );
 
+  await userEvent.click(screen.getByRole("link", { name: "预算" }));
+  await userEvent.clear(await screen.findByLabelText("月度预算（美元）"));
+  await userEvent.type(screen.getByLabelText("月度预算（美元）"), "10");
+  await userEvent.click(screen.getByRole("button", { name: "保存预算" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ budgetMonthlyCents: 1000 }),
+    }),
+  );
+
   await userEvent.click(screen.getByRole("link", { name: "运行" }));
+  const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
+  expect(queueRegion).toHaveTextContent("3 个活跃运行");
+  expect(within(queueRegion).getByText("定时心跳")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
+  expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
   expect((await within(detail).findAllByText("失败")).length).toBeGreaterThanOrEqual(1);
   expect(within(detail).getByText("runtime_error")).toBeInTheDocument();
-  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
   expect(within(detail).getAllByText("model missing").length).toBeGreaterThanOrEqual(1);
-  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
   expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
+  expect(within(detail).queryByText("raw run log")).not.toBeInTheDocument();
+  expect(within(detail).queryByText(/executionWorkspaceId/)).not.toBeInTheDocument();
+  await userEvent.click(within(detail).getByRole("button", { name: "Raw" }));
+  expect(within(detail).getByText("boot ok")).toBeInTheDocument();
+  expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
   expect(within(detail).getByText("raw run log")).toBeInTheDocument();
   expect(within(detail).getByText("npm test")).toBeInTheDocument();
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
-  expect(screen.getByTestId("agent-runs-list-pane")).toBeInTheDocument();
+  const rail = screen.getByTestId("agent-runs-list-pane");
+  expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("定时心跳").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getByText(/issue_passive_followup/)).toBeInTheDocument();
+  expect(within(rail).getByText("OCT-1")).toBeInTheDocument();
+  expect(within(rail).getByText("定时心跳到点触发，用来检查智能体是否需要继续工作。")).toBeInTheDocument();
+  expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
+  expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
+  expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
+  await userEvent.click(within(rail).getByRole("button", { name: /run-automation/ }));
+  expect(await within(detail).findByRole("button", { name: "停止运行" })).toBeInTheDocument();
+  await userEvent.click(within(detail).getByRole("button", { name: "停止运行" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-automation/cancel",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
+});
+
+it("saves heartbeat policy from the agent configuration form", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: { heartbeat: { enabled: true, intervalSec: 120, wakeOnDemand: true, preflightEnabled: true, maxConcurrentRuns: 1 } },
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, ...(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  const interval = screen.getByLabelText("心跳间隔秒数");
+  expect(interval).toHaveValue(120);
+  expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
+  const maxConcurrentRuns = screen.getByLabelText("最大并发运行数");
+  expect(maxConcurrentRuns).toHaveValue(1);
+  await userEvent.clear(interval);
+  await userEvent.type(interval, "450");
+  await userEvent.selectOptions(screen.getByLabelText("空跑预检查"), "disabled");
+  await userEvent.clear(maxConcurrentRuns);
+  await userEvent.type(maxConcurrentRuns, "3");
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":450,"wakeOnDemand":true,"preflightEnabled":false,"maxConcurrentRuns":3}'),
+    }),
+  );
+});
+
+it("materializes the default heartbeat policy from the agent configuration form", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, ...(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  expect(screen.getByLabelText("定时心跳")).toHaveValue("enabled");
+  expect(screen.getByLabelText("心跳间隔秒数")).toHaveValue(300);
+  expect(screen.getByLabelText("按需唤醒")).toHaveValue("enabled");
+  expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
+  expect(screen.getByLabelText("最大并发运行数")).toHaveValue(3);
+  await userEvent.click(screen.getByText("高级 JSON"));
+  const runtimeConfigJson = String((screen.getByLabelText("Runtime config") as HTMLTextAreaElement).value);
+  expect(runtimeConfigJson).toContain('"enabled": true');
+  expect(runtimeConfigJson).toContain('"intervalSec": 300');
+  expect(runtimeConfigJson).toContain('"wakeOnDemand": true');
+
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":300,"wakeOnDemand":true,"preflightEnabled":true,"maxConcurrentRuns":3}'),
+    }),
+  );
+});
+
+it("fills built-in process demo config from the runtime form", async () => {
+  const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, agentRuntimeConfig: JSON.parse(String(init?.body ?? "{}")).agentRuntimeConfig ?? {} });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  expect(screen.getByText("内置 process demo")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "使用内置 demo" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  const updateCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/agents/agent-1" && init?.method === "PATCH");
+  expect(updateCall).toBeDefined();
+  expect(JSON.parse(String(updateCall?.[1]?.body)).agentRuntimeConfig).toEqual({
+    command: "uv",
+    args: ["run", "--no-sync", "python", "-m", "packages.runtimes.process.demo"],
+    timeoutSec: 10,
+  });
 });
 
 it("validates opencode local model before saving agent configuration", async () => {
@@ -476,10 +723,10 @@ it("validates opencode local model before saving agent configuration", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
     }
     return respond({ ...agent, agentRuntimeType: "opencode_local" });
@@ -489,6 +736,7 @@ it("validates opencode local model before saving agent configuration", async () 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
   expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
@@ -513,10 +761,10 @@ it("warns when the configured opencode model is not in organization runtime mode
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
     }
     return respond({});
@@ -548,10 +796,10 @@ it("toggles opencode local skip permissions without replacing other extra args",
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash", enabled: true }]);
     }
     if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
@@ -562,6 +810,7 @@ it("toggles opencode local skip permissions without replacing other extra args",
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await userEvent.click(await screen.findByRole("button", { name: "个性化配置" }));
   const checkbox = await screen.findByLabelText("跳过 OpenCode 权限确认");
   expect(checkbox).toBeChecked();
   expect(screen.getByText(/仅适用于本地可信开发环境/)).toBeInTheDocument();
@@ -604,7 +853,7 @@ it("tests agent runtime availability from configuration", async () => {
   await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
 
   expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
-  expect(screen.getByText("CWD")).toBeInTheDocument();
+  expect(screen.getAllByText("CWD").length).toBeGreaterThan(0);
   expect(screen.getByText("ok")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/adapters/codex_local/test-environment",
@@ -620,7 +869,7 @@ it("shows a model configuration input for opencode agents without configured mod
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") return respond([]);
+    if (path === "/api/llm/providers" && init?.method === "GET") return respond([]);
     return respond({});
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -628,6 +877,54 @@ it("shows a model configuration input for opencode agents without configured mod
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
   expect(await screen.findByLabelText("模型配置")).toHaveValue("openai/gpt-5");
+});
+
+it("updates http runtime config from dedicated runtime fields", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "http",
+    agentRuntimeConfig: { url: "https://old.example/run", method: "POST", timeoutSec: 30 },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ ...agent, ...JSON.parse(String(init.body)) });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(await screen.findByText("HTTP endpoint runtime")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Endpoint URL")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  const url = await screen.findByLabelText("Endpoint URL");
+  await userEvent.clear(url);
+  await userEvent.type(url, "https://runtime.example/execute");
+  await userEvent.selectOptions(screen.getByLabelText("HTTP method"), "PUT");
+  const timeout = screen.getByLabelText("Timeout seconds");
+  await userEvent.clear(timeout);
+  await userEvent.type(timeout, "45");
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  const updateCall = fetchMock.mock.calls.find(([path, init]) => (
+    path === "/api/agents/agent-1" && init?.method === "PATCH"
+  ));
+  expect(updateCall).toBeDefined();
+  expect(JSON.parse(String(updateCall?.[1]?.body)).agentRuntimeConfig).toEqual({
+    url: "https://runtime.example/execute",
+    method: "PUT",
+    timeoutSec: 45,
+  });
 });
 
 it("shows runtime test failures from configuration", async () => {
@@ -763,8 +1060,10 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(await screen.findByRole("heading", { name: "使用分析" })).toBeInTheDocument();
   expect(screen.queryByText("No skills.")).not.toBeInTheDocument();
   expect(screen.getByText("内置技能")).toBeInTheDocument();
-  expect(screen.getByText("社区技能")).toBeInTheDocument();
-  expect(screen.getByText("外部技能")).toBeInTheDocument();
+  expect(screen.getByText("组织技能")).toBeInTheDocument();
+  expect(screen.getByText("智能体私有技能")).toBeInTheDocument();
+  expect(screen.getByText("外部发现")).toBeInTheDocument();
+  expect(screen.queryByText("社区技能")).not.toBeInTheDocument();
   expect(screen.queryByText("Review")).not.toBeInTheDocument();
   expect(screen.queryByText("Debug")).not.toBeInTheDocument();
   expect(screen.queryByText("Deploy")).not.toBeInTheDocument();
@@ -877,8 +1176,23 @@ it("manages skills from agent configuration", async () => {
             runtimeName: "Deep Research",
             sourceLocator: "server/skills/community/deep-research",
             state: "available",
-            enabled: false,
+            enabled: true,
+            desired: false,
             description: "Research deeply",
+          },
+          {
+            key: "external-deep-research",
+            selectionKey: "external:deep-research",
+            runtimeName: "Deep Research",
+            sourceClass: "adapter_home",
+            origin: "user_installed",
+            originLabel: "User-installed",
+            locationLabel: "managed CODEX_HOME/skills",
+            state: "external",
+            managed: false,
+            sourcePath: null,
+            targetPath: "D:/codex-home/skills/deep-research",
+            description: "Runtime already has a same-name skill.",
           },
         ],
         warnings: [
@@ -904,9 +1218,10 @@ it("manages skills from agent configuration", async () => {
   expect(await screen.findByRole("heading", { name: "技能管理" })).toBeInTheDocument();
   expect(await screen.findByText("使用分析")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "组织技能" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "外部技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "智能体私有技能" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(await screen.findByText("Review")).toBeInTheDocument();
   expect(await screen.findByText("deep-research")).toBeInTheDocument();
@@ -921,22 +1236,30 @@ it("manages skills from agent configuration", async () => {
   expect(document.querySelector(".agent-skill-detail-card")).not.toBeInTheDocument();
   await userEvent.click(screen.getByText("Review"));
   expect(screen.getByText(/Turn the current conversation's workflow into a reusable agent skill/)).toBeInTheDocument();
-  expect(screen.getByText("每次智能体运行都会自动加载。")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "内置技能" })).toBeInTheDocument();
-  expect(screen.getByText("Deep Research")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "社区技能" })).toBeInTheDocument();
+  const communityGroup = screen.getByRole("heading", { name: "社区技能" }).closest("section");
+  expect(communityGroup).not.toBeNull();
+  expect(within(communityGroup!).getByText("Deep Research")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "外部发现" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "派生" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("追加启用"), { target: { value: "org:organization/org-1/deep-research, external:debug" } });
-  await userEvent.click(screen.getByRole("button", { name: "追加启用" }));
-  fireEvent.change(screen.getByLabelText("完整列表"), { target: { value: "review, agent:deploy" } });
-  await userEvent.click(screen.getByRole("button", { name: "替换列表" }));
+  expect(screen.getByText("自动启用")).toBeInTheDocument();
+  const externalGroup = screen.getByRole("heading", { name: "外部发现" }).closest("section");
+  expect(externalGroup).not.toBeNull();
+  const externalConflictDescription = within(externalGroup!).getByText("Runtime already has a same-name skill.");
+  const externalConflictSkill = externalConflictDescription.closest("article");
+  expect(externalConflictSkill).not.toBeNull();
+  expect(within(externalConflictSkill!).getByText("Deep Research")).toBeInTheDocument();
   await userEvent.click(screen.getByText("Deploy"));
   expect(screen.getByText("Deploy safely from frontmatter")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "取消使用" }));
+  await userEvent.click(within(screen.getByText("Deploy").closest("article")!).getByRole("switch", { name: /Deploy 技能已启用/ }));
+  await userEvent.click(screen.getByText("deep-research"));
+  const orgSkill = screen.getByText("deep-research").closest("article");
+  expect(orgSkill).not.toBeNull();
+  await userEvent.click(within(orgSkill!).getByRole("switch", { name: /deep-research 技能未启用/ }));
   await userEvent.click(screen.getByText("Debug"));
   const debugSkill = screen.getByText("Debug").closest("article");
   expect(debugSkill).not.toBeNull();
-  await userEvent.click(within(debugSkill!).getByRole("button", { name: "使用" }));
+  await userEvent.click(within(debugSkill!).getByRole("switch", { name: /Debug 技能未启用/ }));
   await userEvent.click(screen.getByRole("button", { name: "创建技能" }));
   const dialog = screen.getByRole("dialog");
   fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "Incident Response" } });
@@ -946,24 +1269,17 @@ it("manages skills from agent configuration", async () => {
   await userEvent.click(within(dialog).getByRole("button", { name: "创建" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1/skills/enable",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ skills: ["org:organization/org-1/deep-research", "external:debug"] }),
-    }),
-  );
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/agents/agent-1/skills/sync",
-    expect.objectContaining({
-      method: "POST",
-      body: JSON.stringify({ desiredSkills: ["review", "agent:deploy"] }),
-    }),
-  );
-  expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/skills/sync",
     expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ desiredSkills: ["review"] }),
+    }),
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1/skills/enable",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ skills: ["org:organization/org-1/deep-research"] }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(

@@ -33,7 +33,12 @@ def skill_snapshot(
 def _codex_skills_home(config: dict[str, Any]) -> Path:
     configured_home = _env_value(config, "CODEX_HOME")
     if configured_home:
-        return Path(configured_home).expanduser().resolve() / "skills"
+        context = config.get("_octopus")
+        agent_id = (
+            _string(context.get("agentId")) if isinstance(context, dict) else None
+        )
+        base = Path(configured_home).expanduser().resolve()
+        return base / "agents" / agent_id / "skills" if agent_id else base / "skills"
     context = config.get("_octopus")
     org_id = "default-org"
     agent_id = "default-agent"

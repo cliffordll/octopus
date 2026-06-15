@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+﻿import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalsApi } from "../api/approvals";
 import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
@@ -104,12 +104,12 @@ describe("runtime provider API", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local",
+      "/api/llm/providers",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/orgs/org-1/runtime-providers",
+      "/api/llm/providers",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -125,12 +125,12 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+      "/api/llm/providers/kimi",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ modelId: "kimi/k2", displayName: "Kimi K2", enabled: true }),
@@ -138,17 +138,17 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
-      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models/kimi%2Fk2",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
-      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models/kimi%2Fk2",
       expect.objectContaining({ method: "DELETE" }),
     );
   });
@@ -574,6 +574,23 @@ describe("agent and heartbeat APIs", () => {
     );
   });
 
+  it("requests an immediate issue passive follow-up", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "run-followup", status: "queued" }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await issuesApi.passiveFollowup("issue-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/issues/issue-1/passive-followup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+  });
+
   it("covers runtime adapter and skills management routes", async () => {
     const fetchMock = vi
       .fn()
@@ -622,6 +639,18 @@ describe("agent and heartbeat APIs", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       9,
       "/api/agents/agent-1/skills/analytics?windowDays=14",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("fetches agent inbox", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await agentsApi.inbox("agent-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agents/agent-1/inbox-lite",
       expect.objectContaining({ method: "GET" }),
     );
   });

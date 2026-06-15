@@ -58,11 +58,21 @@ _REVIEW_DECISION_STATUS_MAP = {
 }
 
 
+def _require_reviewer_for_in_review(values: Mapping[str, Any]) -> None:
+    if values.get("status") != "in_review":
+        return
+    if values.get("reviewer_agent_id") or values.get("reviewer_user_id"):
+        return
+    raise ValueError("in_review requires reviewerAgentId or reviewerUserId")
+
+
 class IssueCheckoutConflictError(RuntimeError):
     pass
 
 
-def _apply_status_side_effects(values: dict[str, Any]) -> None:
+def _apply_status_side_effects(
+    values: dict[str, Any], *, previous_status: str | None = None
+) -> None:
     """Mirror upstream ``applyStatusSideEffects`` in ``issues.helpers.ts``.
 
     When ``status`` transitions to ``in_progress``/``done``/``cancelled`` and
@@ -78,8 +88,12 @@ def _apply_status_side_effects(values: dict[str, Any]) -> None:
         values["started_at"] = now
     if status == "done":
         values["completed_at"] = now
+    elif previous_status == "done":
+        values["completed_at"] = None
     if status == "cancelled":
         values["cancelled_at"] = now
+    elif previous_status == "cancelled":
+        values["cancelled_at"] = None
 
 
 ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
@@ -153,14 +167,17 @@ class IssueService:
         return await self._to_detail(row)
 
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
-        rows = await list_issue_comments(self._session, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            return []
+        rows = await list_issue_comments(self._session, issue.id)
         return list(rows)
 
     async def list_attachments(self, issue_id: str) -> list[IssueAttachmentType]:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             raise ValueError("Issue not found")
-        rows = await list_issue_attachments(self._session, issue_id)
+        rows = await list_issue_attachments(self._session, issue.id)
         return [_to_attachment(row, asset) for row, asset in rows]
 
     async def get_attachment(self, attachment_id: str) -> IssueAttachmentType | None:
@@ -190,6 +207,7 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
+        _require_reviewer_for_in_review(values)
         await self._apply_parent_values(
             org_id,
             values,
@@ -287,7 +305,17 @@ class IssueService:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
 
-        _apply_status_side_effects(values)
+        effective_values = {
+            "status": values.get("status", current.status),
+            "reviewer_agent_id": values.get(
+                "reviewer_agent_id", current.reviewer_agent_id
+            ),
+            "reviewer_user_id": values.get(
+                "reviewer_user_id", current.reviewer_user_id
+            ),
+        }
+        _require_reviewer_for_in_review(effective_values)
+        _apply_status_side_effects(values, previous_status=current.status)
 
         row = await update_issue(self._session, issue_id, values)
         if row is None:
@@ -485,7 +513,7 @@ class IssueService:
         result = await self._session.execute(
             update(Issue)
             .where(
-                Issue.id == issue_id,
+                Issue.id == current.id,
                 Issue.status.in_(expected_statuses),
                 assignee_matches,
                 run_lock_matches,
@@ -574,7 +602,7 @@ class IssueService:
 
         values: dict[str, Any] = {
             "org_id": issue.org_id,
-            "issue_id": issue_id,
+            "issue_id": issue.id,
             "body": payload["body"],
         }
         if actor_type == "agent":
@@ -590,7 +618,7 @@ class IssueService:
             actor_id=actor_id,
             action="issue.comment_added",
             entity_type="issue",
-            entity_id=issue_id,
+            entity_id=issue.id,
             run_id=run_id,
             details=dict(payload),
         )

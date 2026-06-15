@@ -34,6 +34,10 @@ from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
 from .runtime_providers import (
+    LlmModel,
+    LlmProvider,
+    LlmProviderBinding,
+    LlmRuntimeDefault,
     RuntimeGlobalModel,
     RuntimeGlobalProvider,
     RuntimeModel,
@@ -86,6 +90,10 @@ __all__ = [
     "ProjectGoal",
     "OrganizationResource",
     "ProjectResourceAttachment",
+    "LlmProvider",
+    "LlmModel",
+    "LlmProviderBinding",
+    "LlmRuntimeDefault",
     "RuntimeProvider",
     "RuntimeModel",
     "RuntimeGlobalProvider",

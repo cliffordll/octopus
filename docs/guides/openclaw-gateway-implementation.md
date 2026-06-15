@@ -9,9 +9,9 @@ OpenClaw Gateway 是 WebSocket runtime
 不是 HTTP hook runtime，也不是 OpenAI /v1/responses 兼容 runtime
 ```
 
-Octopus 当前已经把 `openclaw_gateway` 放进 runtime 枚举、CLI 选择项和 UI runtime
-列表，但还没有真实 runner 和 environment probe。实现时应补齐原生 Gateway
-WebSocket 协议，而不是复用 `http` runtime。
+Octopus 已经把 `openclaw_gateway` 放进 runtime 枚举、CLI 选择项和 UI runtime
+列表，并已补齐真实 runner、environment probe 和 WebSocket 协议 helper。实现遵循原生
+Gateway WebSocket 协议，不复用 `http` runtime。
 
 ## 上游依据
 
@@ -49,23 +49,26 @@ Octopus 应保留这些前缀，方便后续 run transcript、debug 和上游行
 已存在：
 
 - `packages/shared/constants/agent.py` 包含 `openclaw_gateway`。
-- `packages/runtimes/registry.py` 包含 `openclaw_gateway` 占位。
+- `packages/runtimes/registry.py` 注册 `OpenClawGatewayRuntimeAdapter`。
+- `packages/runtimes/openclaw_gateway/` 包含 protocol、environment 和 runner。
 - `cli/commands/agent.py` 允许选择 `openclaw_gateway`。
 - `ui/src/pages/NewAgentPage.tsx` 和 `ui/src/pages/AgentPage.tsx` 暴露 runtime。
 - `ui/src/utils/runtimeModels.ts` 将 `openclaw_gateway` 识别为支持 provider/model
   配置的 runtime。
+- `tests/contract/test_openclaw_gateway_runtime.py` 覆盖 URL 校验、auth 派生、
+  session key、payload 构造和 environment probe。
+- `tests/contract/test_step14_runtime_adapters.py` 覆盖 registry 与 runtime metadata。
 
-缺口：
+剩余边界：
 
-- 没有 `packages/runtimes/openclaw_gateway/`。
-- 没有真实 runner。
-- 没有 WebSocket environment probe。
-- Step 14 文档中仍把 `openclaw_gateway` 标记为未实现。
-- UI/CLI 只能选择 runtime，缺少面向 OpenClaw 的配置引导和测试反馈。
+- Step 14 文档仍按当阶段说明 `openclaw_gateway` 不做完整执行实现；`FEATURE.md`
+  已标明该 runtime 在后续 OpenClaw Gateway 工作中升级为真实 WebSocket Gateway runtime。
+- UI/CLI 已能选择 runtime 和保存基础 config；OpenClaw 专属 onboarding、invite 和
+  pairing 体验仍属于后续产品化增强。
 
 ## 实现边界
 
-第一批实现只做最小可用 Gateway runtime：
+第一批实现已完成最小可用 Gateway runtime：
 
 - WebSocket 连接和协议握手。
 - 基础认证字段解析。
@@ -262,4 +265,8 @@ UI/CLI 测试：
 - UI/CLI 能创建、编辑和测试 OpenClaw agent。
 - 实现不改变 `http`、`codex_local`、`claude_local`、`opencode_local` 的行为。
 - invite prompt、device signing、auto-pairing 没有被误标为已完成。
+
+## 本地验证记录
+
+- `uv run pytest tests/contract/test_openclaw_gateway_runtime.py tests/contract/test_step14_runtime_adapters.py::test_step14_registry_returns_known_adapters_or_unavailable tests/contract/test_step14_runtime_adapters.py::test_openclaw_gateway_runtime_metadata_reports_environment_support -q`：14 passed。
 

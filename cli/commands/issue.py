@@ -114,8 +114,19 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     review_parser = actions.add_parser("review", help="Record an issue review decision")
     review_parser.add_argument("issue_id")
     review_parser.add_argument("--decision", required=True, choices=DECISIONS)
+    review_parser.add_argument("--comment")
     review_parser.add_argument("--note")
     review_parser.set_defaults(handler=review_issue)
+
+    done_parser = actions.add_parser("done", help="Mark an issue done")
+    done_parser.add_argument("issue_id")
+    done_parser.add_argument("--comment", required=True)
+    done_parser.set_defaults(handler=done_issue)
+
+    block_parser = actions.add_parser("block", help="Mark an issue blocked")
+    block_parser.add_argument("issue_id")
+    block_parser.add_argument("--comment", required=True)
+    block_parser.set_defaults(handler=block_issue)
 
     attachment_list = actions.add_parser("attachments", help="List issue attachments")
     attachment_list.add_argument("issue_id")
@@ -243,10 +254,27 @@ def add_comment(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, str] = {"decision": args.decision}
-    if args.note is not None:
-        payload["note"] = args.note
+    note = args.comment if args.comment is not None else args.note
+    if note is not None:
+        payload["note"] = note
     return client.request(
         "POST", f"/api/issues/{args.issue_id}/review-decision", json=payload
+    )
+
+
+def done_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "PATCH",
+        f"/api/issues/{args.issue_id}",
+        json={"status": "done", "comment": args.comment},
+    )
+
+
+def block_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "PATCH",
+        f"/api/issues/{args.issue_id}",
+        json={"status": "blocked", "comment": args.comment},
     )
 
 

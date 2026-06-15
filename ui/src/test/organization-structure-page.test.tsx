@@ -226,3 +226,44 @@ it("loads organization settings from the avatar destination route", async () => 
     expect.objectContaining({ method: "POST" }),
   );
 });
+
+it("shows organization cost reporting on the organization costs route", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1" && init?.method === "GET") {
+      return respond({
+        id: "org-1",
+        name: "核心团队",
+        description: "核心组织",
+        budgetMonthlyCents: 500000,
+        requireBoardApprovalForNewAgents: false,
+        defaultChatIssueCreationMode: "manual_approval",
+      });
+    }
+    if (path === "/api/orgs/org-1/costs/summary" && init?.method === "GET") {
+      return respond({ totalCostCents: 4234, eventCount: 7, inputTokens: 1200, outputTokens: 340 });
+    }
+    if (path === "/api/orgs/org-1/costs/by-agent" && init?.method === "GET") {
+      return respond([{ agentId: "agent-1", costCents: 2300 }]);
+    }
+    if (path === "/api/orgs/org-1/costs/by-provider" && init?.method === "GET") {
+      return respond([{ provider: "openai", costCents: 1800 }]);
+    }
+    if (path === "/api/orgs/org-1/costs/by-biller" && init?.method === "GET") {
+      return respond([{ biller: "platform", costCents: 4234 }]);
+    }
+    if (path === "/api/orgs/org-1/costs/by-project" && init?.method === "GET") {
+      return respond([{ projectId: "project-1", costCents: 900 }]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/costs");
+
+  expect((await screen.findAllByRole("heading", { name: "成本" })).length).toBeGreaterThanOrEqual(1);
+  expect((await screen.findAllByText("$42.34")).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByText("agent-1")).toBeInTheDocument();
+  expect(screen.getByText("openai")).toBeInTheDocument();
+  expect(screen.getByText("platform")).toBeInTheDocument();
+  expect(screen.getByText("project-1")).toBeInTheDocument();
+});
