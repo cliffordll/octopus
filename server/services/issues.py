@@ -66,6 +66,17 @@ def _require_reviewer_for_in_review(values: Mapping[str, Any]) -> None:
     raise ValueError("in_review requires reviewerAgentId or reviewerUserId")
 
 
+def _require_distinct_assignee_and_reviewer(values: Mapping[str, Any]) -> None:
+    assignee_agent_id = values.get("assignee_agent_id")
+    reviewer_agent_id = values.get("reviewer_agent_id")
+    if (
+        assignee_agent_id
+        and reviewer_agent_id
+        and assignee_agent_id == reviewer_agent_id
+    ):
+        raise ValueError("reviewerAgentId must differ from assigneeAgentId")
+
+
 class IssueCheckoutConflictError(RuntimeError):
     pass
 
@@ -221,6 +232,7 @@ class IssueService:
             and "assignee_user_id" not in values
         ):
             values["assignee_agent_id"] = actor_id
+        _require_distinct_assignee_and_reviewer(values)
         if not values.get("project_id") and not values.get("goal_id"):
             default_goal = await GoalService(
                 self._session
@@ -307,6 +319,9 @@ class IssueService:
 
         effective_values = {
             "status": values.get("status", current.status),
+            "assignee_agent_id": values.get(
+                "assignee_agent_id", current.assignee_agent_id
+            ),
             "reviewer_agent_id": values.get(
                 "reviewer_agent_id", current.reviewer_agent_id
             ),
@@ -315,6 +330,8 @@ class IssueService:
             ),
         }
         _require_reviewer_for_in_review(effective_values)
+        if "assignee_agent_id" in values or "reviewer_agent_id" in values:
+            _require_distinct_assignee_and_reviewer(effective_values)
         _apply_status_side_effects(values, previous_status=current.status)
 
         row = await update_issue(self._session, issue_id, values)

@@ -132,6 +132,13 @@ Only `reviewerAgentId` creates and dispatches a reviewer agent wakeup.
 `reviewerUserId` represents a human review assignment and does not create an
 agent run.
 
+`reviewerAgentId` must differ from `assigneeAgentId`. Self-reviewer agent
+assignments are rejected with `422`:
+
+```text
+reviewerAgentId must differ from assigneeAgentId
+```
+
 ### Attachments
 
 - `POST /api/orgs/:orgId/issues/:issueId/attachments`

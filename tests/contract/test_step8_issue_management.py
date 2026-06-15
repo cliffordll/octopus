@@ -400,6 +400,30 @@ async def test_create_in_review_issue_requires_reviewer(
     assert body["detail"] == "in_review requires reviewerAgentId or reviewerUserId"
 
 
+async def test_create_issue_rejects_same_assignee_and_reviewer_agent(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Self review should be rejected",
+            "status": "todo",
+            "assigneeAgentId": agent_id,
+            "reviewerAgentId": agent_id,
+            "originKind": "manual",
+        },
+    )
+
+    assert code == 422
+    assert body["detail"] == "reviewerAgentId must differ from assigneeAgentId"
+
+
 async def test_create_in_review_issue_with_user_reviewer_does_not_queue_agent(
     app: FastAPI,
     session: AsyncSession,
@@ -485,6 +509,30 @@ async def test_update_issue_to_in_review_requires_reviewer(
 
     assert code == 422
     assert body["detail"] == "in_review requires reviewerAgentId or reviewerUserId"
+
+
+async def test_update_issue_rejects_same_assignee_and_reviewer_agent(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"reviewerAgentId": agent_id},
+    )
+
+    assert code == 422
+    assert body["detail"] == "reviewerAgentId must differ from assigneeAgentId"
 
 
 async def test_update_in_review_issue_cannot_clear_last_reviewer(

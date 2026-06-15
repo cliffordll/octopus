@@ -73,6 +73,7 @@ it("groups issues by status and creates issues for an organization", async () =>
   const dialog = within(screen.getByRole("dialog", { name: "新建任务" }));
   await userEvent.type(dialog.getByLabelText("任务名称"), "核对发布说明");
   await userEvent.selectOptions(dialog.getByLabelText("智能体"), "agent-1");
+  expect(within(dialog.getByLabelText("Reviewer")).getByRole("option", { name: "Builder" })).toBeDisabled();
   await userEvent.selectOptions(dialog.getByLabelText("项目"), "project-1");
   await userEvent.selectOptions(dialog.getByLabelText("Reviewer"), "agent-2");
   await userEvent.selectOptions(dialog.getByLabelText("模型配置"), "gpt-5-codex");
