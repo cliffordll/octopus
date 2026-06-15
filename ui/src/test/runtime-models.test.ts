@@ -30,9 +30,11 @@ describe("runtime model references", () => {
       "opencode_local",
       "codex_local",
       "claude_local",
+      "openclaw_local",
     ]);
     expect(supportsRuntimeModels("codex_local")).toBe(true);
     expect(supportsRuntimeModels("claude_local")).toBe(true);
+    expect(supportsRuntimeModels("openclaw_local")).toBe(true);
     expect(supportsRuntimeModels("openclaw_gateway")).toBe(false);
     expect(supportsRuntimeModels("process")).toBe(false);
   });
