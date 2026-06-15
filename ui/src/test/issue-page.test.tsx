@@ -1045,6 +1045,9 @@ it("auto-expands the latest live run and explains silent runtime progress", asyn
   const output = await screen.findByRole("region", { name: "执行输出" });
   expect(output).toHaveTextContent("进程 31740 已启动，等待 runtime 输出。");
   expect(output).toHaveTextContent("最近进度：runtime still running");
+  expect(output).toHaveTextContent("Run stream ended without a final or error event");
+  expect(output).toHaveTextContent("动态刷新中");
+  expect(output).not.toHaveTextContent("stream 连接中");
 });
 
 it("surfaces operator closeout review activity on the issue page", async () => {

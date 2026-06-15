@@ -1936,6 +1936,8 @@ function IssueRunDetailsPanel({
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       setStreamError(error instanceof Error ? error.message : "Run stream failed");
+      void queryClient.invalidateQueries({ queryKey: ["heartbeat-run", runId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
     }).finally(() => {
       if (!controller.signal.aborted) setStreamActive(false);
     });

@@ -381,6 +381,26 @@ describe("project API", () => {
 });
 
 describe("agent and heartbeat APIs", () => {
+  it("rejects a run stream error terminal event", async () => {
+    const onError = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "error", error: "runtime disconnected" },
+    ], 200)));
+
+    await expect(heartbeatApi.streamRun("run-1", { onError })).rejects.toThrow("runtime disconnected");
+    expect(onError).toHaveBeenCalledWith("runtime disconnected");
+  });
+
+  it("rejects a run stream that ends without a terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "run", run: { id: "run-1", status: "running" } },
+    ], 200)));
+
+    await expect(heartbeatApi.streamRun("run-1")).rejects.toThrow(
+      "Run stream ended without a final or error event",
+    );
+  });
+
   it("creates, pauses and invokes an agent, then loads runs", async () => {
     const fetchMock = vi
       .fn()
@@ -783,6 +803,16 @@ describe("chat API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow("database is locked");
+  });
+
+  it("rejects a chat stream that ends without a terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "assistant_delta", delta: "partial" },
+    ])));
+
+    await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow(
+      "Chat stream ended without a final response",
+    );
   });
 
   it("shows the root cause for JSON API errors", async () => {

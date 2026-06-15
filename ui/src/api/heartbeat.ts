@@ -106,6 +106,8 @@ export const heartbeatApi = {
       signal: options.signal,
     });
     if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    let finalReceived = false;
+    let streamError: string | null = null;
     await readNdjsonStream(response, (value) => {
       if (!value || typeof value !== "object") return;
       const event = value as Record<string, unknown>;
@@ -123,12 +125,16 @@ export const heartbeatApi = {
         });
       }
       if (event.type === "final" && event.run && typeof event.run === "object") {
+        finalReceived = true;
         options.onFinal?.(event.run as HeartbeatRun);
       }
       if (event.type === "error") {
-        options.onError?.(typeof event.error === "string" ? event.error : "Run stream error");
+        streamError = typeof event.error === "string" ? event.error : "Run stream error";
+        options.onError?.(streamError);
       }
     });
+    if (streamError) throw new Error(streamError);
+    if (!finalReceived) throw new Error("Run stream ended without a final or error event");
   },
   listWorkspaceOperations: (runId: string): Promise<WorkspaceOperation[]> =>
     request<WorkspaceOperation[]>(`/api/heartbeat-runs/${encodeURIComponent(runId)}/workspace-operations`, {
