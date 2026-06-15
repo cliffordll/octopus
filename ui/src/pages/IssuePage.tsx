@@ -192,6 +192,14 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, i
   return sorted[0] ?? null;
 }
 
+function latestTerminalRunForIssue(runs: HeartbeatRun[], issueId: string): HeartbeatRun | null {
+  const listedRunIds = new Set(runs.map(heartbeatRunId).filter(Boolean));
+  const sorted = runs
+    .filter((run) => isTerminalRun(run.status) && runBelongsToIssue(run, issueId, listedRunIds))
+    .sort((left, right) => runSortTime(right) - runSortTime(left));
+  return sorted[0] ?? null;
+}
+
 function metadataText(metadata: Record<string, unknown> | null | undefined, key: string): string {
   const value = metadata?.[key];
   if (value === null || value === undefined || value === "") return "-";
@@ -2225,16 +2233,18 @@ export function IssuePage() {
     },
   });
   useEffect(() => {
-    const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
+    const latestRun = latestTerminalRunForIssue(issueRuns.data ?? [], issueId);
     const latestRunId = heartbeatRunId(latestRun);
-    if (!latestRunId || !isTerminalRun(latestRun?.status)) return;
+    if (!latestRunId) return;
     const refreshKey = `${latestRunId}:${latestRun?.status}`;
     if (refreshedTerminalRunRef.current === refreshKey) return;
     refreshedTerminalRunRef.current = refreshKey;
     void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+    void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
+    void queryClient.invalidateQueries({ queryKey: ["issue-activity", issueId] });
     void queryClient.invalidateQueries({ queryKey: ["issue-documents", issueId] });
     void queryClient.invalidateQueries({ queryKey: ["issue-work-products", issueId] });
-  }, [issueId, issueRuns.data, queryClient]);
+  }, [issueId, issueRuns.data, orgId, queryClient]);
   const review = useMutation({
     mutationFn: (decision: IssueReviewDecision) => issuesApi.review(issueId, { decision }),
     onSuccess: () => {
