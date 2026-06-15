@@ -38,6 +38,7 @@ async def _noop_on_log(stream: str, chunk: str) -> None:
 def test_step14_runtime_contract_exposes_adapter_paths() -> None:
     paths = importlib.import_module("packages.shared.api_paths.agents")
 
+    assert paths.ORG_ADAPTER_LIST_PATH == "/api/orgs/{orgId}/adapters"
     assert paths.ORG_ADAPTER_MODELS_PATH == "/api/orgs/{orgId}/adapters/{type}/models"
     assert (
         paths.ORG_ADAPTER_TEST_ENVIRONMENT_PATH
@@ -58,6 +59,15 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
 def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
     registry = importlib.import_module("packages.runtimes.registry")
 
+    assert registry.list_runtime_adapter_types() == [
+        "process",
+        "codex_local",
+        "http",
+        "claude_local",
+        "opencode_local",
+        "openclaw_gateway",
+        "openclaw_local",
+    ]
     assert registry.get_runtime_adapter("http").type == "http"
     assert registry.get_runtime_adapter("claude_local").type == "claude_local"
     assert registry.get_runtime_adapter("opencode_local").type == "opencode_local"
@@ -546,6 +556,30 @@ async def test_adapter_models_and_environment_routes(
     assert unavailable_quota_code == 200
     assert unavailable_quota["provider"] == "gemini_local"
     assert unavailable_quota["ok"] is False
+
+
+async def test_adapter_list_route_returns_registered_runtime_types(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    response_code, adapters = await _request(
+        application, "GET", f"/api/orgs/{org_id}/adapters"
+    )
+
+    assert response_code == 200
+    assert [adapter["type"] for adapter in adapters] == [
+        "process",
+        "codex_local",
+        "http",
+        "claude_local",
+        "opencode_local",
+        "openclaw_gateway",
+        "openclaw_local",
+    ]
+    assert all("capabilities" in adapter["metadata"] for adapter in adapters)
+    assert "gemini_local" not in {adapter["type"] for adapter in adapters}
 
 
 async def test_local_runtime_environment_reports_cwd_command_and_auth_checks(

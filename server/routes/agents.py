@@ -45,6 +45,7 @@ from packages.shared.api_paths.agents import (
     ORG_AGENT_NAME_SUGGESTION_PATH,
     ORG_ADAPTER_METADATA_PATH,
     ORG_ADAPTER_MODELS_PATH,
+    ORG_ADAPTER_LIST_PATH,
     ORG_ADAPTER_QUOTA_WINDOWS_PATH,
     ORG_ADAPTER_TEST_ENVIRONMENT_PATH,
 )
@@ -52,6 +53,7 @@ from packages.runtimes import (
     get_runtime_adapter,
     get_runtime_metadata,
     get_runtime_quota_windows,
+    list_runtime_adapters,
     list_runtime_models,
 )
 from packages.shared.api_paths.heartbeat import (
@@ -707,6 +709,14 @@ async def list_agent_configurations_route(
     return await service.list_configurations_for_org(orgId)
 
 
+@router.get(ORG_ADAPTER_LIST_PATH)
+async def list_adapters_route(
+    orgId: str,
+    _: None = Depends(require_organization_access),
+) -> list[dict[str, Any]]:
+    return await list_runtime_adapters()
+
+
 @router.get(ORG_ADAPTER_MODELS_PATH)
 async def list_adapter_models_route(
     orgId: str,
@@ -1157,16 +1167,19 @@ async def stream_heartbeat_run_route(
     offset: int = 0,
     limitBytes: int = 65_536,
     pollMs: int = 1000,
-    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> StreamingResponse:
-    run = await heartbeat.get(runId)
+    session_factory = request.app.state.session_factory
+    session = session_factory()
+    try:
+        run = await HeartbeatService(session).get(runId)
+    finally:
+        await _close_session(session)
     if run is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Heartbeat run not found"
         )
     assert_organization_access(request, run["orgId"])
 
-    session_factory = request.app.state.session_factory
     initial_after_seq = max(0, afterSeq)
     initial_offset = max(0, offset)
     limit_bytes = max(1024, min(limitBytes, 1_048_576))

@@ -401,6 +401,12 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "codex_local", displayName: "Codex", metadata: { type: "codex_local", capabilities: { models: true } } },
+      ]);
+    }
     if (path === "/api/heartbeat-runs/run-1/log" && init?.method === "GET") {
       return respond({ content: "raw run log", endOffset: 11, eof: true });
     }
@@ -723,6 +729,12 @@ it("validates opencode local model before saving agent configuration", async () 
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "opencode_local", displayName: "OpenCode", metadata: { type: "opencode_local", capabilities: { models: true } } },
+      ]);
+    }
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
@@ -734,6 +746,7 @@ it("validates opencode local model before saving agent configuration", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
+  expect(within(await screen.findByLabelText("Runtime")).queryByRole("option", { name: "claude_local" })).not.toBeInTheDocument();
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
   expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));

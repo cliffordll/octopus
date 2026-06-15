@@ -614,6 +614,9 @@ describe("agent and heartbeat APIs", () => {
   it("covers runtime adapter and skills management routes", async () => {
     const fetchMock = vi
       .fn()
+      .mockReturnValueOnce(jsonResponse([
+        { type: "process", displayName: "process", metadata: { type: "process", capabilities: {} } },
+      ]))
       .mockReturnValueOnce(jsonResponse([{ id: "gpt-5", label: "GPT-5" }]))
       .mockReturnValueOnce(jsonResponse({ type: "codex_local", capabilities: { models: true } }))
       .mockReturnValueOnce(jsonResponse({ provider: "openai", ok: false, windows: [] }))
@@ -625,6 +628,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ totalCount: 0, skills: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
+    await agentsApi.adapters("org-1");
     await agentsApi.adapterModels("org-1", "codex_local");
     await agentsApi.adapterMetadata("org-1", "codex_local");
     await agentsApi.adapterQuotaWindows("org-1", "codex_local");
@@ -637,11 +641,16 @@ describe("agent and heartbeat APIs", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      "/api/orgs/org-1/adapters",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "/api/orgs/org-1/adapters/codex_local/models",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       "/api/orgs/org-1/adapters/http/test-environment",
       expect.objectContaining({
         method: "POST",
@@ -649,7 +658,7 @@ describe("agent and heartbeat APIs", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      6,
+      7,
       "/api/agents/agent-1/skills/sync",
       expect.objectContaining({
         method: "POST",
@@ -657,7 +666,7 @@ describe("agent and heartbeat APIs", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      9,
+      10,
       "/api/agents/agent-1/skills/analytics?windowDays=14",
       expect.objectContaining({ method: "GET" }),
     );
