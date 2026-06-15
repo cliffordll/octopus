@@ -152,9 +152,32 @@ async def test_openclaw_local_runtime_metadata_reports_capabilities() -> None:
 
     assert metadata["type"] == "openclaw_local"
     assert metadata["capabilities"]["environmentTest"] is True
-    assert metadata["capabilities"]["skills"] is False
+    assert metadata["capabilities"]["skills"] is True
     assert metadata["supportsLocalAgentJwt"] is True
     assert isinstance(metadata["agentConfigurationDoc"], str)
+
+
+async def test_openclaw_local_reports_skill_snapshot(tmp_path: Path) -> None:
+    from packages.runtimes.openclaw_local import OpenClawLocalRuntimeAdapter
+
+    skills_root = tmp_path / "skills"
+    skills_root.joinpath("review").mkdir(parents=True)
+    skills_root.joinpath("review", "SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+
+    adapter = OpenClawLocalRuntimeAdapter()
+    snapshot = await adapter.list_skills(
+        {"skillsRootPath": str(skills_root)}, desired_skills=["review"]
+    )
+
+    assert snapshot["agentRuntimeType"] == "openclaw_local"
+    assert snapshot["supported"] is True
+    assert snapshot["desiredSkills"] == ["review"]
+    assert any(
+        entry["key"] == "review" and entry["desired"] is True
+        for entry in snapshot["entries"]
+    )
 
 
 async def test_openclaw_local_registers_model_and_parses_reply(

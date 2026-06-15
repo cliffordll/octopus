@@ -10,6 +10,7 @@ from ..types import (
 )
 from .environment import test_environment as test_openclaw_environment
 from .runner import execute as execute_openclaw
+from .skills import skill_snapshot
 
 
 class OpenClawLocalRuntimeAdapter(RuntimeCapabilityMixin):
@@ -42,33 +43,19 @@ class OpenClawLocalRuntimeAdapter(RuntimeCapabilityMixin):
     ) -> RuntimeEnvironmentTestResult:
         return await test_openclaw_environment(config)
 
-    async def list_skills(
-        self, config: dict[str, Any], desired_skills: list[str] | None = None
-    ) -> dict[str, Any]:
-        return _unsupported_skill_snapshot(desired_skills or [])
-
-    async def sync_skills(
-        self, config: dict[str, Any], desired_skills: list[str]
-    ) -> dict[str, Any]:
-        return _unsupported_skill_snapshot(desired_skills)
-
-    async def get_metadata(self) -> dict[str, Any]:
-        metadata = await super().get_metadata()
-        metadata["capabilities"]["skills"] = False
-        return metadata
-
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         return await execute_openclaw(context)
 
-
-def _unsupported_skill_snapshot(desired_skills: list[str]) -> dict[str, Any]:
-    return {
-        "agentRuntimeType": "openclaw_local",
-        "supported": False,
-        "mode": "unsupported",
-        "desiredSkills": desired_skills,
-        "entries": [],
-        "warnings": [
-            "OpenClaw manages its own skills; Octopus runtime skill sync is not wired."
-        ],
-    }
+    def _skill_snapshot(
+        self,
+        config: dict[str, Any],
+        desired_skills: list[str],
+        *,
+        materialize: bool,
+    ) -> dict[str, Any]:
+        return skill_snapshot(
+            runtime_type=self.type,
+            config=config,
+            desired_skills=desired_skills,
+            materialize=materialize,
+        )

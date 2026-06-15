@@ -13,7 +13,12 @@ from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
-from ..local_skills import ensure_control_plane_cli_shim, prepare_managed_home
+from ..local_skills import (
+    desired_skills_from_config,
+    ensure_control_plane_cli_shim,
+    materialize_runtime_skills,
+    prepare_managed_home,
+)
 from ..provider_config import apply_provider_env, provider_model_id, runtime_provider
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
@@ -71,6 +76,13 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
     ensure_control_plane_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
+    loaded_skills = materialize_runtime_skills(
+        runtime_type="openclaw_local",
+        config=context.config,
+        desired_skills=desired_skills_from_config(context.config),
+        skills_home=managed_home / ".claude" / "skills",
+        location_label="managed OpenClaw Claude-compatible skills home",
+    )
 
     timeout = config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
@@ -92,6 +104,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         env=env,
         timeout_sec=timeout_sec,
         register_error=register_error,
+        loaded_skills=loaded_skills,
     )
 
 
@@ -213,6 +226,7 @@ async def _run_attempt(
     env: dict[str, str],
     timeout_sec: float,
     register_error: str | None,
+    loaded_skills: list[dict[str, str | None]],
 ) -> RuntimeExecutionResult:
     full_args = [*args, "-m", prompt]
     rc, stdout, stderr, timed_out, signal = await _run_with_lifecycle(
@@ -235,7 +249,9 @@ async def _run_attempt(
             signal=signal,
             timed_out=True,
             error_message=f"Timed out after {timeout_sec:g}s",
-            result_json=_result_json(stdout, cleaned_stderr, "", register_error),
+            result_json=_result_json(
+                stdout, cleaned_stderr, "", register_error, loaded_skills
+            ),
         )
 
     text, usage, session_id, _data = _parse_output(stdout)
@@ -252,14 +268,25 @@ async def _run_attempt(
         error_message=error,
         usage_json=usage or None,
         session_id_after=session_id,
-        result_json=_result_json(stdout, cleaned_stderr, text, register_error),
+        result_json=_result_json(
+            stdout, cleaned_stderr, text, register_error, loaded_skills
+        ),
     )
 
 
 def _result_json(
-    stdout: str, stderr: str, summary: str, register_error: str | None
+    stdout: str,
+    stderr: str,
+    summary: str,
+    register_error: str | None,
+    loaded_skills: list[dict[str, str | None]],
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"stdout": stdout, "stderr": stderr, "summary": summary}
+    payload: dict[str, Any] = {
+        "stdout": stdout,
+        "stderr": stderr,
+        "summary": summary,
+        "loadedSkills": loaded_skills,
+    }
     if register_error:
         payload["modelRegistrationError"] = register_error
     return payload

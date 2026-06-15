@@ -787,6 +787,79 @@ async def test_openclaw_local_uses_managed_home_and_syncs_credentials(
     assert result.result_json["summary"] == "ok"
 
 
+async def test_openclaw_local_materializes_enabled_skills(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    skills_root = tmp_path / "skills"
+    skills_root.joinpath("review").mkdir(parents=True)
+    skills_root.joinpath("review", "SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    captured_skill: dict[str, str] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        def __init__(self, env: dict[str, str]) -> None:
+            self._env = env
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            if payload is None:
+                skill_file = (
+                    Path(self._env["HOME"]) / ".claude" / "skills" / "review" / "SKILL.md"
+                )
+                captured_skill["text"] = skill_file.read_text(encoding="utf-8")
+            return (
+                b'{"payloads":[{"text":"ok"}],"meta":{"agentMeta":{"sessionId":"sess-1","usage":{"input":1,"output":1,"total":2}}}}',
+                b"",
+            )
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(kwargs["env"])
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    adapter = OpenClawLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-openclaw-skills",
+            agent_id="agent-openclaw",
+            org_id="org-openclaw",
+            agent_name="OpenClaw Agent",
+            config={
+                "command": "openclaw-test",
+                "skillsRootPath": str(skills_root),
+                "_octopus": {"desiredSkills": ["review"]},
+            },
+            on_log=_noop_log,
+        )
+    )
+
+    assert captured_skill["text"] == "# Review\n\nReview code changes."
+    assert result.result_json is not None
+    assert result.result_json["loadedSkills"] == [
+        {
+            "key": "review",
+            "runtimeName": "review",
+            "name": "review",
+            "description": "Review code changes.",
+        }
+    ]
+
+
 async def test_opencode_local_discovers_models_from_cli(tmp_path) -> None:
     fake_opencode = tmp_path / "fake_opencode.py"
     fake_opencode.write_text(
