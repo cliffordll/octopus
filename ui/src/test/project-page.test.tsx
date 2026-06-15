@@ -202,7 +202,10 @@ it("updates a project and manages its resource attachments", async () => {
   await userEvent.selectOptions(screen.getByLabelText("负责人"), "agent-1");
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
-  await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
+  await userEvent.type(
+    screen.getByLabelText("目标 ID"),
+    "11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222",
+  );
   await userEvent.click(screen.getByLabelText(/独立工作区/));
   expect(screen.getByLabelText(/独立工作区/)).toBeChecked();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
@@ -216,7 +219,7 @@ it("updates a project and manages its resource attachments", async () => {
         status: "planned",
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
-        goalIds: ["goal-1", "goal-2"],
+        goalIds: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"],
         executionWorkspacePolicy: {
           enabled: true,
           defaultMode: "isolated_workspace",
@@ -375,6 +378,50 @@ it("saves the selected workspace policy when the project has no existing policy"
         },
       }),
     }),
+  );
+});
+
+it("blocks project configuration save when goal IDs are not UUIDs", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    executionWorkspacePolicy: null,
+    codebase: { configured: false, scope: "none", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "organizations/org-1/workspaces", origin: "managed_checkout" },
+    workspaces: [],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+  expect(await screen.findByRole("heading", { name: "基础信息" })).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1");
+  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+
+  expect(await screen.findByText("目标 ID 必须是 UUID，多个目标请用逗号分隔。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({ method: "PATCH" }),
   );
 });
 
