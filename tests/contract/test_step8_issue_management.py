@@ -1234,7 +1234,7 @@ async def test_issue_comment_queues_assignee_wakeup(
     assert run.context_snapshot["wakeReason"] == "issue_comment_added"
 
 
-async def test_issue_comment_queues_mentioned_agent_wakeup(
+async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -1277,18 +1277,6 @@ async def test_issue_comment_queues_mentioned_agent_wakeup(
 
     assert create_code == 200
     async with session_factory() as verify:
-        assignee_wakeup = (
-            (
-                await verify.execute(
-                    select(AgentWakeupRequest).where(
-                        AgentWakeupRequest.agent_id == assignee_agent_id,
-                        AgentWakeupRequest.reason == "issue_comment_added",
-                    )
-                )
-            )
-            .scalars()
-            .one()
-        )
         mentioned_wakeup = (
             (
                 await verify.execute(
@@ -1308,12 +1296,20 @@ async def test_issue_comment_queues_mentioned_agent_wakeup(
                 )
             )
         ).scalar_one()
+        assignee_wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == assignee_agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_added",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-    assert assignee_wakeup.payload == {
-        "issueId": issue_id,
-        "mutation": "comment",
-        "commentId": create_body["id"],
-    }
+    assert assignee_wakeups == []
     assert mentioned_wakeup.source == "on_demand"
     assert mentioned_wakeup.payload == {
         "issueId": issue_id,
@@ -1324,6 +1320,60 @@ async def test_issue_comment_queues_mentioned_agent_wakeup(
     assert run.context_snapshot["wakeSource"] == "mention"
     assert run.context_snapshot["wakeReason"] == "issue_comment_mentioned"
     assert run.context_snapshot["commentId"] == create_body["id"]
+
+
+async def test_issue_comment_mentioning_assignee_queues_assignee_wakeup_once(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    assignee_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=assignee_agent_id,
+                org_id=org_id,
+                name="owner-1",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_progress",
+        assignee_agent_id=assignee_agent_id,
+    )
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@owner-1 请根据反馈继续处理"},
+    )
+
+    assert create_code == 200
+    async with session_factory() as verify:
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == assignee_agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert len(wakeups) == 1
+    assert wakeups[0].reason == "issue_comment_added"
+    assert wakeups[0].payload == {
+        "issueId": issue_id,
+        "mutation": "comment",
+        "commentId": create_body["id"],
+    }
 
 
 async def test_review_decision_route_applies_status_mapping(

@@ -796,12 +796,18 @@ async def create_issue_comment_route(
             reason="Issue has user comment after missing closeout",
         )
     )
+    mentioned_agents = await _mentioned_agents(
+        agent_service, detail["orgId"], comment.body
+    )
+    mentioned_agent_ids = {mentioned["id"] for mentioned in mentioned_agents}
+    assignee_agent_id = detail.get("assigneeAgentId")
+    comment_targets_assignee = not mentioned_agent_ids or (
+        assignee_agent_id is not None and assignee_agent_id in mentioned_agent_ids
+    )
     queued_assignee_wakeup = not (
         user_intervention_stopped_followup
-        or (
-            actor.actor_type == "agent"
-            and actor.actor_id == detail.get("assigneeAgentId")
-        )
+        or not comment_targets_assignee
+        or (actor.actor_type == "agent" and actor.actor_id == assignee_agent_id)
     )
     if queued_assignee_wakeup:
         await queue_issue_assignment_wakeup(
@@ -815,15 +821,11 @@ async def create_issue_comment_route(
             extra_payload={"commentId": comment.id},
             extra_context={"commentId": comment.id, "commentBody": comment.body},
         )
-    for mentioned in await _mentioned_agents(
-        agent_service, detail["orgId"], comment.body
-    ):
+    for mentioned in mentioned_agents:
         mentioned_agent_id = mentioned["id"]
         if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
             continue
-        if queued_assignee_wakeup and mentioned_agent_id == detail.get(
-            "assigneeAgentId"
-        ):
+        if queued_assignee_wakeup and mentioned_agent_id == assignee_agent_id:
             continue
         await _queue_issue_comment_mention_wakeup(
             heartbeat,
