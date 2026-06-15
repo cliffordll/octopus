@@ -35,6 +35,28 @@ async def _noop_on_log(stream: str, chunk: str) -> None:
     return None
 
 
+@pytest.fixture(autouse=True)
+def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def blocked_create_subprocess_exec(command: str, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            f"Codex runtime test attempted to launch a real subprocess: {command}"
+        )
+
+    def blocked_subprocess_run(args: Any, *pargs: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            f"Codex runtime test attempted to launch a blocking subprocess: {args}"
+        )
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        blocked_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.subprocess.run",
+        blocked_subprocess_run,
+    )
+
+
 def test_step14_runtime_contract_exposes_adapter_paths() -> None:
     paths = importlib.import_module("packages.shared.api_paths.agents")
 
@@ -1008,9 +1030,6 @@ async def test_opencode_local_update_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_skills_sync_materializes_desired_bundled_skill(
     app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
 ) -> None:
@@ -1053,9 +1072,6 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     )
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1168,9 +1184,6 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
     assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_streams_agent_message_delta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1223,9 +1236,6 @@ async def test_codex_execute_streams_agent_message_delta(
     assert streamed == [{"type": "assistant_delta", "delta": "done"}]
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_infers_openrouter_biller_from_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1271,9 +1281,6 @@ async def test_codex_execute_infers_openrouter_biller_from_api_key(
     assert result.result_json["biller"] == "openrouter"
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_uses_default_managed_codex_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1358,9 +1365,6 @@ async def test_codex_execute_uses_default_managed_codex_home(
     ]
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1461,9 +1465,6 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     )
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_retries_unknown_resume_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1535,9 +1536,6 @@ async def test_codex_execute_retries_unknown_resume_session(
     assert any("retrying with a fresh session" in chunk for _, chunk in logs)
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_injects_runtime_context_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1658,9 +1656,6 @@ async def test_codex_execute_injects_runtime_context_env(
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in captured_env)
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_drops_inherited_sandbox_proxy_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1707,9 +1702,6 @@ async def test_codex_execute_drops_inherited_sandbox_proxy_env(
     assert "ALL_PROXY" not in captured_env
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_preserves_explicit_proxy_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1755,9 +1747,6 @@ async def test_codex_execute_preserves_explicit_proxy_env(
     assert captured_env["HTTPS_PROXY"] == "http://127.0.0.1:9"
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_reports_subprocess_start_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1787,9 +1776,6 @@ async def test_codex_execute_reports_subprocess_start_failure(
     assert "spawn failed" in str(result.result_json["stderr"])
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2069,9 +2055,6 @@ async def test_opencode_execute_materializes_database_provider_config(
     assert provider["models"]["deepseek-v4-flash"]["name"] == "DeepSeek V4 Flash"
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_and_claude_execute_use_database_provider_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2152,9 +2135,6 @@ async def test_codex_and_claude_execute_use_database_provider_env(
     assert claude["args"][claude["args"].index("--model") + 1] == "deepseek-v4-flash"
 
 
-@pytest.mark.skip(
-    reason="Disabled because Codex runtime tests disrupt the local Codex CLI"
-)
 async def test_codex_execute_suppresses_closed_stdin_tool_session_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
