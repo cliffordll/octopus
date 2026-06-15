@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
@@ -237,10 +238,16 @@ async def read_org_workspace_file_content(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Workspace file is not an image preview",
         )
+    # 裸 filename 段须 latin-1 可编码，非 ASCII（中文）文件名会致响应头编码 500；
+    # 降级为 ASCII fallback，完整名交给 RFC 5987 的 filename*（percent-encode）。
+    raw_filename = workspace_file.original_filename.replace(chr(34), "")
+    ascii_filename = raw_filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
     headers = {
         "Cache-Control": "private, max-age=60",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": f'inline; filename="{workspace_file.original_filename.replace(chr(34), "")}"',
+        "Content-Disposition": (
+            f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(raw_filename)}"
+        ),
     }
     if workspace_file.content_type == "image/svg+xml":
         headers["Content-Security-Policy"] = (
@@ -264,14 +271,18 @@ async def read_org_workspace_archive(
     ),
 ) -> Response:
     archive_file = await service.read_archive_file(orgId, path)
+    # 同上：非 ASCII 归档名（如中文子目录名）会致响应头编码 500，裸段降级 ASCII + filename*。
     filename = archive_file.original_filename.replace(chr(34), "")
+    ascii_filename = filename.encode("ascii", "ignore").decode("ascii").strip() or "workspace.zip"
     return Response(
         content=archive_file.content,
         media_type=archive_file.content_type,
         headers={
             "Cache-Control": "private, max-age=60",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+            ),
         },
     )
 
