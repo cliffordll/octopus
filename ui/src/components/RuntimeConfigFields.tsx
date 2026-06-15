@@ -82,7 +82,7 @@ function runtimeSummary(runtime: AgentRuntimeType): string {
   if (runtime === "http") return "HTTP endpoint runtime";
   if (runtime === "openclaw_gateway") return "OpenClaw Gateway runtime";
   if (runtime === "process") return "Process runtime";
-  if (["codex_local", "claude_local", "opencode_local"].includes(runtime)) return "Local CLI runtime";
+  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "Local CLI runtime";
   return `${runtime} runtime`;
 }
 
@@ -90,7 +90,7 @@ function runtimeDefaultHint(runtime: AgentRuntimeType): string {
   if (runtime === "http") return "默认 POST，30s 超时，无自定义 headers";
   if (runtime === "openclaw_gateway") return "默认按 run 建立会话，30s 连接，5 分钟等待";
   if (runtime === "process") return "默认使用 server 侧命令配置和当前工作目录";
-  if (["codex_local", "claude_local", "opencode_local"].includes(runtime)) return "默认使用本机 CLI 登录态和 server 工作目录";
+  if (["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime)) return "默认使用本机 CLI 登录态和 server 工作目录";
   return "使用 server 推荐默认配置";
 }
 

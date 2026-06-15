@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.queries.runtime_providers import get_llm_runtime_default
 from packages.database.schema import (
     Agent,
     Base,
@@ -373,6 +374,51 @@ async def test_llm_provider_and_model_are_visible_across_runtime_switches(
         assert [(item["scope"], item["modelId"]) for item in models] == [
             ("instance", "deepseek-v4-flash")
         ]
+
+
+async def test_llm_model_route_uses_runtime_type_query_for_default_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+
+    create_code, _ = await _request(
+        application,
+        "POST",
+        "/api/llm/providers",
+        json_body={
+            "runtimeType": "openclaw_local",
+            "providerId": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "openai_chat_completions",
+        },
+    )
+    assert create_code == 201
+
+    model_code, model = await _request(
+        application,
+        "POST",
+        "/api/llm/providers/deepseek/models",
+        params={"runtimeType": "openclaw_local"},
+        json_body={
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+        },
+    )
+    assert model_code == 201
+    assert model["providerId"] == "deepseek"
+
+    async with factory() as session:
+        openclaw_default = await get_llm_runtime_default(
+            session, "instance", "", "openclaw_local"
+        )
+        opencode_default = await get_llm_runtime_default(
+            session, "instance", "", "opencode_local"
+        )
+
+    assert openclaw_default is not None
+    assert openclaw_default.provider_id == "deepseek"
+    assert openclaw_default.model_id == "deepseek-v4-flash"
+    assert opencode_default is None
 
 
 async def test_llm_provider_and_model_are_instance_scoped_across_organizations(

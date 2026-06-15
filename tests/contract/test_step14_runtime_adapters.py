@@ -1030,6 +1030,51 @@ async def test_opencode_local_update_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
+async def test_openclaw_local_agent_requires_provider_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    missing_code, missing_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {},
+        },
+    )
+    invalid_code, invalid_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {"model": "gpt-5"},
+        },
+    )
+    valid_code, valid = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {"model": "openai/gpt-5"},
+        },
+    )
+
+    assert missing_code == 422
+    assert "openclaw_local requires agentRuntimeConfig.model" in missing_error["detail"]
+    assert invalid_code == 422
+    assert "provider/model" in invalid_error["detail"]
+    assert valid_code == 201
+    assert valid["agentRuntimeType"] == "openclaw_local"
+
+
 async def test_codex_skills_sync_materializes_desired_bundled_skill(
     app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
 ) -> None:

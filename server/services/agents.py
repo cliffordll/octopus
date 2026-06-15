@@ -582,18 +582,21 @@ async def prepare_agent_runtime_config(
     return config
 
 
+_PROVIDER_MODEL_RUNTIME_TYPES = {"opencode_local", "openclaw_local"}
+
+
 def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
-    if runtime_type != "opencode_local":
+    if runtime_type not in _PROVIDER_MODEL_RUNTIME_TYPES:
         return
     model = config.get("model")
     if not isinstance(model, str) or not model.strip():
         raise ValueError(
-            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+            f"{runtime_type} requires agentRuntimeConfig.model in provider/model format"
         )
     provider, separator, model_name = model.strip().partition("/")
     if not separator or not provider.strip() or not model_name.strip():
         raise ValueError(
-            "opencode_local requires agentRuntimeConfig.model in provider/model format"
+            f"{runtime_type} requires agentRuntimeConfig.model in provider/model format"
         )
 
 

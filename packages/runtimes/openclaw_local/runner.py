@@ -9,10 +9,11 @@ import subprocess
 from datetime import UTC, datetime
 from typing import Any
 
+from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
-from ..paths import ensure_managed_runtime_home
+from ..local_skills import ensure_control_plane_cli_shim, prepare_managed_home
 from ..provider_config import apply_provider_env, provider_model_id, runtime_provider
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
@@ -63,12 +64,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
 
-    managed_home = ensure_managed_runtime_home(
-        "openclaw_local", org_id=context.org_id, agent_id=context.agent_id
+    managed_home = await prepare_managed_home(
+        runtime_type="openclaw_local",
+        context=context,
+        env=env,
     )
-    managed_home.mkdir(parents=True, exist_ok=True)
-    env["HOME"] = str(managed_home)
-    env["USERPROFILE"] = str(managed_home)
+    ensure_control_plane_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
 
     timeout = config.get("timeoutSec", 0)
@@ -390,6 +391,7 @@ async def _run_cli(
             stdin=asyncio.subprocess.PIPE if input_text is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **runtime_subprocess_kwargs(),
         )
     except (PermissionError, OSError):
         return await asyncio.to_thread(
@@ -429,6 +431,7 @@ def _run_blocking(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout_sec if timeout_sec > 0 else None,
+            **runtime_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return None, "", "timed out"
@@ -459,6 +462,7 @@ async def _run_with_lifecycle(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **runtime_subprocess_kwargs(),
         )
     except (PermissionError, OSError) as exc:
         rc, out, err = await asyncio.to_thread(
