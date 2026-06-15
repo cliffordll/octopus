@@ -25,6 +25,12 @@ it("opens the first agent by default and creates one from the new agent flow", a
     if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Suggested Agent" });
     }
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "http", displayName: "HTTP", metadata: { type: "http", capabilities: {} } },
+      ]);
+    }
     if (path === "/api/agents/agent-1" && init?.method === "GET") {
       return respond(agent);
     }
@@ -83,6 +89,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "gemini_local" })).not.toBeInTheDocument();
   expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "cursor" })).not.toBeInTheDocument();
   expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "pi_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "codex_local" })).not.toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "http");
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
@@ -116,6 +123,12 @@ it("creates the first agent as the organization CEO", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") {
       return respond([]);
+    }
+    if (path === "/api/orgs/org-empty/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "codex_local", displayName: "Codex", metadata: { type: "codex_local", capabilities: { models: true } } },
+      ]);
     }
     if (path === "/api/orgs/org-empty/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Founder" });
@@ -191,6 +204,12 @@ it("requires provider/model when creating a model-provider runtime agent", async
     if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Suggested Agent" });
     }
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "opencode_local", displayName: "OpenCode", metadata: { type: "opencode_local", capabilities: { models: true } } },
+      ]);
+    }
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
@@ -237,6 +256,12 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
     }
     if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "openclaw-1" });
+    }
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "openclaw_gateway", displayName: "OpenClaw", metadata: { type: "openclaw_gateway", capabilities: {} } },
+      ]);
     }
     if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
       return respond({ agent: { id: "agent-2", name: "OpenClaw Agent", role: "engineer", status: "idle" }, approval: null }, 201);

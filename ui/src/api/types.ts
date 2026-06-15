@@ -1083,6 +1083,12 @@ export interface RuntimeAdapterMetadata {
   agentConfigurationDoc?: string | null;
 }
 
+export interface RuntimeAdapterListItem {
+  type: AgentRuntimeType;
+  displayName: string;
+  metadata: RuntimeAdapterMetadata;
+}
+
 export interface ProviderQuotaResult {
   provider?: string;
   source?: string | null;

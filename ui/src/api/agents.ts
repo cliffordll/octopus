@@ -23,6 +23,7 @@ import type {
   ProviderQuotaResult,
   ResetAgentSessionPayload,
   RuntimeAdapterMetadata,
+  RuntimeAdapterListItem,
   UpdateAgentInstructionsBundlePayload,
   UpdateAgentInstructionsFilePayload,
   UpdateAgentInstructionsPathPayload,
@@ -37,6 +38,8 @@ function agentRoot(agentId: string): string {
 export const agentsApi = {
   list: (orgId: string): Promise<Agent[]> =>
     request<Agent[]>(`/api/orgs/${encodeURIComponent(orgId)}/agents`, { method: "GET" }),
+  adapters: (orgId: string): Promise<RuntimeAdapterListItem[]> =>
+    request<RuntimeAdapterListItem[]>(`/api/orgs/${encodeURIComponent(orgId)}/adapters`, { method: "GET" }),
   nameSuggestion: (orgId: string): Promise<{ name: string }> =>
     request<{ name: string }>(`/api/orgs/${encodeURIComponent(orgId)}/agents/name-suggestion`, { method: "GET" }),
   configurations: (orgId: string): Promise<AgentConfiguration[]> =>

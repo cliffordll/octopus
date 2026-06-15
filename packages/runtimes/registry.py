@@ -50,6 +50,21 @@ def get_runtime_adapter(runtime_type: str) -> RuntimeAdapter:
     raise ValueError(f"Unknown runtime adapter: {runtime_type}")
 
 
+def list_runtime_adapter_types() -> list[str]:
+    return list(_ADAPTERS)
+
+
+async def list_runtime_adapters() -> list[dict]:
+    return [
+        {
+            "type": runtime_type,
+            "displayName": runtime_type,
+            "metadata": await adapter.get_metadata(),
+        }
+        for runtime_type, adapter in _ADAPTERS.items()
+    ]
+
+
 def list_quota_runtime_types() -> list[str]:
     return [
         runtime_type

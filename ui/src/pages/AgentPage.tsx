@@ -15,15 +15,6 @@ import { isPassiveFollowupRun, runDescriptor, runIssueLabel } from "../utils/run
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = [
-  "process",
-  "http",
-  "claude_local",
-  "codex_local",
-  "opencode_local",
-  "openclaw_gateway",
-  "openclaw_local",
-];
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
 const DEFAULT_HEARTBEAT_POLICY = {
   enabled: true,
@@ -891,11 +882,19 @@ export function AgentPage() {
     queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
     enabled: activeTab === "configuration" && Boolean(orgId && runtime),
   });
+  const adapters = useQuery({
+    queryKey: ["runtime-adapters", orgId],
+    queryFn: () => agentsApi.adapters(orgId),
+    enabled: activeTab === "configuration" && Boolean(orgId),
+  });
   const runtimeModels = useQuery({
     queryKey: ["runtime-model-options", orgId, runtime],
     queryFn: () => listRuntimeModelOptions(orgId, runtime),
     enabled: activeTab === "configuration" && supportsRuntimeModels(runtime) && Boolean(orgId),
   });
+  const adapterOptions = Array.isArray(adapters.data)
+    ? adapters.data
+    : [{ type: runtime, displayName: runtime, metadata: { type: runtime, capabilities: {} } }];
   const skills = useQuery({
     queryKey: ["agent-skills", agentId],
     queryFn: () => agentsApi.skills(agentId),
@@ -1733,10 +1732,13 @@ export function AgentPage() {
                     <div className="agent-property-list">
                       <label className="agent-property-row">
                         <span>Runtime</span>
-                        <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
-                          {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
+                        <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+                          {adapterOptions.map((adapter) => (
+                            <option key={adapter.type} value={adapter.type}>{adapter.displayName}</option>
+                          ))}
                         </select>
                       </label>
+                      {adapters.error && <ErrorNotice error={adapters.error} />}
                       {supportsRuntimeModels(runtime) && (
                         <label className="agent-property-row">
                           <span>模型配置</span>
@@ -1872,7 +1874,7 @@ export function AgentPage() {
                 {configurationError && <p className="error-notice">{configurationError}</p>}
                 {save.error && <ErrorNotice error={save.error} />}
                 <div className="agent-property-actions">
-                  <button disabled={save.isPending} type="submit">保存配置</button>
+                  <button disabled={!adapters.isSuccess || save.isPending} type="submit">保存配置</button>
                 </div>
               </form>
               <div className="panel agent-config-card">

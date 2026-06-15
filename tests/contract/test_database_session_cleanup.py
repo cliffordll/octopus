@@ -133,12 +133,13 @@ async def test_dispose_engine_times_out() -> None:
 def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
     source = inspect.getsource(agent_routes.stream_heartbeat_run_route)
 
+    assert "heartbeat: HeartbeatService = Depends(get_heartbeat_service)" not in source
     assert "async with session_factory() as session" not in source
-    assert "_close_session(session)" in source
+    assert source.count("_close_session(session)") >= 2
 
 
 def test_chat_message_stream_uses_shielded_session_cleanup() -> None:
     source = inspect.getsource(chat_routes.add_chat_message_stream_route)
 
     assert "async with session_factory() as session" not in source
-    assert source.count("_close_session(session)") >= 2
+    assert "_close_session(session)" in source
