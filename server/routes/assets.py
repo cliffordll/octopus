@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,18 +40,15 @@ async def get_asset_content(
             detail=str(exc),
         ) from exc
     filename = (asset.original_filename or "asset").replace('"', "")
-    # 裸 filename 段会被原样写入 HTTP 响应头，HTTP header 必须 latin-1 可编码；
-    # 非 ASCII（如中文）文件名会触发 UnicodeEncodeError 进而 500。故裸段降级为 ASCII
-    # fallback，完整文件名交给 RFC 5987 的 filename*（已 percent-encode，浏览器优先采用）。
-    ascii_filename = filename.encode("ascii", "ignore").decode("ascii").strip() or "asset"
+    # HTTP header 必须 latin-1 可编码：用 latin-1 承载 UTF-8 字节，客户端按 UTF-8 还原中文名，
+    # 不再用 RFC 5987 的 filename*（部分客户端会把 "UTF-8''" 前缀并入下载文件名）。
+    disposition_name = filename.encode("utf-8").decode("latin-1")
     return Response(
         content=content,
         media_type=asset.content_type or "application/octet-stream",
         headers={
             "Cache-Control": "private, max-age=60",
-            "Content-Disposition": (
-                f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
-            ),
+            "Content-Disposition": f'inline; filename="{disposition_name}"',
             "X-Content-Type-Options": "nosniff",
         },
     )
