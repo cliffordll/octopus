@@ -19,6 +19,7 @@ from packages.database.clients import (
 from packages.database.schema import Base, Organization
 from packages.runtimes.claude_local import ClaudeLocalRuntimeAdapter
 from packages.runtimes.opencode_local import OpenCodeLocalRuntimeAdapter
+from packages.runtimes.openclaw_local import OpenClawLocalRuntimeAdapter
 from packages.runtimes.types import RuntimeExecutionContext
 from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import CreateAgentPayload
@@ -714,6 +715,76 @@ async def test_opencode_local_syncs_opencode_config_into_managed_home(
     assert '"kimik"' in capture["config"]
     assert '"kimi-k2.5"' in capture["config"]
     assert capture["auth"] == "{}\n"
+
+
+async def test_openclaw_local_uses_managed_home_and_syncs_credentials(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    operator_home = tmp_path / "operator-home"
+    operator_home.mkdir()
+    operator_home.joinpath(".npmrc").write_text("token=openclaw\n", encoding="utf-8")
+    captured_env: dict[str, str] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return (
+                b'{"payloads":[{"text":"ok"}],"meta":{"agentMeta":{"sessionId":"sess-1","usage":{"input":1,"output":1,"total":2}}}}',
+                b"",
+            )
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        captured_env.update(kwargs["env"])
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    adapter = OpenClawLocalRuntimeAdapter()
+    result = await adapter.execute(
+        RuntimeExecutionContext(
+            run_id="run-openclaw-home",
+            agent_id="agent-openclaw",
+            org_id="org-openclaw",
+            agent_name="OpenClaw Agent",
+            config={
+                "command": "openclaw-test",
+                "env": {"OCTOPUS_OPERATOR_HOME": str(operator_home)},
+            },
+            on_log=_noop_log,
+        )
+    )
+
+    home = Path(captured_env["HOME"])
+    normalized_home = str(home).replace("\\", "/")
+    assert normalized_home.endswith(
+        "octopus-home/instances/test/organizations/org-openclaw/"
+        "openclaw-home/agents/agent-openclaw/home"
+    )
+    assert Path(captured_env["USERPROFILE"]) == home
+    assert Path(captured_env["APPDATA"]) == home / "AppData" / "Roaming"
+    assert Path(captured_env["LOCALAPPDATA"]) == home / "AppData" / "Local"
+    assert Path(captured_env["XDG_CONFIG_HOME"]) == home / ".config"
+    assert Path(captured_env["XDG_CACHE_HOME"]) == home / ".cache"
+    assert Path(captured_env["XDG_DATA_HOME"]) == home / ".local" / "share"
+    assert home.joinpath(".npmrc").read_text(encoding="utf-8") == "token=openclaw\n"
+    assert home.joinpath(".octopus", "bin", "control-plane.cmd").is_file()
+    assert str(home / ".octopus" / "bin") in captured_env["PATH"].split(";")
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "ok"
 
 
 async def test_opencode_local_discovers_models_from_cli(tmp_path) -> None:

@@ -24,11 +24,13 @@ OpenCode 的 provider、baseURL、认证和模型目录来自 OpenCode 自己的
 
 ## Octopus 当前方案
 
-Octopus server 增加组织级手动维护能力：
+Octopus server 增加实例级手动维护能力：
 
 ```text
-runtime_providers
-runtime_models
+llm_providers
+llm_provider_bindings
+llm_models
+llm_runtime_defaults
 agents.agent_runtime_config.model
 ```
 
@@ -45,15 +47,15 @@ agents.agent_runtime_config.model
 
 ```text
 1. 创建 provider：
-   POST /api/orgs/{orgId}/runtime-providers
+   POST /api/llm/providers
 
 2. 手动添加模型：
-   POST /api/orgs/{orgId}/runtime-providers/{providerId}/models?runtimeType=opencode_local
+   POST /api/llm/providers/{providerId}/models?runtimeType=opencode_local
 
 3. 创建或编辑智能体时选择模型：
    agents.agent_runtime_config.model = provider/model
 
-4. 执行时 runtime adapter 读取组织 provider/model 配置。
+4. 执行时 runtime adapter 读取实例级 provider/model 配置。
 
 5. `opencode_local` adapter 执行前将配置渲染到 managed OpenCode home：
    .octopus/instances/default/organizations/<org_id>/opencode-home/home/.config/opencode/opencode.json
@@ -62,7 +64,8 @@ agents.agent_runtime_config.model
 ## OpenCode 配置含义
 
 OpenCode 仍然通过自己的配置文件识别 provider/model。Octopus 会在执行前从
-`runtime_providers` 和 `runtime_models` 生成 managed home 内的 OpenCode 配置，
+`llm_providers`、`llm_provider_bindings`、`llm_models` 和 `llm_runtime_defaults`
+生成 managed home 内的 OpenCode 配置，
 不长期修改用户全局 OpenCode 配置。
 
 `opencode_local` 可以复制宿主机 OpenCode 配置作为 managed home 的基础配置，

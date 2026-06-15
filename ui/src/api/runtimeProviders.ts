@@ -14,27 +14,20 @@ function root(orgId: string) {
   return "/api/llm/providers";
 }
 
-function legacyRoot(orgId: string) {
-  return `/api/orgs/${encodeURIComponent(orgId)}/runtime-providers`;
-}
-
 function runtimeQuery(runtimeType: AgentRuntimeType) {
   return `runtimeType=${encodeURIComponent(runtimeType)}`;
 }
 
 function providerRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string) {
-  void runtimeType;
-  return `${root(orgId)}/${encodeURIComponent(providerId)}`;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}?${runtimeQuery(runtimeType)}`;
 }
 
 function modelRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string) {
-  void runtimeType;
-  return `${root(orgId)}/${encodeURIComponent(providerId)}/models`;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}/models?${runtimeQuery(runtimeType)}`;
 }
 
 function modelDetailRoot(orgId: string, runtimeType: AgentRuntimeType, providerId: string, modelId: string) {
-  void runtimeType;
-  return `${root(orgId)}/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}`;
+  return `${root(orgId)}/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}?${runtimeQuery(runtimeType)}`;
 }
 
 export const runtimeProvidersApi = {
@@ -70,6 +63,3 @@ export const runtimeProvidersApi = {
   deleteModel: (orgId: string, runtimeType: AgentRuntimeType, providerId: string, modelId: string): Promise<RuntimeModel> =>
     request<RuntimeModel>(modelDetailRoot(orgId, runtimeType, providerId, modelId), { method: "DELETE" }),
 };
-
-export const legacyRuntimeProvidersRoot = (orgId: string, runtimeType: AgentRuntimeType) =>
-  `${legacyRoot(orgId)}?${runtimeQuery(runtimeType)}`;

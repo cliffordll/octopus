@@ -125,12 +125,12 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "/api/llm/providers/kimi",
+      "/api/llm/providers/kimi?runtimeType=opencode_local",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "/api/llm/providers/kimi/models",
+      "/api/llm/providers/kimi/models?runtimeType=opencode_local",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ modelId: "kimi/k2", displayName: "Kimi K2", enabled: true }),
@@ -138,17 +138,17 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
-      "/api/llm/providers/kimi/models",
+      "/api/llm/providers/kimi/models?runtimeType=opencode_local",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/api/llm/providers/kimi/models/kimi%2Fk2",
+      "/api/llm/providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
-      "/api/llm/providers/kimi/models/kimi%2Fk2",
+      "/api/llm/providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
       expect.objectContaining({ method: "DELETE" }),
     );
   });

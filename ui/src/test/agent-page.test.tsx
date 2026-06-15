@@ -738,7 +738,7 @@ it("validates opencode local model before saving agent configuration", async () 
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
     }
     return respond({ ...agent, agentRuntimeType: "opencode_local" });
@@ -777,7 +777,7 @@ it("warns when the configured opencode model is not in organization runtime mode
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
     }
     return respond({});
@@ -812,7 +812,7 @@ it("toggles opencode local skip permissions without replacing other extra args",
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/llm/providers/deepseek/models" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash", enabled: true }]);
     }
     if (path === "/api/agents/agent-1" && init?.method === "PATCH") {

@@ -55,6 +55,7 @@ async def create_llm_provider_route(
 async def update_llm_provider_route(
     providerId: str,
     request: Request,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     body: dict[str, Any] = Body(...),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
@@ -62,7 +63,7 @@ async def update_llm_provider_route(
     try:
         result = await service.update_provider(
             "",
-            DEFAULT_RUNTIME_TYPE,
+            runtimeType,
             providerId,
             body,
             actor_type=actor.actor_type,
@@ -83,12 +84,13 @@ async def update_llm_provider_route(
 async def delete_llm_provider_route(
     providerId: str,
     request: Request,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
     result = await service.delete_provider(
         "",
-        DEFAULT_RUNTIME_TYPE,
+        runtimeType,
         providerId,
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
@@ -103,10 +105,11 @@ async def delete_llm_provider_route(
 @router.get(LLM_MODEL_LIST_PATH)
 async def list_llm_models_route(
     providerId: str,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> list[dict[str, Any]]:
     try:
-        return await service.list_models("", DEFAULT_RUNTIME_TYPE, providerId)
+        return await service.list_models("", runtimeType, providerId)
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
@@ -117,6 +120,7 @@ async def list_llm_models_route(
 async def create_llm_model_route(
     providerId: str,
     request: Request,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     body: dict[str, Any] = Body(...),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
@@ -124,7 +128,7 @@ async def create_llm_model_route(
     try:
         return await service.create_model(
             "",
-            DEFAULT_RUNTIME_TYPE,
+            runtimeType,
             providerId,
             body,
             actor_type=actor.actor_type,
@@ -149,13 +153,14 @@ async def update_llm_model_route(
     providerId: str,
     modelId: str,
     request: Request,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     body: dict[str, Any] = Body(...),
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
     result = await service.update_model(
         "",
-        DEFAULT_RUNTIME_TYPE,
+        runtimeType,
         providerId,
         modelId,
         body,
@@ -174,12 +179,13 @@ async def delete_llm_model_route(
     providerId: str,
     modelId: str,
     request: Request,
+    runtimeType: str = DEFAULT_RUNTIME_TYPE,
     service: RuntimeProviderService = Depends(get_runtime_provider_service),
 ) -> dict[str, Any]:
     actor = require_actor_identity(request)
     result = await service.delete_model(
         "",
-        DEFAULT_RUNTIME_TYPE,
+        runtimeType,
         providerId,
         modelId,
         actor_type=actor.actor_type,
