@@ -1366,6 +1366,82 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
   expect(screen.queryByRole("button", { name: "标记任务完成" })).not.toBeInTheDocument();
 });
 
+it("refreshes issue status after a reviewer run completes", async () => {
+  const staleIssue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "等待评审刷新",
+    description: "reviewer run 完成后应刷新任务状态",
+    status: "in_review",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: "reviewer-1",
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const doneIssue = {
+    ...staleIssue,
+    status: "done",
+    completedAt: "2026-06-02T10:05:00Z",
+  };
+  const reviewerRun = {
+    id: "run-reviewer",
+    runId: "run-reviewer",
+    orgId: "org-1",
+    agentId: "reviewer-1",
+    issueId: "issue-1",
+    invocationSource: "review",
+    runPurpose: "review",
+    status: "succeeded",
+    createdAt: "2026-06-02T10:03:00Z",
+    startedAt: "2026-06-02T10:04:00Z",
+    finishedAt: "2026-06-02T10:05:00Z",
+  };
+  let issueFetches = 0;
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([
+        { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" },
+        { id: "reviewer-1", orgId: "org-1", name: "Reviewer", role: "qa", status: "idle" },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([reviewerRun]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1" && init?.method === "GET") {
+      issueFetches += 1;
+      return respond(issueFetches === 1 ? staleIssue : doneIssue);
+    }
+    return respond(staleIssue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByText("任务状态：评审中")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText("任务状态：已完成")).toBeInTheDocument());
+});
+
 it("labels cancelled passive follow-up runs explicitly", async () => {
   const issue = {
     id: "issue-1",
