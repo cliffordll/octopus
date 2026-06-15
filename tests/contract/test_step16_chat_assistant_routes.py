@@ -172,6 +172,11 @@ async def test_assistant_reply_persists_kind_structured_payload_and_approval(
     assert "issueProposal" in prompt
     assert "server-side issue conversion mode" in prompt
     assert "conversation issueCreationMode" in prompt
+    assert "Multiple tasks in the same chat are parallel" in prompt
+    assert (
+        "Only set parentId when the user explicitly asks to split or decompose a parent issue"
+        in prompt
+    )
 
 
 async def test_assistant_json_text_issue_proposal_is_persisted(
