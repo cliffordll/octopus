@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
@@ -237,13 +238,16 @@ async def read_org_workspace_file_content(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Workspace file is not an image preview",
         )
-    # HTTP header 必须 latin-1 可编码：用 latin-1 承载 UTF-8 字节，客户端按 UTF-8 还原中文名。
+    # RFC 6266：裸 filename 只放 ASCII fallback，完整中文名走 filename*（percent-encoded UTF-8），
+    # header 全 ASCII 不崩，浏览器原生下载自动解析显示正确中文、不带 "UTF-8''" 前缀。
     raw_filename = workspace_file.original_filename.replace(chr(34), "")
-    disposition_name = raw_filename.encode("utf-8").decode("latin-1")
+    ascii_filename = raw_filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
     headers = {
         "Cache-Control": "private, max-age=60",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": f'inline; filename="{disposition_name}"',
+        "Content-Disposition": (
+            f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(raw_filename)}"
+        ),
     }
     if workspace_file.content_type == "image/svg+xml":
         headers["Content-Security-Policy"] = (
@@ -267,16 +271,18 @@ async def read_org_workspace_archive(
     ),
 ) -> Response:
     archive_file = await service.read_archive_file(orgId, path)
-    # 同上：latin-1 承载 UTF-8 字节，避免 RFC 5987 的 "UTF-8''" 前缀并入下载文件名。
+    # 同上：ASCII fallback + filename*（percent-encoded UTF-8），header 全 ASCII 不崩。
     filename = archive_file.original_filename.replace(chr(34), "")
-    disposition_name = filename.encode("utf-8").decode("latin-1")
+    ascii_filename = filename.encode("ascii", "ignore").decode("ascii").strip() or "workspace.zip"
     return Response(
         content=archive_file.content,
         media_type=archive_file.content_type,
         headers={
             "Cache-Control": "private, max-age=60",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": f'attachment; filename="{disposition_name}"',
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+            ),
         },
     )
 
