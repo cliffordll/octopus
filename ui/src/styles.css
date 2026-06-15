@@ -9176,16 +9176,29 @@ pre {
   color: #c8d4e5;
 }
 
+.chat-linked-issues-strip {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: -4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 2px 4px;
+  scrollbar-width: thin;
+}
+
 .chat-linked-issue-card {
   align-items: center;
   background: #101722;
   border: 1px solid #263346;
-  border-radius: 14px;
+  border-radius: 12px;
   color: inherit;
   display: flex;
+  flex: 0 0 clamp(220px, 30vw, 340px);
   gap: 12px;
   justify-content: space-between;
-  padding: 12px 14px;
+  min-width: 0;
+  padding: 9px 11px;
   text-decoration: none;
 }
 
@@ -9198,12 +9211,20 @@ pre {
   color: #7f8ea5;
   display: block;
   font-size: 11px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .chat-linked-issue-card strong {
   color: #edf4ff;
+  display: block;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-linked-issue-card .badge {
+  flex: 0 0 auto;
 }
 
 .chat-thinking-text {

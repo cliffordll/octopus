@@ -820,6 +820,167 @@ it("approves a chat issue proposal through the approval API and shows the create
   expect(screen.queryByText("任务创建待确认")).not.toBeInTheDocument();
 });
 
+it("keeps later issue proposals approvable and shows every linked issue in one conversation", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "拆分任务", status: "active", preferredAgentId: "agent-1", issueCreationMode: "manual_approval" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({
+        id: "chat-1",
+        orgId: "org-1",
+        title: "拆分任务",
+        status: "active",
+        preferredAgentId: "agent-1",
+        issueCreationMode: "manual_approval",
+        primaryIssue: { id: "issue-1", identifier: "OCT-1", title: "整理接口契约", status: "open", priority: "medium" },
+        contextLinks: [
+          {
+            id: "link-1",
+            orgId: "org-1",
+            conversationId: "chat-1",
+            entityType: "issue",
+            entityId: "issue-1",
+            metadata: null,
+            entity: { type: "issue", id: "issue-1", label: "整理接口契约", subtitle: "open", identifier: "OCT-1", status: "open", href: "/issues/OCT-1" },
+          },
+          {
+            id: "link-2",
+            orgId: "org-1",
+            conversationId: "chat-1",
+            entityType: "issue",
+            entityId: "issue-2",
+            metadata: null,
+            entity: { type: "issue", id: "issue-2", label: "补充回归测试", subtitle: "in_review", identifier: "OCT-2", status: "in_review", href: "/issues/OCT-2" },
+          },
+        ],
+      });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") {
+      return respond([
+        {
+          id: "message-1",
+          role: "assistant",
+          kind: "issue_proposal",
+          body: "请确认是否创建第一个任务？",
+          status: "completed",
+          approvalId: "approval-1",
+          structuredPayload: {
+            issueProposal: {
+              title: "整理接口契约",
+              description: "整理接口契约。",
+              priority: "medium",
+            },
+          },
+        },
+        {
+          id: "system-1",
+          role: "system",
+          kind: "system_event",
+          body: "Created issue OCT-1 from this chat conversation.",
+          status: "completed",
+          structuredPayload: {
+            eventType: "issue_created",
+            issueId: "issue-1",
+            issueIdentifier: "OCT-1",
+            sourceMessageId: "message-1",
+          },
+        },
+        {
+          id: "message-2",
+          role: "assistant",
+          kind: "issue_proposal",
+          body: "请确认是否创建第二个任务？",
+          status: "completed",
+          approvalId: "approval-2",
+          structuredPayload: {
+            issueProposal: {
+              title: "补充回归测试",
+              description: "为拆分任务补充回归测试。",
+              priority: "medium",
+            },
+          },
+        },
+      ]);
+    }
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    if (path === "/api/approvals/approval-2" && init?.method === "GET") {
+      return respond({ id: "approval-2", orgId: "org-1", type: "chat_issue_creation", status: "pending", payload: {} });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+
+  expect(await screen.findByText("任务创建待确认")).toBeInTheDocument();
+  expect(screen.getByText("补充回归测试")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "同意" })).toBeInTheDocument();
+  expect(screen.queryByText("子任务")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: /OCT-1 · 整理接口契约/ }).some((link) =>
+    link.getAttribute("href") === "/orgs/org-1/issues/issue-1",
+  )).toBe(true);
+  expect(screen.getByRole("link", { name: /OCT-2 · 补充回归测试/ })).toHaveAttribute("href", "/orgs/org-1/issues/issue-2");
+});
+
+it("marks linked issues with parentId as subtasks in the chat context strip", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {
+      return respond([{ id: "chat-1", title: "拆分父任务", status: "active", preferredAgentId: "agent-1" }]);
+    }
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "GET") {
+      return respond({ id: "agent-1", name: "Builder", role: "engineer", status: "active", agentRuntimeType: "codex_local" });
+    }
+    if (path === "/api/chats/chat-1" && init?.method === "GET") {
+      return respond({
+        id: "chat-1",
+        orgId: "org-1",
+        title: "拆分父任务",
+        status: "active",
+        preferredAgentId: "agent-1",
+        contextLinks: [
+          {
+            id: "link-1",
+            orgId: "org-1",
+            conversationId: "chat-1",
+            entityType: "issue",
+            entityId: "issue-child",
+            metadata: null,
+            entity: {
+              type: "issue",
+              id: "issue-child",
+              label: "实现登录表单",
+              subtitle: "todo",
+              identifier: "OCT-3",
+              status: "todo",
+              parentId: "issue-parent",
+              href: "/issues/OCT-3",
+            },
+          },
+        ],
+      });
+    }
+    if (path === "/api/chats/chat-1/messages" && init?.method === "GET") return respond([]);
+    if (path === "/api/agents/agent-1/skills" && init?.method === "GET") return respond({ desiredSkills: [], entries: [] });
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/chats/chat-1");
+
+  expect(await screen.findByText("子任务")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /OCT-3 · 实现登录表单/ })).toHaveAttribute("href", "/orgs/org-1/issues/issue-child");
+});
+
 it("shows an approved chat issue proposal as syncing until the issue-created event arrives", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/chats" && init?.method === "GET") {

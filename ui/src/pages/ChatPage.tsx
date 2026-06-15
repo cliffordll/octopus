@@ -44,14 +44,16 @@ function issueProposalFromMessage(message: ChatMessage): Record<string, unknown>
     : message.structuredPayload;
 }
 
-function issueCreatedEventFromMessage(message: ChatMessage): { issueId: string; issueIdentifier: string | null } | null {
+function issueCreatedEventFromMessage(message: ChatMessage): { issueId: string; issueIdentifier: string | null; sourceMessageId: string | null } | null {
   if (message.kind !== "system_event" || message.structuredPayload?.eventType !== "issue_created") return null;
   const issueId = message.structuredPayload.issueId;
   if (typeof issueId !== "string" || !issueId) return null;
   const issueIdentifier = message.structuredPayload.issueIdentifier;
+  const sourceMessageId = message.structuredPayload.sourceMessageId;
   return {
     issueId,
     issueIdentifier: typeof issueIdentifier === "string" && issueIdentifier ? issueIdentifier : null,
+    sourceMessageId: typeof sourceMessageId === "string" && sourceMessageId ? sourceMessageId : null,
   };
 }
 
@@ -82,6 +84,9 @@ function chatIssueCreationModeLabel(mode: string | null | undefined): string {
 
 type ChatApprovalPromptStatus = "pending" | "revision_requested" | "approved" | "rejected" | "cancelled";
 type ChatApprovalPromptAction = "approve" | "requestRevision" | "reject";
+type ChatLinkedIssueSummary = NonNullable<ChatConversation["primaryIssue"]> & {
+  parentId?: string | null;
+};
 
 function chatApprovalStatusLabel(status: ChatApprovalPromptStatus): string {
   if (status === "revision_requested") return "需修改";
@@ -110,6 +115,7 @@ export function ChatPage() {
   const [approvalPrompt, setApprovalPrompt] = useState<{
     approvalId: string;
     proposal: Record<string, unknown>;
+    sourceMessageId: string;
     status: ChatApprovalPromptStatus;
   } | null>(null);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<Set<string>>(() => new Set());
@@ -183,12 +189,23 @@ export function ChatPage() {
     }
     return Array.from(merged.values());
   }, [messages.data, optimisticMessages]);
+  const createdIssueSourceMessageIds = useMemo(() => {
+    const sourceMessageIds = new Set<string>();
+    for (const message of visibleMessages) {
+      const event = issueCreatedEventFromMessage(message);
+      if (event?.sourceMessageId) sourceMessageIds.add(event.sourceMessageId);
+    }
+    return sourceMessageIds;
+  }, [visibleMessages]);
   useEffect(() => {
     if (!orgId || !chatId || approvalPrompt) return;
-    const issueCreated = visibleMessages.some((message) => Boolean(issueCreatedEventFromMessage(message)));
-    if (issueCreated) return;
     const proposalMessage = [...visibleMessages].reverse().find((message) =>
-      Boolean(message.approvalId && !dismissedApprovalIds.has(message.approvalId) && issueProposalFromMessage(message)),
+      Boolean(
+        message.approvalId
+        && !dismissedApprovalIds.has(message.approvalId)
+        && !createdIssueSourceMessageIds.has(message.id)
+        && issueProposalFromMessage(message),
+      ),
     );
     if (!proposalMessage?.approvalId) return;
     const proposal = issueProposalFromMessage(proposalMessage);
@@ -196,14 +213,14 @@ export function ChatPage() {
     setApprovalPrompt({
       approvalId: proposalMessage.approvalId,
       proposal,
+      sourceMessageId: proposalMessage.id,
       status: "pending",
     });
-  }, [approvalPrompt, chatId, dismissedApprovalIds, orgId, visibleMessages]);
+  }, [approvalPrompt, chatId, createdIssueSourceMessageIds, dismissedApprovalIds, orgId, visibleMessages]);
   useEffect(() => {
     if (!approvalPrompt) return;
-    const issueCreated = visibleMessages.some((message) => Boolean(issueCreatedEventFromMessage(message)));
-    if (issueCreated) setApprovalPrompt(null);
-  }, [approvalPrompt, visibleMessages]);
+    if (createdIssueSourceMessageIds.has(approvalPrompt.sourceMessageId)) setApprovalPrompt(null);
+  }, [approvalPrompt, createdIssueSourceMessageIds]);
   useEffect(() => {
     if (!approvalPrompt || approvalPromptStatus !== "approved") return;
     void queryClient.invalidateQueries({ queryKey: ["chat", chatId] });
@@ -231,6 +248,29 @@ export function ChatPage() {
   const selectedAgentName = selectedAgent?.name ?? boundChatAgentName ?? "智能体";
   const selectedAgentControlLabel = agentOptionLabel(selectedAgent, selectedAgentName);
   const projectContext = chat.data?.contextLinks?.find((link) => link.entityType === "project");
+  const linkedIssues = useMemo(() => {
+    const issueMap = new Map<string, ChatLinkedIssueSummary>();
+    for (const link of chat.data?.contextLinks ?? []) {
+      if (link.entityType !== "issue") continue;
+      issueMap.set(link.entityId, {
+        id: link.entityId,
+        identifier: link.entity?.identifier ?? null,
+        parentId: link.entity?.parentId ?? null,
+        title: link.entity?.label ?? link.entityId,
+        status: link.entity?.status ?? "open",
+        priority: "",
+      });
+    }
+    const primaryIssue = chat.data?.primaryIssue;
+    if (primaryIssue) {
+      issueMap.set(primaryIssue.id, {
+        ...issueMap.get(primaryIssue.id),
+        ...primaryIssue,
+      });
+    }
+    return Array.from(issueMap.values());
+  }, [chat.data?.contextLinks, chat.data?.primaryIssue]);
+  const linkedIssueById = useMemo(() => new Map(linkedIssues.map((issue) => [issue.id, issue])), [linkedIssues]);
   const skillEntries = selectedAgentSkills.data && !Array.isArray(selectedAgentSkills.data) && Array.isArray(selectedAgentSkills.data.entries)
     ? selectedAgentSkills.data.entries
     : [];
@@ -432,14 +472,18 @@ export function ChatPage() {
               {chat.data.unreadCount ? <Badge>{chat.data.unreadCount} 未读</Badge> : null}
             </div>
           </header>
-          {chat.data.primaryIssue && (
-            <Link className="chat-linked-issue-card" to={`/orgs/${orgId}/issues/${chat.data.primaryIssue.id}`}>
-              <div>
-                <span>关联任务</span>
-                <strong>{chat.data.primaryIssue.identifier ?? chat.data.primaryIssue.id.slice(0, 8)} · {chat.data.primaryIssue.title}</strong>
-              </div>
-              <Badge>{statusLabel(chat.data.primaryIssue.status)}</Badge>
-            </Link>
+          {linkedIssues.length > 0 && (
+            <div aria-label="关联任务" className="chat-linked-issues-strip">
+              {linkedIssues.map((issue) => (
+                <Link className="chat-linked-issue-card" key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
+                  <div>
+                    <span>{issue.parentId ? "子任务" : "关联任务"}</span>
+                    <strong>{issue.identifier ?? issue.id.slice(0, 8)} · {issue.title}</strong>
+                  </div>
+                  <Badge>{statusLabel(issue.status)}</Badge>
+                </Link>
+              ))}
+            </div>
           )}
           {chat.error && (
             <div className="error-notice">
@@ -504,8 +548,8 @@ export function ChatPage() {
                       <IssueCreatedCard
                         issueId={issueCreatedEvent.issueId}
                         issueIdentifier={issueCreatedEvent.issueIdentifier}
+                        linkedIssue={linkedIssueById.get(issueCreatedEvent.issueId) ?? null}
                         orgId={orgId}
-                        primaryIssue={chat.data.primaryIssue}
                       />
                     )}
                     {message.structuredPayload && !issueCreatedEvent && (
@@ -513,7 +557,7 @@ export function ChatPage() {
                         {issueProposal ? (
                           message.approvalId ? null : (
                             <IssueProposalCard
-                              hasLinkedIssue={Boolean(chat.data.primaryIssue)}
+                              hasCreatedIssue={createdIssueSourceMessageIds.has(message.id)}
                               messageId={message.id}
                               onCreate={(messageId) => convertIssue.mutate(messageId)}
                               pending={convertIssue.isPending}
@@ -657,13 +701,13 @@ function ChatIssueCreationHelp() {
 }
 
 function IssueProposalCard({
-  hasLinkedIssue,
+  hasCreatedIssue,
   messageId,
   onCreate,
   pending,
   proposal,
 }: {
-  hasLinkedIssue: boolean;
+  hasCreatedIssue: boolean;
   messageId: string;
   onCreate: (messageId: string) => void;
   pending: boolean;
@@ -682,8 +726,8 @@ function IssueProposalCard({
         <small>优先级：{priority}</small>
         {requiresLabelSelection && <small>需要人工选择标签，审批后创建任务。</small>}
       </div>
-      <button disabled={hasLinkedIssue || pending} onClick={() => onCreate(messageId)} type="button">
-        {hasLinkedIssue ? "已有关联任务" : pending ? "创建中..." : "创建任务"}
+      <button disabled={hasCreatedIssue || pending} onClick={() => onCreate(messageId)} type="button">
+        {hasCreatedIssue ? "任务已创建" : pending ? "创建中..." : "创建任务"}
       </button>
     </div>
   );
@@ -692,15 +736,14 @@ function IssueProposalCard({
 function IssueCreatedCard({
   issueId,
   issueIdentifier,
+  linkedIssue,
   orgId,
-  primaryIssue,
 }: {
   issueId: string;
   issueIdentifier: string | null;
+  linkedIssue: ChatLinkedIssueSummary | null;
   orgId: string;
-  primaryIssue: ChatConversation["primaryIssue"];
 }) {
-  const linkedIssue = primaryIssue?.id === issueId ? primaryIssue : null;
   const label = linkedIssue?.identifier ?? issueIdentifier ?? issueId.slice(0, 8);
   const title = linkedIssue?.title ?? "任务已创建";
   return (

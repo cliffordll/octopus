@@ -1413,6 +1413,7 @@ export interface ChatContextLink {
     subtitle: string | null;
     identifier: string | null;
     status: string | null;
+    parentId?: string | null;
     href: string;
   } | null;
   createdAt: string;

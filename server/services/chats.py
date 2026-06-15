@@ -1001,6 +1001,13 @@ class ChatService:
                     "requested task. The UI/server will convert the proposal "
                     "according to the conversation issueCreationMode."
                 ),
+                (
+                    "Multiple tasks in the same chat are parallel by default. "
+                    "Only set parentId when the user explicitly asks to split or "
+                    "decompose a parent issue, or when the latest user message "
+                    "and contextLinks clearly identify the parent issue. Do not "
+                    "infer parentId merely from conversation.primaryIssueId."
+                ),
                 "Conversation input:",
                 envelope,
             ]
@@ -1501,6 +1508,7 @@ def _context_link_summary(link: ChatContextLink) -> dict[str, Any]:
         "label": entity_data.get("label"),
         "identifier": entity_data.get("identifier"),
         "status": entity_data.get("status"),
+        "parentId": entity_data.get("parentId"),
         "description": entity_data.get("description"),
         "priority": entity_data.get("priority"),
     }
@@ -1523,6 +1531,7 @@ def _linked_entity(
                 "subtitle": issue.status,
                 "identifier": issue.identifier,
                 "status": issue.status,
+                "parentId": issue.parent_id,
                 "description": issue.description,
                 "priority": issue.priority,
                 "href": f"/issues/{issue.identifier or issue.id}",
