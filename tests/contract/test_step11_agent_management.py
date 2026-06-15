@@ -115,6 +115,7 @@ def test_agent_contract_modules_define_management_boundary() -> None:
         "pi_local",
         "cursor",
         "openclaw_gateway",
+        "openclaw_local",
         "hermes_local",
     )
     payload = validators.validate_create_agent({"name": "Operator"})
