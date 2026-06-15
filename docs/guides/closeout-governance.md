@@ -74,6 +74,12 @@ reviewer 类型决定后续是否创建 agent run：
 | `reviewerAgentId` | issue 进入 `in_review` | 是，创建 `issue_review_requested` wakeup 并调度 reviewer |
 | `reviewerUserId` | issue 进入 `in_review` | 否，等待人工 reviewer |
 
+`reviewerAgentId` 必须不同于 `assigneeAgentId`。同一个 agent 不能既执行任务又作为 agent reviewer；否则 API 返回 `422`：
+
+```text
+reviewerAgentId must differ from assigneeAgentId
+```
+
 完整触发流程：
 
 1. 先给 issue 配置 `reviewerAgentId` 或 `reviewerUserId`
@@ -87,7 +93,7 @@ reviewer 类型决定后续是否创建 agent run：
 - issue 没有 `reviewerAgentId`
 - 只配置了 `reviewerUserId`
 - issue 没有进入 `in_review` 或 `blocked`
-- reviewer agent 自己执行了会导致自我唤醒的状态变更
+- reviewer 配置无效，例如 `reviewerAgentId` 等于 `assigneeAgentId`
 
 如果 issue 已经处于 `in_review`，不能清空最后一个 reviewer。应先通过评审结论把任务退回或完成，再修改 reviewer 配置。
 

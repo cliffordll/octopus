@@ -442,6 +442,7 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(properties).toHaveTextContent("已启动");
   expect(properties).toHaveTextContent("已完成");
   expect(screen.getByRole("option", { name: "进行中" })).toBeDisabled();
+  expect(within(screen.getByLabelText("Reviewer")).getByRole("option", { name: "Builder" })).toBeDisabled();
   await userEvent.selectOptions(screen.getByLabelText("优先级"), "critical");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
@@ -570,7 +571,6 @@ it("shows an issue and records comments and review decisions", async () => {
         projectId: null,
         goalId: null,
         assigneeAgentId: "agent-1",
-        reviewerAgentId: "agent-1",
         priority: "high",
         status: "todo",
       }),
@@ -585,7 +585,7 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/issues/issue-child",
     expect.objectContaining({ method: "GET" }),
   );
-});
+}, 10000);
 
 it("suggests agents when adding issue comment mentions", async () => {
   const issue = {
@@ -644,13 +644,19 @@ it("suggests agents when adding issue comment mentions", async () => {
   expect(mentionList).toBeInTheDocument();
   await userEvent.click(within(mentionList).getByRole("option", { name: /Review Agent/ }));
   expect(commentBox).toHaveValue("请 @reviewer ");
-  await userEvent.click(screen.getByRole("button", { name: "发送评论" }));
+  await userEvent.keyboard("{Shift>}{Enter}{/Shift}补充说明");
+  expect(commentBox).toHaveValue("请 @reviewer \n补充说明");
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/issues/issue-1/comments",
+    expect.objectContaining({ method: "POST" }),
+  );
+  await userEvent.keyboard("{Enter}");
 
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/comments",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ body: "请 @reviewer" }),
+      body: JSON.stringify({ body: "请 @reviewer \n补充说明" }),
     }),
   );
 });

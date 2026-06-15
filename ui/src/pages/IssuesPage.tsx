@@ -85,7 +85,7 @@ export function IssuesPage() {
       ...(description.trim() ? { description: description.trim() } : {}),
       ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
       ...(assigneeAgentId ? { assigneeAgentId } : {}),
-      ...(reviewerAgentId ? { reviewerAgentId } : {}),
+      ...(reviewerAgentId && reviewerAgentId !== assigneeAgentId ? { reviewerAgentId } : {}),
       priority,
       status: requestedStatus,
     });
@@ -151,7 +151,14 @@ export function IssuesPage() {
               <div className="task-form-row task-form-grid task-form-grid-three">
                 <label>
                   智能体
-                  <select value={assigneeAgentId} onChange={(event) => setAssigneeAgentId(event.target.value)}>
+                  <select
+                    value={assigneeAgentId}
+                    onChange={(event) => {
+                      const nextAssigneeAgentId = event.target.value;
+                      setAssigneeAgentId(nextAssigneeAgentId);
+                      if (nextAssigneeAgentId && nextAssigneeAgentId === reviewerAgentId) setReviewerAgentId("");
+                    }}
+                  >
                     <option value="">不分配</option>
                     {agentList.map((agent) => (
                       <option key={agent.id} value={agent.id}>{agent.name}</option>
@@ -172,7 +179,7 @@ export function IssuesPage() {
                   <select value={reviewerAgentId} onChange={(event) => setReviewerAgentId(event.target.value)}>
                     <option value="">不设置</option>
                     {agentList.map((agent) => (
-                      <option key={agent.id} value={agent.id}>{agent.name}</option>
+                      <option disabled={agent.id === assigneeAgentId} key={agent.id} value={agent.id}>{agent.name}</option>
                     ))}
                   </select>
                 </label>

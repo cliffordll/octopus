@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
@@ -744,7 +744,14 @@ function IssuePropertiesPanel({
           <select
             disabled={isUpdating}
             value={nullableSelectValue(issue.assigneeAgentId)}
-            onChange={(event) => onUpdate({ assigneeAgentId: event.target.value || null, assigneeUserId: null })}
+            onChange={(event) => {
+              const nextAssigneeAgentId = event.target.value || null;
+              onUpdate({
+                assigneeAgentId: nextAssigneeAgentId,
+                assigneeUserId: null,
+                ...(nextAssigneeAgentId && nextAssigneeAgentId === issue.reviewerAgentId ? { reviewerAgentId: null, reviewerUserId: null } : {}),
+              });
+            }}
           >
             <option value="">未分配</option>
             {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
@@ -764,7 +771,9 @@ function IssuePropertiesPanel({
             onChange={(event) => onUpdate({ reviewerAgentId: event.target.value || null, reviewerUserId: null })}
           >
             <option value="">不设置</option>
-            {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            {agents.map((agent) => (
+              <option disabled={agent.id === issue.assigneeAgentId} key={agent.id} value={agent.id}>{agent.name}</option>
+            ))}
           </select>
         </label>
         {issue.reviewerAgentId && (
@@ -2104,13 +2113,17 @@ export function IssuePage() {
   const createSubIssue = useMutation({
     mutationFn: () => {
       if (!issue.data) throw new Error("任务未加载");
+      const reviewerAgentId =
+        issue.data.reviewerAgentId && issue.data.reviewerAgentId !== issue.data.assigneeAgentId
+          ? issue.data.reviewerAgentId
+          : undefined;
       return issuesApi.create(orgId, {
         title: subIssueTitle.trim(),
         parentId: issue.data.id,
         projectId: issue.data.projectId,
         goalId: issue.data.goalId,
         assigneeAgentId: issue.data.assigneeAgentId,
-        reviewerAgentId: issue.data.reviewerAgentId,
+        ...(reviewerAgentId ? { reviewerAgentId } : {}),
         priority: issue.data.priority,
         status: "todo",
       });
@@ -2287,6 +2300,11 @@ export function IssuePage() {
   function submitComment(event: FormEvent) {
     event.preventDefault();
     if (comment.trim()) addComment.mutate();
+  }
+  function submitCommentFromKeyboard(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (comment.trim() && !addComment.isPending) addComment.mutate();
   }
   function updateCommentMention(value: string, cursor: number | null | undefined) {
     const position = typeof cursor === "number" ? cursor : value.length;
@@ -2773,6 +2791,7 @@ export function IssuePage() {
                     value={comment}
                     onChange={(event) => changeComment(event.target.value, event.target.selectionStart)}
                     onClick={(event) => updateCommentMention(event.currentTarget.value, event.currentTarget.selectionStart)}
+                    onKeyDown={submitCommentFromKeyboard}
                     onKeyUp={(event) => updateCommentMention(event.currentTarget.value, event.currentTarget.selectionStart)}
                     required
                   />
