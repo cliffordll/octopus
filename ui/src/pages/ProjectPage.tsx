@@ -35,6 +35,7 @@ const RESOURCE_ROLE_LABELS: Record<ProjectResourceRole, string> = {
   working_set: "工作集",
 };
 const WORKSPACE_POLICY_MODES = ["shared_workspace", "isolated_workspace", "operator_branch"] as const;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type WorkspacePolicyMode = (typeof WORKSPACE_POLICY_MODES)[number];
 
@@ -75,6 +76,17 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
     throw new Error("执行工作区策略必须是 JSON 对象。");
   }
   return parsed as Record<string, unknown>;
+}
+
+function parseGoalIds(value: string): string[] {
+  const ids = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (ids.some((id) => !UUID_PATTERN.test(id))) {
+    throw new Error("目标 ID 必须是 UUID，多个目标请用逗号分隔。");
+  }
+  return ids;
 }
 
 function normalizeWorkspacePolicyMode(value: unknown): WorkspacePolicyMode {
@@ -280,16 +292,14 @@ export function ProjectPage() {
   const update = useMutation({
     mutationFn: () => {
       const executionWorkspacePolicy = parseJsonObject(workspacePolicy || workspacePolicyForMode("", workspacePolicyMode));
+      const parsedGoalIds = parseGoalIds(goalIds);
       return projectsApi.update(projectId, {
         description: description.trim() || null,
         name: projectName.trim() || project.data?.name,
         status,
         leadAgentId: leadAgentId || null,
         targetDate: targetDate || null,
-        goalIds: goalIds
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        goalIds: parsedGoalIds,
         executionWorkspacePolicy,
       });
     },
@@ -714,7 +724,7 @@ export function ProjectPage() {
             </section>
             </div>
             {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
-            {update.error && <ErrorNotice error={update.error} />}
+            {!workspacePolicyError && update.error && <ErrorNotice error={update.error} />}
             {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
             {setPrimaryWorkspace.error && <ErrorNotice error={setPrimaryWorkspace.error} />}
             {removeWorkspace.error && <ErrorNotice error={removeWorkspace.error} />}
