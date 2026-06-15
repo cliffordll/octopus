@@ -797,20 +797,28 @@ async def test_openclaw_local_materializes_enabled_skills(
         "# Review\n\nReview code changes.", encoding="utf-8"
     )
     captured_skill: dict[str, str] = {}
+    captured_agent_args: list[str] = []
 
     class FakeProcess:
         returncode = 0
         pid = 1234
 
-        def __init__(self, env: dict[str, str]) -> None:
+        def __init__(self, args: tuple[str, ...], env: dict[str, str]) -> None:
+            self._args = args
             self._env = env
 
         async def communicate(
             self, payload: bytes | None = None
         ) -> tuple[bytes, bytes]:
             if payload is None:
+                captured_agent_args[:] = list(self._args)
                 skill_file = (
-                    Path(self._env["HOME"]) / ".claude" / "skills" / "review" / "SKILL.md"
+                    Path(self._env["HOME"])
+                    / ".openclaw"
+                    / "workspace-agent-openclaw"
+                    / "skills"
+                    / "review"
+                    / "SKILL.md"
                 )
                 captured_skill["text"] = skill_file.read_text(encoding="utf-8")
             return (
@@ -825,7 +833,7 @@ async def test_openclaw_local_materializes_enabled_skills(
             return self.returncode
 
     async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
-        return FakeProcess(kwargs["env"])
+        return FakeProcess(args, kwargs["env"])
 
     monkeypatch.setattr(
         "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
@@ -849,6 +857,8 @@ async def test_openclaw_local_materializes_enabled_skills(
     )
 
     assert captured_skill["text"] == "# Review\n\nReview code changes."
+    assert "--agent" in captured_agent_args
+    assert captured_agent_args[captured_agent_args.index("--agent") + 1] == "agent-openclaw"
     assert result.result_json is not None
     assert result.result_json["loadedSkills"] == [
         {

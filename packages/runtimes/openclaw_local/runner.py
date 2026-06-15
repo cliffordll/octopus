@@ -25,6 +25,7 @@ from ..tool_capabilities import (
     append_runtime_workspace_guidance,
 )
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+from .skills import _normalize_openclaw_agent_id, _openclaw_workspace_path
 
 _DEFAULT_CONTEXT_WINDOW = 128000
 # OpenClaw resolves --model against its own catalog; for an injected platform
@@ -74,14 +75,16 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         context=context,
         env=env,
     )
+    openclaw_agent_id = _normalize_openclaw_agent_id(context.agent_id)
+    openclaw_workspace = _openclaw_workspace_path(managed_home, openclaw_agent_id)
     ensure_control_plane_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="openclaw_local",
         config=context.config,
         desired_skills=desired_skills_from_config(context.config),
-        skills_home=managed_home / ".claude" / "skills",
-        location_label="managed OpenClaw Claude-compatible skills home",
+        skills_home=openclaw_workspace / "skills",
+        location_label="managed OpenClaw agent workspace skills",
     )
 
     timeout = config.get("timeoutSec", 0)
@@ -94,7 +97,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
 
     session_key = _session_key(context)
-    args = _build_args(config, session_key, model_ref)
+    args = _build_args(config, session_key, model_ref, openclaw_agent_id)
     return await _run_attempt(
         context=context,
         command=command,
@@ -196,9 +199,17 @@ def _openclaw_provider_name(raw: str) -> str:
 # agent run
 # --------------------------------------------------------------------------- #
 def _build_args(
-    config: dict[str, Any], session_key: str, model_ref: str
+    config: dict[str, Any], session_key: str, model_ref: str, agent_id: str
 ) -> list[str]:
-    args = ["agent", "--local", "--json", "--session-key", session_key]
+    args = [
+        "agent",
+        "--local",
+        "--json",
+        "--agent",
+        agent_id,
+        "--session-key",
+        session_key,
+    ]
     if model_ref:
         args.extend(["--model", model_ref])
     thinking = _string(config.get("thinking") or config.get("effort"))
