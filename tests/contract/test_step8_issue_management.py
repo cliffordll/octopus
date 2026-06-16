@@ -1121,6 +1121,85 @@ async def test_issue_execute_route_retries_after_terminal_execution_run(
     assert {wakeup.run_id for wakeup in new_wakeups} == {old_run_id, run["id"]}
 
 
+async def test_issue_execute_route_creates_new_run_after_completed_execution(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    issue_id = str(uuid.uuid4())
+    old_run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Repeat Executor",
+                role="engineer",
+                status="idle",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=old_run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": issue_id, "wakeReason": "issue_execute"},
+            )
+        )
+        session.add(
+            AgentWakeupRequest(
+                org_id=org_id,
+                agent_id=agent_id,
+                source="assignment",
+                trigger_detail="system",
+                reason="issue_execute",
+                payload={"issueId": issue_id, "mutation": "execute"},
+                status="completed",
+                run_id=old_run_id,
+                idempotency_key=f"issue:{issue_id}:execute",
+            )
+        )
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                title="Repeat executable task",
+                status="in_progress",
+                priority="medium",
+                assignee_agent_id=agent_id,
+            )
+        )
+
+    code, run = await _request(app, "POST", f"/api/issues/{issue_id}/execute")
+
+    assert code == 202
+    assert run["id"] != old_run_id
+    assert run["status"] == "queued"
+    async with session_factory() as verify:
+        issue = await verify.get(Issue, issue_id)
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_execute",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert issue is not None
+    assert issue.execution_run_id == run["id"]
+    assert issue.checkout_run_id == run["id"]
+    assert {wakeup.run_id for wakeup in wakeups} == {old_run_id, run["id"]}
+
+
 async def test_issue_execute_route_reports_paused_assignee_deferred(
     app: FastAPI,
     session: AsyncSession,

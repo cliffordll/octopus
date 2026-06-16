@@ -271,6 +271,81 @@ async def test_assignment_success_moves_issue_to_review_and_wakes_reviewer(
     assert activity.details["reason"] == "run_succeeded"
 
 
+async def test_failed_assignment_run_blocks_issue(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class FailingAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            return RuntimeExecutionResult(
+                exit_code=1,
+                error_message="runtime permission rejected",
+            )
+
+    assignee = await _seed_agent(session, name="FailingAssignee")
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: FailingAdapter(),
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=assignee["orgId"],
+            title="Failing child task",
+            status="in_progress",
+            priority="medium",
+            identifier="RUN-FAIL",
+            assignee_agent_id=assignee["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        run = await heartbeat.wakeup(
+            assignee["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "payload": {"issueId": issue.id},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeReason": "issue_execute",
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["errorCode"] == "adapter_failed"
+    persisted_issue = (
+        await session.execute(select(Issue).where(Issue.identifier == "RUN-FAIL"))
+    ).scalar_one()
+    assert persisted_issue.status == "blocked"
+    assert persisted_issue.execution_run_id is None
+    assert persisted_issue.checkout_run_id is None
+    activity = (
+        await session.execute(
+            select(ActivityLog).where(ActivityLog.entity_id == persisted_issue.id)
+        )
+    ).scalar_one()
+    assert activity.action == "issue.updated"
+    assert activity.actor_type == "agent"
+    assert activity.run_id == run["id"]
+    assert isinstance(activity.details, dict)
+    assert activity.details["status"] == "blocked"
+    assert activity.details["fromStatus"] == "in_progress"
+    assert activity.details["reason"] == "run_failed"
+    assert activity.details["error"] == "runtime permission rejected"
+
+
 async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

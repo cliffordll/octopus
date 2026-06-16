@@ -2470,6 +2470,15 @@ class HeartbeatService:
             and issue.status == "in_progress"
             and bool(issue.reviewer_agent_id)
         )
+        should_block_failed_issue = (
+            final.status in {"failed", "timed_out"}
+            and final.invocation_source == "assignment"
+            and final.error_code != "closeout_missing"
+            and issue is not None
+            and issue.org_id == final.org_id
+            and issue.assignee_agent_id == final.agent_id
+            and issue.status in {"todo", "in_progress"}
+        )
         criteria = [
             IssueRow.execution_run_id == final.id,
             IssueRow.checkout_run_id == final.id,
@@ -2514,6 +2523,29 @@ class HeartbeatService:
                 },
             )
             await self._queue_issue_review_wakeup_after_success(final, issue)
+        if should_block_failed_issue and issue is not None:
+            from_status = issue.status
+            issue.status = "blocked"
+            issue.updated_at = values["updated_at"]
+            await self._session.flush()
+            await insert_activity_log(
+                self._session,
+                org_id=issue.org_id,
+                actor_type="agent",
+                actor_id=final.agent_id,
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                run_id=final.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": from_status,
+                    "reason": "run_failed",
+                    "runId": final.id,
+                    "error": final.error,
+                    "errorCode": final.error_code,
+                },
+            )
         if issue_id is not None and final.status in {
             "failed",
             "timed_out",
