@@ -49,9 +49,11 @@ class BrokenSession:
 class SlowCloseSession:
     def __init__(self) -> None:
         self.invalidate_called = False
+        self.close_finished = False
 
     async def close(self) -> None:
-        await asyncio.sleep(10)
+        await asyncio.sleep(0.05)
+        self.close_finished = True
 
     async def invalidate(self) -> None:
         self.invalidate_called = True
@@ -86,7 +88,7 @@ async def test_get_session_preserves_original_exception_when_cleanup_fails() -> 
     assert session.close_called
 
 
-async def test_close_session_times_out_and_invalidates(
+async def test_close_session_timeout_keeps_background_close_without_invalidating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(database_dependency, "REQUEST_DB_CLEANUP_TIMEOUT_SECONDS", 0.01)
@@ -94,7 +96,9 @@ async def test_close_session_times_out_and_invalidates(
 
     await database_dependency._close_session(session)  # type: ignore[arg-type]
 
-    assert session.invalidate_called
+    assert session.invalidate_called is False
+    await asyncio.sleep(0.06)
+    assert session.close_finished
 
 
 async def test_shielded_cleanup_finishes_before_propagating_task_cancellation() -> None:
@@ -142,6 +146,19 @@ async def test_shielded_cleanup_timeout_does_not_cancel_database_reset() -> None
     assert isinstance(error, TimeoutError)
     await asyncio.sleep(0.06)
     assert cleanup_cancelled is False
+
+
+def test_cleanup_timeout_does_not_require_connection_invalidation() -> None:
+    assert (
+        database_dependency._cleanup_error_requires_invalidate(TimeoutError())
+        is False
+    )
+    assert (
+        database_dependency._cleanup_error_requires_invalidate(
+            RuntimeError("connection is broken")
+        )
+        is True
+    )
 
 
 async def test_dispose_engine_times_out() -> None:

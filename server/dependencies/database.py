@@ -39,9 +39,11 @@ async def _commit_after_success(
         transaction.commit,
         timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     )
-    if error is not None:
+    if error is None:
+        return
+    if _cleanup_error_requires_invalidate(error):
         await _invalidate_session(session)
-        raise error
+    raise error
 
 
 async def _rollback_after_error(
@@ -54,7 +56,7 @@ async def _rollback_after_error(
         transaction.rollback,
         timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     )
-    if error is not None:
+    if _cleanup_error_requires_invalidate(error):
         await _invalidate_session(session)
 
 
@@ -64,8 +66,12 @@ async def _close_session(session: AsyncSession) -> None:
         session.close,
         timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     )
-    if error is not None:
+    if _cleanup_error_requires_invalidate(error):
         await _invalidate_session(session)
+
+
+def _cleanup_error_requires_invalidate(error: BaseException | None) -> bool:
+    return error is not None and not isinstance(error, TimeoutError)
 
 
 async def _run_shielded_cleanup(
