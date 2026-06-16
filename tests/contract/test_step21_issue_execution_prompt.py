@@ -38,6 +38,37 @@ def test_runtime_prompt_appends_issue_context_to_agent_instructions() -> None:
     )
 
 
+def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
+    prompt = runtime_prompt_from_config(
+        {
+            "promptTemplate": "# Base\n\nYou are an agent.",
+            "_octopus": {
+                "context": {
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_execute",
+                    "issue": {
+                        "id": "issue-parent",
+                        "identifier": "OCT-42",
+                        "title": "五岳名山诗歌创作 - 管理汇总",
+                        "description": "主任务负责管理进度，拆分五个子任务并汇总审核。",
+                        "status": "in_progress",
+                        "priority": "medium",
+                    },
+                }
+            },
+        }
+    )
+
+    assert "## Subtask Coordination" in prompt
+    assert "Product-visible subtasks must be Octopus child issues" in prompt
+    assert (
+        'control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "OCT-42"'
+        in prompt
+    )
+    assert "internal `task` subagent call" in prompt
+    assert "do not appear in the board" in prompt
+
+
 def test_runtime_prompt_hard_gates_passive_followup_closeout() -> None:
     prompt = runtime_prompt_from_config(
         {

@@ -241,7 +241,10 @@ If your comment mentions a screenshot path or uses a screenshot as validation ev
 control-plane issue update "<issue-id-or-identifier>" ... --json
 ```
 
-**Step 9 — Delegate if needed.** Create subtasks with the generic create surface only when the workflow really needs a new task:
+**Step 9 — Delegate if needed.** When the issue or user asks to split work into
+subtasks, child tasks, or parallel delegated tasks, those product-visible
+subtasks must be real Octopus child issues. Create them with the generic create
+surface before treating the work as delegated:
 
 ```bash
 control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... [--label-id "<label-id>"] [--label "<label-name>"] --json
@@ -256,6 +259,10 @@ control-plane issue labels list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Always set `parentId`. Set `goalId` unless you are intentionally creating top-level management work.
+
+Runtime-local todo lists, planning checkboxes, or internal subagent/task tool
+calls are execution helpers only. They do not create Octopus board subtasks and
+must not be reported as product-visible child tasks.
 
 ## Organization Skills Workflow
 
