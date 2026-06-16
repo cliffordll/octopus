@@ -101,6 +101,9 @@ it("shows existing run records without collapsing the section by default", async
     if (path === "/api/heartbeat-runs/run-visible" && init?.method === "GET") return respond({ ...runDetail, status: "succeeded" });
     if (path === "/api/heartbeat-runs/run-visible/events" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-visible/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-visible/cancel" && init?.method === "POST") {
+      return respond({ ...run, status: "cancelled", error: "run cancelled" });
+    }
     if (path === "/api/heartbeat-runs/run-second" && init?.method === "GET") return respond(secondRunDetail);
     if (path === "/api/heartbeat-runs/run-second/events" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-second/workspace-operations" && init?.method === "GET") return respond([]);
@@ -121,6 +124,11 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
   expect(screen.getByText("最新运行：运行中")).toBeInTheDocument();
+  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "取消运行 run-visible" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-visible/cancel",
+    expect.objectContaining({ method: "POST" }),
+  );
   const summaryBlock = within(runRecordsRegion).getAllByText("输出摘要")[0].closest(".issue-run-record-summary");
   expect(summaryBlock).not.toHaveTextContent(longSummary);
   expect(summaryBlock).toHaveTextContent("展开");
@@ -953,7 +961,7 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runRecordsRegion).toHaveTextContent("任务执行");
   expect(runRecordsRegion).not.toHaveTextContent("等待执行");
   expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
-  expect(within(runRecordsRegion).queryByRole("button", { name: "取消运行 run-1" })).not.toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
   await ensureRunExpanded(runRecordsRegion, "run-1");
   expect(await screen.findByRole("region", { name: "执行输出" })).toBeInTheDocument();
   expect(within(screen.getByRole("region", { name: "执行输出" })).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
@@ -2396,6 +2404,9 @@ it("explains queued issue runs from the assignee active queue", async () => {
     if (path === "/api/heartbeat-runs/run-queued" && init?.method === "GET") return respond(queuedRun);
     if (path === "/api/heartbeat-runs/run-queued/events" && init?.method === "GET") return respond([]);
     if (path === "/api/heartbeat-runs/run-queued/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-timer/cancel" && init?.method === "POST") {
+      return respond({ id: "run-timer", orgId: "org-1", agentId: "agent-1", invocationSource: "timer", triggerDetail: "heartbeat_timer", status: "cancelled", createdAt: "2026-06-10T10:00:00Z" });
+    }
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -2411,5 +2422,10 @@ it("explains queued issue runs from the assignee active queue", async () => {
   expect(queueRegion).toHaveTextContent("OCT-1");
   expect(queueRegion).toHaveTextContent("automation");
   expect(queueRegion).toHaveTextContent("issue_passive_followup");
+  await userEvent.click(within(queueRegion).getByRole("button", { name: "取消运行 run-timer" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-timer/cancel",
+    expect.objectContaining({ method: "POST" }),
+  );
   expect(within(queueRegion).getByRole("link", { name: "打开负责人运行页" })).toHaveAttribute("href", "/orgs/org-1/agents/agent-1/runs");
 });

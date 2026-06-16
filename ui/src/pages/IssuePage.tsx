@@ -877,14 +877,18 @@ function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
 function IssueQueueStatusPanel({
   activeRuns,
   agentsById,
+  cancellingRunId,
   currentRun,
   issue,
+  onCancelRun,
   orgId,
 }: {
   activeRuns: HeartbeatRun[];
   agentsById: Map<string, Agent>;
+  cancellingRunId?: string;
   currentRun: HeartbeatRun | null;
   issue: IssueDetail;
+  onCancelRun: (run: HeartbeatRun) => void;
   orgId: string;
 }) {
   if (!currentRun || !isLiveRun(currentRun.status) || activeRuns.length === 0 || !issue.assigneeAgentId) return null;
@@ -924,6 +928,17 @@ function IssueQueueStatusPanel({
             <small title={runDescriptor(run)}>{runDescriptor(run)}</small>
             {queueRunIssueLabel(run) && <small>{queueRunIssueLabel(run)}</small>}
             <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+            {isLiveRun(run.status) && (
+              <button
+                aria-label={`取消运行 ${heartbeatRunId(run)}`}
+                className="secondary small-button"
+                disabled={cancellingRunId === heartbeatRunId(run)}
+                onClick={() => onCancelRun(run)}
+                type="button"
+              >
+                {cancellingRunId === heartbeatRunId(run) ? "取消中" : "取消"}
+              </button>
+            )}
           </article>
         ))}
       </div>
@@ -1239,18 +1254,22 @@ function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean
 
 function IssueRunsPanel({
   agentsById,
+  cancellingRunId,
   currentRunId,
   embedded = false,
   expandedRunIds,
+  onCancelRun,
   onSelect,
   onToggle,
   renderRunDetails,
   runs,
 }: {
   agentsById: Map<string, Agent>;
+  cancellingRunId?: string;
   currentRunId: string;
   embedded?: boolean;
   expandedRunIds: Set<string>;
+  onCancelRun?: (run: HeartbeatRun) => void;
   onSelect: (runId: string) => void;
   onToggle: (runId: string) => void;
   renderRunDetails?: (runId: string) => ReactNode;
@@ -1356,6 +1375,17 @@ function IssueRunsPanel({
               >
                 {isExpanded ? "折叠" : "展开"}
               </button>
+              {isLiveRun(displayRun.status) && onCancelRun && (
+                <button
+                  aria-label={`取消运行 ${runId}`}
+                  className="secondary small-button issue-run-record-cancel"
+                  disabled={cancellingRunId === runId}
+                  onClick={() => onCancelRun(displayRun)}
+                  type="button"
+                >
+                  {cancellingRunId === runId ? "取消中" : "取消运行"}
+                </button>
+              )}
             </div>
             {isExpanded && renderRunDetails && (
               <div className="issue-run-record-details">
@@ -2240,8 +2270,13 @@ export function IssuePage() {
       queryClient.setQueryData<HeartbeatRun[]>(["issue-heartbeat-runs", issueId], (current = []) =>
         current.map((item) => heartbeatRunId(item) === cancelledRunId ? run : item),
       );
+      queryClient.setQueryData<HeartbeatRun[]>(["heartbeat-runs", orgId], (current = []) =>
+        current.map((item) => heartbeatRunId(item) === cancelledRunId ? run : item),
+      );
       void queryClient.invalidateQueries({ queryKey: ["issue-heartbeat-runs", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["issue", issueId] });
+      void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
   const checkoutIssue = useMutation({
@@ -2415,6 +2450,10 @@ export function IssuePage() {
       ? null
       : latestRunError;
   const activeAssigneeRuns = activeQueueRunsForAgent(orgHeartbeatRuns.data ?? [], issue.data?.assigneeAgentId);
+  const cancellingRunId =
+    cancelIssueRun.isPending && cancelIssueRun.variables
+      ? heartbeatRunId(cancelIssueRun.variables)
+      : undefined;
   const latestRunIsLive = isLiveRun(latestRun?.status);
   const latestRunCanReexecute = isRerunnableRun(latestRun?.status);
   const latestRunSucceeded = latestRun?.status === "succeeded";
@@ -2539,8 +2578,10 @@ export function IssuePage() {
             <IssueQueueStatusPanel
               activeRuns={activeAssigneeRuns}
               agentsById={agentsById}
+              cancellingRunId={cancellingRunId}
               currentRun={latestRun}
               issue={issue.data}
+              onCancelRun={(run) => cancelIssueRun.mutate(run)}
               orgId={orgId}
             />
 
@@ -2643,9 +2684,11 @@ export function IssuePage() {
 
               <IssueRunsPanel
                 agentsById={agentsById}
+                cancellingRunId={cancellingRunId}
                 currentRunId={currentRunId}
                 embedded
                 expandedRunIds={expandedRunIds}
+                onCancelRun={(run) => cancelIssueRun.mutate(run)}
                 onSelect={(runId) => {
                   localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
                   setCurrentRunId(runId);
@@ -2663,11 +2706,7 @@ export function IssuePage() {
                 }}
                 renderRunDetails={(runId) => (
                   <IssueRunDetailsPanel
-                    cancellingRunId={
-                      cancelIssueRun.isPending && cancelIssueRun.variables
-                        ? heartbeatRunId(cancelIssueRun.variables)
-                        : undefined
-                    }
+                    cancellingRunId={cancellingRunId}
                     issue={issue.data}
                     issueId={issueId}
                     latestRunStatus={latestRun?.status}

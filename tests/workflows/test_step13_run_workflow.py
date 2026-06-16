@@ -17,6 +17,7 @@ from packages.database.clients import (
 )
 from packages.database.schema import (
     ActivityLog,
+    Agent as AgentRow,
     AgentWakeupRequest,
     Base,
     HeartbeatRun,
@@ -681,6 +682,82 @@ async def test_cancel_retry_and_timer_preserve_recovery_context(
     assert retried["contextSnapshot"] is not None
     assert retried["contextSnapshot"]["recovery"]["recoveryTrigger"] == "manual"
     assert timed[0]["invocationSource"] == "timer"
+
+
+async def test_cancel_assignment_run_releases_issue_execution_lock(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="CancelLock")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Locked issue",
+            status="in_progress",
+            priority="medium",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="queued",
+            context_snapshot={
+                "issueId": issue.id,
+                "wakeSource": "assignment",
+                "wakeReason": "issue_execute",
+            },
+        )
+        session.add(run)
+        await session.flush()
+        issue.checkout_run_id = run.id
+        issue.execution_run_id = run.id
+        issue.execution_locked_at = datetime.now(UTC)
+
+        cancelled = await heartbeat.cancel_run(run.id)
+
+    assert cancelled is not None and cancelled["status"] == "cancelled"
+    persisted_issue = await session.get(Issue, issue.id)
+    assert persisted_issue is not None
+    assert persisted_issue.checkout_run_id is None
+    assert persisted_issue.execution_run_id is None
+    assert persisted_issue.execution_locked_at is None
+
+
+async def test_recover_orphaned_run_does_not_abort_when_retry_is_unavailable(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="PausedRecover")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        agent_row = await session.get(AgentRow, agent["id"])
+        assert agent_row is not None
+        agent_row.status = "paused"
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            process_pid=987654,
+            process_loss_retry_count=0,
+            context_snapshot={"wakeSource": "assignment"},
+        )
+        session.add(run)
+        await session.flush()
+
+        recovered = await heartbeat.recover_orphaned_runs()
+
+    assert recovered == []
+    persisted_run = await session.get(HeartbeatRun, run.id)
+    assert persisted_run is not None
+    assert persisted_run.status == "failed"
+    assert persisted_run.error_code == "process_lost"
 
 
 async def test_manual_retry_preserves_review_invocation_source(
