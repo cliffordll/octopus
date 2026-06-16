@@ -37,7 +37,9 @@ async def _noop_on_log(stream: str, chunk: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def blocked_create_subprocess_exec(command: str, *args: Any, **kwargs: Any) -> Any:
+    async def blocked_create_subprocess_exec(
+        command: str, *args: Any, **kwargs: Any
+    ) -> Any:
         raise AssertionError(
             f"Codex runtime test attempted to launch a real subprocess: {command}"
         )
@@ -185,7 +187,9 @@ async def test_openclaw_local_registers_model_and_parses_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    from packages.runtimes.openclaw_local.runner import execute as execute_openclaw_local
+    from packages.runtimes.openclaw_local.runner import (
+        execute as execute_openclaw_local,
+    )
 
     calls: list[list[str]] = []
     patch_stdin: dict[str, str] = {}

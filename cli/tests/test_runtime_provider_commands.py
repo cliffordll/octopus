@@ -112,8 +112,7 @@ def test_runtime_provider_and_model_commands() -> None:
         "modelId": "deepseek-v4-flash",
         "displayName": "DeepSeek V4",
     }
-    assert (
-        "/api/llm/providers/deepseek/models/deepseek%2Fdeepseek-v4-flash"
-        in str(requests[3].url)
+    assert "/api/llm/providers/deepseek/models/deepseek%2Fdeepseek-v4-flash" in str(
+        requests[3].url
     )
     assert requests[3].url.params["runtimeType"] == "opencode_local"

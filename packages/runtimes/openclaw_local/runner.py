@@ -387,11 +387,7 @@ _BENIGN_STDERR_PREFIXES = ("[diagnostic]", "[model-fallback", "[agent/embedded]"
 def _strip_benign_stderr(value: str) -> str:
     if not value:
         return value
-    kept = [
-        line
-        for line in value.splitlines(keepends=True)
-        if not _is_benign(line)
-    ]
+    kept = [line for line in value.splitlines(keepends=True) if not _is_benign(line)]
     return "".join(kept)
 
 
