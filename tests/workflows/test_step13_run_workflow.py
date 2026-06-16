@@ -728,6 +728,91 @@ async def test_cancel_assignment_run_releases_issue_execution_lock(
     assert persisted_issue.execution_locked_at is None
 
 
+async def test_closed_issue_deferred_wakeup_is_skipped_instead_of_promoted(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ClosedDeferred")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Close while comment wake is deferred",
+            status="in_progress",
+            priority="medium",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        active_run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            context_snapshot={
+                "issueId": issue.id,
+                "wakeSource": "assignment",
+                "wakeReason": "issue_assigned",
+            },
+        )
+        session.add(active_run)
+        await session.flush()
+        issue.checkout_run_id = active_run.id
+        issue.execution_run_id = active_run.id
+        issue.execution_locked_at = datetime.now(UTC)
+
+        deferred = await heartbeat.wakeup(
+            agent["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "reason": "issue_comment_added",
+                "payload": {"issueId": issue.id, "commentId": "comment-1"},
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "commentId": "comment-1",
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_comment_added",
+                },
+            },
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+        assert deferred is None
+        issue.status = "done"
+        active_run.status = "succeeded"
+        active_run.finished_at = datetime.now(UTC)
+
+        await heartbeat._release_issue_execution(active_run)
+
+    persisted_wakeups = (
+        (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent["id"]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(persisted_wakeups) == 1
+    assert persisted_wakeups[0].status == "skipped"
+    assert persisted_wakeups[0].run_id is None
+    runs = (
+        (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == agent["id"])
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [run.id for run in runs] == [active_run.id]
+
+
 async def test_recover_orphaned_run_does_not_abort_when_retry_is_unavailable(
     session: AsyncSession,
 ) -> None:
@@ -864,6 +949,36 @@ async def test_orphaned_running_run_enqueues_automatic_recovery(
     assert recovery[0]["processLossRetryCount"] == 1
     assert recovery[0]["contextSnapshot"] is not None
     assert recovery[0]["contextSnapshot"]["recovery"]["recoveryTrigger"] == "automatic"
+
+
+async def test_periodic_recovery_skips_running_local_child_that_is_still_alive(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: True)
+    agent = await _seed_agent(session, name="AliveChild")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            process_pid=12345,
+            process_started_at=datetime.now(UTC),
+        )
+        session.add(run)
+        await session.flush()
+        recovery = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+
+    assert recovery == []
+    await session.refresh(run)
+    assert run.status == "running"
+    assert run.error_code is None
 
 
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(

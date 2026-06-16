@@ -1295,6 +1295,55 @@ async def test_issue_comment_queues_assignee_wakeup(
     assert run.context_snapshot["wakeReason"] == "issue_comment_added"
 
 
+async def test_issue_comment_on_closed_issue_does_not_queue_assignee_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Closed Comment Assignee",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="done",
+        assignee_agent_id=agent_id,
+    )
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "补充归档说明，不要重新执行"},
+    )
+
+    assert create_code == 200
+    assert create_body["body"] == "补充归档说明，不要重新执行"
+    async with session_factory() as verify:
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_added",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert wakeups == []
+
+
 async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
     app: FastAPI,
     session: AsyncSession,

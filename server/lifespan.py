@@ -39,6 +39,7 @@ async def _heartbeat_scheduler(
             async with session_factory() as session:
                 async with session.begin():
                     heartbeat = HeartbeatService(session)
+                    await heartbeat.recover_orphaned_runs(require_process_loss=True)
                     for org in await list_organizations(session):
                         await heartbeat.tick_timers(org.id)
             await dispatch_all_queued_runs(session_factory)

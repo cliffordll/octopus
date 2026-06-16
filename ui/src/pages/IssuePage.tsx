@@ -893,18 +893,14 @@ function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
 function IssueQueueStatusPanel({
   activeRuns,
   agentsById,
-  cancellingRunId,
   currentRun,
   issue,
-  onCancelRun,
   orgId,
 }: {
   activeRuns: HeartbeatRun[];
   agentsById: Map<string, Agent>;
-  cancellingRunId?: string;
   currentRun: HeartbeatRun | null;
   issue: IssueDetail;
-  onCancelRun: (run: HeartbeatRun) => void;
   orgId: string;
 }) {
   if (!currentRun || !isLiveRun(currentRun.status) || activeRuns.length === 0 || !issue.assigneeAgentId) return null;
@@ -944,17 +940,6 @@ function IssueQueueStatusPanel({
             <small title={runDescriptor(run)}>{runDescriptor(run)}</small>
             {queueRunIssueLabel(run) && <small>{queueRunIssueLabel(run)}</small>}
             <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
-            {isLiveRun(run.status) && (
-              <button
-                aria-label={`取消运行 ${heartbeatRunId(run)}`}
-                className="secondary small-button"
-                disabled={cancellingRunId === heartbeatRunId(run)}
-                onClick={() => onCancelRun(run)}
-                type="button"
-              >
-                {cancellingRunId === heartbeatRunId(run) ? "取消中" : "取消"}
-              </button>
-            )}
           </article>
         ))}
       </div>
@@ -1270,22 +1255,18 @@ function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean
 
 function IssueRunsPanel({
   agentsById,
-  cancellingRunId,
   currentRunId,
   embedded = false,
   expandedRunIds,
-  onCancelRun,
   onSelect,
   onToggle,
   renderRunDetails,
   runs,
 }: {
   agentsById: Map<string, Agent>;
-  cancellingRunId?: string;
   currentRunId: string;
   embedded?: boolean;
   expandedRunIds: Set<string>;
-  onCancelRun?: (run: HeartbeatRun) => void;
   onSelect: (runId: string) => void;
   onToggle: (runId: string) => void;
   renderRunDetails?: (runId: string) => ReactNode;
@@ -1391,19 +1372,8 @@ function IssueRunsPanel({
               >
                 {isExpanded ? "折叠" : "展开"}
               </button>
-              {isLiveRun(displayRun.status) && onCancelRun && (
-                <button
-                  aria-label={`取消运行 ${runId}`}
-                  className="secondary small-button issue-run-record-cancel"
-                  disabled={cancellingRunId === runId}
-                  onClick={() => onCancelRun(displayRun)}
-                  type="button"
-                >
-                  {cancellingRunId === runId ? "取消中" : "取消运行"}
-                </button>
-              )}
             </div>
-            {isExpanded && renderRunDetails && (
+            {isExpanded && renderRunDetails && (
               <div className="issue-run-record-details">
                 {renderRunDetails(runId)}
               </div>
@@ -1610,23 +1580,23 @@ function IssueRunOutputPanel({
           {processPid && <Badge>PID {processPid}</Badge>}
           {streamActive && <Badge>stream 连接中</Badge>}
           {liveRun && !streamActive && <Badge>动态刷新中</Badge>}
-          <div className="agent-run-view-toggle" aria-label="任务执行视图">
-            <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
-            <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
-          </div>
-          {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
-          {liveRun && (
-            <button
-              aria-label={`取消运行 ${runId}`}
+          {liveRun && (
+            <button
+              aria-label={`取消运行 ${runId}`}
               className="secondary small-button"
               disabled={cancelling}
               onClick={onCancel}
               type="button"
             >
-              {cancelling ? "取消中" : "取消运行"}
-            </button>
-          )}
-          {run && canRetryRun && (
+              {cancelling ? "取消中" : "取消运行"}
+            </button>
+          )}
+          <div className="agent-run-view-toggle" aria-label="任务执行视图">
+            <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
+            <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
+          </div>
+          {run && <Link className="button secondary small-button" to={`/orgs/${run.orgId}/agents/${run.agentId}/runs`}>打开运行页</Link>}
+          {run && canRetryRun && (
             <button
               aria-label={`重新执行 ${retryRunLabel} ${runId}`}
               className="secondary small-button"
@@ -2601,10 +2571,8 @@ export function IssuePage() {
             <IssueQueueStatusPanel
               activeRuns={activeAssigneeRuns}
               agentsById={agentsById}
-              cancellingRunId={cancellingRunId}
               currentRun={latestRun}
               issue={issue.data}
-              onCancelRun={(run) => cancelIssueRun.mutate(run)}
               orgId={orgId}
             />
 
@@ -2707,11 +2675,9 @@ export function IssuePage() {
 
               <IssueRunsPanel
                 agentsById={agentsById}
-                cancellingRunId={cancellingRunId}
                 currentRunId={currentRunId}
                 embedded
                 expandedRunIds={expandedRunIds}
-                onCancelRun={(run) => cancelIssueRun.mutate(run)}
                 onSelect={(runId) => {
                   localStorage.setItem(issueRunStorageKey(orgId, issueId), runId);
                   setCurrentRunId(runId);

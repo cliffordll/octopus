@@ -8,9 +8,10 @@ from typing import cast
 
 import pytest
 
+from server import lifespan as lifespan_module
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
-from server.lifespan import _dispose_engine
+from server.lifespan import _dispose_engine, _heartbeat_scheduler
 from server.routes import agents as agent_routes
 from server.routes import chats as chat_routes
 
@@ -66,6 +67,25 @@ class SlowDisposeEngine:
     async def dispose(self) -> None:
         self.dispose_started = True
         await asyncio.sleep(10)
+
+
+class EmptyAsyncContext:
+    async def __aenter__(self) -> object:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class SchedulerTestSession:
+    async def __aenter__(self) -> "SchedulerTestSession":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def begin(self) -> EmptyAsyncContext:
+        return EmptyAsyncContext()
 
 
 async def test_get_session_preserves_original_exception_when_cleanup_fails() -> None:
@@ -166,6 +186,55 @@ async def test_dispose_engine_times_out() -> None:
     await _dispose_engine(engine, timeout_seconds=0.01)  # type: ignore[arg-type]
 
     assert engine.dispose_started
+
+
+async def test_heartbeat_scheduler_recovers_orphaned_runs_on_each_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recover_modes: list[bool] = []
+    dispatch_calls = 0
+    tick_complete = asyncio.Event()
+
+    class FakeHeartbeatService:
+        def __init__(self, _session: object) -> None:
+            return None
+
+        async def recover_orphaned_runs(
+            self, *, require_process_loss: bool = False
+        ) -> list[object]:
+            recover_modes.append(require_process_loss)
+            return []
+
+        async def tick_timers(self, _org_id: str) -> list[object]:
+            return []
+
+    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
+        nonlocal dispatch_calls
+        dispatch_calls += 1
+        if dispatch_calls >= 2:
+            tick_complete.set()
+
+    async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
+        return [SimpleNamespace(id="org-1")]
+
+    monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
+    monkeypatch.setattr(
+        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
+    )
+    monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
+
+    def _make_session_factory() -> SchedulerTestSession:
+        return SchedulerTestSession()
+
+    task = asyncio.create_task(_heartbeat_scheduler(_make_session_factory, 0.01))  # type: ignore[arg-type]
+    try:
+        await asyncio.wait_for(tick_complete.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert recover_modes[:2] == [False, True]
 
 
 def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:

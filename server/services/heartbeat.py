@@ -897,7 +897,9 @@ class HeartbeatService:
             return self._to_run(run)
         return self._to_run(await self._start_if_capacity(agent, run))
 
-    async def recover_orphaned_runs(self) -> list[HeartbeatRun]:
+    async def recover_orphaned_runs(
+        self, *, require_process_loss: bool = False
+    ) -> list[HeartbeatRun]:
         recovered: list[HeartbeatRun] = []
         active_ids = (
             set().union(*self._active_run_ids.values())
@@ -915,6 +917,12 @@ class HeartbeatService:
                 and agent.agent_runtime_type in LOCAL_CHILD_PROCESS_RUNTIMES
                 and run.process_pid is not None
             )
+            if require_process_loss:
+                if not tracks_local_child:
+                    continue
+                assert run.process_pid is not None
+                if _is_process_alive(run.process_pid):
+                    continue
             detached_message: str | None = None
             if tracks_local_child:
                 detached_message = (
@@ -2585,6 +2593,21 @@ class HeartbeatService:
             )
             if deferred is None:
                 return
+
+            if issue.status in {"done", "cancelled"}:
+                await update_wakeup_request(
+                    self._session,
+                    deferred.id,
+                    {
+                        "status": "skipped",
+                        "reason": "issue_execution_closed",
+                        "run_id": None,
+                        "claimed_at": None,
+                        "finished_at": datetime.now(UTC),
+                        "error": "Deferred wake skipped because issue is already closed",
+                    },
+                )
+                continue
 
             agent = await get_agent_by_id(self._session, deferred.agent_id)
             if (

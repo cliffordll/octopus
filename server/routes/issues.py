@@ -801,11 +801,14 @@ async def create_issue_comment_route(
     )
     mentioned_agent_ids = {mentioned["id"] for mentioned in mentioned_agents}
     assignee_agent_id = detail.get("assigneeAgentId")
+    issue_status = detail.get("status")
+    skip_assignee_comment_wakeup = issue_status in {"backlog", "done", "cancelled"}
     comment_targets_assignee = not mentioned_agent_ids or (
         assignee_agent_id is not None and assignee_agent_id in mentioned_agent_ids
     )
     queued_assignee_wakeup = not (
         user_intervention_stopped_followup
+        or skip_assignee_comment_wakeup
         or not comment_targets_assignee
         or (actor.actor_type == "agent" and actor.actor_id == assignee_agent_id)
     )
