@@ -810,6 +810,7 @@ class HeartbeatService:
         await WorkspaceService(self._session).mark_run_workspace_interrupted(
             run.id, reason="cancelled", message="run cancelled"
         )
+        await self._release_issue_execution(cancelled)
         agent = await get_agent_by_id(self._session, run.agent_id)
         if agent is not None and agent.status == "running":
             await update_agent(self._session, agent.id, {"status": "idle"})
@@ -970,13 +971,23 @@ class HeartbeatService:
                 )
             if run.process_loss_retry_count >= 1:
                 continue
-            retry = await self.retry_run(
-                run.id,
-                actor_type="system",
-                actor_id="heartbeat_scheduler",
-                execute_immediately=False,
-                recovery_trigger="automatic",
-            )
+            try:
+                retry = await self.retry_run(
+                    run.id,
+                    actor_type="system",
+                    actor_id="heartbeat_scheduler",
+                    execute_immediately=False,
+                    recovery_trigger="automatic",
+                )
+            except AgentConflictError as exc:
+                await self._append_event(
+                    failed,
+                    await self._next_event_sequence(run.id),
+                    "lifecycle",
+                    message=f"automatic recovery retry skipped: {exc}",
+                    level="warning",
+                )
+                continue
             if retry is not None:
                 recovered.append(retry)
         return recovered
