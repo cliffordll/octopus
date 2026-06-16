@@ -821,6 +821,54 @@ async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery
     assert recovery[0]["retryOfRunId"] == orphan.id
 
 
+async def test_orphaned_assignment_run_for_closed_issue_is_cancelled_without_retry(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ClosedIssueOrphan")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Already closed issue",
+            status="done",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        wakeup = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            payload={"issueId": issue.id},
+            status="claimed",
+            run_id=None,
+            claimed_at=datetime.now(UTC),
+        )
+        session.add(wakeup)
+        await session.flush()
+        orphan = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            wakeup_request_id=wakeup.id,
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(orphan)
+        await session.flush()
+        wakeup.run_id = orphan.id
+        recovery = await heartbeat.recover_orphaned_runs()
+
+    assert recovery == []
+    await session.refresh(orphan)
+    await session.refresh(wakeup)
+    assert orphan.status == "cancelled"
+    assert orphan.error_code == "issue_already_closed"
+    assert wakeup.status == "cancelled"
+
+
 async def test_process_run_persists_child_process_metadata(
     session: AsyncSession,
 ) -> None:
@@ -901,6 +949,68 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
+
+
+async def test_successful_run_stays_succeeded_when_postprocess_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class SuccessfulAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            return RuntimeExecutionResult(
+                exit_code=0,
+                result_json={"summary": "work completed"},
+            )
+
+    async def fail_release(
+        self: HeartbeatService, final: HeartbeatRun
+    ) -> None:
+        raise AssertionError
+
+    agent = await _seed_agent(session, name="PostprocessCleanup")
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: SuccessfulAdapter(),
+    )
+    monkeypatch.setattr(
+        HeartbeatService,
+        "_release_issue_execution",
+        fail_release,
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    assert run["errorCode"] is None
+    warning_events = (
+        (
+            await session.execute(
+                select(HeartbeatRunEvent).where(
+                    HeartbeatRunEvent.run_id == run["id"],
+                    HeartbeatRunEvent.event_type == "postprocess.warning",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(warning_events) == 1
+    assert warning_events[0].message == "AssertionError"
 
 
 async def test_running_local_child_loss_fails_before_adapter_returns(

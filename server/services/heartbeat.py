@@ -155,6 +155,11 @@ def _database_log_fields(fields: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _exception_message(exc: BaseException) -> str:
+    message = str(exc).strip()
+    return message or type(exc).__name__
+
+
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
     RUNTIME_PROGRESS_INTERVAL_SECONDS = 15.0
@@ -901,6 +906,8 @@ class HeartbeatService:
         for run in await list_runs_by_status(self._session, "running"):
             if run.id in active_ids:
                 continue
+            if await self._cancel_orphaned_run_if_issue_closed(run):
+                continue
             agent = await get_agent_by_id(self._session, run.agent_id)
             tracks_local_child = (
                 agent is not None
@@ -973,6 +980,52 @@ class HeartbeatService:
             if retry is not None:
                 recovered.append(retry)
         return recovered
+
+    async def _cancel_orphaned_run_if_issue_closed(
+        self, run: HeartbeatRunRow
+    ) -> bool:
+        if run.invocation_source != "assignment":
+            return False
+        issue_id = _issue_id_from_context(run.context_snapshot)
+        issue = await self._session.get(IssueRow, issue_id) if issue_id else None
+        if issue is None or issue.org_id != run.org_id:
+            return False
+        if issue.status not in {"done", "cancelled"}:
+            return False
+        message = f"Run stopped during recovery because issue is already {issue.status}"
+        cancelled = await update_run(
+            self._session,
+            run.id,
+            {
+                "status": "cancelled",
+                "finished_at": datetime.now(UTC),
+                "error": message,
+                "error_code": "issue_already_closed",
+                **self._finalize_run_log_fields(run),
+            },
+        )
+        if cancelled is None:
+            return True
+        if run.wakeup_request_id:
+            await update_wakeup_request(
+                self._session,
+                run.wakeup_request_id,
+                {
+                    "status": "cancelled",
+                    "finished_at": datetime.now(UTC),
+                    "error": message,
+                },
+            )
+        await self._append_event(
+            cancelled,
+            await self._next_event_sequence(run.id),
+            "lifecycle",
+            message=message,
+            level="warning",
+            payload={"issueId": issue.id, "issueStatus": issue.status},
+        )
+        await self._release_issue_execution(cancelled)
+        return True
 
     async def resume_queued_runs(self, agent_id: str) -> list[HeartbeatRun]:
         agent = await get_agent_by_id(self._session, agent_id)
@@ -1628,6 +1681,81 @@ class HeartbeatService:
                 },
             )
             assert final is not None
+            return await self._complete_finalized_run(
+                agent=agent,
+                running=running,
+                final=final,
+                final_status=final_status,
+                result=result,
+                sequence=sequence,
+            )
+        except Exception as exc:
+            if cancellation.is_set():
+                return running
+            await self._session.refresh(running)
+            if running.status == "cancelled":
+                return running
+            message = _exception_message(exc)
+            await self._append_run_log(running, stream="stderr", chunk=message)
+            await self._finish_adapter_workspace_operation(
+                locals().get("adapter_operation"),
+                status="failed",
+                stderr_excerpt=message,
+                metadata={"error": message},
+            )
+            error_code = (
+                "process_lost"
+                if isinstance(exc, ProcessLostError)
+                else "adapter_failed"
+            )
+            failed = await update_run(
+                self._session,
+                running.id,
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now(UTC),
+                    "error": message,
+                    "error_code": error_code,
+                    **self._finalize_run_log_fields(running),
+                    "stdout_excerpt": stdout or None,
+                    "stderr_excerpt": stderr or None,
+                },
+            )
+            assert failed is not None
+            await update_wakeup_request(
+                self._session,
+                running.wakeup_request_id or "",
+                {
+                    "status": "failed",
+                    "finished_at": datetime.now(UTC),
+                    "error": message,
+                },
+            )
+            await self._update_runtime_state(agent, failed)
+            await update_agent(self._session, agent.id, {"status": "error"})
+            with contextlib.suppress(Exception):
+                await self._release_issue_execution(failed)
+            await self._append_event(
+                failed, sequence, "error", message=message, level="error"
+            )
+            await WorkspaceService(self._session).release_runtime_services_for_run(
+                failed.id
+            )
+            return failed
+        finally:
+            self._cancel_events.pop(running.id, None)
+
+    async def _complete_finalized_run(
+        self,
+        *,
+        agent: AgentRow,
+        running: HeartbeatRunRow,
+        final: HeartbeatRunRow,
+        final_status: HeartbeatRunStatus,
+        result: Any,
+        sequence: int,
+    ) -> HeartbeatRunRow:
+        try:
             if final_status == "succeeded":
                 final = await self._enforce_closeout_governance_success(agent, final)
                 final_status = cast(HeartbeatRunStatus, final.status)
@@ -1638,9 +1766,12 @@ class HeartbeatService:
                     final,
                     sequence,
                     "cost.collection_failed",
-                    message=f"Cost collection failed: {exc}",
+                    message=f"Cost collection failed: {_exception_message(exc)}",
                     level="warning",
-                    payload={"error": str(exc)},
+                    payload={
+                        "error": _exception_message(exc),
+                        "errorType": type(exc).__name__,
+                    },
                 )
                 sequence += 1
             await update_wakeup_request(
@@ -1688,59 +1819,39 @@ class HeartbeatService:
             )
             return final
         except Exception as exc:
-            if cancellation.is_set():
-                return running
-            await self._session.refresh(running)
-            if running.status == "cancelled":
-                return running
-            message = str(exc)
-            await self._append_run_log(running, stream="stderr", chunk=message)
-            await self._finish_adapter_workspace_operation(
-                locals().get("adapter_operation"),
-                status="failed",
-                stderr_excerpt=message,
-                metadata={"error": message},
-            )
-            error_code = (
-                "process_lost"
-                if isinstance(exc, ProcessLostError)
-                else "adapter_failed"
-            )
-            failed = await update_run(
-                self._session,
-                running.id,
-                {
-                    "status": "failed",
-                    "finished_at": datetime.now(UTC),
-                    "error": message,
-                    "error_code": error_code,
-                    **self._finalize_run_log_fields(running),
-                    "stdout_excerpt": stdout or None,
-                    "stderr_excerpt": stderr or None,
-                },
-            )
-            assert failed is not None
-            await update_wakeup_request(
-                self._session,
-                running.wakeup_request_id or "",
-                {
-                    "status": "failed",
-                    "finished_at": datetime.now(UTC),
-                    "error": message,
-                },
-            )
-            await self._update_runtime_state(agent, failed)
-            await update_agent(self._session, agent.id, {"status": "error"})
-            await self._release_issue_execution(failed)
-            await self._append_event(
-                failed, sequence, "error", message=message, level="error"
-            )
-            await WorkspaceService(self._session).release_runtime_services_for_run(
-                failed.id
-            )
-            return failed
-        finally:
-            self._cancel_events.pop(running.id, None)
+            if final.status != "succeeded":
+                raise
+            message = _exception_message(exc)
+            with contextlib.suppress(Exception):
+                await self._append_event(
+                    final,
+                    sequence,
+                    "postprocess.warning",
+                    message=message,
+                    level="warning",
+                    payload={
+                        "error": message,
+                        "errorType": type(exc).__name__,
+                        "runStatusPreserved": final.status,
+                    },
+                )
+            with contextlib.suppress(Exception):
+                await update_wakeup_request(
+                    self._session,
+                    running.wakeup_request_id or "",
+                    {
+                        "status": "completed",
+                        "finished_at": datetime.now(UTC),
+                        "error": None,
+                    },
+                )
+            with contextlib.suppress(Exception):
+                await update_agent(self._session, agent.id, {"status": "idle"})
+            with contextlib.suppress(Exception):
+                await WorkspaceService(self._session).release_runtime_services_for_run(
+                    final.id
+                )
+            return final
 
     async def _prepare_execution(
         self, agent: AgentRow, running: HeartbeatRunRow
