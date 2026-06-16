@@ -241,7 +241,9 @@ async def read_org_workspace_file_content(
     # RFC 6266：裸 filename 只放 ASCII fallback，完整中文名走 filename*（percent-encoded UTF-8），
     # header 全 ASCII 不崩，浏览器原生下载自动解析显示正确中文、不带 "UTF-8''" 前缀。
     raw_filename = workspace_file.original_filename.replace(chr(34), "")
-    ascii_filename = raw_filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
+    ascii_filename = (
+        raw_filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
+    )
     headers = {
         "Cache-Control": "private, max-age=60",
         "X-Content-Type-Options": "nosniff",
@@ -273,7 +275,9 @@ async def read_org_workspace_archive(
     archive_file = await service.read_archive_file(orgId, path)
     # 同上：ASCII fallback + filename*（percent-encoded UTF-8），header 全 ASCII 不崩。
     filename = archive_file.original_filename.replace(chr(34), "")
-    ascii_filename = filename.encode("ascii", "ignore").decode("ascii").strip() or "workspace.zip"
+    ascii_filename = (
+        filename.encode("ascii", "ignore").decode("ascii").strip() or "workspace.zip"
+    )
     return Response(
         content=archive_file.content,
         media_type=archive_file.content_type,

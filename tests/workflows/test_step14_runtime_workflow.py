@@ -857,8 +857,12 @@ async def test_openclaw_local_materializes_enabled_skills(
     )
 
     assert captured_skill["text"] == "# Review\n\nReview code changes."
-    assert "--agent" in captured_agent_args
-    assert captured_agent_args[captured_agent_args.index("--agent") + 1] == "agent-openclaw"
+    assert "--agent" not in captured_agent_args
+    assert "--session-key" in captured_agent_args
+    assert (
+        captured_agent_args[captured_agent_args.index("--session-key") + 1]
+        == "agent:agent-openclaw:run-openclaw-skills"
+    )
     assert result.result_json is not None
     assert result.result_json["loadedSkills"] == [
         {

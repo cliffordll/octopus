@@ -42,10 +42,12 @@ async def get_asset_content(
             detail=str(exc),
         ) from exc
     filename = (asset.original_filename or "asset").replace('"', "")
-    # RFC 6266：裸 filename 只放 ASCII fallback（中文直接进 header 会 latin-1 编码崩→500，且经网关
-    # httpx/starlette 往返也崩）；完整中文名走 filename*（percent-encoded UTF-8），header 全 ASCII，
-    # 浏览器原生下载会自动解析 filename* 显示正确中文、不带 "UTF-8''"（该前缀仅 raw header 语法）。
-    ascii_filename = filename.encode("ascii", "ignore").decode("ascii").strip() or "asset"
+    # 裸 filename 段会被原样写入 HTTP 响应头，HTTP header 必须 latin-1 可编码；
+    # 非 ASCII（如中文）文件名会触发 UnicodeEncodeError 进而 500。故裸段降级为 ASCII
+    # fallback，完整文件名交给 RFC 5987 的 filename*（已 percent-encode，浏览器优先采用）。
+    ascii_filename = (
+        filename.encode("ascii", "ignore").decode("ascii").strip() or "asset"
+    )
     return Response(
         content=content,
         media_type=asset.content_type or "application/octet-stream",
