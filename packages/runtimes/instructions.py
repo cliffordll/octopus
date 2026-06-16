@@ -234,6 +234,7 @@ def _assignment_issue_prompt(
                 "Use the available tools to explore the codebase, understand "
                 "the requirements, and implement a solution."
             ),
+            _subtask_coordination_prompt(issue_ref, issue),
             "\n".join(
                 [
                     "## Close-out Gate",
@@ -250,6 +251,41 @@ def _assignment_issue_prompt(
                     "Do not exit until one command above succeeds.",
                 ]
             ),
+        ]
+    )
+
+
+def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
+    text = " ".join(
+        [
+            _string(issue.get("title")) or "",
+            _string(issue.get("description")) or "",
+        ]
+    ).lower()
+    if not any(
+        marker in text
+        for marker in (
+            "subtask",
+            "sub-task",
+            "child task",
+            "split",
+            "delegate",
+            "子任务",
+            "拆分",
+            "分解",
+            "并行",
+        )
+    ):
+        return ""
+    return "\n".join(
+        [
+            "## Subtask Coordination",
+            "",
+            "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
+            'Create each real subtask with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
+            f'"{issue_ref}" ... --json` before treating it as delegated.',
+            "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
+            "If you intentionally complete the split work inside this run without creating child issues, say that explicitly in the close-out comment.",
         ]
     )
 
