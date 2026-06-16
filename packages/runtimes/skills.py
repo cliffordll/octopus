@@ -20,6 +20,7 @@ def skill_snapshot_from_root(
     external_conflict_detail: str | None = None,
     external_detail: str | None = None,
     persistent_materialization: bool = False,
+    force_copy_materialization: bool = False,
 ) -> dict[str, Any]:
     agent_skills_root = _agent_skills_root(config)
     desired = set(desired_skills)
@@ -52,6 +53,7 @@ def skill_snapshot_from_root(
             desired,
             warnings,
             explicit_sources=explicit_desired_sources,
+            force_copy=force_copy_materialization,
         )
     entries = _skill_entries(
         available,
@@ -417,6 +419,7 @@ def _materialize_desired_skills(
     warnings: list[str],
     *,
     explicit_sources: list[Path],
+    force_copy: bool = False,
 ) -> None:
     by_key = {skill_dir.name: skill_dir for skill_dir in available}
     explicit_by_key = {skill_dir.name: skill_dir for skill_dir in explicit_sources}
@@ -432,7 +435,7 @@ def _materialize_desired_skills(
             continue
         target = skills_home / source.name
         try:
-            if not _ensure_skill_link_or_copy(source, target):
+            if not _ensure_skill_link_or_copy(source, target, force_copy=force_copy):
                 warnings.append(
                     f'Skill "{source.name}" was not materialized because the runtime '
                     "target is occupied by a different source."
@@ -465,12 +468,18 @@ def _prune_stale_managed_skills(
             shutil.rmtree(entry)
 
 
-def _ensure_skill_link_or_copy(source: Path, target: Path) -> bool:
+def _ensure_skill_link_or_copy(
+    source: Path, target: Path, *, force_copy: bool = False
+) -> bool:
     if target.exists() or target.is_symlink():
         if _same_path(_resolve_installed_target(target), source):
             return True
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
+    if force_copy:
+        shutil.copytree(source, target)
+        (target / _SOURCE_MARKER).write_text(str(source), encoding="utf-8")
+        return True
     try:
         target.symlink_to(source, target_is_directory=True)
     except OSError:

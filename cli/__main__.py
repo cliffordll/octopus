@@ -28,8 +28,10 @@ def main(
 
 
 def _normalize_global_flags(argv: Sequence[str] | None) -> list[str] | None:
-    if argv is None or "--json" not in argv:
-        return None if argv is None else list(argv)
+    if argv is None:
+        return _normalize_global_flags(sys.argv[1:])
+    if "--json" not in argv:
+        return list(argv)
     normalized = [arg for arg in argv if arg != "--json"]
     return ["--json", *normalized]
 

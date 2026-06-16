@@ -450,11 +450,11 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "Do not guess tool input schemas" in captured_prompt
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
-    assert "D:/octopus/artifacts" in captured_prompt
-    assert "D:/octopus/artifacts/issues/ISSUE-1" not in captured_prompt
+    assert "D:/octopus/worktree/artifacts" in captured_prompt
+    assert "D:/octopus/artifacts" not in captured_prompt
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
-    assert "Prefer the organization artifacts directory" in captured_prompt
+    assert "Prefer the workspace artifacts directory" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
