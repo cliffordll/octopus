@@ -324,6 +324,67 @@ async def test_create_assigned_issue_skips_wakeup_when_on_demand_disabled(
     assert runs == []
 
 
+async def test_agent_duplicate_child_issue_create_does_not_queue_second_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, status="in_progress")
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Child Owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+
+    payload = {
+        "title": "Duplicate delegated child",
+        "status": "todo",
+        "parentId": parent_id,
+        "assigneeAgentId": agent_id,
+    }
+    headers = {
+        "x-test-org-id": org_id,
+        "x-test-agent-id": "agent-parent",
+        "x-octopus-run-id": "run-parent",
+    }
+    first_code, first_body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json=payload,
+        headers=headers,
+    )
+    second_code, second_body = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json=payload,
+        headers={**headers, "x-octopus-run-id": "run-parent-retry"},
+    )
+
+    assert first_code == 200
+    assert second_code == 200
+    assert second_body["id"] == first_body["id"]
+    async with session_factory() as verify:
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(runs) == 1
+
+
 async def test_create_in_review_issue_queues_reviewer_wakeup(
     app: FastAPI,
     session: AsyncSession,

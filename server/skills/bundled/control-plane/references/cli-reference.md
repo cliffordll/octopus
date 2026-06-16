@@ -102,7 +102,7 @@ Do not rely on a free-form reject or accept comment as the review outcome. The s
 - `control-plane agent config list --org-id <id>` — List redacted agent configuration snapshots for an organization.
 - `control-plane agent config get <agent-id-or-shortname>` — Read one redacted agent configuration snapshot by id or shortname.
 - `control-plane agent icons` — List legacy named agent icons for compatibility/debugging; normal create and hire payloads should omit icon.
-- `control-plane issue create --org-id <id> ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`.
+- `control-plane issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`. Before creating delegated subtasks, list existing children with `control-plane issue list --org-id <id> --parent-id <parent>` and reuse a matching child title.
 - `control-plane issue labels list --org-id <id>` — List organization issue labels available for issue creation.
 - `control-plane approval create --org-id <id> --type <type> --payload <json>` — Create a new approval request.
 - `control-plane approval resubmit <approval-id> [--payload <json>]` — Resubmit a revision-requested approval, optionally with updated payload.

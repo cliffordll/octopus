@@ -256,10 +256,16 @@ Before delegating child issues, list available agents when you need to choose th
 control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
+Before creating a child issue, list existing children for the parent and reuse the existing child when the title already matches:
+
+```bash
+control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
+```
+
 Delegated child issues must be assigned explicitly and should be moved into executable work:
 
 ```bash
-control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --status todo --assignee-agent-id "<agent-id>" ... --json
+control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json
 ```
 
 When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; prefer a suitable agent other than yourself when one is available.
