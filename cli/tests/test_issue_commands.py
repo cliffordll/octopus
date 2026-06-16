@@ -113,6 +113,78 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
+def test_issue_create_accepts_body_alias_for_description() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "title": "Child"})
+
+    assert (
+        main(
+            [
+                "issue",
+                "create",
+                "--org-id",
+                "org-1",
+                "--title",
+                "Child",
+                "--body",
+                "Child details",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+    assert requests[0].read() == b'{"title":"Child","description":"Child details"}'
+
+
+def test_issue_mutation_commands_tolerate_org_id_for_agent_scripts() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "title": "Child"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "issue",
+                "comment",
+                "--org-id",
+                "org-1",
+                "issue-1",
+                "--body",
+                "Progress",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "update",
+                "--org-id",
+                "org-1",
+                "issue-1",
+                "--description",
+                "Updated",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/issue-1/comments"
+    assert requests[0].read() == b'{"body":"Progress"}'
+    assert requests[1].url.path == "/api/issues/issue-1"
+    assert requests[1].read() == b'{"description":"Updated"}'
+
+
 def test_issue_list_sends_route_supported_filters() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/orgs/org-1/issues"

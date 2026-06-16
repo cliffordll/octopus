@@ -69,6 +69,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--title", required=True)
     create_parser.add_argument("--description")
+    create_parser.add_argument("--body")
     create_parser.add_argument("--status", choices=STATUSES)
     create_parser.add_argument("--priority", choices=PRIORITIES)
     create_parser.add_argument("--project-id")
@@ -87,6 +88,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
     update_parser = actions.add_parser("update", help="Update an issue")
     update_parser.add_argument("issue_id")
+    update_parser.add_argument("--org-id")
     update_parser.add_argument("--title")
     update_parser.add_argument("--description")
     update_parser.add_argument("--status", choices=STATUSES)
@@ -108,6 +110,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "comment", aliases=["comment-add"], help="Add an issue comment"
     )
     comment_add.add_argument("issue_id")
+    comment_add.add_argument("--org-id")
     comment_add.add_argument("--body", required=True)
     comment_add.set_defaults(handler=add_comment)
 
@@ -198,7 +201,9 @@ def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
         key: value
         for key, value in {
             "title": args.title,
-            "description": args.description,
+            "description": args.description
+            if args.description is not None
+            else args.body,
             "status": args.status,
             "priority": args.priority,
             "projectId": args.project_id,

@@ -219,12 +219,19 @@ class IssueService:
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
         _require_reviewer_for_in_review(values)
-        await self._apply_parent_values(
+        parent = await self._apply_parent_values(
             org_id,
             values,
             issue_id=None,
             explicit_parent="parent_id" in values,
         )
+        if parent is not None:
+            self._inherit_parent_scope(values, parent)
+            existing = await self._find_existing_agent_child_issue(
+                values, actor_type=actor_type
+            )
+            if existing is not None:
+                return await self._to_detail(existing)
         if (
             actor_type == "agent"
             and values.get("created_by_agent_id") == actor_id
@@ -401,13 +408,13 @@ class IssueService:
         *,
         issue_id: str | None,
         explicit_parent: bool,
-    ) -> None:
+    ) -> Issue | None:
         if not explicit_parent:
-            return
+            return None
         parent_id = values.get("parent_id")
         if parent_id is None:
             values["request_depth"] = 0
-            return
+            return None
         if issue_id is not None and parent_id == issue_id:
             raise ValueError("Issue cannot be its own parent")
         parent = await get_issue_by_id(self._session, parent_id)
@@ -416,6 +423,41 @@ class IssueService:
         if issue_id is not None:
             await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
         values["request_depth"] = parent.request_depth + 1
+        return parent
+
+    @staticmethod
+    def _inherit_parent_scope(values: dict[str, Any], parent: Issue) -> None:
+        inherited_fields = {
+            "project_id": parent.project_id,
+            "goal_id": parent.goal_id,
+            "project_workspace_id": parent.project_workspace_id,
+            "execution_workspace_id": parent.execution_workspace_id,
+            "execution_workspace_preference": parent.execution_workspace_preference,
+            "execution_workspace_settings": parent.execution_workspace_settings,
+        }
+        for field, value in inherited_fields.items():
+            if values.get(field) is None and value is not None:
+                values[field] = value
+
+    async def _find_existing_agent_child_issue(
+        self, values: Mapping[str, Any], *, actor_type: str
+    ) -> Issue | None:
+        parent_id = values.get("parent_id")
+        title = values.get("title")
+        if actor_type != "agent" or not parent_id or not isinstance(title, str):
+            return None
+        result = await self._session.execute(
+            select(Issue)
+            .where(
+                Issue.org_id == values["org_id"],
+                Issue.parent_id == parent_id,
+                Issue.title == title,
+                Issue.hidden_at.is_(None),
+            )
+            .order_by(Issue.created_at, Issue.id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def _assert_parent_does_not_cycle(
         self, issue_id: str, parent_id: str, org_id: str
