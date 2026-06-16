@@ -452,9 +452,11 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "D:/octopus/worktree" in captured_prompt
     assert "D:/octopus/artifacts" in captured_prompt
     assert "D:/octopus/artifacts/issues/ISSUE-1" not in captured_prompt
+    assert "project source/download directory" in captured_prompt
+    assert "downloaded source bundles" in captured_prompt
     assert "Prefer the organization artifacts directory" in captured_prompt
     assert (
-        "Do not write generated deliverables into external source paths"
+        "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
     )
 

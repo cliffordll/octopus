@@ -374,6 +374,8 @@ class WorkspaceService:
             project_workspace.id if project_workspace is not None else None
         )
         fallback_cwd: str | None = None
+        project_cwd = _string(project_workspace.cwd) if project_workspace else None
+        execution_cwd: str | None = None
         warnings: list[str] = []
         if project_workspace is None:
             fallback_cwd = str(self._org_workspace_root(issue.org_id))
@@ -381,12 +383,16 @@ class WorkspaceService:
                 "Project has no workspace configured. Run will start in "
                 f'shared organization workspace "{fallback_cwd}".'
             )
-        elif not _string(project_workspace.cwd):
+        elif not project_cwd:
             fallback_cwd = str(self._org_workspace_root(issue.org_id))
             warnings.append(
                 "Project workspace has no local cwd configured. Run will start "
                 f'in shared organization workspace "{fallback_cwd}".'
             )
+        elif mode == "shared_workspace":
+            execution_cwd = project_cwd
+        if fallback_cwd is not None:
+            execution_cwd = fallback_cwd
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -407,7 +413,7 @@ class WorkspaceService:
                 "strategy_type": strategy_type,
                 "name": f"{project.name} workspace",
                 "status": "active",
-                "cwd": fallback_cwd,
+                "cwd": execution_cwd,
                 "provider_type": "git_worktree"
                 if strategy_type == "git_worktree"
                 else "local_fs",
