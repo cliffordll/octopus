@@ -140,6 +140,40 @@ def test_issue_create_accepts_body_alias_for_description() -> None:
     assert requests[0].read() == b'{"title":"Child","description":"Child details"}'
 
 
+def test_json_flag_after_subcommand_is_normalized_from_sys_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[{"id": "agent-1", "name": "Agent"}])
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "control-plane",
+            "agent",
+            "list",
+            "--org-id",
+            "org-1",
+            "--json",
+        ],
+    )
+
+    output = io.StringIO()
+    assert (
+        main(
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/orgs/org-1/agents"
+    assert output.getvalue().strip().startswith("[")
+
+
 def test_issue_mutation_commands_tolerate_org_id_for_agent_scripts() -> None:
     requests: list[httpx.Request] = []
 

@@ -85,6 +85,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         desired_skills=desired_skills_from_config(context.config),
         skills_home=openclaw_workspace / "skills",
         location_label="managed OpenClaw agent workspace skills",
+        force_copy=True,
     )
 
     timeout = config.get("timeoutSec", 0)

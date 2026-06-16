@@ -119,6 +119,7 @@ def materialize_runtime_skills(
     desired_skills: list[str],
     skills_home: Path,
     location_label: str,
+    force_copy: bool = False,
 ) -> list[dict[str, str | None]]:
     if not desired_skills:
         return []
@@ -131,6 +132,7 @@ def materialize_runtime_skills(
         location_label=location_label,
         skills_home=skills_home,
         materialize=True,
+        force_copy_materialization=force_copy,
     )
     return [
         {

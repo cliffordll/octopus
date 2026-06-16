@@ -821,6 +821,7 @@ async def test_openclaw_local_materializes_enabled_skills(
                     / "SKILL.md"
                 )
                 captured_skill["text"] = skill_file.read_text(encoding="utf-8")
+                captured_skill["path"] = str(skill_file.parent)
             return (
                 b'{"payloads":[{"text":"ok"}],"meta":{"agentMeta":{"sessionId":"sess-1","usage":{"input":1,"output":1,"total":2}}}}',
                 b"",
@@ -857,6 +858,7 @@ async def test_openclaw_local_materializes_enabled_skills(
     )
 
     assert captured_skill["text"] == "# Review\n\nReview code changes."
+    assert not Path(captured_skill["path"]).is_symlink()
     assert "--agent" not in captured_agent_args
     assert "--session-key" in captured_agent_args
     assert (
