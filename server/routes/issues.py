@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from typing import Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -447,7 +448,7 @@ async def execute_issue_route(
         return active
 
     actor = require_actor_identity(request)
-    idempotency_key = f"issue:{id}:execute"
+    idempotency_key = f"issue:{id}:execute:{uuid.uuid4()}"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
