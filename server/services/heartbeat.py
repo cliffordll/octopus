@@ -981,9 +981,7 @@ class HeartbeatService:
                 recovered.append(retry)
         return recovered
 
-    async def _cancel_orphaned_run_if_issue_closed(
-        self, run: HeartbeatRunRow
-    ) -> bool:
+    async def _cancel_orphaned_run_if_issue_closed(self, run: HeartbeatRunRow) -> bool:
         if run.invocation_source != "assignment":
             return False
         issue_id = _issue_id_from_context(run.context_snapshot)

@@ -968,9 +968,7 @@ async def test_successful_run_stays_succeeded_when_postprocess_cleanup_fails(
                 result_json={"summary": "work completed"},
             )
 
-    async def fail_release(
-        self: HeartbeatService, final: HeartbeatRun
-    ) -> None:
+    async def fail_release(self: HeartbeatService, final: HeartbeatRun) -> None:
         raise AssertionError
 
     agent = await _seed_agent(session, name="PostprocessCleanup")
