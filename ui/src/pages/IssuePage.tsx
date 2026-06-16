@@ -115,6 +115,10 @@ function isLiveRun(status?: string | null): boolean {
   return status === "queued" || status === "running";
 }
 
+function isOpenIssueStatus(status?: string | null): boolean {
+  return status === "todo" || status === "in_progress" || status === "in_review" || status === "blocked";
+}
+
 function isRerunnableRun(status?: string | null): boolean {
   return status === "failed" || status === "timed_out" || status === "cancelled";
 }
@@ -2052,6 +2056,12 @@ export function IssuePage() {
     queryKey: ["issues", orgId, "children", issueId],
     queryFn: () => issuesApi.list(orgId, { parentId: issueId }),
     enabled: Boolean(orgId && issueId),
+    refetchInterval: (query) => {
+      const children = Array.isArray(query.state.data) ? query.state.data : [];
+      return issueRuns.data?.some((run) => isLiveRun(run.status)) || children.some((child) => isOpenIssueStatus(child.status))
+        ? LIVE_RUN_REFETCH_MS
+        : false;
+    },
   });
   useEffect(() => {
     if (!orgId || !issueId) return;

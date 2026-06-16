@@ -6,6 +6,7 @@ import { renderApp, respond, respondStream } from "./render-app";
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 }, 10000);
 
@@ -660,6 +661,91 @@ it("suggests agents when adding issue comment mentions", async () => {
     }),
   );
 });
+
+it("refreshes subtasks while the parent issue run is still live", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "拆分子任务",
+    description: "运行中创建子任务",
+    status: "in_progress",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: null,
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const childIssue = {
+    ...issue,
+    id: "issue-child",
+    identifier: "OCT-2",
+    title: "运行中新建子任务",
+    parentId: "issue-1",
+    issueNumber: 2,
+    status: "todo",
+  };
+  const run = {
+    id: "run-live",
+    orgId: "org-1",
+    agentId: "agent-1",
+    issueId: "issue-1",
+    invocationSource: "assignment",
+    runPurpose: "task_execution",
+    status: "running",
+    createdAt: "2026-06-02T10:00:00Z",
+    startedAt: "2026-06-02T10:00:01Z",
+  };
+  let childListCalls = 0;
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "running" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([run]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/issues?parentId=issue-1" && init?.method === "GET") {
+      childListCalls += 1;
+      if (childListCalls === 1) return respond([]);
+      return respond([{ ...childIssue, status: childListCalls >= 3 ? "done" : "todo" }]);
+    }
+    if (path === "/api/heartbeat-runs/run-live" && init?.method === "GET") return respond(run);
+    if (path === "/api/heartbeat-runs/run-live/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-live/log" && init?.method === "GET") return respond({ content: "", endOffset: 0, eof: true });
+    if (path === "/api/heartbeat-runs/run-live/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path.startsWith("/api/heartbeat-runs/run-live/stream") && init?.method === "GET") return respondStream([]);
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues/issue-1");
+
+  expect(await screen.findByText("暂无子任务。")).toBeInTheDocument();
+
+  await waitFor(() => expect(childListCalls).toBeGreaterThanOrEqual(2), { timeout: 1500 });
+  expect(await screen.findByText("运行中新建子任务")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("todo");
+  await waitFor(() => expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("done"), { timeout: 1500 });
+}, 3000);
 
 it("executes an assigned issue through the issue execution route", async () => {
   let hasExecuted = false;
