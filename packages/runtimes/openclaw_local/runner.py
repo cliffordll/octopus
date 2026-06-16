@@ -198,9 +198,7 @@ def _openclaw_provider_name(raw: str) -> str:
 # --------------------------------------------------------------------------- #
 # agent run
 # --------------------------------------------------------------------------- #
-def _build_args(
-    config: dict[str, Any], session_key: str, model_ref: str
-) -> list[str]:
+def _build_args(config: dict[str, Any], session_key: str, model_ref: str) -> list[str]:
     # 不传 --agent：openclaw 的 --agent 要求该 agent 预先在 openclaw 注册（且注册是交互式的），
     # 否则报 "Unknown agent id" 直接令 run 失败。改用 --session-key（agent:<id>:<run>），
     # openclaw 据此自动推断/创建 per-agent workspace（workspace-<id>），与 skills 落点一致。
