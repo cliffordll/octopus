@@ -90,10 +90,9 @@ async def _run_shielded_cleanup(
                     timeout=timeout_seconds,
                 )
             except TimeoutError:
-                cleanup_task.cancel()
-                await asyncio.gather(cleanup_task, return_exceptions=True)
+                _observe_background_cleanup(action, cleanup_task)
                 logger.warning(
-                    "Timed out while trying to %s after cancellation",
+                    "Database cleanup is still running while trying to %s after cancellation",
                     action,
                 )
             except BaseException:
@@ -104,10 +103,9 @@ async def _run_shielded_cleanup(
                 )
             raise
         except TimeoutError as exc:
-            cleanup_task.cancel()
-            await asyncio.gather(cleanup_task, return_exceptions=True)
+            _observe_background_cleanup(action, cleanup_task)
             logger.warning(
-                "Timed out while trying to %s after %.1f seconds",
+                "Database cleanup is still running while trying to %s after %.1f seconds",
                 action,
                 timeout_seconds,
             )
@@ -115,6 +113,24 @@ async def _run_shielded_cleanup(
         except BaseException as exc:
             logger.warning("Failed to %s", action, exc_info=True)
             return exc
+
+
+def _observe_background_cleanup(
+    action: str, cleanup_task: asyncio.Future[None]
+) -> None:
+    def _consume_result(task: asyncio.Future[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.warning("Background database cleanup was cancelled while %s", action)
+        except BaseException:
+            logger.warning(
+                "Background database cleanup failed while trying to %s",
+                action,
+                exc_info=True,
+            )
+
+    cleanup_task.add_done_callback(_consume_result)
 
 
 async def _invalidate_session(session: AsyncSession) -> None:
