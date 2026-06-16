@@ -250,7 +250,21 @@ surface before treating the work as delegated:
 control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... [--label-id "<label-id>"] [--label "<label-name>"] --json
 ```
 
-When you create an issue as an authenticated agent without an assignee, control plane assigns it to you by default. Pass an explicit assignee only when the new issue should belong to someone else.
+Before delegating child issues, list available agents when you need to choose the executor:
+
+```bash
+control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
+```
+
+Delegated child issues must be assigned explicitly and should be moved into executable work:
+
+```bash
+control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --status todo --assignee-agent-id "<agent-id>" ... --json
+```
+
+When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; prefer a suitable agent other than yourself when one is available.
+
+Do not mark the parent issue done while child issues are still open. Wait for child issues to finish, or explicitly close/cancel them with a reason.
 
 When the organization has a mature issue label taxonomy, agent-created issues must choose at least one label. List the available labels first when you are not sure which one applies:
 

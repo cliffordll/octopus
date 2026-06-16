@@ -44,7 +44,7 @@ If `OCTOPUS_APPROVAL_ID` is set:
 
 ## 6. Delegation
 
-- Create subtasks with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... --json`. Always set `parentId` and `goalId`.
+- Create subtasks with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... --json`. Always set `parentId` and `goalId`. For delegated subtasks, also set `--status todo` and an explicit `--assignee-agent-id`; use `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose the executor. Do not mark the parent issue done while child issues are still open.
 - Use `create-agent` skill when hiring new agents.
 - Assign work to the right agent for the job.
 - For hire/create-agent tasks, invoke `create-agent` immediately after identity succeeds. Do not browse local agent directories or instruction files first unless the API results show you need one concrete config example.
