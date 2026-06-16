@@ -1707,7 +1707,7 @@ async def test_issue_update_rejects_parent_cycle(
     assert "cycle" in body["detail"].lower()
 
 
-async def test_parent_done_auto_closes_open_children(
+async def test_parent_done_rejects_open_children(
     app: FastAPI,
     session: AsyncSession,
 ) -> None:
@@ -1729,15 +1729,15 @@ async def test_parent_done_auto_closes_open_children(
         json={"status": "done"},
     )
 
-    assert code == 200
-    assert body["status"] == "done"
+    assert code == 422
+    assert "child issues are still open" in body["detail"]
     child_code, children = await _request(
         app, "GET", f"/api/orgs/{org_id}/issues?parentId={parent_id}"
     )
     assert child_code == 200
     assert {child["id"]: child["status"] for child in children} == {
-        child_a_id: "done",
-        child_b_id: "done",
+        child_a_id: "todo",
+        child_b_id: "blocked",
         done_child_id: "done",
     }
 

@@ -282,8 +282,11 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             "## Subtask Coordination",
             "",
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
+            'List available agents first with `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
             'Create each real subtask with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
-            f'"{issue_ref}" ... --json` before treating it as delegated.',
+            f'"{issue_ref}" --status todo --assignee-agent-id "<agent-id>" ... --json` before treating it as delegated.',
+            "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
+            "Do not mark the parent issue done while child issues are still open; wait for child issues to finish, or explicitly close/cancel them with a reason.",
             "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
             "If you intentionally complete the split work inside this run without creating child issues, say that explicitly in the close-out comment.",
         ]

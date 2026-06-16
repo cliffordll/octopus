@@ -65,6 +65,10 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
         'control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "OCT-42"'
         in prompt
     )
+    assert "--status todo" in prompt
+    assert "--assignee-agent-id" in prompt
+    assert 'control-plane agent list --org-id "$OCTOPUS_ORG_ID"' in prompt
+    assert "Do not mark the parent issue done while child issues are still open" in prompt
     assert "internal `task` subagent call" in prompt
     assert "do not appear in the board" in prompt
 

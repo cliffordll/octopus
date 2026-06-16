@@ -340,12 +340,7 @@ class IssueService:
         if "parent_id" in values:
             await self._refresh_descendant_depths(row)
         if values.get("status") == "done":
-            await self._auto_close_open_descendants(
-                row,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                run_id=run_id,
-            )
+            await self._reject_done_with_open_descendants(row)
 
         if values and review_decision is None:
             await insert_activity_log(
@@ -373,14 +368,7 @@ class IssueService:
             )
         return await self._to_detail(row)
 
-    async def _auto_close_open_descendants(
-        self,
-        parent: Issue,
-        *,
-        actor_type: str,
-        actor_id: str,
-        run_id: str | None,
-    ) -> None:
+    async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
         rows = (
             (
                 await self._session.execute(
@@ -395,33 +383,16 @@ class IssueService:
             if row.parent_id is not None:
                 children_by_parent.setdefault(row.parent_id, []).append(row)
 
-        now = datetime.now(UTC)
         stack = list(children_by_parent.get(parent.id, []))
         while stack:
             child = stack.pop()
             stack.extend(children_by_parent.get(child.id, []))
             if child.status in {"done", "cancelled"}:
                 continue
-            previous_status = child.status
-            child.status = "done"
-            child.completed_at = now
-            child.updated_at = now
-            await insert_activity_log(
-                self._session,
-                org_id=child.org_id,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                action="issue.auto_closed_by_parent",
-                entity_type="issue",
-                entity_id=child.id,
-                run_id=run_id,
-                details={
-                    "parentId": parent.id,
-                    "previousStatus": previous_status,
-                    "status": "done",
-                },
+            raise ValueError(
+                "Cannot mark issue done while child issues are still open. "
+                f"Complete or cancel child issue {child.identifier or child.id} first."
             )
-        await self._session.flush()
 
     async def _apply_parent_values(
         self,

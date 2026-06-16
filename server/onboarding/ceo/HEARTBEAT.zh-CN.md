@@ -44,7 +44,7 @@
 
 ## 6. 委派
 
-- 使用 `control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... --json` 创建子任务。始终设置 `parentId` 和 `goalId`。
+- 使用 `control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... --json` 创建子任务。始终设置 `parentId` 和 `goalId`。委派型子任务还必须设置 `--status todo` 和明确的 `--assignee-agent-id`；需要选择执行者时先运行 `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json`。子任务仍未完成时，不要把父任务标记为 done。
 - 招聘新智能体时使用 `create-agent` skill。
 - 把工作分配给最合适的智能体。
 - 对 hire/create-agent 任务，在身份确认成功后立即调用 `create-agent`。除非 API 结果表明你需要一个具体配置示例，否则不要先浏览本地 agent 目录或说明文件。
