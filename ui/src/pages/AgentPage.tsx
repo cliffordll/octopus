@@ -11,7 +11,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
-import { isPassiveFollowupRun, runDescriptor, runIssueLabel } from "../utils/runDisplay";
+import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
@@ -508,8 +508,8 @@ function AgentRunDetail({
   operationsError,
   operationsLoading,
   run,
-  onStopPassiveFollowup,
-  stopPassiveFollowupPending = false,
+  cancelRunPending = false,
+  onCancelRun,
 }: {
   events?: HeartbeatRunEvent[];
   eventsError?: unknown;
@@ -520,8 +520,8 @@ function AgentRunDetail({
   operationsError?: unknown;
   operationsLoading?: boolean;
   run: HeartbeatRun | null;
-  onStopPassiveFollowup?: (() => void) | null;
-  stopPassiveFollowupPending?: boolean;
+  cancelRunPending?: boolean;
+  onCancelRun?: (() => void) | null;
 }) {
   const [viewMode, setViewMode] = useState<"nice" | "raw">("nice");
   useEffect(() => {
@@ -542,7 +542,7 @@ function AgentRunDetail({
   const contextSnapshot = run.contextSnapshot ?? {};
   const resultJson = run.resultJson ?? {};
   const usageJson = run.usageJson ?? {};
-  const showPassiveFollowupStop = isPassiveFollowupRun(run) && ["queued", "running"].includes(run.status) && Boolean(onStopPassiveFollowup);
+  const showCancelRun = ACTIVE_RUN_STATUSES.has(run.status) && Boolean(onCancelRun);
   return (
     <section className="panel agent-run-detail-card" data-testid="agent-runs-detail-pane">
       <div className="agent-run-detail-header">
@@ -557,21 +557,21 @@ function AgentRunDetail({
         </div>
         <div className="agent-run-detail-actions">
           {run.processPid && <Badge>PID {run.processPid}</Badge>}
+          {showCancelRun && (
+            <button
+              aria-label={`取消运行 ${run.id}`}
+              className="secondary small-button"
+              disabled={cancelRunPending}
+              onClick={() => onCancelRun?.()}
+              type="button"
+            >
+              {cancelRunPending ? "取消中" : "取消运行"}
+            </button>
+          )}
           <div className="agent-run-view-toggle" aria-label="运行详情视图">
             <button className={viewMode === "nice" ? "active" : ""} onClick={() => setViewMode("nice")} type="button">Nice</button>
             <button className={viewMode === "raw" ? "active" : ""} onClick={() => setViewMode("raw")} type="button">Raw</button>
           </div>
-          {showPassiveFollowupStop && (
-            <button
-              className="secondary small-button"
-              disabled={stopPassiveFollowupPending}
-              onClick={() => onStopPassiveFollowup?.()}
-              title="停止当前 issue_passive_followup run"
-              type="button"
-            >
-              停止运行
-            </button>
-          )}
         </div>
       </div>
       <dl className="detail-grid compact">
@@ -1142,7 +1142,7 @@ export function AgentPage() {
   );
   const maxConcurrentRuns = heartbeatMaxConcurrentRuns(agent.data?.runtimeConfig ?? null);
   const selectedRun = sortedRuns.find((run) => run.id === selectedRunId) ?? sortedRuns[0] ?? null;
-  const cancelPassiveFollowupRun = useMutation({
+  const cancelRun = useMutation({
     mutationFn: (run: HeartbeatRun) => heartbeatApi.cancel(run.id),
     onSuccess: async (_, run) => {
       await Promise.all([
@@ -2153,7 +2153,7 @@ export function AgentPage() {
           </section>}
           {activeTab === "runs" && <div className="agent-runs-layout">
             {runs.error && <ErrorNotice error={runs.error} />}
-            {cancelPassiveFollowupRun.error && <ErrorNotice error={cancelPassiveFollowupRun.error} />}
+            {cancelRun.error && <ErrorNotice error={cancelRun.error} />}
             <div className="agent-runs-main">
               <AgentQueuePanel maxConcurrentRuns={maxConcurrentRuns} orgId={orgId} runs={sortedActiveRuns} />
               <AgentRunDetail
@@ -2166,8 +2166,8 @@ export function AgentPage() {
                 operationsError={runWorkspaceOperations.error}
                 operationsLoading={runWorkspaceOperations.isLoading}
                 run={selectedRun}
-                onStopPassiveFollowup={selectedRun ? () => cancelPassiveFollowupRun.mutate(selectedRun) : null}
-                stopPassiveFollowupPending={cancelPassiveFollowupRun.isPending && cancelPassiveFollowupRun.variables?.id === selectedRun?.id}
+                cancelRunPending={cancelRun.isPending && cancelRun.variables?.id === selectedRun?.id}
+                onCancelRun={selectedRun ? () => cancelRun.mutate(selectedRun) : null}
               />
             </div>
             <aside className="panel agent-run-rail" data-testid="agent-runs-list-pane">

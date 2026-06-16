@@ -454,6 +454,20 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
         },
       ]);
     }
+    if (path === "/api/heartbeat-runs/run-timer/events" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-timer/log" && init?.method === "GET") return respond({ content: "", endOffset: 0, eof: true });
+    if (path === "/api/heartbeat-runs/run-timer/workspace-operations" && init?.method === "GET") return respond([]);
+    if (path === "/api/heartbeat-runs/run-timer/cancel" && init?.method === "POST") {
+      return respond({
+        id: "run-timer",
+        orgId: "org-1",
+        agentId: "agent-1",
+        status: "cancelled",
+        invocationSource: "timer",
+        triggerDetail: "heartbeat_timer",
+        createdAt: "2026-05-28T23:58:00Z",
+      });
+    }
     if (path.includes("heartbeat-runs") && init?.method === "GET") {
       return respond([
         {
@@ -579,6 +593,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("runtime.stderr")).toBeInTheDocument();
   expect(within(detail).queryByText("raw run log")).not.toBeInTheDocument();
   expect(within(detail).queryByText(/executionWorkspaceId/)).not.toBeInTheDocument();
+  expect(within(detail).queryByRole("button", { name: "取消运行 run-1" })).not.toBeInTheDocument();
   await userEvent.click(within(detail).getByRole("button", { name: "Raw" }));
   expect(within(detail).getByText("boot ok")).toBeInTheDocument();
   expect(within(detail).getByText(/executionWorkspaceId/)).toBeInTheDocument();
@@ -596,9 +611,18 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
   expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
   expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
+  await userEvent.click(within(rail).getByRole("button", { name: /run-timer/ }));
+  expect(await within(detail).findByRole("button", { name: "取消运行 run-timer" })).toBeInTheDocument();
+  await userEvent.click(within(detail).getByRole("button", { name: "取消运行 run-timer" }));
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/heartbeat-runs/run-timer/cancel",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
   await userEvent.click(within(rail).getByRole("button", { name: /run-automation/ }));
-  expect(await within(detail).findByRole("button", { name: "停止运行" })).toBeInTheDocument();
-  await userEvent.click(within(detail).getByRole("button", { name: "停止运行" }));
+  expect(await within(detail).findByRole("button", { name: "取消运行 run-automation" })).toBeInTheDocument();
+  const detailActionButtons = Array.from(detail.querySelectorAll(".agent-run-detail-actions button")).map((button) => button.textContent);
+  expect(detailActionButtons.slice(0, 3)).toEqual(["取消运行", "Nice", "Raw"]);
+  await userEvent.click(within(detail).getByRole("button", { name: "取消运行 run-automation" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-automation/cancel",
     expect.objectContaining({ method: "POST", body: "{}" }),

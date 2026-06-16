@@ -121,14 +121,12 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(runRecordsRegion).getByText("来源 assignment")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("来源 automation")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("任务执行")).toBeInTheDocument();
-  expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
-  expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
   expect(screen.getByText("最新运行：运行中")).toBeInTheDocument();
-  await userEvent.click(within(runRecordsRegion).getByRole("button", { name: "取消运行 run-visible" }));
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/heartbeat-runs/run-visible/cancel",
-    expect.objectContaining({ method: "POST" }),
-  );
+  const runRecordGroup = within(runRecordsRegion).getByText("run-visible").closest(".issue-run-record-group") as HTMLElement;
+  const runRecordMainRow = runRecordGroup.querySelector(".issue-run-record-main-row") as HTMLElement;
+  expect(within(runRecordMainRow).queryByRole("button", { name: "取消运行 run-visible" })).not.toBeInTheDocument();
   const summaryBlock = within(runRecordsRegion).getAllByText("输出摘要")[0].closest(".issue-run-record-summary");
   expect(summaryBlock).not.toHaveTextContent(longSummary);
   expect(summaryBlock).toHaveTextContent("展开");
@@ -958,14 +956,20 @@ it("executes an assigned issue through the issue execution route", async () => {
   expect(runRecordsRegion).toHaveTextContent("排队中");
   expect(runRecordsRegion).toHaveTextContent("第 1 次");
   expect(runRecordsRegion).toHaveTextContent("run-1");
-  expect(runRecordsRegion).toHaveTextContent("任务执行");
-  expect(runRecordsRegion).not.toHaveTextContent("等待执行");
-  expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
-  expect(within(runRecordsRegion).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
-  await ensureRunExpanded(runRecordsRegion, "run-1");
-  expect(await screen.findByRole("region", { name: "执行输出" })).toBeInTheDocument();
-  expect(within(screen.getByRole("region", { name: "执行输出" })).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
+  expect(runRecordsRegion).toHaveTextContent("任务执行");
+  expect(runRecordsRegion).not.toHaveTextContent("等待执行");
+  expect(screen.getByRole("region", { name: "动态" })).not.toHaveTextContent("等待执行");
+  const runRecordGroup = within(runRecordsRegion).getByText("run-1").closest(".issue-run-record-group") as HTMLElement;
+  const runRecordMainRow = runRecordGroup.querySelector(".issue-run-record-main-row") as HTMLElement;
+  expect(within(runRecordMainRow).queryByRole("button", { name: "取消运行 run-1" })).not.toBeInTheDocument();
+  await ensureRunExpanded(runRecordsRegion, "run-1");
+  expect(await screen.findByRole("region", { name: "执行输出" })).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "执行输出" })).getByRole("button", { name: "取消运行 run-1" })).toBeInTheDocument();
+  const runActionButtons = Array.from(
+    (screen.getByRole("region", { name: "执行输出" }).querySelector(".issue-run-actions") as HTMLElement).querySelectorAll("button"),
+  ).map((button) => button.textContent);
+  expect(runActionButtons.slice(0, 3)).toEqual(["取消运行", "Nice", "Raw"]);
+  expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("动态刷新中");
   expect(screen.getByRole("region", { name: "执行输出" })).toHaveTextContent("运行中会通过 stream 动态刷新事件和输出。");
   expect(screen.queryByRole("button", { name: "折叠执行输出" })).not.toBeInTheDocument();
   const runLogBlock = screen.getByRole("heading", { name: "运行日志" }).closest("section") as HTMLElement;
@@ -2542,13 +2546,9 @@ it("explains queued issue runs from the assignee active queue", async () => {
   expect(queueRegion).toHaveTextContent("定时心跳");
   expect(queueRegion).toHaveTextContent("assignment");
   expect(queueRegion).toHaveTextContent("issue_assigned");
-  expect(queueRegion).toHaveTextContent("OCT-1");
+  expect(queueRegion).toHaveTextContent("OCT-1");
   expect(queueRegion).toHaveTextContent("automation");
   expect(queueRegion).toHaveTextContent("issue_passive_followup");
-  await userEvent.click(within(queueRegion).getByRole("button", { name: "取消运行 run-timer" }));
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/heartbeat-runs/run-timer/cancel",
-    expect.objectContaining({ method: "POST" }),
-  );
+  expect(within(queueRegion).queryByRole("button", { name: "取消运行 run-timer" })).not.toBeInTheDocument();
   expect(within(queueRegion).getByRole("link", { name: "打开负责人运行页" })).toHaveAttribute("href", "/orgs/org-1/agents/agent-1/runs");
 });
