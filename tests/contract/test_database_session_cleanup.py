@@ -122,6 +122,28 @@ async def test_shielded_cleanup_finishes_before_propagating_task_cancellation() 
     assert cleanup_finished.is_set()
 
 
+async def test_shielded_cleanup_timeout_does_not_cancel_database_reset() -> None:
+    cleanup_cancelled = False
+
+    async def cleanup() -> None:
+        nonlocal cleanup_cancelled
+        try:
+            await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            cleanup_cancelled = True
+            raise
+
+    error = await database_dependency._run_shielded_cleanup(
+        "test cleanup",
+        cleanup,
+        timeout_seconds=0.01,
+    )
+
+    assert isinstance(error, TimeoutError)
+    await asyncio.sleep(0.06)
+    assert cleanup_cancelled is False
+
+
 async def test_dispose_engine_times_out() -> None:
     engine = SlowDisposeEngine()
 
