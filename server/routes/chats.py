@@ -53,6 +53,7 @@ from ..dependencies.chats import get_chat_service
 from ..dependencies.database import (
     REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     _close_session,
+    _cleanup_error_requires_invalidate,
     _invalidate_session,
     _run_shielded_cleanup,
 )
@@ -485,8 +486,9 @@ async def add_chat_message_stream_route(
                     session.commit,
                     timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
                 )
-                if error is not None:
+                if _cleanup_error_requires_invalidate(error):
                     await _invalidate_session(session)
+                if error is not None:
                     raise error
                 return result
             except BaseException:
@@ -495,7 +497,7 @@ async def add_chat_message_stream_route(
                     session.rollback,
                     timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
                 )
-                if error is not None:
+                if _cleanup_error_requires_invalidate(error):
                     await _invalidate_session(session)
                 raise
             finally:
