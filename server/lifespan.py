@@ -24,8 +24,15 @@ SHUTDOWN_TASK_TIMEOUT_SECONDS = 2.0
 ENGINE_DISPOSE_TIMEOUT_SECONDS = 2.0
 
 
+def _current_task_is_cancelling() -> bool:
+    current_task = asyncio.current_task()
+    return current_task is not None and current_task.cancelling() > 0
+
+
 async def _heartbeat_scheduler(
-    session_factory: async_sessionmaker[AsyncSession], interval_seconds: float
+    session_factory: async_sessionmaker[AsyncSession],
+    interval_seconds: float,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
     try:
         async with session_factory() as session:
@@ -35,6 +42,8 @@ async def _heartbeat_scheduler(
     except Exception:
         logger.exception("heartbeat startup recovery failed")
     while True:
+        if stop_event is not None and stop_event.is_set():
+            return
         try:
             async with session_factory() as session:
                 async with session.begin():
@@ -47,7 +56,14 @@ async def _heartbeat_scheduler(
             raise
         except Exception:
             logger.exception("heartbeat scheduler tick failed")
-        await asyncio.sleep(interval_seconds)
+        if stop_event is None:
+            await asyncio.sleep(interval_seconds)
+        else:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+                return
+            except TimeoutError:
+                continue
 
 
 @asynccontextmanager
@@ -61,19 +77,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = session_factory
     scheduler_task = None
+    scheduler_stop_event = None
     if settings.heartbeat_scheduler_enabled:
+        scheduler_stop_event = asyncio.Event()
         scheduler_task = asyncio.create_task(
             _heartbeat_scheduler(
-                session_factory, settings.heartbeat_scheduler_interval_seconds
+                session_factory,
+                settings.heartbeat_scheduler_interval_seconds,
+                scheduler_stop_event,
             )
         )
     try:
         yield
     finally:
         if scheduler_task is not None:
-            await _cancel_task(
+            await _stop_task_cooperatively(
                 scheduler_task,
                 "heartbeat scheduler",
+                stop_event=scheduler_stop_event,
                 timeout_seconds=SHUTDOWN_TASK_TIMEOUT_SECONDS,
             )
         dispatch_tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
@@ -93,6 +114,8 @@ async def _cancel_task(
     try:
         await asyncio.wait_for(task, timeout=timeout_seconds)
     except asyncio.CancelledError:
+        if _current_task_is_cancelling():
+            raise
         return
     except TimeoutError:
         logger.warning(
@@ -102,6 +125,35 @@ async def _cancel_task(
         )
     except Exception:
         logger.warning("%s failed during shutdown", label, exc_info=True)
+
+
+async def _stop_task_cooperatively(
+    task: asyncio.Task[Any],
+    label: str,
+    *,
+    stop_event: asyncio.Event | None,
+    timeout_seconds: float,
+) -> None:
+    if stop_event is not None:
+        stop_event.set()
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=timeout_seconds)
+        if task in done:
+            await task
+            return
+        logger.warning(
+            "Timed out waiting for %s to stop cooperatively after %.1f seconds",
+            label,
+            timeout_seconds,
+        )
+    except asyncio.CancelledError:
+        if _current_task_is_cancelling():
+            raise
+        return
+    except Exception:
+        logger.warning("%s failed during cooperative shutdown", label, exc_info=True)
+        return
+    await _cancel_task(task, label, timeout_seconds=timeout_seconds)
 
 
 async def _cancel_tasks(
