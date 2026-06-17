@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from packages.database.queries.workspaces import (
     update_workspace_operation,
     update_workspace_runtime_service,
 )
-from packages.database.queries.assets import create_asset
+from packages.database.queries.assets import create_asset, get_asset_by_sha256
 from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
@@ -778,6 +779,8 @@ class WorkspaceService:
             if isinstance(workspace_context, dict)
             else None
         )
+        existing = await list_issue_work_products(self._session, issue.id)
+        seen_external_ids = {row.external_id for row in existing if row.external_id}
         stored: list[IssueWorkProductData] = []
         for product in products:
             if not isinstance(product, dict):
@@ -786,6 +789,11 @@ class WorkspaceService:
             product_type = _string(product.get("type"))
             provider = _string(product.get("provider")) or "rudder"
             if not title or not product_type:
+                continue
+            external_id = _string(product.get("externalId"))
+            # Idempotent capture: a re-scan (backfill after a transient failure)
+            # must not duplicate an already-registered artifact for this issue.
+            if external_id and external_id in seen_external_ids:
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
@@ -811,6 +819,8 @@ class WorkspaceService:
                     "created_by_run_id": run_id,
                 },
             )
+            if external_id:
+                seen_external_ids.add(external_id)
             stored.append(self._to_work_product(row))
         return stored
 
@@ -887,7 +897,7 @@ class WorkspaceService:
                         "externalId": f"{source}:{workspace_ref}:{rel_path}",
                         "status": "active",
                         "reviewState": "none",
-                        "isPrimary": len(products) == 0,
+                        "isPrimary": False,
                         "summary": "Generated file captured from managed workspace storage.",
                         "content": content,
                         "contentType": content_type,
@@ -903,6 +913,20 @@ class WorkspaceService:
                 )
         if not products:
             return []
+        # Pick the primary deliverable from THIS run's own worktree (newest such
+        # file), not "the first file scanned" — which, because the shared org
+        # artifacts dir is scanned first and oldest-first, used to surface a stale
+        # file from another task as the headline product. Files are appended in
+        # ascending mtime per root, so the last worktree-sourced product is newest.
+        primary_idx = next(
+            (
+                i
+                for i in range(len(products) - 1, -1, -1)
+                if products[i]["metadata"].get("source") == "execution_workspace_scan"
+            ),
+            len(products) - 1,
+        )
+        products[primary_idx]["isPrimary"] = True
         return await self.persist_run_work_products(
             run_id=run_id,
             context_snapshot=context_snapshot,
@@ -927,27 +951,34 @@ class WorkspaceService:
             return product
         if not content:
             return product
-        storage = get_storage_service()
-        stored = await storage.put_file(
-            org_id=org_id,
-            namespace="work-products",
-            original_filename=_string(product.get("filename"))
-            or f"{_string(product.get('title')) or 'work-product'}.txt",
-            content_type=content_type,
-            body=content,
-        )
-        asset = await create_asset(
-            self._session,
-            {
-                "org_id": org_id,
-                "provider": stored["provider"],
-                "object_key": stored["objectKey"],
-                "content_type": stored["contentType"],
-                "byte_size": stored["byteSize"],
-                "sha256": stored["sha256"],
-                "original_filename": stored["originalFilename"],
-            },
-        )
+        # Reuse an existing asset with identical content instead of re-archiving:
+        # the same generated file is scanned/captured repeatedly (shared org
+        # artifacts dir, re-runs), and a fresh put_file each time would mint a new
+        # asset id and waste storage for byte-identical content.
+        digest = hashlib.sha256(content).hexdigest()
+        asset = await get_asset_by_sha256(self._session, org_id, digest)
+        if asset is None:
+            storage = get_storage_service()
+            stored = await storage.put_file(
+                org_id=org_id,
+                namespace="work-products",
+                original_filename=_string(product.get("filename"))
+                or f"{_string(product.get('title')) or 'work-product'}.txt",
+                content_type=content_type,
+                body=content,
+            )
+            asset = await create_asset(
+                self._session,
+                {
+                    "org_id": org_id,
+                    "provider": stored["provider"],
+                    "object_key": stored["objectKey"],
+                    "content_type": stored["contentType"],
+                    "byte_size": stored["byteSize"],
+                    "sha256": stored["sha256"],
+                    "original_filename": stored["originalFilename"],
+                },
+            )
         metadata = dict(product.get("metadata") or {})
         metadata.update(
             {

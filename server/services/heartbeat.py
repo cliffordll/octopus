@@ -1646,22 +1646,40 @@ class HeartbeatService:
                 context_snapshot=running.context_snapshot,
                 reports=result.runtime_services,
             )
-            work_products = await WorkspaceService(
-                self._session
-            ).persist_run_work_products(
-                run_id=running.id,
-                context_snapshot=running.context_snapshot,
-                products=result.work_products,
-            )
-            if final_status == "succeeded":
-                work_products.extend(
-                    await WorkspaceService(
-                        self._session
-                    ).persist_generated_workspace_files(
-                        run_id=running.id,
-                        context_snapshot=running.context_snapshot,
-                        since=running.started_at,
+            work_products: list[Any] = []
+            try:
+                work_products = await WorkspaceService(
+                    self._session
+                ).persist_run_work_products(
+                    run_id=running.id,
+                    context_snapshot=running.context_snapshot,
+                    products=result.work_products,
+                )
+                # Capture generated files for any terminal status, not only
+                # success: a run that crashed mid-way (e.g. ENOSPC) may have
+                # already produced deliverables that must still be registered.
+                if final_status in ("succeeded", "failed", "timed_out"):
+                    work_products.extend(
+                        await WorkspaceService(
+                            self._session
+                        ).persist_generated_workspace_files(
+                            run_id=running.id,
+                            context_snapshot=running.context_snapshot,
+                            since=running.started_at,
+                        )
                     )
+            except Exception as wp_exc:  # noqa: BLE001
+                # Work-product capture is best-effort and must never override the
+                # run's real outcome nor abort finalization. The capture is
+                # idempotent, so the next run of this issue backfills any miss.
+                work_products = []
+                await self._append_run_log(
+                    running,
+                    stream="stderr",
+                    chunk=(
+                        "[octopus] work-product capture failed: "
+                        f"{_exception_message(wp_exc)}\n"
+                    ),
                 )
             final = await update_run(
                 self._session,
