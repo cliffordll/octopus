@@ -11,7 +11,12 @@ import pytest
 from server import lifespan as lifespan_module
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
-from server.lifespan import _dispose_engine, _heartbeat_scheduler
+from server.lifespan import (
+    _cancel_task,
+    _dispose_engine,
+    _heartbeat_scheduler,
+    _stop_task_cooperatively,
+)
 from server.routes import agents as agent_routes
 from server.routes import chats as chat_routes
 
@@ -235,6 +240,129 @@ async def test_heartbeat_scheduler_recovers_orphaned_runs_on_each_tick(
             await task
 
     assert recover_modes[:2] == [False, True]
+
+
+async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tick_started = asyncio.Event()
+    allow_tick_finish = asyncio.Event()
+    tick_cancelled = False
+
+    class FakeHeartbeatService:
+        def __init__(self, _session: object) -> None:
+            return None
+
+        async def recover_orphaned_runs(
+            self, *, require_process_loss: bool = False
+        ) -> list[object]:
+            nonlocal tick_cancelled
+            if require_process_loss:
+                tick_started.set()
+                try:
+                    await allow_tick_finish.wait()
+                except asyncio.CancelledError:
+                    tick_cancelled = True
+                    raise
+            return []
+
+        async def tick_timers(self, _org_id: str) -> list[object]:
+            return []
+
+    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
+        return None
+
+    async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
+        return []
+
+    monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
+    monkeypatch.setattr(
+        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
+    )
+    monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
+
+    def _make_session_factory() -> SchedulerTestSession:
+        return SchedulerTestSession()
+
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(
+        _heartbeat_scheduler(
+            _make_session_factory, 30, stop_event  # type: ignore[arg-type]
+        )
+    )
+    await asyncio.wait_for(tick_started.wait(), timeout=1)
+
+    stop_waiter = asyncio.create_task(
+        _stop_task_cooperatively(
+            task,
+            "heartbeat scheduler",
+            stop_event=stop_event,
+            timeout_seconds=1,
+        )
+    )
+    await asyncio.sleep(0)
+    assert task.done() is False
+
+    allow_tick_finish.set()
+    await asyncio.wait_for(stop_waiter, timeout=1)
+
+    assert tick_cancelled is False
+    assert task.done() is True
+
+
+async def test_cooperative_stop_propagates_caller_cancellation() -> None:
+    async def never_finishes() -> None:
+        await asyncio.Event().wait()
+
+    target_task = asyncio.create_task(never_finishes())
+    stop_event = asyncio.Event()
+    stopper_task = asyncio.create_task(
+        _stop_task_cooperatively(
+            target_task,
+            "test task",
+            stop_event=stop_event,
+            timeout_seconds=30,
+        )
+    )
+    await asyncio.sleep(0)
+
+    stopper_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper_task
+
+    assert target_task.done() is False
+    target_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await target_task
+
+
+async def test_cancel_task_propagates_caller_cancellation() -> None:
+    cancel_started = asyncio.Event()
+    allow_cancel_finish = asyncio.Event()
+
+    async def slow_cancel() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancel_started.set()
+            await allow_cancel_finish.wait()
+            raise
+
+    target_task = asyncio.create_task(slow_cancel())
+    await asyncio.sleep(0)
+
+    stopper_task = asyncio.create_task(
+        _cancel_task(target_task, "test task", timeout_seconds=30)
+    )
+    await asyncio.wait_for(cancel_started.wait(), timeout=1)
+
+    stopper_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper_task
+
+    allow_cancel_finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await target_task
 
 
 def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
