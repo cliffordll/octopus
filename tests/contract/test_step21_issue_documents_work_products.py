@@ -180,6 +180,35 @@ async def test_generated_work_product_primary_prefers_run_worktree(
     assert "this_run_deliverable.md" in primary[0]["title"]
 
 
+async def test_generated_work_product_captures_binary_document(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    """A generated .docx deliverable must be captured as a work product, not
+    silently skipped by the extension whitelist (then only seen as an attachment)."""
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "静夜思.docx").write_bytes(b"PK\x03\x04 fake docx bytes")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {"rudderWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    titles = [row["title"] for row in rows]
+    assert any(title.endswith(".docx") for title in titles)
+
+
 async def test_issue_documents_are_versioned_and_listed_on_detail(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
