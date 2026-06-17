@@ -60,6 +60,126 @@ async def _seed_issue(factory: async_sessionmaker) -> tuple[str, str]:
     return org_id, issue_id
 
 
+async def test_work_product_capture_is_idempotent_on_external_id(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    """A re-scan (backfill after a transient failure such as ENOSPC) must not
+    duplicate a work product already registered for the issue."""
+    _, factory = app
+    org_id, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    product = {
+        "title": "report.md",
+        "type": "document",
+        "provider": "rudder",
+        "externalId": "organization_artifacts_scan:org:report.md",
+        "content": b"hello world",
+        "contentType": "text/markdown",
+        "filename": "report.md",
+    }
+    snapshot = {"issueId": issue_id}
+
+    async with factory() as session:
+        first = await WorkspaceService(session).persist_run_work_products(
+            run_id="run-1", context_snapshot=snapshot, products=[dict(product)]
+        )
+        await session.commit()
+    async with factory() as session:
+        second = await WorkspaceService(session).persist_run_work_products(
+            run_id="run-2", context_snapshot=snapshot, products=[dict(product)]
+        )
+        await session.commit()
+    async with factory() as session:
+        listed = await WorkspaceService(session).list_work_products_for_issue(
+            issue_id
+        )
+
+    assert len(first) == 1
+    assert len(second) == 0  # deduped on externalId
+    assert len(listed) == 1
+
+
+async def test_work_product_archive_reuses_asset_for_identical_content(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    """Byte-identical captures must reuse one asset, not mint a new asset id each
+    time (avoids the 'same product, different assetId' duplication + storage bloat)."""
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    def _product(external_id: str) -> dict:
+        return {
+            "title": external_id,
+            "type": "document",
+            "provider": "rudder",
+            "externalId": external_id,
+            "content": b"identical deliverable bytes",
+            "contentType": "text/markdown",
+            "filename": "deliverable.md",
+        }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_run_work_products(
+            run_id="run-1",
+            context_snapshot={"issueId": issue_id},
+            products=[_product("scanA:foo"), _product("scanB:foo")],
+        )
+        await session.commit()
+
+    assert len(rows) == 2  # distinct external ids -> two work products
+    asset_ids = {row["assetId"] for row in rows}
+    urls = {row["url"] for row in rows}
+    assert len(asset_ids) == 1  # ...but one shared asset for identical content
+    assert len(urls) == 1
+
+
+async def test_generated_work_product_primary_prefers_run_worktree(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    """Primary must be this run's own (newest worktree) deliverable, not the
+    oldest file lingering in the shared org artifacts dir."""
+    import os
+
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    artifacts = tmp_path / "art"
+    artifacts.mkdir()
+    shared_old = artifacts / "old_shared_from_another_task.md"
+    shared_old.write_text("stale shared file")
+    deliverable = worktree / "this_run_deliverable.md"
+    deliverable.write_text("the real output of this run")
+    os.utime(shared_old, (1_000_000, 1_000_000))
+    os.utime(deliverable, (2_000_000, 2_000_000))
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-1",
+                "cwd": str(worktree),
+                "orgArtifactsDir": str(artifacts),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    primary = [row for row in rows if row["isPrimary"]]
+    assert len(primary) == 1
+    assert "this_run_deliverable.md" in primary[0]["title"]
+
+
 async def test_issue_documents_are_versioned_and_listed_on_detail(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
