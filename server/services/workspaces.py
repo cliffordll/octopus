@@ -120,6 +120,20 @@ _GENERATED_FILE_EXTENSIONS = {
     ".xml",
     ".yaml",
     ".yml",
+    # Binary document deliverables agents commonly produce. Without these, a
+    # generated .docx/.pdf/... is silently skipped by the work-product scan and
+    # only ever surfaces as an issue attachment, never as a work product.
+    ".doc",
+    ".docx",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".pdf",
+    ".ppt",
+    ".pptx",
+    ".rtf",
+    ".xls",
+    ".xlsx",
 }
 _GENERATED_FILE_EXCLUDED_PARTS = {
     ".git",
@@ -139,7 +153,9 @@ _GENERATED_FILE_EXCLUDED_AGENT_DIRS = {
     "memory",
     "skills",
 }
-_GENERATED_FILE_MAX_BYTES = 1_000_000
+# Binary document deliverables (docx/pdf with embedded images) routinely exceed
+# the old 1 MB text-oriented cap; raise it so real deliverables aren't dropped.
+_GENERATED_FILE_MAX_BYTES = 25_000_000
 _GENERATED_FILE_MAX_COUNT = 20
 
 
