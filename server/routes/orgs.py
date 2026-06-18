@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 
 from packages.shared.api_paths.issues import ORG_ISSUE_LIST_MISSING_ORG_PATH
 from packages.shared.api_paths.organizations import (
     ORG_ARCHIVE_PATH,
     ORG_DETAIL_PATH,
+    ORG_IMPORT_PATH,
     ORG_LIST_PATH,
     ORG_RESOURCE_DETAIL_PATH,
     ORG_RESOURCE_LIST_PATH,
@@ -33,7 +48,11 @@ from ..dependencies.access import (
     require_board_access,
     require_organization_access,
 )
-from ..dependencies.orgs import get_org_detail, get_org_service
+from ..dependencies.orgs import (
+    get_org_detail,
+    get_org_service,
+    get_organization_import_service,
+)
 from ..dependencies.organization_workspace_browser import (
     get_organization_workspace_browser_service,
 )
@@ -43,6 +62,7 @@ from ..services.organization_workspace_browser import (
     OrganizationWorkspaceFileList,
     OrganizationWorkspaceBrowserService,
 )
+from ..services.organization_import import OrganizationImportService
 from ..services.orgs import OrgService
 from ..services.resources import ResourceService
 
@@ -78,6 +98,48 @@ async def create_org(
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
     )
+
+
+@router.post(ORG_IMPORT_PATH)
+async def import_org(
+    request: Request,
+    file: UploadFile = File(...),
+    target: str = Form(default="new"),
+    org_id: str | None = Form(default=None, alias="orgId"),
+    runtime_type: str = Form(default="opencode_local", alias="runtimeType"),
+    model: str | None = Form(default=None),
+    collision: str = Form(default="rename", alias="collisionStrategy"),
+    dry_run: bool = Form(default=False, alias="dryRun"),
+    _: None = Depends(require_board_access),
+    service: OrganizationImportService = Depends(get_organization_import_service),
+) -> dict[str, Any]:
+    """Import a companies.sh / Rudder organization package from an uploaded zip.
+
+    ``dryRun=true`` returns the parsed plan without writing anything.
+    """
+    actor = require_actor_identity(request)
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+        return await service.import_zip(
+            tmp_path,
+            target=target,
+            org_id=org_id,
+            runtime_type=runtime_type,
+            model=model,
+            collision=collision,
+            dry_run=dry_run,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    finally:
+        os.unlink(tmp_path)
 
 
 @router.get(ORG_ISSUE_LIST_MISSING_ORG_PATH)
