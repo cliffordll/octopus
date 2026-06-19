@@ -62,6 +62,8 @@ export const issuesApi = {
     jsonRequest<IssueDetail>(`${issueRoot(issueId)}/checkout`, "POST", payload),
   execute: (issueId: string): Promise<HeartbeatRun> =>
     jsonRequest<HeartbeatRun>(`${issueRoot(issueId)}/execute`, "POST", {}),
+  passiveFollowup: (issueId: string): Promise<HeartbeatRun> =>
+    jsonRequest<HeartbeatRun>(`${issueRoot(issueId)}/passive-followup`, "POST", {}),
   heartbeatContext: (issueId: string): Promise<Record<string, unknown>> =>
     request<Record<string, unknown>>(`${issueRoot(issueId)}/heartbeat-context`, { method: "GET" }),
   listRuns: (issueId: string): Promise<HeartbeatRun[]> =>

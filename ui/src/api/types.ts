@@ -846,6 +846,7 @@ export type AgentRuntimeType =
   | "pi_local"
   | "cursor"
   | "openclaw_gateway"
+  | "openclaw_local"
   | "hermes_local";
 
 export interface Agent {
@@ -867,6 +868,23 @@ export interface Agent {
 
 export interface AgentDetail extends Agent {
   capabilities?: string | null;
+}
+
+export type AgentInboxRelationship = "assignee" | "reviewer" | "mentioned";
+
+export interface AgentInboxItem {
+  relationship: AgentInboxRelationship;
+  issueId: string;
+  identifier: string | null;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  checkoutRunId: string | null;
+  executionRunId: string | null;
+  wakeReason: string | null;
+  wakeCommentId: string | null;
+  commentPreview: string | null;
+  updatedAt: string;
 }
 
 export interface AgentConfiguration {
@@ -975,7 +993,7 @@ export interface RuntimeModel {
   updatedAt?: string;
 }
 
-export type RuntimeProviderScope = "global" | "organization";
+export type RuntimeProviderScope = "instance" | "global" | "organization";
 
 export interface CreateRuntimeProviderPayload {
   scope?: RuntimeProviderScope;
@@ -1063,6 +1081,12 @@ export interface RuntimeAdapterMetadata {
   capabilities: Record<string, boolean>;
   supportsLocalAgentJwt?: boolean;
   agentConfigurationDoc?: string | null;
+}
+
+export interface RuntimeAdapterListItem {
+  type: AgentRuntimeType;
+  displayName: string;
+  metadata: RuntimeAdapterMetadata;
 }
 
 export interface ProviderQuotaResult {
@@ -1213,6 +1237,7 @@ export interface HeartbeatRun {
   projectId?: string | null;
   goalId?: string | null;
   invocationSource: string;
+  runPurpose?: "task_execution" | "closeout_followup" | "review" | "heartbeat";
   triggerDetail?: string | null;
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;
@@ -1223,6 +1248,7 @@ export interface HeartbeatRun {
   signal?: string | null;
   usageJson?: Record<string, unknown> | null;
   resultJson?: Record<string, unknown> | null;
+  summary?: string | null;
   sessionIdBefore?: string | null;
   sessionIdAfter?: string | null;
   stdoutExcerpt?: string | null;
@@ -1250,6 +1276,23 @@ export interface HeartbeatRunEvent {
   message: string | null;
   payload?: Record<string, unknown> | null;
   createdAt: string;
+}
+
+export interface InstanceSchedulerHeartbeatAgent {
+  id: string;
+  orgId: string;
+  organizationName: string;
+  organizationIssuePrefix: string;
+  agentName: string;
+  agentUrlKey: string;
+  role: AgentRole;
+  title: string | null;
+  status: AgentStatus;
+  agentRuntimeType: AgentRuntimeType;
+  intervalSec: number;
+  heartbeatEnabled: boolean;
+  schedulerActive: boolean;
+  lastHeartbeatAt: string | null;
 }
 
 export interface LogReadResult {
@@ -1376,6 +1419,7 @@ export interface ChatContextLink {
     subtitle: string | null;
     identifier: string | null;
     status: string | null;
+    parentId?: string | null;
     href: string;
   } | null;
   createdAt: string;

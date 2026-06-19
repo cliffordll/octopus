@@ -5,9 +5,9 @@ Stable CLI contract for agents using the bundled `control-plane` skill. Prefer t
 ## Defaults
 
 - All commands support `--json`.
-- `--org-id` defaults to `CONTROL_PLANE_ORG_ID` when relevant.
-- `--run-id` defaults to `CONTROL_PLANE_RUN_ID` and is attached to mutating requests when available.
-- `issue checkout` defaults `--agent-id` from `CONTROL_PLANE_AGENT_ID`.
+- `--org-id` defaults to `OCTOPUS_ORG_ID` when relevant.
+- `--run-id` defaults to `OCTOPUS_RUN_ID` and is attached to mutating requests when available.
+- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID`.
 
 ## JSON Output Contract
 
@@ -35,7 +35,7 @@ Direct API fallback is allowed for heartbeat close-out only when a required CLI 
 | `control-plane issue update <issue> ... [--image <path>]` | Apply generic issue updates when workflow commands are not enough, optionally uploading images for the update comment. | yes | no | no | attached when available |
 | `control-plane issue review <issue> --decision <decision> --comment <text>` | Record a structured reviewer decision with a required comment. | yes | no | no | attached when available |
 | `control-plane issue commit <issue> --sha <sha> --message <subject>` | Report a code commit created during issue work as structured issue activity. | yes | no | no | attached when available |
-| `control-plane issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment, optionally uploading images. | yes | no | no | attached when available |
+| `control-plane issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment; when the issue has a reviewer, submit it to review instead. | yes | no | no | attached when available |
 | `control-plane issue block <issue> --comment <text> [--image <path>]` | Mark an issue blocked with a required blocker comment, optionally uploading images. | yes | no | no | attached when available |
 | `control-plane issue release <issue>` | Release an issue back to todo and clear ownership. | yes | no | no | attached when available |
 | `control-plane issue documents list <issue>` | List issue documents. | no | no | no | no |
@@ -61,13 +61,21 @@ Before a successful `todo` or `in_progress` issue run exits, leave one close-out
 - work is blocked: `control-plane issue block <issue> --comment <text> [--image <path>]`
 - ownership changes: add an explicit handoff comment before or with the assignee update
 
+If the issue has a reviewer, `issue done` means the assignee is ready for
+review. The control plane moves the issue to `in_review` and wakes the
+reviewer agent when `reviewerAgentId` is configured; only
+`control-plane issue review --decision approve` marks the issue done. A
+`reviewerUserId` assignment enters human review without creating an agent run.
+Without either reviewer field, `issue done` marks the issue `done` directly,
+and a direct attempt to set `in_review` is rejected.
+
 If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: the reviewer should confirm the blocker, request changes, approve, or keep explicit follow-up open with `control-plane issue review`.
 
 `--image` may be repeated. The CLI uploads each local PNG/JPEG/WebP/GIF as an issue attachment and appends Markdown image links to the comment text before sending it.
 
 If your issue comment cites a screenshot path or visual validation artifact, attach that file with `--image <path>` instead of leaving only the local path in the text.
 
-If `CONTROL_PLANE_WAKE_REASON=issue_passive_followup`, the run is close-out governance for the same issue. Inspect current issue state first, then leave a progress comment, completion, blocker, or explicit handoff.
+If `OCTOPUS_WAKE_REASON=issue_passive_followup`, the run is close-out governance for the same issue. Inspect current issue state first, then leave a progress comment, completion, blocker, or explicit handoff.
 
 ## Git Identity Policy
 
@@ -94,7 +102,7 @@ Do not rely on a free-form reject or accept comment as the review outcome. The s
 - `control-plane agent config list --org-id <id>` — List redacted agent configuration snapshots for an organization.
 - `control-plane agent config get <agent-id-or-shortname>` — Read one redacted agent configuration snapshot by id or shortname.
 - `control-plane agent icons` — List legacy named agent icons for compatibility/debugging; normal create and hire payloads should omit icon.
-- `control-plane issue create --org-id <id> ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface; agent-created issues default to the creating agent when no assignee is supplied.
+- `control-plane issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`. Before creating delegated subtasks, list existing children with `control-plane issue list --org-id <id> --parent-id <parent>` and reuse a matching child title.
 - `control-plane issue labels list --org-id <id>` — List organization issue labels available for issue creation.
 - `control-plane approval create --org-id <id> --type <type> --payload <json>` — Create a new approval request.
 - `control-plane approval resubmit <approval-id> [--payload <json>]` — Resubmit a revision-requested approval, optionally with updated payload.

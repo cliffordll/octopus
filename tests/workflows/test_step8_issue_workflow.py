@@ -11,7 +11,13 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
-from packages.database.schema import ActivityLog, Base, IssueComment, Organization
+from packages.database.schema import (
+    ActivityLog,
+    Base,
+    Issue,
+    IssueComment,
+    Organization,
+)
 from server.services.issues import IssueService
 
 
@@ -110,6 +116,104 @@ async def test_update_issue_writes_activity(session: AsyncSession) -> None:
     assert rows[-1].actor_id == "user-2"
 
 
+async def test_child_issue_inherits_parent_project_and_workspace(
+    session: AsyncSession,
+) -> None:
+    org = await _seed_org(session)
+    service = IssueService(session)
+
+    async with async_transaction(session):
+        parent = await service.create_issue(
+            org.id,
+            {
+                "title": "Parent with project workspace",
+                "status": "in_progress",
+                "originKind": "manual",
+                "projectId": "project-1",
+                "goalId": "goal-1",
+            },
+            actor_type="board",
+            actor_id="user-1",
+        )
+        parent_row = await session.get(Issue, parent["id"])
+        assert parent_row is not None
+        parent_row.project_workspace_id = "project-workspace-1"
+        parent_row.execution_workspace_id = "execution-workspace-1"
+        parent_row.execution_workspace_preference = "shared_workspace"
+        parent_row.execution_workspace_settings = {"mode": "shared_workspace"}
+
+    async with async_transaction(session):
+        child = await service.create_issue(
+            org.id,
+            {
+                "title": "Delegated child",
+                "status": "todo",
+                "originKind": "manual",
+                "parentId": parent["id"],
+                "assigneeAgentId": "agent-1",
+            },
+            actor_type="agent",
+            actor_id="agent-parent",
+            run_id="run-parent",
+        )
+
+    child_row = await session.get(Issue, child["id"])
+    assert child_row is not None
+    assert child_row.project_id == "project-1"
+    assert child_row.goal_id == "goal-1"
+    assert child_row.project_workspace_id == "project-workspace-1"
+    assert child_row.execution_workspace_id == "execution-workspace-1"
+    assert child_row.execution_workspace_preference == "shared_workspace"
+    assert child_row.execution_workspace_settings == {"mode": "shared_workspace"}
+    assert child_row.request_depth == 1
+
+
+async def test_agent_child_issue_create_is_idempotent_by_parent_and_title(
+    session: AsyncSession,
+) -> None:
+    org = await _seed_org(session)
+    service = IssueService(session)
+
+    async with async_transaction(session):
+        parent = await service.create_issue(
+            org.id,
+            {"title": "Parent", "status": "in_progress", "originKind": "manual"},
+            actor_type="board",
+            actor_id="user-1",
+        )
+        first = await service.create_issue(
+            org.id,
+            {
+                "title": "Duplicate child",
+                "status": "todo",
+                "originKind": "manual",
+                "parentId": parent["id"],
+            },
+            actor_type="agent",
+            actor_id="agent-parent",
+            run_id="run-1",
+        )
+        second = await service.create_issue(
+            org.id,
+            {
+                "title": "Duplicate child",
+                "status": "todo",
+                "originKind": "manual",
+                "parentId": parent["id"],
+            },
+            actor_type="agent",
+            actor_id="agent-parent",
+            run_id="run-2",
+        )
+
+    assert second["id"] == first["id"]
+    result = await session.execute(
+        select(Issue).where(Issue.org_id == org.id, Issue.parent_id == parent["id"])
+    )
+    children = result.scalars().all()
+    assert [child.title for child in children] == ["Duplicate child"]
+
+
 async def test_add_comment_writes_activity(session: AsyncSession) -> None:
     org = await _seed_org(session)
     service = IssueService(session)
@@ -185,7 +289,12 @@ async def test_review_approve_moves_issue_to_done(session: AsyncSession) -> None
     async with async_transaction(session):
         created = await service.create_issue(
             org.id,
-            {"title": "Review approve", "status": "in_review", "originKind": "manual"},
+            {
+                "title": "Review approve",
+                "status": "in_review",
+                "originKind": "manual",
+                "reviewerUserId": "reviewer-1",
+            },
             actor_type="board",
             actor_id="user-1",
         )
@@ -226,6 +335,7 @@ async def test_review_request_changes_moves_issue_back_to_in_progress(
                 "title": "Review changes",
                 "status": "in_review",
                 "originKind": "manual",
+                "reviewerUserId": "reviewer-2",
             },
             actor_type="board",
             actor_id="user-1",
@@ -256,6 +366,7 @@ async def test_review_needs_followup_keeps_status_and_writes_intervention_activi
                 "title": "Needs followup",
                 "status": "in_review",
                 "originKind": "manual",
+                "reviewerUserId": "reviewer-3",
             },
             actor_type="board",
             actor_id="user-1",

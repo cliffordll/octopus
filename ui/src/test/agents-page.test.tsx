@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+﻿import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -24,6 +24,12 @@ it("opens the first agent by default and creates one from the new agent flow", a
     }
     if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Suggested Agent" });
+    }
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "http", displayName: "HTTP", metadata: { type: "http", capabilities: {} } },
+      ]);
     }
     if (path === "/api/agents/agent-1" && init?.method === "GET") {
       return respond(agent);
@@ -79,10 +85,16 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.type(await screen.findByLabelText(/智能体名称/), "Reviewer");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "qa");
   await userEvent.selectOptions(screen.getByLabelText("角色"), "cto");
-  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "hermes_local");
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "hermes_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "gemini_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "cursor" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "pi_local" })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Runtime")).queryByRole("option", { name: "codex_local" })).not.toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "http");
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
   fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
   fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
   await userEvent.type(screen.getByLabelText("期望技能"), "review,debug");
@@ -97,7 +109,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
         role: "cto",
         title: "Runtime owner",
         capabilities: "Own runtime rollout",
-        agentRuntimeType: "hermes_local",
+        agentRuntimeType: "http",
         agentRuntimeConfig: { model: "provider/model" },
         budgetMonthlyCents: 5000,
         metadata: { team: "runtime" },
@@ -111,6 +123,12 @@ it("creates the first agent as the organization CEO", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") {
       return respond([]);
+    }
+    if (path === "/api/orgs/org-empty/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "codex_local", displayName: "Codex", metadata: { type: "codex_local", capabilities: { models: true } } },
+      ]);
     }
     if (path === "/api/orgs/org-empty/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Founder" });
@@ -186,10 +204,16 @@ it("requires provider/model when creating a model-provider runtime agent", async
     if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Suggested Agent" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "opencode_local", displayName: "OpenCode", metadata: { type: "opencode_local", capabilities: { models: true } } },
+      ]);
+    }
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", name: "DeepSeek", runtimeType: "opencode_local", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/deepseek/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ providerId: "deepseek", modelId: "deepseek-v4-flash", displayName: "deepseek-v4-flash (local)", enabled: true }]);
     }
     if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
@@ -220,6 +244,56 @@ it("requires provider/model when creating a model-provider runtime agent", async
         role: "engineer",
         agentRuntimeType: "opencode_local",
         agentRuntimeConfig: { model: "deepseek/deepseek-v4-flash" },
+      }),
+    }),
+  );
+}, 10000);
+
+it("builds openclaw gateway config from dedicated runtime fields", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
+      return respond([{ id: "agent-1", orgId: "org-1", name: "CEO", role: "ceo", status: "idle" }]);
+    }
+    if (path === "/api/orgs/org-1/agents/name-suggestion" && init?.method === "GET") {
+      return respond({ name: "openclaw-1" });
+    }
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "process", displayName: "Process", metadata: { type: "process", capabilities: {} } },
+        { type: "openclaw_gateway", displayName: "OpenClaw", metadata: { type: "openclaw_gateway", capabilities: {} } },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/agent-hires" && init?.method === "POST") {
+      return respond({ agent: { id: "agent-2", name: "OpenClaw Agent", role: "engineer", status: "idle" }, approval: null }, 201);
+    }
+    return respond({ id: "agent-2", name: "OpenClaw Agent", role: "engineer", status: "idle" }, 201);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/new");
+  await userEvent.type(await screen.findByLabelText(/智能体名称/), "OpenClaw Agent");
+  await userEvent.selectOptions(screen.getByLabelText("Runtime"), "openclaw_gateway");
+  expect(screen.getByText("使用推荐默认配置")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Gateway URL")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
+  await userEvent.type(await screen.findByLabelText("Gateway URL"), "wss://gateway.example/ws");
+  await userEvent.type(screen.getByLabelText("Auth token"), "secret-token");
+  await userEvent.selectOptions(screen.getByLabelText("Session key strategy"), "issue");
+  await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/agent-hires",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "OpenClaw Agent",
+        role: "engineer",
+        agentRuntimeType: "openclaw_gateway",
+        agentRuntimeConfig: {
+          url: "wss://gateway.example/ws",
+          authToken: "secret-token",
+          sessionKeyStrategy: "issue",
+        },
       }),
     }),
   );
@@ -313,37 +387,37 @@ it("manages runtime providers and models from settings", async () => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([
-        { scope: "global", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
-        { scope: "organization", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
+        { scope: "instance", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
+        { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=codex_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
-      return respond([{ scope: "global", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
+    if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ scope: "instance", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", metadata: { pricing: { inputCostPer1M: 0.12, outputCostPer1M: 0.24 } }, enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
-      return respond([{ scope: "organization", modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
+    if (path === "/api/llm/providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([{ scope: "instance", modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers" && init?.method === "POST") {
+    if (path === "/api/llm/providers" && init?.method === "POST") {
       return respond({ providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local" }, 201);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local" && init?.method === "PATCH") {
+    if (path === "/api/llm/providers/kimi?runtimeType=opencode_local" && init?.method === "PATCH") {
       return respond({ providerId: "kimi", name: "Kimi Updated", runtimeType: "opencode_local" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "POST") {
+    if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "POST") {
       return respond({ modelId: "kimi/kimi-k3", displayName: "Kimi K3" }, 201);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "PATCH") {
+    if (path === "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "PATCH") {
       return respond({ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5 Updated" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "DELETE") {
+    if (path === "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "DELETE") {
       return respond({ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/openrouter?runtimeType=opencode_local" && init?.method === "DELETE") {
+    if (path === "/api/llm/providers/openrouter?runtimeType=opencode_local" && init?.method === "DELETE") {
       return respond({ providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local" });
     }
     return respond([]);
@@ -356,6 +430,7 @@ it("manages runtime providers and models from settings", async () => {
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   expect(dialog.getByRole("button", { name: /供应商/ })).toHaveClass("active");
+  expect(dialog.queryByRole("button", { name: /成本/ })).not.toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /存储/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
@@ -372,7 +447,8 @@ it("manages runtime providers and models from settings", async () => {
   expect(document.documentElement.lang).toBe("en-US");
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
-  expect(await dialog.findByRole("heading", { name: "Runtime Providers" })).toBeInTheDocument();
+  expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.getAllByText("Runtime Providers")).toHaveLength(1);
   const englishKimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   expect(englishKimiProvider.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   expect(englishKimiProvider.queryByRole("button", { name: "Edit" })).toBeInTheDocument();
@@ -384,12 +460,14 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
-  expect(kimiProvider.getAllByText("Global").length).toBeGreaterThanOrEqual(2);
+  expect(kimiProvider.getByText("价格：输入 $0.12 / 输出 $0.24 每 100 万 tokens")).toBeInTheDocument();
+  expect(kimiProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
-  expect(openrouterProvider.getAllByText("Organization").length).toBeGreaterThanOrEqual(2);
+  expect(openrouterProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
   expect(kimiProvider.getByRole("button", { name: "Kimi 更多操作" })).toBeInTheDocument();
@@ -399,23 +477,24 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: "新建 Provider" }));
   const providerDialog = within(screen.getByRole("dialog", { name: "新建 Provider" }));
+  await userEvent.selectOptions(providerDialog.getByLabelText("运行时"), "openclaw_local");
   await userEvent.type(providerDialog.getByLabelText("Provider ID"), "openrouter");
   await userEvent.type(providerDialog.getByLabelText("Provider 名称"), "OpenRouter");
   await userEvent.type(providerDialog.getByLabelText("Base URL"), "https://openrouter.ai/api/v1");
   await userEvent.type(providerDialog.getByLabelText("API Key"), "sk-test");
   await userEvent.click(providerDialog.getByRole("button", { name: "保存 Provider" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers",
+    "/api/llm/providers",
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"providerId":"openrouter"'),
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers",
+    "/api/llm/providers",
     expect.objectContaining({
       method: "POST",
-      body: expect.stringContaining('"scope":"global"'),
+      body: expect.stringContaining('"runtimeType":"openclaw_local"'),
     }),
   );
 
@@ -426,7 +505,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(providerEditDialog.getByLabelText("Provider 名称"), "Kimi Updated");
   await userEvent.click(providerEditDialog.getByRole("button", { name: "保存 Provider" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+    "/api/llm/providers/kimi?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"name":"Kimi Updated"'),
@@ -436,7 +515,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.click(kimiProvider.getByRole("button", { name: "Kimi 更多操作" }));
   await userEvent.click(kimiProvider.getByRole("menuitem", { name: "禁用" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+    "/api/llm/providers/kimi?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"enabled":false'),
@@ -450,36 +529,42 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(modelDialog.getByLabelText("模型显示名称"), "Kimi K3");
   await userEvent.click(modelDialog.getByRole("button", { name: "保存 Model" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models?runtimeType=opencode_local",
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"modelId":"kimi/kimi-k3"'),
     }),
   );
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
-    expect.objectContaining({
-      method: "POST",
-      body: expect.stringContaining('"scope":"global"'),
-    }),
-  );
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "编辑" }));
   const modelEditDialog = within(screen.getByRole("dialog", { name: "编辑 Model" }));
+  expect(modelEditDialog.getByLabelText("输入 / 100 万 tokens")).toHaveValue(0.12);
+  expect(modelEditDialog.getByLabelText("输出 / 100 万 tokens")).toHaveValue(0.24);
   await userEvent.clear(modelEditDialog.getByLabelText("模型显示名称"));
   await userEvent.type(modelEditDialog.getByLabelText("模型显示名称"), "Kimi K2.5 Updated");
+  await userEvent.clear(modelEditDialog.getByLabelText("输入 / 100 万 tokens"));
+  await userEvent.type(modelEditDialog.getByLabelText("输入 / 100 万 tokens"), "0.14");
+  await userEvent.clear(modelEditDialog.getByLabelText("输出 / 100 万 tokens"));
+  await userEvent.type(modelEditDialog.getByLabelText("输出 / 100 万 tokens"), "0.28");
   await userEvent.click(modelEditDialog.getByRole("button", { name: "保存 Model" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"displayName":"Kimi K2.5 Updated"'),
     }),
   );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"pricing":{"inputCostPer1M":0.14,"outputCostPer1M":0.28}'),
+    }),
+  );
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "禁用" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"enabled":false'),
@@ -488,22 +573,17 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({ method: "DELETE" }),
   );
 
   await userEvent.click(openrouterProvider.getByRole("button", { name: "OpenRouter 更多操作" }));
   await userEvent.click(openrouterProvider.getByRole("menuitem", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/openrouter?runtimeType=opencode_local",
+    "/api/llm/providers/openrouter?runtimeType=opencode_local",
     expect.objectContaining({ method: "DELETE" }),
   );
 
-  await userEvent.selectOptions(dialog.getByLabelText("运行时"), "codex_local");
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers?runtimeType=codex_local",
-    expect.objectContaining({ method: "GET" }),
-  );
 }, 10000);
 
 it("manages runtime providers and models from settings", async () => {
@@ -514,37 +594,37 @@ it("manages runtime providers and models from settings", async () => {
     if (path === "/api/orgs/org-1/agents" && init?.method === "GET") {
       return respond([]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([
         { providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
         { providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers?runtimeType=codex_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/openrouter/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ modelId: "openai/gpt-5", displayName: "GPT-5", enabled: true }]);
     }
-    if (path === "/api/orgs/org-1/runtime-providers" && init?.method === "POST") {
+    if (path === "/api/llm/providers" && init?.method === "POST") {
       return respond({ providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local" }, 201);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local" && init?.method === "PATCH") {
+    if (path === "/api/llm/providers/kimi?runtimeType=opencode_local" && init?.method === "PATCH") {
       return respond({ providerId: "kimi", name: "Kimi Updated", runtimeType: "opencode_local" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local" && init?.method === "POST") {
+    if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "POST") {
       return respond({ modelId: "kimi/kimi-k3", displayName: "Kimi K3" }, 201);
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "PATCH") {
+    if (path === "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "PATCH") {
       return respond({ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5 Updated" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "DELETE") {
+    if (path === "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local" && init?.method === "DELETE") {
       return respond({ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5" });
     }
-    if (path === "/api/orgs/org-1/runtime-providers/openrouter?runtimeType=opencode_local" && init?.method === "DELETE") {
+    if (path === "/api/llm/providers/openrouter?runtimeType=opencode_local" && init?.method === "DELETE") {
       return respond({ providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local" });
     }
     return respond([]);
@@ -560,6 +640,7 @@ it("manages runtime providers and models from settings", async () => {
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
@@ -579,7 +660,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(providerDialog.getByLabelText("API Key"), "sk-test");
   await userEvent.click(providerDialog.getByRole("button", { name: "保存 Provider" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers",
+    "/api/llm/providers",
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"providerId":"openrouter"'),
@@ -593,7 +674,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(providerEditDialog.getByLabelText("Provider 名称"), "Kimi Updated");
   await userEvent.click(providerEditDialog.getByRole("button", { name: "保存 Provider" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+    "/api/llm/providers/kimi?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"name":"Kimi Updated"'),
@@ -603,7 +684,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.click(kimiProvider.getByRole("button", { name: "Kimi 更多操作" }));
   await userEvent.click(kimiProvider.getByRole("menuitem", { name: "禁用" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+    "/api/llm/providers/kimi?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"enabled":false'),
@@ -617,7 +698,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(modelDialog.getByLabelText("模型显示名称"), "Kimi K3");
   await userEvent.click(modelDialog.getByRole("button", { name: "保存 Model" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models?runtimeType=opencode_local",
     expect.objectContaining({
       method: "POST",
       body: expect.stringContaining('"modelId":"kimi/kimi-k3"'),
@@ -630,7 +711,7 @@ it("manages runtime providers and models from settings", async () => {
   await userEvent.type(modelEditDialog.getByLabelText("模型显示名称"), "Kimi K2.5 Updated");
   await userEvent.click(modelEditDialog.getByRole("button", { name: "保存 Model" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"displayName":"Kimi K2.5 Updated"'),
@@ -639,7 +720,7 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "禁用" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"enabled":false'),
@@ -648,22 +729,17 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(kimiProvider.getByRole("button", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
+    "/api/llm/providers/kimi/models/kimi%2Fkimi-k2.5?runtimeType=opencode_local",
     expect.objectContaining({ method: "DELETE" }),
   );
 
   await userEvent.click(openrouterProvider.getByRole("button", { name: "OpenRouter 更多操作" }));
   await userEvent.click(openrouterProvider.getByRole("menuitem", { name: "删除" }));
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers/openrouter?runtimeType=opencode_local",
+    "/api/llm/providers/openrouter?runtimeType=opencode_local",
     expect.objectContaining({ method: "DELETE" }),
   );
 
-  await userEvent.selectOptions(dialog.getByLabelText("运行时"), "codex_local");
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/runtime-providers?runtimeType=codex_local",
-    expect.objectContaining({ method: "GET" }),
-  );
 });
 
 it("shows empty detail tabs when the organization has no agents", async () => {

@@ -32,7 +32,9 @@ def resolve_managed_runtime_home(
     org_root = resolve_octopus_instance_root() / "organizations" / org_id
     if runtime_type == "codex_local":
         return (org_root / "codex-home" / "agents" / agent_id).resolve()
-    return (org_root / _runtime_home_dir_name(runtime_type)).resolve()
+    return (
+        org_root / _runtime_home_dir_name(runtime_type) / "agents" / agent_id
+    ).resolve()
 
 
 def ensure_managed_runtime_home(

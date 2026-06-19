@@ -3,31 +3,41 @@ import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRuntimeType, RuntimeModel, RuntimeProvider, RuntimeProviderScope } from "../api/types";
 import { isEnglishLocale } from "../utils/locale";
-import { MODEL_PROVIDER_RUNTIMES } from "../utils/runtimeModels";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
 
 const DEFAULT_PROTOCOL = "openai_chat_completions";
+const PRICING_KEYS = ["inputCostPer1M", "outputCostPer1M"] as const;
+const SETTINGS_RUNTIME_TYPE: AgentRuntimeType = "opencode_local";
+const MODEL_PROVIDER_RUNTIMES: AgentRuntimeType[] = [
+  "opencode_local",
+  "codex_local",
+  "claude_local",
+  "openclaw_local",
+];
 
 export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const english = isEnglishLocale();
   const queryClient = useQueryClient();
-  const [runtimeType, setRuntimeType] = useState<AgentRuntimeType>("opencode_local");
+  const runtimeType = SETTINGS_RUNTIME_TYPE;
+  const [providerRuntimeType, setProviderRuntimeType] = useState<AgentRuntimeType>(SETTINGS_RUNTIME_TYPE);
   const [providerId, setProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [protocol, setProtocol] = useState(DEFAULT_PROTOCOL);
-  const [providerScope, setProviderScope] = useState<RuntimeProviderScope>("global");
+  const [providerScope, setProviderScope] = useState<RuntimeProviderScope>("instance");
   const [modelId, setModelId] = useState("");
   const [modelName, setModelName] = useState("");
+  const [inputCostPer1M, setInputCostPer1M] = useState("");
+  const [outputCostPer1M, setOutputCostPer1M] = useState("");
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [modelDialogProviderId, setModelDialogProviderId] = useState("");
   const [editingProvider, setEditingProvider] = useState<RuntimeProvider | null>(null);
-  const [editingModel, setEditingModel] = useState<{ providerId: string; model: RuntimeModel } | null>(null);
+  const [editingModel, setEditingModel] = useState<{ providerId: string; runtimeType: AgentRuntimeType; model: RuntimeModel } | null>(null);
 
   const providers = useQuery({
-    queryKey: ["runtime-providers", orgId, runtimeType],
+    queryKey: ["llm-providers", orgId],
     queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
     enabled: Boolean(orgId),
   });
@@ -37,7 +47,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     mutationFn: () =>
       runtimeProvidersApi.createProvider(orgId, {
         scope: providerScope,
-        runtimeType,
+        runtimeType: providerRuntimeType,
         providerId: providerId.trim(),
         name: providerName.trim() || providerId.trim(),
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
@@ -51,16 +61,16 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       setBaseUrl("");
       setApiKey("");
       setProtocol(DEFAULT_PROTOCOL);
-      setProviderScope("global");
+      setProviderScope("instance");
       setProviderDialogOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const updateProvider = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateProvider(orgId, runtimeType, editingProvider!.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, providerRuntimeType, editingProvider!.providerId, {
         name: providerName.trim() || editingProvider!.providerId,
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
         baseUrl: baseUrl.trim() || null,
@@ -69,90 +79,98 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       }),
     onSuccess: () => {
       clearProviderForm();
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const toggleProvider = useMutation({
     mutationFn: (provider: RuntimeProvider) =>
-      runtimeProvidersApi.updateProvider(orgId, runtimeType, provider.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, provider.runtimeType ?? runtimeType, provider.providerId, {
         enabled: provider.enabled === false,
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const createModel = useMutation({
-    mutationFn: () =>
-      runtimeProvidersApi.createModel(orgId, runtimeType, modelDialogProviderId, {
-        scope: providerRows.find((provider) => provider.providerId === modelDialogProviderId)?.scope ?? "global",
+    mutationFn: () => {
+      const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
+      return runtimeProvidersApi.createModel(orgId, provider?.runtimeType ?? runtimeType, modelDialogProviderId, {
+        scope: provider?.scope ?? "instance",
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
+        metadata: modelMetadataWithPricing({}),
         enabled: true,
-      }),
+      });
+    },
     onSuccess: () => {
+      const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
+      const modelRuntimeType = provider?.runtimeType ?? runtimeType;
       setModelId("");
       setModelName("");
       setModelDialogProviderId("");
-      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, modelDialogProviderId] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, modelRuntimeType, modelDialogProviderId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const updateModel = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateModel(orgId, runtimeType, editingModel!.providerId, editingModel!.model.modelId, {
+      runtimeProvidersApi.updateModel(orgId, editingModel!.runtimeType, editingModel!.providerId, editingModel!.model.modelId, {
         displayName: modelName.trim() || editingModel!.model.modelId,
+        metadata: modelMetadataWithPricing(editingModel!.model.metadata ?? {}),
         enabled: editingModel!.model.enabled !== false,
       }),
     onSuccess: () => {
       const providerId = editingModel?.providerId;
+      const modelRuntimeType = editingModel?.runtimeType ?? runtimeType;
       clearModelForm();
       if (providerId) {
-        void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, providerId] });
+        void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, modelRuntimeType, providerId] });
       }
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const toggleModel = useMutation({
-    mutationFn: ({ model, providerId }: { model: RuntimeModel; providerId: string }) =>
-      runtimeProvidersApi.updateModel(orgId, runtimeType, providerId, model.modelId, {
+    mutationFn: ({ model, providerId, runtimeType: modelRuntimeType }: { model: RuntimeModel; providerId: string; runtimeType: AgentRuntimeType }) =>
+      runtimeProvidersApi.updateModel(orgId, modelRuntimeType, providerId, model.modelId, {
         enabled: model.enabled === false,
       }),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, variables.providerId] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, variables.runtimeType, variables.providerId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const deleteProvider = useMutation({
-    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, runtimeType, provider.providerId),
+    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, provider.runtimeType ?? runtimeType, provider.providerId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-providers", orgId, runtimeType] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   const deleteModel = useMutation({
-    mutationFn: ({ model, providerId }: { model: RuntimeModel; providerId: string }) =>
-      runtimeProvidersApi.deleteModel(orgId, runtimeType, providerId, model.modelId),
+    mutationFn: ({ model, providerId, runtimeType: modelRuntimeType }: { model: RuntimeModel; providerId: string; runtimeType: AgentRuntimeType }) =>
+      runtimeProvidersApi.deleteModel(orgId, modelRuntimeType, providerId, model.modelId),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, runtimeType, variables.providerId] });
-      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId, runtimeType] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, variables.runtimeType, variables.providerId] });
+      void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
     },
   });
 
   function clearProviderForm() {
+    setProviderRuntimeType(SETTINGS_RUNTIME_TYPE);
     setProviderId("");
     setProviderName("");
     setBaseUrl("");
     setApiKey("");
     setProtocol(DEFAULT_PROTOCOL);
-    setProviderScope("global");
+    setProviderScope("instance");
     setProviderDialogOpen(false);
     setEditingProvider(null);
   }
@@ -160,6 +178,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   function clearModelForm() {
     setModelId("");
     setModelName("");
+    setInputCostPer1M("");
+    setOutputCostPer1M("");
     setModelDialogProviderId("");
     setEditingModel(null);
   }
@@ -167,26 +187,32 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   function openProviderEdit(provider: RuntimeProvider) {
     setEditingProvider(provider);
     setProviderDialogOpen(false);
+    setProviderRuntimeType(provider.runtimeType ?? SETTINGS_RUNTIME_TYPE);
     setProviderId(provider.providerId);
     setProviderName(provider.name ?? "");
     setBaseUrl(provider.baseUrl ?? "");
     setApiKey("");
     setProtocol(provider.protocol ?? DEFAULT_PROTOCOL);
-    setProviderScope(provider.scope ?? "organization");
+    setProviderScope(provider.scope ?? "instance");
   }
 
   function openModelCreate(providerId: string) {
     setEditingModel(null);
     setModelId("");
     setModelName("");
+    setInputCostPer1M("");
+    setOutputCostPer1M("");
     setModelDialogProviderId(providerId);
   }
 
-  function openModelEdit(providerId: string, model: RuntimeModel) {
+  function openModelEdit(providerId: string, runtimeType: AgentRuntimeType, model: RuntimeModel) {
     setModelDialogProviderId("");
-    setEditingModel({ providerId, model });
+    setEditingModel({ providerId, runtimeType, model });
     setModelId(model.modelId);
     setModelName(model.displayName ?? "");
+    const pricing = modelPricing(model.metadata);
+    setInputCostPer1M(pricing.inputCostPer1M);
+    setOutputCostPer1M(pricing.outputCostPer1M);
   }
 
   function confirmDeleteProvider(provider: RuntimeProvider) {
@@ -203,14 +229,14 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     deleteProvider.mutate(provider);
   }
 
-  function confirmDeleteModel(providerId: string, model: RuntimeModel) {
+  function confirmDeleteModel(providerId: string, runtimeType: AgentRuntimeType, model: RuntimeModel) {
     const modelName = model.displayName || model.modelId;
     if (!window.confirm(english ? `Delete model: ${modelName}?` : `确认删除模型：${modelName}？`)) return;
-    deleteModel.mutate({ providerId, model });
+    deleteModel.mutate({ providerId, runtimeType, model });
   }
 
-  function toggleModelEnabled(providerId: string, model: RuntimeModel) {
-    toggleModel.mutate({ providerId, model });
+  function toggleModelEnabled(providerId: string, runtimeType: AgentRuntimeType, model: RuntimeModel) {
+    toggleModel.mutate({ providerId, runtimeType, model });
   }
 
   function submitProvider(event: FormEvent) {
@@ -231,35 +257,39 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     }
   }
 
+  function modelMetadataWithPricing(metadata: Record<string, unknown>) {
+    const next = { ...metadata };
+    const pricing = pricingPayload(inputCostPer1M, outputCostPer1M);
+    if (pricing) {
+      next.pricing = pricing;
+    } else {
+      delete next.pricing;
+    }
+    return next;
+  }
+
   return (
-    <section className="runtime-settings" aria-label="模型供应商设置">
+    <section className="runtime-settings runtime-provider-settings" aria-label="模型供应商设置">
       <div className="panel-heading runtime-provider-heading">
         <div className="settings-section-heading-copy">
           <p className="eyebrow">Runtime Providers</p>
           <div className="runtime-provider-title-line">
-            <h3>{english ? "Runtime Providers" : "模型供应商"}</h3>
+            <h3>模型供应商</h3>
             <p className="muted">
-              {english ? "Manage runtime providers and models for the current organization." : "维护当前组织的运行时 provider 和 model。"}
+              {english ? "Manage shared LLM providers and models for all runtimes." : "维护所有运行时共享的 LLM provider 和 model。"}
             </p>
           </div>
         </div>
-        <label className="runtime-type-select">
+      </div>
+      <section className="runtime-settings-column runtime-provider-section">
+        <label>
           {english ? "Runtime" : "运行时"}
-          <select
-            value={runtimeType}
-            onChange={(event) => {
-              clearProviderForm();
-              clearModelForm();
-              setRuntimeType(event.target.value as AgentRuntimeType);
-            }}
-          >
+          <select value={providerRuntimeType} onChange={(event) => setProviderRuntimeType(event.target.value as AgentRuntimeType)}>
             {MODEL_PROVIDER_RUNTIMES.map((item) => (
-              <option key={item} value={item}>{item}</option>
+              <option key={item} value={item}>{runtimeLabel(item)}</option>
             ))}
           </select>
         </label>
-      </div>
-      <section className="runtime-settings-column runtime-provider-section">
         <div className="runtime-settings-title">
           <h4>Provider</h4>
           <div className="runtime-settings-title-actions">
@@ -274,15 +304,15 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <ProviderModelGroup
               key={provider.providerId}
               onCreateModel={() => openModelCreate(provider.providerId)}
-              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, model)}
+              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, provider.runtimeType ?? runtimeType, model)}
               onDeleteProvider={() => confirmDeleteProvider(provider)}
-              onEditModel={(model) => openModelEdit(provider.providerId, model)}
+              onEditModel={(model) => openModelEdit(provider.providerId, provider.runtimeType ?? runtimeType, model)}
               onEditProvider={() => openProviderEdit(provider)}
-              onToggleModel={(model) => toggleModelEnabled(provider.providerId, model)}
+              onToggleModel={(model) => toggleModelEnabled(provider.providerId, provider.runtimeType ?? runtimeType, model)}
               onToggleProvider={() => toggleProvider.mutate(provider)}
               orgId={orgId}
               provider={provider}
-              runtimeType={runtimeType}
+              runtimeType={provider.runtimeType ?? runtimeType}
             />
           ))}
         </div>
@@ -312,11 +342,16 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
               <label>
-                {english ? "Scope" : "作用域"}
-                <select value={providerScope} onChange={(event) => setProviderScope(event.target.value as RuntimeProviderScope)}>
-                  <option value="global">{english ? "Global" : "全局"}</option>
-                  <option value="organization">{english ? "Organization only" : "仅当前组织"}</option>
+                {english ? "Runtime" : "运行时"}
+                <select value={providerRuntimeType} onChange={(event) => setProviderRuntimeType(event.target.value as AgentRuntimeType)}>
+                  {MODEL_PROVIDER_RUNTIMES.map((item) => (
+                    <option key={item} value={item}>{runtimeLabel(item)}</option>
+                  ))}
                 </select>
+              </label>
+              <label>
+                {english ? "Scope" : "作用域"}
+                <input disabled value={scopeLabel(providerScope, english)} />
               </label>
               <label>
                 Provider ID
@@ -361,6 +396,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 <p className="eyebrow">Runtime Provider</p>
                 <h2>{english ? "Edit Provider" : "编辑 Provider"}</h2>
                 <p className="muted">{editingProvider.providerId}</p>
+                <Badge>{runtimeLabel(providerRuntimeType)}</Badge>
                 <Badge>{scopeLabel(editingProvider.scope, english)}</Badge>
               </div>
               <button className="secondary small-button" onClick={clearProviderForm} type="button">
@@ -368,6 +404,10 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
+              <label>
+                {english ? "Runtime" : "运行时"}
+                <input disabled value={runtimeLabel(providerRuntimeType)} />
+              </label>
               <label>
                 {english ? "Scope" : "作用域"}
                 <input disabled value={scopeLabel(providerScope, english)} />
@@ -430,6 +470,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
+              <ModelPricingFields
+                english={english}
+                inputCostPer1M={inputCostPer1M}
+                onInputCostPer1M={setInputCostPer1M}
+                onOutputCostPer1M={setOutputCostPer1M}
+                outputCostPer1M={outputCostPer1M}
+              />
               <div className="task-modal-actions">
               <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
                 <button disabled={createModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
@@ -468,6 +515,13 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
                 {english ? "Model display name" : "模型显示名称"}
                 <input value={modelName} onChange={(event) => setModelName(event.target.value)} />
               </label>
+              <ModelPricingFields
+                english={english}
+                inputCostPer1M={inputCostPer1M}
+                onInputCostPer1M={setInputCostPer1M}
+                onOutputCostPer1M={setOutputCostPer1M}
+                outputCostPer1M={outputCostPer1M}
+              />
               <div className="task-modal-actions">
                 <button className="secondary" onClick={clearModelForm} type="button">{english ? "Cancel" : "取消"}</button>
                 <button disabled={updateModel.isPending} type="submit">{english ? "Save Model" : "保存 Model"}</button>
@@ -478,6 +532,55 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ModelPricingFields({
+  english,
+  inputCostPer1M,
+  onInputCostPer1M,
+  onOutputCostPer1M,
+  outputCostPer1M,
+}: {
+  english: boolean;
+  inputCostPer1M: string;
+  onInputCostPer1M: (value: string) => void;
+  onOutputCostPer1M: (value: string) => void;
+  outputCostPer1M: string;
+}) {
+  return (
+    <fieldset className="runtime-model-pricing">
+      <legend>{english ? "Pricing fallback" : "价格估算"}</legend>
+      <p className="muted">
+        {english
+          ? "Used when the runtime returns tokens without cost. Leave blank to skip estimation, or enter 0 for free models."
+          : "运行时只返回 token、不返回成本时使用。留空表示不估算，免费模型填 0。"}
+      </p>
+      <div className="runtime-model-pricing-grid">
+        <label>
+          {english ? "Input / 1M tokens" : "输入 / 100 万 tokens"}
+          <input
+            min="0"
+            placeholder={english ? "e.g. 0.14" : "例如 0.14"}
+            step="0.000001"
+            type="number"
+            value={inputCostPer1M}
+            onChange={(event) => onInputCostPer1M(event.target.value)}
+          />
+        </label>
+        <label>
+          {english ? "Output / 1M tokens" : "输出 / 100 万 tokens"}
+          <input
+            min="0"
+            placeholder={english ? "e.g. 0.28" : "例如 0.28"}
+            step="0.000001"
+            type="number"
+            value={outputCostPer1M}
+            onChange={(event) => onOutputCostPer1M(event.target.value)}
+          />
+        </label>
+      </div>
+    </fieldset>
   );
 }
 
@@ -520,6 +623,7 @@ function ProviderModelGroup({
       <div className="runtime-provider-group-header">
         <div>
           <strong>{providerName}</strong>
+          <Badge>{runtimeLabel(runtimeType)}</Badge>
           <Badge>{scopeLabel(provider.scope, english)}</Badge>
           <span>{provider.providerId}</span>
           <small>{provider.baseUrl ?? (english ? "No Base URL" : "未设置 Base URL")}</small>
@@ -630,6 +734,7 @@ function ProviderModelGroup({
                 </div>
               </div>
               <span className="runtime-model-id">{model.modelId}</span>
+              <span className="runtime-model-pricing-summary">{pricingSummary(model.metadata, english)}</span>
             </div>
           </article>
         ))}
@@ -640,6 +745,59 @@ function ProviderModelGroup({
 }
 
 function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) {
+  if (scope === "instance") return "Instance";
   if (scope === "global") return "Global";
   return "Organization";
+}
+
+function runtimeLabel(runtimeType: AgentRuntimeType) {
+  if (runtimeType === "opencode_local") return "OpenCode";
+  if (runtimeType === "codex_local") return "Codex";
+  if (runtimeType === "claude_local") return "Claude";
+  if (runtimeType === "openclaw_local") return "OpenClaw";
+  return runtimeType;
+}
+
+function modelPricing(metadata: RuntimeModel["metadata"] | undefined) {
+  const pricing = metadata?.pricing;
+  if (!pricing || typeof pricing !== "object" || Array.isArray(pricing)) {
+    return { inputCostPer1M: "", outputCostPer1M: "" };
+  }
+  const record = pricing as Record<string, unknown>;
+  return {
+    inputCostPer1M: numericString(record.inputCostPer1M),
+    outputCostPer1M: numericString(record.outputCostPer1M),
+  };
+}
+
+function pricingPayload(inputCostPer1M: string, outputCostPer1M: string) {
+  const pairs = [
+    ["inputCostPer1M", inputCostPer1M],
+    ["outputCostPer1M", outputCostPer1M],
+  ] as const;
+  const pricing: Record<(typeof PRICING_KEYS)[number], number> = {} as Record<(typeof PRICING_KEYS)[number], number>;
+  for (const [key, value] of pairs) {
+    if (!value.trim()) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      pricing[key] = parsed;
+    }
+  }
+  return Object.keys(pricing).length ? pricing : null;
+}
+
+function numericString(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function pricingSummary(metadata: RuntimeModel["metadata"] | undefined, english: boolean) {
+  const pricing = modelPricing(metadata);
+  if (!pricing.inputCostPer1M && !pricing.outputCostPer1M) {
+    return english ? "Pricing not configured" : "未配置价格";
+  }
+  const input = pricing.inputCostPer1M || "0";
+  const output = pricing.outputCostPer1M || "0";
+  return english
+    ? `Pricing: input $${input} / output $${output} per 1M tokens`
+    : `价格：输入 $${input} / 输出 $${output} 每 100 万 tokens`;
 }

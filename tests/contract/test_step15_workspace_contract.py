@@ -218,6 +218,76 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
     assert workspace["strategyType"] == "git_worktree"
 
 
+async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -> None:
+    project_cwd = tmp_path / "project-workspace"
+    project_cwd.mkdir()
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-shared-project-cwd",
+                name="Step 15 Shared Project Cwd",
+                issue_prefix="SPC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Shared Project Cwd",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd)},
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert project_workspace is not None
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Run directly in project workspace",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-shared-project-cwd",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["mode"] == "shared_workspace"
+    assert workspace["strategyType"] == "project_primary"
+    assert workspace["projectWorkspaceId"] == project_workspace["id"]
+    assert workspace["cwd"] == str(project_cwd)
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(project_cwd)
+
+
 async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -278,13 +348,19 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert workspace["metadata"]["warnings"] == [
         f'Project has no workspace configured. Run will start in shared organization workspace "{org_root}".'
     ]
-    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
-    assert context["workspace"]["env"]["RUDDER_ORG_WORKSPACE_ROOT"] == str(org_root)
-    assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["OCTOPUS_ORG_WORKSPACE_ROOT"] == str(org_root)
+    assert context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
-    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in context["workspace"]["env"]
-    assert "RUDDER_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert all(
+        not key.startswith("RUDDER" + "_") for key in context["workspace"]["env"]
+    )
+    assert all(
+        not key.startswith("CONTROL" + "_PLANE_") for key in context["workspace"]["env"]
+    )
     assert "issueArtifactsDir" not in workspace
     assert "runArtifactsDir" not in workspace
 
@@ -345,11 +421,17 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     assert workspace["metadata"]["warnings"] == [
         f'Issue has no project configured. Run will start in shared organization workspace "{org_root}".'
     ]
-    assert context["workspace"]["env"]["RUDDER_WORKSPACE_CWD"] == str(org_root)
-    assert context["workspace"]["env"]["RUDDER_ORG_ARTIFACTS_DIR"] == str(
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(org_root)
+    assert context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
-    assert "RUDDER_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    assert all(
+        not key.startswith("RUDDER" + "_") for key in context["workspace"]["env"]
+    )
+    assert all(
+        not key.startswith("CONTROL" + "_PLANE_") for key in context["workspace"]["env"]
+    )
     assert "runArtifactsDir" not in workspace
 
 
@@ -595,7 +677,7 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env() -> Non
                         "command": sys.executable,
                         "args": [
                             "-c",
-                            "import os; print(os.environ['RUDDER_WORKSPACE_ID'])",
+                            "import os; print(os.environ['OCTOPUS_WORKSPACE_ID'])",
                         ],
                     },
                 },
@@ -790,7 +872,16 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             assert isinstance(workspace, str)
             report = Path(workspace) / "CLAUDE_SUMMARY.md"
             report.write_text("# Summary\n\nGenerated by runtime.\n", encoding="utf-8")
-            artifacts_dir = (context.env or {}).get("RUDDER_ORG_ARTIFACTS_DIR")
+            memory = (
+                Path(workspace)
+                / "agents"
+                / "file-writer--agent"
+                / "memory"
+                / "2026-06-11.md"
+            )
+            memory.parent.mkdir(parents=True, exist_ok=True)
+            memory.write_text("# Memory\n\nInternal note.\n", encoding="utf-8")
+            artifacts_dir = (context.env or {}).get("OCTOPUS_ORG_ARTIFACTS_DIR")
             assert isinstance(artifacts_dir, str)
             artifact = Path(artifacts_dir) / "analysis-plan.md"
             artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
@@ -900,6 +991,7 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
         "analysis-plan.md",
         "python-demo/README.md",
     }
+    assert all(not title.startswith("agents/") for title in titles)
     assert all(product["contentPath"] for product in result_json["workProducts"])
     assert detail is not None
     detail_titles = {product["title"] for product in detail["workProducts"]}

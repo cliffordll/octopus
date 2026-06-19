@@ -128,6 +128,7 @@ class UpdateIssuePayload(TypedDict, total=False):
     reopen: bool
     hiddenAt: str | None
     reviewDecision: "RecordIssueReviewDecisionPayload"
+    requestedStatus: str
 
 
 IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_followup"]

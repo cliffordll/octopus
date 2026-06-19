@@ -161,7 +161,8 @@ def _model_payload(
 
 
 def _provider_root(args: argparse.Namespace) -> str:
-    return f"/api/orgs/{args.org_id}/runtime-providers"
+    del args
+    return "/api/llm/providers"
 
 
 def _provider_detail(args: argparse.Namespace) -> str:

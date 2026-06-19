@@ -187,20 +187,27 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/issues",
   );
+  expect(within(tabs).getByRole("link", { name: "预算" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/projects/project-1/budget",
+  );
   expect(screen.getByText("代码库")).toBeInTheDocument();
   expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
   expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByText("console-main")).toBeInTheDocument();
+  expect(screen.getAllByText("console-main").length).toBeGreaterThanOrEqual(1);
 
   await userEvent.clear(screen.getByLabelText("描述"));
   await userEvent.type(screen.getByLabelText("描述"), "更新后的描述");
   await userEvent.selectOptions(screen.getByLabelText("负责人"), "agent-1");
   await userEvent.clear(screen.getByLabelText("目标日期"));
   await userEvent.type(screen.getByLabelText("目标日期"), "2026-06-01");
-  await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1,goal-2");
+  await userEvent.type(
+    screen.getByLabelText("目标 ID"),
+    "11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222",
+  );
   await userEvent.click(screen.getByLabelText(/独立工作区/));
-  expect(screen.getByText("isolated_workspace")).toBeInTheDocument();
+  expect(screen.getByLabelText(/独立工作区/)).toBeChecked();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -212,7 +219,7 @@ it("updates a project and manages its resource attachments", async () => {
         status: "planned",
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
-        goalIds: ["goal-1", "goal-2"],
+        goalIds: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"],
         executionWorkspacePolicy: {
           enabled: true,
           defaultMode: "isolated_workspace",
@@ -337,7 +344,16 @@ it("saves the selected workspace policy when the project has no existing policy"
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
-  expect(await screen.findByText("shared_workspace")).toBeInTheDocument();
+  expect(await screen.findByLabelText(/共享工作区/)).toBeChecked();
+  expect(screen.queryByText("shared_workspace")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByText("高级配置 JSON"));
+  expect(screen.getByLabelText("execution_workspace_policy JSON")).toHaveValue(
+    JSON.stringify({
+      enabled: true,
+      defaultMode: "shared_workspace",
+      workspaceStrategy: { mode: "shared_workspace" },
+    }, null, 2),
+  );
   expect(screen.getByText("将使用组织共享工作区")).toBeInTheDocument();
   expect(screen.getByText("organizations/org-1/workspaces")).toBeInTheDocument();
   expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
@@ -362,6 +378,50 @@ it("saves the selected workspace policy when the project has no existing policy"
         },
       }),
     }),
+  );
+});
+
+it("blocks project configuration save when goal IDs are not UUIDs", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    executionWorkspacePolicy: null,
+    codebase: { configured: false, scope: "none", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "organizations/org-1/workspaces", origin: "managed_checkout" },
+    workspaces: [],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+  expect(await screen.findByRole("heading", { name: "基础信息" })).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1");
+  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+
+  expect(await screen.findByText("目标 ID 必须是 UUID，多个目标请用逗号分隔。")).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/projects/project-1",
+    expect.objectContaining({ method: "PATCH" }),
   );
 });
 

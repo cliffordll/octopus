@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
 import server
+import server.__main__ as server_module
 from server.app import app
 
 
@@ -36,6 +37,7 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
     monkeypatch.setenv("OCTOPUS_HOST", "0.0.0.0")
     monkeypatch.setenv("OCTOPUS_PORT", "9123")
     monkeypatch.setenv("OCTOPUS_LOG_LEVEL", "debug")
+    monkeypatch.setenv("OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS", "2")
     monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
     monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test-instance")
     monkeypatch.setattr("uvicorn.run", fake_run)
@@ -47,6 +49,7 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
         "host": "0.0.0.0",
         "port": 9123,
         "log_level": "debug",
+        "timeout_graceful_shutdown": 2,
     }
     assert (
         tmp_path
@@ -56,3 +59,18 @@ def test_server_command_starts_uvicorn_with_configured_bindings(
         / "logs"
         / "octopus.log"
     ).exists()
+
+
+def test_python_module_entrypoint_delegates_to_server_main(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    called: list[str] = []
+
+    def fake_main() -> None:
+        called.append("main")
+
+    monkeypatch.setattr(server_module, "main", fake_main)
+
+    server_module.run()
+
+    assert called == ["main"]

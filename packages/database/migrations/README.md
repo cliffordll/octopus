@@ -24,6 +24,19 @@ uv run alembic revision -m "describe change"
 - 未设置 `OCTOPUS_HOME` 时，默认 home 是 `~/.octopus`；未设置 `OCTOPUS_INSTANCE_ID` 时，默认实例是 `default`。
 - 外部数据库当前推荐 PostgreSQL。MySQL 尚未作为支持目标验证，现有 query 和 migration 里存在 MySQL 不兼容点，不要直接用于生产或共享数据。
 
+本地开发不同 step 或功能分支时，推荐用不同 `OCTOPUS_INSTANCE_ID` 隔离 SQLite
+数据库和文件侧数据。例如把 `dev` 作为 step-29 开发实例：
+
+```powershell
+$env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
+$env:OCTOPUS_INSTANCE_ID = "dev"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+uv run server
+```
+
+这样默认 SQLite 会写入
+`D:\coding\octopus\.octopus\instances\dev\db\octopus.db`。不要让较新分支和较旧分支共用同一个 SQLite instance；较新分支写入的 `alembic_version` 可能引用当前分支不存在的 migration。
+
 如果要从 PostgreSQL 或其他外部数据库切回默认 SQLite，清空 `OCTOPUS_DATABASE_URL` 后重新迁移并启动。
 
 PowerShell：

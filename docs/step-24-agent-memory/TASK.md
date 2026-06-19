@@ -1,4 +1,4 @@
-# Step 24: Agent Memory
+﻿# Step 24: Agent Memory
 
 状态：开发中；已在 `step-24-agent-memory` 分支实现 runtime memory contract、专用 memory/life API 和 Agent Memory UI。
 
@@ -54,7 +54,7 @@
 - Runtime prompt 会自动加载长期 home 下 `instructions/MEMORY.md` 作为 tacit memory。
 - Runtime prompt 不会自动注入 `memory/` 或 `life/` 全目录内容，避免把日记和长期结构化资料无界塞进上下文。
 - Agent runtime config 的 `_octopus` 上下文会暴露 `agentHome`、`agentInstructionsDir`、`agentMemoryDir`、`agentLifeDir`、`agentSkillsRootPath`。
-- Local runtime env 支持从 workspace context 或 `_octopus` fallback 注入 `AGENT_HOME`、`RUDDER_AGENT_MEMORY_DIR`、`RUDDER_AGENT_LIFE_DIR` 等路径。
+- Local runtime env 支持从 workspace context 或 `_octopus` fallback 注入 `AGENT_HOME`、`OCTOPUS_AGENT_MEMORY_DIR`、`OCTOPUS_AGENT_LIFE_DIR` 等路径。
 - Codex/Claude/OpenCode managed HOME 不再默认占用 `AGENT_HOME`；`HOME/USERPROFILE` 仍用于 runtime CLI 凭据、缓存和 profile 隔离。
 - 已补 contract/workflow tests 覆盖 tacit memory 加载、lazy memory/life、runtime env fallback、managed HOME 与长期 `AGENT_HOME` 分离。
 - 新增 agent-scoped memory/life 文件 API：

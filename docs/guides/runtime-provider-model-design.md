@@ -1,40 +1,36 @@
-# 组织级 Runtime Provider/Model 设计
+# LLM Provider/Model 设计
 
-本文说明 Octopus 如何管理 `opencode_local`、`codex_local`、`claude_local`
+本文说明 Octopus 如何管理 `opencode_local`、`codex_local`、`claude_local`、`openclaw_local`
 等本地运行时的 provider/model 配置。
 
 ## 核心结论
 
 ```text
-provider/model 连接配置属于组织
+provider/model 连接配置属于实例级 LLM catalog
+runtimeType 只用于运行时默认模型绑定
 agentRuntimeConfig.model 属于智能体
-runtime adapter 负责把组织配置渲染到 managed home
+runtime adapter 负责把 LLM 配置注入到 managed home 或运行时环境
 ```
 
 当前 server 只支持数据库维护，不自动发现模型：
 
-- `GET /models` 只返回 `runtime_models` 中已有数据。
+- `GET /models` 只返回 `llm_models` 中已有数据。
 - 不提供 `/models/refresh`。
 - server 不主动请求外部模型服务 `/models`。
 - 模型服务是否更新，由用户或上层管理流程手动维护到 Octopus。
 
 ## 数据表
 
-### runtime_providers
+### llm_providers
 
-保存组织级模型服务连接配置。
+保存实例级模型服务基础信息。
 
 ```text
 id
-org_id
-runtime_type
 provider_id
 name
 protocol
 npm_package
-base_url
-api_key
-config
 enabled
 created_at
 updated_at
@@ -43,36 +39,59 @@ updated_at
 唯一约束：
 
 ```text
-unique(org_id, runtime_type, provider_id)
+unique(provider_id)
 ```
 
 字段说明：
 
 | 字段 | 说明 |
 | --- | --- |
-| `org_id` | 组织隔离边界 |
-| `runtime_type` | `opencode_local`、`codex_local`、`claude_local` 等 |
 | `provider_id` | provider 标识，例如 `local`、`openrouter`、`kimi` |
 | `name` | 展示名称 |
 | `protocol` | 协议类型，例如 `openai_chat_completions`、`openai_responses`、`ai_sdk_provider` |
 | `npm_package` | OpenCode 需要的 AI SDK package，例如 `@ai-sdk/openai-compatible` |
-| `base_url` | 模型服务地址 |
-| `api_key` | 开发期明文保存；API 响应必须脱敏 |
-| `config` | 额外配置 |
 | `enabled` | 是否启用 |
 
-### runtime_models
+### llm_provider_bindings
 
-保存组织级 provider 下可选模型。
+保存 provider 的实例级连接信息。
 
 ```text
 id
-org_id
-runtime_type
+scope_type
+scope_id
+provider_id
+base_url
+api_key
+config_json
+enabled
+priority
+created_at
+updated_at
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `scope_type` | 当前使用 `instance` |
+| `scope_id` | 实例级绑定为空字符串 |
+| `provider_id` | provider 标识 |
+| `base_url` | 模型服务地址 |
+| `api_key` | 开发期明文保存；API 响应必须脱敏 |
+| `config_json` | 额外配置 |
+| `enabled` | 是否启用 |
+
+### llm_models
+
+保存 provider 下可选模型。
+
+```text
+id
 provider_id
 model_id
 display_name
-metadata
+metadata_json
 enabled
 created_at
 updated_at
@@ -81,30 +100,49 @@ updated_at
 唯一约束：
 
 ```text
-unique(org_id, runtime_type, provider_id, model_id)
+unique(provider_id, model_id)
 ```
 
 字段说明：
 
 | 字段 | 说明 |
 | --- | --- |
-| `org_id` | 组织隔离边界 |
-| `runtime_type` | 所属 runtime |
 | `provider_id` | 所属 provider |
 | `model_id` | provider 内部模型 id，可包含 `/` |
 | `display_name` | 展示名称 |
-| `metadata` | context window、输入输出能力、价格等可选信息 |
+| `metadata_json` | context window、输入输出能力、价格等可选信息 |
 | `enabled` | 是否允许在 UI 中选择 |
+
+### llm_runtime_defaults
+
+保存每个运行时的默认 provider/model。
+
+```text
+id
+scope_type
+scope_id
+runtime_type
+provider_id
+model_id
+created_at
+updated_at
+```
+
+唯一约束：
+
+```text
+unique(scope_type, scope_id, runtime_type)
+```
 
 ## API
 
 ### Provider 管理
 
 ```text
-GET    /api/orgs/{orgId}/runtime-providers?runtimeType=opencode_local
-POST   /api/orgs/{orgId}/runtime-providers
-PATCH  /api/orgs/{orgId}/runtime-providers/{providerId}?runtimeType=opencode_local
-DELETE /api/orgs/{orgId}/runtime-providers/{providerId}?runtimeType=opencode_local
+GET    /api/llm/providers
+POST   /api/llm/providers
+PATCH  /api/llm/providers/{providerId}?runtimeType=opencode_local
+DELETE /api/llm/providers/{providerId}?runtimeType=opencode_local
 ```
 
 写入示例：
@@ -139,10 +177,10 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}?runtimeType=opencode_loc
 ### Model 管理
 
 ```text
-GET    /api/orgs/{orgId}/runtime-providers/{providerId}/models?runtimeType=opencode_local
-POST   /api/orgs/{orgId}/runtime-providers/{providerId}/models?runtimeType=opencode_local
-PATCH  /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtimeType=opencode_local
-DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtimeType=opencode_local
+GET    /api/llm/providers/{providerId}/models?runtimeType=opencode_local
+POST   /api/llm/providers/{providerId}/models?runtimeType=opencode_local
+PATCH  /api/llm/providers/{providerId}/models/{modelId}?runtimeType=opencode_local
+DELETE /api/llm/providers/{providerId}/models/{modelId}?runtimeType=opencode_local
 ```
 
 写入示例：
@@ -165,7 +203,7 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
 ```text
 1. 用户创建或更新 provider。
 2. 用户手动新增或更新 provider 下的 models。
-3. 创建/编辑智能体时，UI 查询 runtime_models。
+3. 创建/编辑智能体时，UI 查询 LLM provider/model 配置。
 4. 用户选择 model。
 5. server 保存到 agents.agent_runtime_config.model。
 ```
@@ -179,7 +217,7 @@ DELETE /api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId}?runtime
    agents.agent_runtime_type
    agents.agent_runtime_config.model
 
-2. 根据 agent.org_id 和 runtime_type 查询 runtime_providers/runtime_models。
+2. 根据 runtime_type 查询 `llm_runtime_defaults`，再读取 `llm_providers`、`llm_provider_bindings`、`llm_models`。
 
 3. adapter 准备 managed runtime home。
 

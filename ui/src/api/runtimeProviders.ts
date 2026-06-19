@@ -10,7 +10,8 @@ import type {
 } from "./types";
 
 function root(orgId: string) {
-  return `/api/orgs/${encodeURIComponent(orgId)}/runtime-providers`;
+  void orgId;
+  return "/api/llm/providers";
 }
 
 function runtimeQuery(runtimeType: AgentRuntimeType) {
@@ -30,8 +31,10 @@ function modelDetailRoot(orgId: string, runtimeType: AgentRuntimeType, providerI
 }
 
 export const runtimeProvidersApi = {
-  listProviders: (orgId: string, runtimeType: AgentRuntimeType): Promise<RuntimeProvider[]> =>
-    request<RuntimeProvider[]>(`${root(orgId)}?${runtimeQuery(runtimeType)}`, { method: "GET" }),
+  listProviders: (orgId: string, runtimeType: AgentRuntimeType): Promise<RuntimeProvider[]> => {
+    void runtimeType;
+    return request<RuntimeProvider[]>(root(orgId), { method: "GET" });
+  },
   createProvider: (orgId: string, payload: CreateRuntimeProviderPayload): Promise<RuntimeProvider> =>
     jsonRequest<RuntimeProvider>(root(orgId), "POST", payload),
   updateProvider: (

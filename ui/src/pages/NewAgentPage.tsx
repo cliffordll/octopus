@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
 import { ApiError } from "../api/client";
@@ -7,29 +7,25 @@ import { organizationsApi } from "../api/organizations";
 import type { AgentRole, AgentRuntimeType, RuntimeModel } from "../api/types";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { roleLabel } from "../utils/display";
 import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
-const RUNTIMES: AgentRuntimeType[] = [
-  "process",
-  "http",
-  "claude_local",
-  "codex_local",
-  "gemini_local",
-  "opencode_local",
-  "pi_local",
-  "cursor",
-  "openclaw_gateway",
-  "hermes_local",
-];
-
 function readJsonObject(value: string, label: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(value);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
     throw new Error(`${label} 必须是 JSON 对象`);
   }
   return parsed as Record<string, unknown>;
+}
+
+function readJsonObjectSafe(value: string): Record<string, unknown> {
+  try {
+    return readJsonObject(value, "Agent runtime config");
+  } catch {
+    return {};
+  }
 }
 
 function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntimeType, model: string): Record<string, unknown> {
@@ -61,6 +57,11 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
   const queryClient = useQueryClient();
   const organization = useQuery({ queryKey: ["organization", orgId], queryFn: () => organizationsApi.get(orgId) });
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const adapters = useQuery({
+    queryKey: ["runtime-adapters", orgId],
+    queryFn: () => agentsApi.adapters(orgId),
+    enabled: Boolean(orgId),
+  });
   const nameSuggestion = useQuery({
     queryKey: ["agent-name-suggestion", orgId],
     queryFn: () => agentsApi.nameSuggestion(orgId),
@@ -71,10 +72,19 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     enabled: supportsRuntimeModels(runtime) && Boolean(orgId),
   });
   const modelOptions: RuntimeModel[] = runtimeModels.data ?? [];
+  const adapterOptions = Array.isArray(adapters.data)
+    ? adapters.data
+    : [{ type: runtime, displayName: runtime, metadata: { type: runtime, capabilities: {} } }];
   const isFirstAgent = agents.isSuccess && agents.data.length === 0;
   const effectiveRole: AgentRole = isFirstAgent ? "ceo" : role;
   const requiresApproval = Boolean(organization.data?.requireBoardApprovalForNewAgents) && !isFirstAgent;
   const ceoActorId = agents.data?.find((agent) => agent.role === "ceo" && agent.status !== "terminated")?.id;
+  useEffect(() => {
+    const options = Array.isArray(adapters.data) ? adapters.data : [];
+    if (options.length > 0 && !options.some((adapter) => adapter.type === runtime)) {
+      setRuntime(options[0].type);
+    }
+  }, [adapters.data, runtime]);
   const create = useMutation({
     mutationFn: () =>
       agentsApi.hire(orgId, {
@@ -106,6 +116,10 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
+  }
+  function updateAgentRuntimeConfig(next: Record<string, unknown>) {
+    setAgentRuntimeConfig(JSON.stringify(next, null, 2));
+    setConfigurationError("");
   }
   return (
       <form className="panel form agent-create-form" onSubmit={submit}>
@@ -149,10 +163,13 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         </label>
         <label>
           Runtime
-          <select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
-            {RUNTIMES.map((item) => <option key={item}>{item}</option>)}
+          <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+            {adapterOptions.map((adapter) => (
+              <option key={adapter.type} value={adapter.type}>{adapter.displayName}</option>
+            ))}
           </select>
         </label>
+        {adapters.error && <ErrorNotice error={adapters.error} />}
         {supportsRuntimeModels(runtime) && (
           <label>
             模型配置
@@ -182,10 +199,20 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
           期望技能
           <input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} />
         </label>
-        <label>
-          Agent runtime config
-          <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
-        </label>
+        <RuntimeConfigFields
+          advancedEditor={(
+            <details className="runtime-config-advanced">
+              <summary>高级 JSON</summary>
+              <label>
+                Agent runtime config
+                <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
+              </label>
+            </details>
+          )}
+          runtime={runtime}
+          value={readJsonObjectSafe(agentRuntimeConfig)}
+          onChange={updateAgentRuntimeConfig}
+        />
         <label>
           Metadata
           <textarea className="config-editor" value={metadata} onChange={(event) => setMetadata(event.target.value)} />
@@ -196,7 +223,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
             ? <p className="error-notice">无创建智能体权限</p>
             : <ErrorNotice error={create.error} />
         )}
-        <button disabled={!agents.isSuccess || create.isPending} type="submit">
+        <button disabled={!agents.isSuccess || !adapters.isSuccess || create.isPending} type="submit">
           {isFirstAgent ? "创建 CEO" : "新建智能体"}
         </button>
       </form>

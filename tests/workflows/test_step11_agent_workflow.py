@@ -111,7 +111,7 @@ async def test_agent_lifecycle_writes_activity_and_prevents_reporting_cycle(
     ]
 
 
-async def test_agent_creation_defaults_control_plane_skill_unless_explicit(
+async def test_agent_creation_defaults_all_bundled_skills_unless_explicit(
     session: AsyncSession,
 ) -> None:
     from server.services.agents import AgentService
@@ -132,9 +132,34 @@ async def test_agent_creation_defaults_control_plane_skill_unless_explicit(
             actor_type="board",
             actor_id="local-board",
         )
+        subset_agent = await service.create_agent(
+            org.id,
+            {
+                "name": "Subset Skills",
+                "desiredSkills": [
+                    "skills/control-plane",
+                    "skills/create-agent",
+                ],
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
 
-    assert default_agent["desiredSkills"] == ["skills/control-plane"]
+    bundled_skill_keys = [
+        "skills/para-memory-files",
+        "skills/control-plane",
+        "skills/create-agent",
+        "skills/create-plugin",
+        "skills/skill-creator",
+        "skills/skill-optimizer",
+        "skills/conversation-to-skill",
+    ]
+    assert default_agent["desiredSkills"] == bundled_skill_keys
     assert explicit_empty_agent["desiredSkills"] == []
+    assert subset_agent["desiredSkills"] == [
+        "skills/control-plane",
+        "skills/create-agent",
+    ]
 
     rows = (
         (
@@ -147,9 +172,27 @@ async def test_agent_creation_defaults_control_plane_skill_unless_explicit(
         .scalars()
         .all()
     )
-    assert [(row.agent_id, row.skill_key) for row in rows] == [
-        (default_agent["id"], "skills/control-plane")
+    skills_by_agent: dict[str, list[str]] = {}
+    for row in rows:
+        skills_by_agent.setdefault(row.agent_id, []).append(row.skill_key)
+    assert skills_by_agent == {
+        default_agent["id"]: sorted(bundled_skill_keys),
+        subset_agent["id"]: [
+            "skills/control-plane",
+            "skills/create-agent",
+        ],
+    }
+
+    snapshot = await service.get_skill_snapshot(default_agent["id"])
+    assert snapshot is not None
+    assert snapshot["desiredSkills"] == bundled_skill_keys
+    bundled_entries = [
+        entry for entry in snapshot["entries"] if entry["sourceClass"] == "bundled"
     ]
+    assert len(bundled_entries) == 7
+    assert all(entry["desired"] is True for entry in bundled_entries)
+    assert all(entry["alwaysEnabled"] is False for entry in bundled_entries)
+    assert all(entry["configurable"] is True for entry in bundled_entries)
 
 
 async def test_agent_runtime_config_prepares_organization_skills_root(
@@ -218,6 +261,15 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     assert (agent_home / "skills").is_dir()
     assert (agent_home / "life").is_dir()
     assert (agent_home / "memory").is_dir()
+    assert config["_octopus"]["desiredSkills"] == [
+        "skills/para-memory-files",
+        "skills/control-plane",
+        "skills/create-agent",
+        "skills/create-plugin",
+        "skills/skill-creator",
+        "skills/skill-optimizer",
+        "skills/conversation-to-skill",
+    ]
 
 
 async def test_agent_config_revision_and_runtime_session_reset_write_activity(

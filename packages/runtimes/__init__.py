@@ -2,6 +2,7 @@ from .registry import (
     get_runtime_adapter,
     get_runtime_metadata,
     get_runtime_quota_windows,
+    list_runtime_adapters,
     list_runtime_models,
 )
 from .types import RuntimeExecutionContext, RuntimeExecutionResult
@@ -12,5 +13,6 @@ __all__ = [
     "get_runtime_adapter",
     "get_runtime_metadata",
     "get_runtime_quota_windows",
+    "list_runtime_adapters",
     "list_runtime_models",
 ]

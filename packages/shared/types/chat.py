@@ -19,6 +19,7 @@ class ChatLinkedEntity(TypedDict, total=False):
     subtitle: str | None
     identifier: str | None
     status: str | None
+    parentId: str | None
     href: str
 
 
