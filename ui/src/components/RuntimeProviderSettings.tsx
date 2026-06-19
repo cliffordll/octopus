@@ -41,7 +41,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
     enabled: Boolean(orgId),
   });
-  const providerRows = providers.data ?? [];
+  const providerRows = Array.isArray(providers.data) ? providers.data : [];
 
   const createProvider = useMutation({
     mutationFn: () =>
@@ -612,6 +612,7 @@ function ProviderModelGroup({
     queryFn: () => runtimeProvidersApi.listModels(orgId, runtimeType, provider.providerId),
     enabled: Boolean(orgId && provider.providerId),
   });
+  const modelRows = Array.isArray(models.data) ? models.data : [];
   const providerName = provider.name || provider.providerId;
   const english = isEnglishLocale();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -694,7 +695,7 @@ function ProviderModelGroup({
         </div>
       </div>
       <div className="runtime-model-list compact">
-        {(models.data ?? []).map((model) => (
+        {modelRows.map((model) => (
           <article key={model.modelId}>
             <div className="runtime-model-row-content">
               <div className="runtime-model-row-main">

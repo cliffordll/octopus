@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from alembic.script import ScriptDirectory
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool.impl import AsyncAdaptedQueuePool
@@ -41,6 +42,7 @@ from packages.database.queries.organizations import (
     update_organization,
 )
 from packages.database.migrations.runner import upgrade_to_head
+from packages.database.migrations.runner import _build_config
 from packages.database.schema import (
     ActivityLog,
     Approval,
@@ -75,6 +77,12 @@ def test_schema_models_exported() -> None:
     assert IssueComment.__tablename__ == "issue_comments"
     assert IssueApproval.__tablename__ == "issue_approvals"
     assert ActivityLog.__tablename__ == "activity_log"
+
+
+def test_alembic_migrations_have_single_head() -> None:
+    config = _build_config("sqlite+aiosqlite:///:memory:")
+    heads = ScriptDirectory.from_config(config).get_heads()
+    assert len(heads) == 1
 
 
 def test_issue_indexes_match_upstream() -> None:
