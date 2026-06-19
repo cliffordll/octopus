@@ -91,9 +91,7 @@ async def test_work_product_capture_is_idempotent_on_external_id(
         )
         await session.commit()
     async with factory() as session:
-        listed = await WorkspaceService(session).list_work_products_for_issue(
-            issue_id
-        )
+        listed = await WorkspaceService(session).list_work_products_for_issue(issue_id)
 
     assert len(first) == 1
     assert len(second) == 0  # deduped on externalId

@@ -30,25 +30,56 @@ _ORG_FILES = ("COMPANY.md", "ORGANIZATION.md")
 _EXTENSION_FILES = (".rudder.yaml", ".rudder.yml", ".paperclip.yaml", ".paperclip.yml")
 _AGENT_ENTRY = "AGENTS.md"
 _BUNDLE_FILES = (
-    "SOUL.md", "MEMORY.md", "HEARTBEAT.md", "TOOLS.md",
-    "SOUL.zh-CN.md", "MEMORY.zh-CN.md", "HEARTBEAT.zh-CN.md", "TOOLS.zh-CN.md",
+    "SOUL.md",
+    "MEMORY.md",
+    "HEARTBEAT.md",
+    "TOOLS.md",
+    "SOUL.zh-CN.md",
+    "MEMORY.zh-CN.md",
+    "HEARTBEAT.zh-CN.md",
+    "TOOLS.zh-CN.md",
 )
 _FRONTMATTER_RE = re.compile(r"\A﻿?---\s*\n(?P<body>.*?)\n---\s*\n?", re.DOTALL)
 _VALID_ROLES = {
-    "ceo", "cto", "cmo", "cfo", "engineer", "designer",
-    "pm", "qa", "devops", "researcher", "general",
+    "ceo",
+    "cto",
+    "cmo",
+    "cfo",
+    "engineer",
+    "designer",
+    "pm",
+    "qa",
+    "devops",
+    "researcher",
+    "general",
 }
 # Ordered keyword -> role inference for Paperclip packages that omit explicit roles.
 _ROLE_KEYWORDS: list[tuple[str, str]] = [
-    ("chief executive", "ceo"), ("ceo", "ceo"),
-    ("chief technology", "cto"), ("cto", "cto"),
-    ("cfo", "cfo"), ("cmo", "cmo"),
-    ("designer", "designer"), ("design", "designer"),
-    ("quality", "qa"), ("evaluat", "qa"), ("review", "qa"), (" qa", "qa"), ("test", "qa"),
-    ("architect", "pm"), ("product manager", "pm"), ("product", "pm"),
-    ("devops", "devops"), ("integration", "devops"), ("infra", "devops"), ("ci/cd", "devops"),
-    ("research", "researcher"), ("analyst", "researcher"),
-    ("engineer", "engineer"), ("editor", "engineer"), ("writer", "engineer"),
+    ("chief executive", "ceo"),
+    ("ceo", "ceo"),
+    ("chief technology", "cto"),
+    ("cto", "cto"),
+    ("cfo", "cfo"),
+    ("cmo", "cmo"),
+    ("designer", "designer"),
+    ("design", "designer"),
+    ("quality", "qa"),
+    ("evaluat", "qa"),
+    ("review", "qa"),
+    (" qa", "qa"),
+    ("test", "qa"),
+    ("architect", "pm"),
+    ("product manager", "pm"),
+    ("product", "pm"),
+    ("devops", "devops"),
+    ("integration", "devops"),
+    ("infra", "devops"),
+    ("ci/cd", "devops"),
+    ("research", "researcher"),
+    ("analyst", "researcher"),
+    ("engineer", "engineer"),
+    ("editor", "engineer"),
+    ("writer", "engineer"),
 ]
 
 CollisionStrategy = Literal["rename", "skip", "replace"]
@@ -64,7 +95,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         data = yaml.safe_load(match.group("body")) or {}
     except yaml.YAMLError:
         data = {}
-    return (data if isinstance(data, dict) else {}), text[match.end():]
+    return (data if isinstance(data, dict) else {}), text[match.end() :]
 
 
 def _read_text(path: Path) -> str | None:
@@ -91,7 +122,9 @@ def parse_company_package(root: Path) -> dict[str, Any]:
     root = Path(root)
     warnings: list[str] = []
 
-    org_file = next((root / name for name in _ORG_FILES if (root / name).is_file()), None)
+    org_file = next(
+        (root / name for name in _ORG_FILES if (root / name).is_file()), None
+    )
     if org_file is None:
         raise ValueError(
             "Organization package must contain COMPANY.md or ORGANIZATION.md at its root"
@@ -110,7 +143,9 @@ def parse_company_package(root: Path) -> dict[str, Any]:
             loaded = yaml.safe_load(_read_text(ext_file) or "") or {}
             ext = loaded if isinstance(loaded, dict) else {}
         except yaml.YAMLError:
-            warnings.append(f"Failed to parse {ext_file.name}; ignoring extension config.")
+            warnings.append(
+                f"Failed to parse {ext_file.name}; ignoring extension config."
+            )
     ext_agents = ext.get("agents") if isinstance(ext.get("agents"), dict) else {}
 
     agents: list[dict[str, Any]] = []
@@ -123,9 +158,19 @@ def parse_company_package(root: Path) -> dict[str, Any]:
                 warnings.append(f"Agent '{slug}' has no {_AGENT_ENTRY}; skipped.")
                 continue
             fm, body = _parse_frontmatter(md_text)
-            ext_entry = ext_agents.get(slug) if isinstance(ext_agents.get(slug), dict) else {}
-            ext_adapter = ext_entry.get("adapter") if isinstance(ext_entry.get("adapter"), dict) else {}
-            ext_cfg = ext_adapter.get("config") if isinstance(ext_adapter.get("config"), dict) else {}
+            ext_entry = (
+                ext_agents.get(slug) if isinstance(ext_agents.get(slug), dict) else {}
+            )
+            ext_adapter = (
+                ext_entry.get("adapter")
+                if isinstance(ext_entry.get("adapter"), dict)
+                else {}
+            )
+            ext_cfg = (
+                ext_adapter.get("config")
+                if isinstance(ext_adapter.get("config"), dict)
+                else {}
+            )
 
             bundle: dict[str, str] = {}
             for fname in _BUNDLE_FILES:
@@ -139,41 +184,52 @@ def parse_company_package(root: Path) -> dict[str, Any]:
             skills_raw = fm.get("skills")
             skills = (
                 [s for s in skills_raw if isinstance(s, str)]
-                if isinstance(skills_raw, list) else []
+                if isinstance(skills_raw, list)
+                else []
             )
             role = _as_str(ext_entry.get("role")) or _infer_role(
                 _as_str(fm.get("title")), _as_str(fm.get("name")), slug
             )
             if role not in _VALID_ROLES:
-                warnings.append(f"Agent '{slug}' inferred invalid role '{role}'; using general.")
+                warnings.append(
+                    f"Agent '{slug}' inferred invalid role '{role}'; using general."
+                )
                 role = "general"
 
-            agents.append({
-                "slug": slug,
-                "name": _as_str(fm.get("name")) or _as_str(fm.get("title")) or slug,
-                "title": _as_str(fm.get("title")),
-                "role": role,
-                "reportsToSlug": _as_str(fm.get("reportsTo")) or _as_str(ext_entry.get("reportsTo")),
-                "skills": skills,
-                "runtimeType": _as_str(ext_adapter.get("type")),
-                "model": _as_str(ext_cfg.get("model")),
-                "bundle": bundle,
-            })
+            agents.append(
+                {
+                    "slug": slug,
+                    "name": _as_str(fm.get("name")) or _as_str(fm.get("title")) or slug,
+                    "title": _as_str(fm.get("title")),
+                    "role": role,
+                    "reportsToSlug": _as_str(fm.get("reportsTo"))
+                    or _as_str(ext_entry.get("reportsTo")),
+                    "skills": skills,
+                    "runtimeType": _as_str(ext_adapter.get("type")),
+                    "model": _as_str(ext_cfg.get("model")),
+                    "bundle": bundle,
+                }
+            )
 
     skills_dir = root / "skills"
-    has_skills = skills_dir.is_dir() and next(skills_dir.rglob("SKILL.md"), None) is not None
+    has_skills = (
+        skills_dir.is_dir() and next(skills_dir.rglob("SKILL.md"), None) is not None
+    )
 
     projects: list[dict[str, Any]] = []
     projects_dir = root / "projects"
     if projects_dir.is_dir():
         for project_md in sorted(projects_dir.rglob("PROJECT.md")):
             fm, body = _parse_frontmatter(_read_text(project_md) or "")
-            projects.append({
-                "slug": _as_str(fm.get("slug")) or project_md.parent.name,
-                "name": _as_str(fm.get("name")) or project_md.parent.name,
-                "description": _as_str(fm.get("description")) or (body.strip() or None),
-                "ownerSlug": _as_str(fm.get("owner")),
-            })
+            projects.append(
+                {
+                    "slug": _as_str(fm.get("slug")) or project_md.parent.name,
+                    "name": _as_str(fm.get("name")) or project_md.parent.name,
+                    "description": _as_str(fm.get("description"))
+                    or (body.strip() or None),
+                    "ownerSlug": _as_str(fm.get("owner")),
+                }
+            )
 
     if not agents:
         warnings.append("Package contains no importable agents.")
@@ -218,7 +274,9 @@ class OrganizationImportService:
         for agent in manifest["agents"]:
             eff_runtime = agent["runtimeType"] or runtime_type
             eff_model = model or agent["model"]
-            if eff_runtime in _PROVIDER_MODEL_RUNTIMES and (not eff_model or "/" not in eff_model):
+            if eff_runtime in _PROVIDER_MODEL_RUNTIMES and (
+                not eff_model or "/" not in eff_model
+            ):
                 raise ValueError(
                     f"Agent '{agent['slug']}' on runtime '{eff_runtime}' requires a "
                     "provider/model formatted model; pass model or set it in the package."
@@ -228,8 +286,13 @@ class OrganizationImportService:
             "organization": manifest["organization"],
             "target": target,
             "agents": [
-                {"slug": a["slug"], "name": a["name"], "role": a["role"],
-                 "reportsTo": a["reportsToSlug"], "skills": a["skills"]}
+                {
+                    "slug": a["slug"],
+                    "name": a["name"],
+                    "role": a["role"],
+                    "reportsTo": a["reportsToSlug"],
+                    "skills": a["skills"],
+                }
                 for a in manifest["agents"]
             ],
             "skills": bool(manifest["skillsDir"]),
@@ -289,7 +352,9 @@ class OrganizationImportService:
                 # or a fully-qualified ref ("org:author/lib/chapter-writing"); imported
                 # skills are keyed by the last path segment, so match on that too.
                 normalized = skill_ref.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
-                key = skill_slug_to_key.get(skill_ref) or skill_slug_to_key.get(normalized)
+                key = skill_slug_to_key.get(skill_ref) or skill_slug_to_key.get(
+                    normalized
+                )
                 if key:
                     desired.append(key)
                 else:
@@ -313,10 +378,14 @@ class OrganizationImportService:
             await self._instructions.materialize_external_bundle(
                 agent_id, agent["bundle"], entry_file="SOUL.md", **actor
             )
-            created_agents.append({
-                "slug": agent["slug"], "id": agent_id,
-                "name": created["name"], "role": agent["role"],
-            })
+            created_agents.append(
+                {
+                    "slug": agent["slug"],
+                    "id": agent_id,
+                    "name": created["name"],
+                    "role": agent["role"],
+                }
+            )
 
         # 4) reporting lines (ids now known)
         for agent in manifest["agents"]:
@@ -333,7 +402,9 @@ class OrganizationImportService:
             if mgr_id == agent_id:
                 continue
             try:
-                await self._agents.update_agent(agent_id, {"reportsTo": mgr_id}, **actor)
+                await self._agents.update_agent(
+                    agent_id, {"reportsTo": mgr_id}, **actor
+                )
             except Exception as exc:  # noqa: BLE001 - record and continue
                 warnings.append(f"Failed to set reportsTo for '{agent['slug']}': {exc}")
 
@@ -341,14 +412,27 @@ class OrganizationImportService:
         created_projects: list[dict[str, Any]] = []
         for project in manifest["projects"]:
             try:
-                payload = {"name": project["name"], "description": project["description"]}
-                lead_id = slug_to_id.get(project["ownerSlug"]) if project["ownerSlug"] else None
+                payload = {
+                    "name": project["name"],
+                    "description": project["description"],
+                }
+                lead_id = (
+                    slug_to_id.get(project["ownerSlug"])
+                    if project["ownerSlug"]
+                    else None
+                )
                 if lead_id:
                     payload["leadAgentId"] = lead_id
-                created = await self._projects.create_project(resolved_org_id, payload, **actor)
-                created_projects.append({
-                    "slug": project["slug"], "id": created["id"], "name": created["name"],
-                })
+                created = await self._projects.create_project(
+                    resolved_org_id, payload, **actor
+                )
+                created_projects.append(
+                    {
+                        "slug": project["slug"],
+                        "id": created["id"],
+                        "name": created["name"],
+                    }
+                )
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"Failed to create project '{project['slug']}': {exc}")
 
@@ -370,7 +454,9 @@ class OrganizationImportService:
         with tempfile.TemporaryDirectory(prefix="org-import-") as tmp:
             with zipfile.ZipFile(zip_path) as zf:
                 zf.extractall(tmp)
-            return await self.import_package(str(_resolve_package_root(Path(tmp))), **kwargs)
+            return await self.import_package(
+                str(_resolve_package_root(Path(tmp))), **kwargs
+            )
 
 
 def _resolve_package_root(extracted: Path) -> Path:

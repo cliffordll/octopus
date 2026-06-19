@@ -347,6 +347,22 @@ def test_lifespan_scheduler_executes_timer_wakeup(
             ):
                 break
             time.sleep(0.05)
+        stop_event = getattr(application.state, "heartbeat_scheduler_stop_event", None)
+        if stop_event is not None:
+            stop_event.set()
+        scheduler_task = getattr(application.state, "heartbeat_scheduler_task", None)
+        if scheduler_task is not None:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not scheduler_task.done():
+                time.sleep(0.02)
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            dispatch_tasks = list(
+                getattr(application.state, "heartbeat_dispatch_tasks", set())
+            )
+            if not dispatch_tasks or all(task.done() for task in dispatch_tasks):
+                break
+            time.sleep(0.02)
 
     assert any(
         run["invocationSource"] == "timer" and run["status"] == "succeeded"

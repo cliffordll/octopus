@@ -284,6 +284,13 @@ class HeartbeatService:
         if issue_id is None:
             return False
         if (
+            payload.get("source") == "review"
+            or payload.get("reason") == "issue_review_requested"
+            or context.get("wakeReason") == "issue_review_requested"
+            or context.get("role") == "reviewer"
+        ):
+            return False
+        if (
             payload.get("reason") == "issue_comment_mentioned"
             or context.get("wakeReason") == "issue_comment_mentioned"
         ):
@@ -294,21 +301,28 @@ class HeartbeatService:
         run_ids = [
             value for value in (issue.execution_run_id, issue.checkout_run_id) if value
         ]
-        if not run_ids:
-            return False
-        active_run_ids = {
-            row.id
-            for row in (
-                await self._session.execute(
-                    select(HeartbeatRunRow).where(
-                        HeartbeatRunRow.id.in_(run_ids),
-                        HeartbeatRunRow.status.in_(("queued", "running")),
+        active_run_ids: set[str] = set()
+        if run_ids:
+            active_run_ids.update(
+                row.id
+                for row in (
+                    await self._session.execute(
+                        select(HeartbeatRunRow).where(
+                            HeartbeatRunRow.id.in_(run_ids),
+                            HeartbeatRunRow.status.in_(("queued", "running")),
+                        )
                     )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        }
+        if not active_run_ids:
+            active_run_ids.update(
+                row.id
+                for row in await list_runs(self._session, issue.org_id, agent.id)
+                if row.status in {"queued", "running"}
+                and _issue_id_from_context(row.context_snapshot) == issue_id
+            )
         if not active_run_ids:
             return False
 

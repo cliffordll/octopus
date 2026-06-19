@@ -480,17 +480,21 @@ def test_openclaw_provider_already_registered_detects_matching_config(
     }
     assert _provider_already_registered(env, **kwargs) is True
     # Endpoint / key / model mismatches must NOT short-circuit the patch.
-    assert _provider_already_registered(
-        env, **{**kwargs, "base_url": "http://other/v1"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "api_key": "sk-other"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "model_id": "glm-5.1"}
-    ) is False
+    assert (
+        _provider_already_registered(env, **{**kwargs, "base_url": "http://other/v1"})
+        is False
+    )
+    assert (
+        _provider_already_registered(env, **{**kwargs, "api_key": "sk-other"}) is False
+    )
+    assert (
+        _provider_already_registered(env, **{**kwargs, "model_id": "glm-5.1"}) is False
+    )
     # Missing config file → cannot skip.
-    assert _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs) is False
+    assert (
+        _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs)
+        is False
+    )
 
 
 def test_opencode_extra_args_are_run_subcommand_options() -> None:
