@@ -95,9 +95,9 @@ def test_runtime_provider_and_model_commands() -> None:
         == 0
     )
 
-    assert requests[0].url.path == "/api/orgs/org-1/runtime-providers"
+    assert requests[0].url.path == "/api/llm/providers"
     assert requests[0].url.params["runtimeType"] == "opencode_local"
-    assert requests[1].url.path == "/api/orgs/org-1/runtime-providers"
+    assert requests[1].url.path == "/api/llm/providers"
     assert json.loads(requests[1].read()) == {
         "runtimeType": "opencode_local",
         "providerId": "deepseek",
@@ -106,14 +106,13 @@ def test_runtime_provider_and_model_commands() -> None:
         "baseUrl": "http://localhost/v1",
         "apiKey": "secret",
     }
-    assert requests[2].url.path == "/api/orgs/org-1/runtime-providers/deepseek/models"
+    assert requests[2].url.path == "/api/llm/providers/deepseek/models"
     assert requests[2].url.params["runtimeType"] == "opencode_local"
     assert json.loads(requests[2].read()) == {
         "modelId": "deepseek-v4-flash",
         "displayName": "DeepSeek V4",
     }
-    assert (
-        "/api/orgs/org-1/runtime-providers/deepseek/models/"
-        "deepseek%2Fdeepseek-v4-flash" in str(requests[3].url)
+    assert "/api/llm/providers/deepseek/models/deepseek%2Fdeepseek-v4-flash" in str(
+        requests[3].url
     )
     assert requests[3].url.params["runtimeType"] == "opencode_local"

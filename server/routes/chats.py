@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 from typing import Any
 
-from anyio import CancelScope
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -50,6 +50,13 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.chats import get_chat_service
+from ..dependencies.database import (
+    REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+    _close_session,
+    _cleanup_error_requires_invalidate,
+    _invalidate_session,
+    _run_shielded_cleanup,
+)
 from ..services.chat_generation_locks import (
     cancel_active_chat_generation,
     claim_chat_generation,
@@ -58,6 +65,11 @@ from ..services.chats import ChatAvailabilityError, ChatService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["chats"])
+
+# 对话回复生成的总超时:当模型/runtime 卡住、迟迟不产出回复时,趁连接还在主动收尾并发
+# error 终态帧,避免前端 NDJSON 流只有 ack、永远停在“生成中”。设为略小于 epaichat 网关
+# 的 stream 超时(默认 300s),确保 octopus 先超时、把 error 帧透传给前端,而不是网关先断连。
+_CHAT_REPLY_TIMEOUT_SECONDS = float(os.environ.get("OCTOPUS_CHAT_REPLY_TIMEOUT", "240"))
 
 
 async def _get_conversation_or_404(
@@ -431,10 +443,12 @@ async def add_chat_message_stream_route(
     body: dict[str, Any] = Body(...),
 ) -> StreamingResponse:
     session_factory = request.app.state.session_factory
-    async with session_factory() as session:
-        async with session.begin():
-            service = ChatService(session)
-            await _get_conversation_or_404(id, request=request, service=service)
+    session = session_factory()
+    try:
+        service = ChatService(session)
+        await _get_conversation_or_404(id, request=request, service=service)
+    finally:
+        await _close_session(session)
     try:
         payload = validate_add_chat_message(body)
     except ValueError as exc:
@@ -467,16 +481,27 @@ async def add_chat_message_stream_route(
                     on_stream_event=on_stream_event,
                     commit_after_user_message=True,
                 )
-                with CancelScope(shield=True):
-                    await session.commit()
+                error = await _run_shielded_cleanup(
+                    "commit chat stream database session",
+                    session.commit,
+                    timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+                )
+                if _cleanup_error_requires_invalidate(error):
+                    await _invalidate_session(session)
+                if error is not None:
+                    raise error
                 return result
             except BaseException:
-                with CancelScope(shield=True):
-                    await session.rollback()
+                error = await _run_shielded_cleanup(
+                    "roll back chat stream database session",
+                    session.rollback,
+                    timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+                )
+                if _cleanup_error_requires_invalidate(error):
+                    await _invalidate_session(session)
                 raise
             finally:
-                with CancelScope(shield=True):
-                    await session.close()
+                await _close_session(session)
 
         async def cancel_reply_task() -> None:
             cancel_event.set()
@@ -491,10 +516,24 @@ async def add_chat_message_stream_route(
                 await task
 
         task = asyncio.create_task(run_reply())
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _CHAT_REPLY_TIMEOUT_SECONDS
         try:
             while True:
                 if task.done() and queue.empty():
                     break
+                # 看门狗:回复迟迟未生成完(模型/runtime 卡住)且已超时,趁连接还在主动取消并收尾,
+                # 发 error 终态帧,避免前端只收到 ack、永远停在“生成中/发送中”。
+                if not task.done() and loop.time() > deadline:
+                    await cancel_reply_task()
+                    yield _stream_line(
+                        {
+                            "type": "error",
+                            "error": "Reply generation timed out",
+                            "messageId": None,
+                        }
+                    )
+                    return
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=0.05)
                 except TimeoutError:
@@ -505,8 +544,19 @@ async def add_chat_message_stream_route(
             result = await task
             yield _stream_line({"type": "final", "messages": result["messages"]})
         except asyncio.CancelledError:
-            await cancel_reply_task()
-            raise
+            if task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                yield _stream_line(
+                    {
+                        "type": "error",
+                        "error": "Chat request was cancelled",
+                        "messageId": None,
+                    }
+                )
+            else:
+                await cancel_reply_task()
+                raise
         except Exception as exc:
             await cancel_reply_task()
             yield _stream_line({"type": "error", "error": str(exc), "messageId": None})

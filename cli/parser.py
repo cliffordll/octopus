@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from .client import DEFAULT_API_BASE
 from .commands import (
@@ -25,7 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m cli", description="Octopus board API client"
     )
-    parser.add_argument("--api-base", default=DEFAULT_API_BASE)
+    parser.add_argument(
+        "--api-base",
+        default=os.environ.get("OCTOPUS_API_URL", DEFAULT_API_BASE),
+    )
     parser.add_argument("--json", action="store_true", dest="json_mode")
     resources = parser.add_subparsers(dest="resource", required=True)
     organization.configure(resources)

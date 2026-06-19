@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -157,3 +158,29 @@ async def test_status_unchanged_does_not_stamp_timestamps(
     assert body["startedAt"] is None
     assert body["completedAt"] is None
     assert body["cancelledAt"] is None
+
+
+async def test_reopening_done_issue_clears_completed_at(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _, issue_id = await _seed_issue(session, status="done")
+    async with async_transaction(session):
+        row = (
+            await session.execute(select(Issue).where(Issue.id == issue_id))
+        ).scalar_one()
+        row.completed_at = datetime.now(UTC)
+
+    code, body = await _patch_status(app, issue_id, "in_progress")
+
+    assert code == 200
+    assert body["status"] == "in_progress"
+    assert body["completedAt"] is None
+    assert body["startedAt"] is not None
+
+    async with session_factory() as verify:
+        row = (
+            await verify.execute(select(Issue).where(Issue.id == issue_id))
+        ).scalar_one()
+    assert row.completed_at is None

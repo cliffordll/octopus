@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+﻿import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalsApi } from "../api/approvals";
 import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
@@ -104,12 +104,12 @@ describe("runtime provider API", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/api/orgs/org-1/runtime-providers?runtimeType=opencode_local",
+      "/api/llm/providers",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/orgs/org-1/runtime-providers",
+      "/api/llm/providers",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -125,12 +125,12 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "/api/orgs/org-1/runtime-providers/kimi?runtimeType=opencode_local",
+      "/api/llm/providers/kimi?runtimeType=opencode_local",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models?runtimeType=opencode_local",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ modelId: "kimi/k2", displayName: "Kimi K2", enabled: true }),
@@ -138,17 +138,17 @@ describe("runtime provider API", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
-      "/api/orgs/org-1/runtime-providers/kimi/models?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models?runtimeType=opencode_local",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
-      "/api/orgs/org-1/runtime-providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
+      "/api/llm/providers/kimi/models/kimi%2Fk2?runtimeType=opencode_local",
       expect.objectContaining({ method: "DELETE" }),
     );
   });
@@ -381,6 +381,26 @@ describe("project API", () => {
 });
 
 describe("agent and heartbeat APIs", () => {
+  it("rejects a run stream error terminal event", async () => {
+    const onError = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "error", error: "runtime disconnected" },
+    ], 200)));
+
+    await expect(heartbeatApi.streamRun("run-1", { onError })).rejects.toThrow("runtime disconnected");
+    expect(onError).toHaveBeenCalledWith("runtime disconnected");
+  });
+
+  it("rejects a run stream that ends without a terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "run", run: { id: "run-1", status: "running" } },
+    ], 200)));
+
+    await expect(heartbeatApi.streamRun("run-1")).rejects.toThrow(
+      "Run stream ended without a final or error event",
+    );
+  });
+
   it("creates, pauses and invokes an agent, then loads runs", async () => {
     const fetchMock = vi
       .fn()
@@ -574,9 +594,29 @@ describe("agent and heartbeat APIs", () => {
     );
   });
 
+  it("requests an immediate issue passive follow-up", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockReturnValueOnce(jsonResponse({ id: "run-followup", status: "queued" }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await issuesApi.passiveFollowup("issue-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/issues/issue-1/passive-followup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+  });
+
   it("covers runtime adapter and skills management routes", async () => {
     const fetchMock = vi
       .fn()
+      .mockReturnValueOnce(jsonResponse([
+        { type: "process", displayName: "process", metadata: { type: "process", capabilities: {} } },
+      ]))
       .mockReturnValueOnce(jsonResponse([{ id: "gpt-5", label: "GPT-5" }]))
       .mockReturnValueOnce(jsonResponse({ type: "codex_local", capabilities: { models: true } }))
       .mockReturnValueOnce(jsonResponse({ provider: "openai", ok: false, windows: [] }))
@@ -588,6 +628,7 @@ describe("agent and heartbeat APIs", () => {
       .mockReturnValueOnce(jsonResponse({ totalCount: 0, skills: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
+    await agentsApi.adapters("org-1");
     await agentsApi.adapterModels("org-1", "codex_local");
     await agentsApi.adapterMetadata("org-1", "codex_local");
     await agentsApi.adapterQuotaWindows("org-1", "codex_local");
@@ -600,11 +641,16 @@ describe("agent and heartbeat APIs", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      "/api/orgs/org-1/adapters",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "/api/orgs/org-1/adapters/codex_local/models",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      5,
       "/api/orgs/org-1/adapters/http/test-environment",
       expect.objectContaining({
         method: "POST",
@@ -612,7 +658,7 @@ describe("agent and heartbeat APIs", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      6,
+      7,
       "/api/agents/agent-1/skills/sync",
       expect.objectContaining({
         method: "POST",
@@ -620,8 +666,20 @@ describe("agent and heartbeat APIs", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      9,
+      10,
       "/api/agents/agent-1/skills/analytics?windowDays=14",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("fetches agent inbox", async () => {
+    const fetchMock = vi.fn().mockReturnValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await agentsApi.inbox("agent-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agents/agent-1/inbox-lite",
       expect.objectContaining({ method: "GET" }),
     );
   });
@@ -754,6 +812,16 @@ describe("chat API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow("database is locked");
+  });
+
+  it("rejects a chat stream that ends without a terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(streamResponse([
+      { type: "assistant_delta", delta: "partial" },
+    ])));
+
+    await expect(chatsApi.addMessageStream("chat-1", { body: "Start" })).rejects.toThrow(
+      "Chat stream ended without a final response",
+    );
   });
 
   it("shows the root cause for JSON API errors", async () => {

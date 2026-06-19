@@ -90,6 +90,27 @@ def _heartbeat_prompt(config: dict[str, Any]) -> str:
         return ""
     wake_source = _string(context.get("wakeSource")) or ""
     wake_reason = _string(context.get("wakeReason")) or ""
+    if wake_reason == "issue_passive_followup":
+        return _passive_followup_issue_prompt(
+            agent_id=_string(octopus.get("agentId")) or "",
+            agent_name=_string(octopus.get("agentName")) or "",
+            issue=issue,
+        )
+    if wake_reason == "issue_review_closeout_missing":
+        return _review_closeout_issue_prompt(
+            agent_id=_string(octopus.get("agentId")) or "",
+            agent_name=_string(octopus.get("agentName")) or "",
+            issue=issue,
+        )
+    if wake_reason in {
+        "issue_review_requested",
+        "issue_convergence_review_requested",
+    }:
+        return _requested_issue_review_prompt(
+            agent_id=_string(octopus.get("agentId")) or "",
+            agent_name=_string(octopus.get("agentName")) or "",
+            issue=issue,
+        )
     if wake_source != "assignment" and wake_reason not in {
         "issue_assigned",
         "issue_execute",
@@ -103,33 +124,201 @@ def _heartbeat_prompt(config: dict[str, Any]) -> str:
     )
 
 
+def _passive_followup_issue_prompt(
+    *, agent_id: str, agent_name: str, issue: dict[str, Any]
+) -> str:
+    issue_ref = _issue_ref(issue)
+    return _join_prompt_sections(
+        [
+            _issue_header_prompt(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                issue=issue,
+                intro="You have been woken for issue close-out governance.",
+            ),
+            "\n".join(
+                [
+                    "## Close-out Gate",
+                    "",
+                    "Wake reason: `issue_passive_followup`.",
+                    "This run exists only because a previous successful issue run exited without a durable close-out signal.",
+                    "Do not start new implementation work. Inspect the current issue state only enough to choose the correct close-out command.",
+                    "",
+                    "Before exiting, execute exactly one of these commands and confirm it succeeded:",
+                    f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
+                    "",
+                    "A final assistant message is not a close-out signal. Do not exit until one command above succeeds.",
+                ]
+            ),
+        ]
+    )
+
+
+def _review_closeout_issue_prompt(
+    *, agent_id: str, agent_name: str, issue: dict[str, Any]
+) -> str:
+    issue_ref = _issue_ref(issue)
+    return _join_prompt_sections(
+        [
+            _issue_header_prompt(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                issue=issue,
+                intro="You have been woken to repair a missing reviewer close-out decision.",
+            ),
+            "\n".join(
+                [
+                    "## Close-out Gate",
+                    "",
+                    "Wake reason: `issue_review_closeout_missing`.",
+                    "This run exists only because a previous reviewer run exited without a structured review decision.",
+                    "Do not start new implementation work. Inspect the current issue state only enough to choose the review outcome.",
+                    "",
+                    "Before exiting, execute exactly one reviewer decision command and confirm it succeeded:",
+                    f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
+                    "",
+                    "Do not use `control-plane issue comment` as a substitute for reviewer close-out. Do not exit until `control-plane issue review` succeeds.",
+                ]
+            ),
+        ]
+    )
+
+
+def _requested_issue_review_prompt(
+    *, agent_id: str, agent_name: str, issue: dict[str, Any]
+) -> str:
+    issue_ref = _issue_ref(issue)
+    return _join_prompt_sections(
+        [
+            _issue_header_prompt(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                issue=issue,
+                intro="You have been assigned to review an issue.",
+            ),
+            "\n".join(
+                [
+                    "Inspect the issue, its work products, and relevant evidence before deciding.",
+                    "Do not take over implementation unless explicitly asked.",
+                    "",
+                    "## Review Gate",
+                    "",
+                    "Before exiting, execute exactly one reviewer decision command and confirm it succeeded:",
+                    f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
+                    "",
+                    "Do not use `control-plane issue comment` as a substitute for the structured reviewer decision.",
+                    "A final assistant message is not a review decision. Do not exit until `control-plane issue review` succeeds.",
+                ]
+            ),
+        ]
+    )
+
+
 def _assignment_issue_prompt(
     *, agent_id: str, agent_name: str, issue: dict[str, Any]
+) -> str:
+    issue_ref = _issue_ref(issue)
+    return _join_prompt_sections(
+        [
+            _issue_header_prompt(
+                agent_id=agent_id,
+                agent_name=agent_name,
+                issue=issue,
+                intro="You have been assigned to work on an issue.",
+            ),
+            (
+                "Your task is to review this issue and begin working on it. "
+                "Use the available tools to explore the codebase, understand "
+                "the requirements, and implement a solution."
+            ),
+            _subtask_coordination_prompt(issue_ref, issue),
+            "\n".join(
+                [
+                    "## Close-out Gate",
+                    "",
+                    "Every issue run must leave a durable close-out signal in the control plane before exiting.",
+                    "A final assistant message is not a close-out signal.",
+                    "",
+                    "Before exiting, execute exactly one of these commands and confirm it succeeded:",
+                    f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
+                    "",
+                    "Do not exit until one command above succeeds.",
+                ]
+            ),
+        ]
+    )
+
+
+def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
+    text = " ".join(
+        [
+            _string(issue.get("title")) or "",
+            _string(issue.get("description")) or "",
+        ]
+    ).lower()
+    if not any(
+        marker in text
+        for marker in (
+            "subtask",
+            "sub-task",
+            "child task",
+            "split",
+            "delegate",
+            "子任务",
+            "拆分",
+            "分解",
+            "并行",
+        )
+    ):
+        return ""
+    return "\n".join(
+        [
+            "## Subtask Coordination",
+            "",
+            "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
+            'List available agents first with `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
+            f'Before creating a child issue, check existing children with `control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "{issue_ref}" --json` and reuse the existing child when the title already matches.',
+            'Create each real subtask with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
+            f'"{issue_ref}" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json` before treating it as delegated.',
+            "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
+            "Do not mark the parent issue done while child issues are still open; wait for child issues to finish, or explicitly close/cancel them with a reason.",
+            "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
+            "If you intentionally complete the split work inside this run without creating child issues, say that explicitly in the close-out comment.",
+        ]
+    )
+
+
+def _issue_header_prompt(
+    *, agent_id: str, agent_name: str, issue: dict[str, Any], intro: str
 ) -> str:
     agent_label = agent_id
     if agent_name:
         agent_label = f"{agent_id} ({agent_name})" if agent_id else agent_name
     return "\n".join(
         [
-            f"You are agent {agent_label}. You have been assigned to work on an issue.",
+            f"You are agent {agent_label}. {intro}",
             "",
             "## Task Context",
             "",
             f"**Issue:** {_string(issue.get('title')) or ''}",
-            f"**ID:** {_string(issue.get('id')) or ''}",
+            f"**ID:** {_issue_ref(issue)}",
             f"**Status:** {_string(issue.get('status')) or ''}",
             f"**Priority:** {_string(issue.get('priority')) or ''}",
             "",
             "**Description:**",
             _string(issue.get("description")) or "",
-            "",
-            (
-                "Your task is to review this issue and begin working on it. "
-                "Use the available tools to explore the codebase, understand "
-                "the requirements, and implement a solution."
-            ),
         ]
     )
+
+
+def _issue_ref(issue: dict[str, Any]) -> str:
+    return _string(issue.get("identifier")) or _string(issue.get("id")) or ""
 
 
 def _resolve_instructions_path(config: dict[str, Any]) -> Path | None:

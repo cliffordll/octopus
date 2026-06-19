@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from packages.shared.types.heartbeat import WakeAgentPayload
 from packages.shared.types.issue import IssueDetail
@@ -26,6 +26,8 @@ async def queue_issue_assignment_wakeup(
     wake_source: str = "assignment",
     actor_type: ActorType,
     actor_id: str,
+    extra_payload: dict[str, Any] | None = None,
+    extra_context: dict[str, Any] | None = None,
 ) -> None:
     assignee_agent_id = issue.get("assigneeAgentId")
     if not assignee_agent_id or issue["status"] == "backlog":
@@ -35,12 +37,17 @@ async def queue_issue_assignment_wakeup(
         "source": source,
         "triggerDetail": "system",
         "reason": reason,
-        "payload": {"issueId": issue["id"], "mutation": mutation},
+        "payload": {
+            "issueId": issue["id"],
+            "mutation": mutation,
+            **(extra_payload or {}),
+        },
         "contextSnapshot": {
             "issueId": issue["id"],
             "source": context_source,
             "wakeSource": wake_source,
             "wakeReason": reason,
+            **(extra_context or {}),
             "issue": {
                 "id": issue["id"],
                 "title": issue["title"],

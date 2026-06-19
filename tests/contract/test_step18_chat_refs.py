@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -32,6 +33,13 @@ class FailingChatAdapter:
             error_message="adapter exploded",
             result_json={"summary": ""},
         )
+
+
+class CancelledChatAdapter:
+    type = "cancelled_chat"
+
+    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+        raise asyncio.CancelledError
 
 
 class TranscriptChatAdapter:
@@ -254,6 +262,40 @@ async def test_stream_runtime_failure_keeps_acknowledged_user_message(
     assert list_code == 200
     assert [message["id"] for message in messages] == [user_message_id]
     assert messages[0]["body"] == "stream and fail"
+
+
+async def test_stream_runtime_cancelled_error_returns_terminal_error_frame(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent_with_runtime(factory, "cancelled_chat")
+    monkeypatch.setattr(
+        chat_service_module, "get_runtime_adapter", lambda _: CancelledChatAdapter()
+    )
+    chat = await _create_chat(application, org_id, agent_id)
+
+    code, content_type, body = await _request_text(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages/stream",
+        json_body={"body": "stream then cancel"},
+    )
+
+    assert code == 201
+    assert content_type.startswith("application/x-ndjson")
+    events = [json.loads(line) for line in body.splitlines()]
+    assert [event["type"] for event in events] == ["ack", "error"]
+    assert events[-1]["error"] == "Chat request was cancelled"
+    user_message_id = events[0]["userMessage"]["id"]
+
+    list_code, messages = await _request_json(
+        application, "GET", f"/api/chats/{chat['id']}/messages"
+    )
+    assert list_code == 200
+    assert [message["id"] for message in messages] == [user_message_id]
 
 
 def test_chat_attachment_tables_are_registered() -> None:

@@ -59,6 +59,14 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         workspace_context.get("worktreePath") or workspace_context.get("cwd")
     )
     artifacts_dir = _string(workspace_context.get("orgArtifactsDir"))
+    workspace_artifacts_dir = (
+        f"{worktree.rstrip('/\\\\')}/artifacts" if worktree else None
+    )
+    preferred_artifacts_label = (
+        "workspace artifacts directory"
+        if workspace_artifacts_dir
+        else "organization artifacts directory"
+    )
     if not worktree and not artifacts_dir:
         return ""
     lines = [
@@ -68,13 +76,16 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     ]
     if worktree:
         lines.append(f"- Workspace worktree: `{worktree}`")
-    if artifacts_dir:
+    if workspace_artifacts_dir:
+        lines.append(f"- Workspace artifacts directory: `{workspace_artifacts_dir}`")
+    elif artifacts_dir:
         lines.append(f"- Organization artifacts directory: `{artifacts_dir}`")
     lines.extend(
         [
-            "- Read external source paths when the task asks for analysis. Do not write generated deliverables into external source paths.",
-            "- Prefer the organization artifacts directory for durable files produced by this run.",
-            "- Prefer relative paths under the workspace worktree for reports, plans, summaries, patches, and generated documents.",
+            "- Treat the workspace worktree as the project source/download directory for this run.",
+            "- Put project-specific checkouts, downloaded source bundles, dependency snapshots, and code edits under the workspace worktree.",
+            f"- Prefer the {preferred_artifacts_label} for durable deliverables produced by this run, such as reports, screenshots, CSV files, mockups, logs, and handoff documents.",
+            "- Use relative paths under the workspace worktree for source changes, patches, temporary project files, and project-local generated files.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",
         ]
     )

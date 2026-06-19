@@ -17,6 +17,7 @@ IssueReviewWakeupMutation = Literal[
     "reviewer_changed_in_review",
     "reviewer_changed_blocked",
     "create_in_review",
+    "assignee_done",
 ]
 
 
@@ -49,7 +50,9 @@ def build_issue_review_wakeup_payload(
         "source": "review",
         "triggerDetail": "system",
         "reason": "issue_review_requested",
-        "idempotencyKey": f"issue:{issue['id']}:review:{mutation}",
+        "idempotencyKey": (
+            f"issue:{issue['id']}:review:{mutation}:{issue.get('updatedAt')}"
+        ),
         "payload": {"issueId": issue["id"], "mutation": mutation},
         "contextSnapshot": {
             "issueId": issue["id"],

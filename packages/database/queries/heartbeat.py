@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import AgentWakeupRequest, HeartbeatRun, HeartbeatRunEvent
@@ -62,6 +62,40 @@ async def list_wakeup_requests_by_status(
     return result.scalars().all()
 
 
+async def list_due_wakeup_request_ids(
+    session: AsyncSession, status: str, now: datetime
+) -> Sequence[str]:
+    result = await session.scalars(
+        select(AgentWakeupRequest.id)
+        .where(
+            AgentWakeupRequest.status == status,
+            AgentWakeupRequest.requested_at <= now,
+        )
+        .order_by(AgentWakeupRequest.requested_at, AgentWakeupRequest.id)
+    )
+    return result.all()
+
+
+async def claim_due_wakeup_request(
+    session: AsyncSession, wakeup_id: str, status: str, claimed_at: datetime
+) -> AgentWakeupRequest | None:
+    result = await session.execute(
+        update(AgentWakeupRequest)
+        .where(
+            AgentWakeupRequest.id == wakeup_id,
+            AgentWakeupRequest.status == status,
+            AgentWakeupRequest.requested_at <= claimed_at,
+        )
+        .values(
+            status="claimed",
+            claimed_at=claimed_at,
+            updated_at=claimed_at,
+        )
+        .returning(AgentWakeupRequest)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_run(session: AsyncSession, fields: Mapping[str, Any]) -> HeartbeatRun:
     row = HeartbeatRun(**dict(fields))
     session.add(row)
@@ -109,6 +143,19 @@ async def list_running_run_ids(session: AsyncSession, agent_id: str) -> set[str]
     return set(result.all())
 
 
+async def has_active_timer_run(session: AsyncSession, agent_id: str) -> bool:
+    result = await session.scalars(
+        select(HeartbeatRun.id)
+        .where(
+            HeartbeatRun.agent_id == agent_id,
+            HeartbeatRun.invocation_source == "timer",
+            HeartbeatRun.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )
+    return result.first() is not None
+
+
 async def list_runs_by_status(
     session: AsyncSession, status: str
 ) -> Sequence[HeartbeatRun]:
@@ -123,11 +170,20 @@ async def list_runs_by_status(
 async def list_queued_runs(
     session: AsyncSession, agent_id: str
 ) -> Sequence[HeartbeatRun]:
+    now = datetime.now(UTC)
     result = await session.execute(
         select(HeartbeatRun)
+        .outerjoin(
+            AgentWakeupRequest,
+            HeartbeatRun.wakeup_request_id == AgentWakeupRequest.id,
+        )
         .where(
             HeartbeatRun.agent_id == agent_id,
             HeartbeatRun.status == "queued",
+            or_(
+                HeartbeatRun.wakeup_request_id.is_(None),
+                AgentWakeupRequest.requested_at <= now,
+            ),
         )
         .order_by(HeartbeatRun.created_at, HeartbeatRun.id)
     )
@@ -136,7 +192,19 @@ async def list_queued_runs(
 
 async def list_queued_agent_ids(session: AsyncSession) -> set[str]:
     result = await session.scalars(
-        select(HeartbeatRun.agent_id).where(HeartbeatRun.status == "queued").distinct()
+        select(HeartbeatRun.agent_id)
+        .outerjoin(
+            AgentWakeupRequest,
+            HeartbeatRun.wakeup_request_id == AgentWakeupRequest.id,
+        )
+        .where(
+            HeartbeatRun.status == "queued",
+            or_(
+                HeartbeatRun.wakeup_request_id.is_(None),
+                AgentWakeupRequest.requested_at <= datetime.now(UTC),
+            ),
+        )
+        .distinct()
     )
     return set(result.all())
 

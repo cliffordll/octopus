@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 
 from packages.shared.api_paths.issues import ORG_ISSUE_LIST_MISSING_ORG_PATH
 from packages.shared.api_paths.organizations import (
     ORG_ARCHIVE_PATH,
     ORG_DETAIL_PATH,
+    ORG_IMPORT_PATH,
     ORG_LIST_PATH,
     ORG_RESOURCE_DETAIL_PATH,
     ORG_RESOURCE_LIST_PATH,
@@ -32,7 +48,11 @@ from ..dependencies.access import (
     require_board_access,
     require_organization_access,
 )
-from ..dependencies.orgs import get_org_detail, get_org_service
+from ..dependencies.orgs import (
+    get_org_detail,
+    get_org_service,
+    get_organization_import_service,
+)
 from ..dependencies.organization_workspace_browser import (
     get_organization_workspace_browser_service,
 )
@@ -42,6 +62,7 @@ from ..services.organization_workspace_browser import (
     OrganizationWorkspaceFileList,
     OrganizationWorkspaceBrowserService,
 )
+from ..services.organization_import import OrganizationImportService
 from ..services.orgs import OrgService
 from ..services.resources import ResourceService
 
@@ -77,6 +98,48 @@ async def create_org(
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
     )
+
+
+@router.post(ORG_IMPORT_PATH)
+async def import_org(
+    request: Request,
+    file: UploadFile = File(...),
+    target: str = Form(default="new"),
+    org_id: str | None = Form(default=None, alias="orgId"),
+    runtime_type: str = Form(default="opencode_local", alias="runtimeType"),
+    model: str | None = Form(default=None),
+    collision: str = Form(default="rename", alias="collisionStrategy"),
+    dry_run: bool = Form(default=False, alias="dryRun"),
+    _: None = Depends(require_board_access),
+    service: OrganizationImportService = Depends(get_organization_import_service),
+) -> dict[str, Any]:
+    """Import a companies.sh / Rudder organization package from an uploaded zip.
+
+    ``dryRun=true`` returns the parsed plan without writing anything.
+    """
+    actor = require_actor_identity(request)
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    try:
+        with os.fdopen(fd, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+        return await service.import_zip(
+            tmp_path,
+            target=target,
+            org_id=org_id,
+            runtime_type=runtime_type,
+            model=model,
+            collision=collision,
+            dry_run=dry_run,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    finally:
+        os.unlink(tmp_path)
 
 
 @router.get(ORG_ISSUE_LIST_MISSING_ORG_PATH)
@@ -237,10 +300,18 @@ async def read_org_workspace_file_content(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Workspace file is not an image preview",
         )
+    # RFC 6266：裸 filename 只放 ASCII fallback，完整中文名走 filename*（percent-encoded UTF-8），
+    # header 全 ASCII 不崩，浏览器原生下载自动解析显示正确中文、不带 "UTF-8''" 前缀。
+    raw_filename = workspace_file.original_filename.replace(chr(34), "")
+    ascii_filename = (
+        raw_filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
+    )
     headers = {
         "Cache-Control": "private, max-age=60",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": f'inline; filename="{workspace_file.original_filename.replace(chr(34), "")}"',
+        "Content-Disposition": (
+            f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(raw_filename)}"
+        ),
     }
     if workspace_file.content_type == "image/svg+xml":
         headers["Content-Security-Policy"] = (
@@ -264,14 +335,20 @@ async def read_org_workspace_archive(
     ),
 ) -> Response:
     archive_file = await service.read_archive_file(orgId, path)
+    # 同上：ASCII fallback + filename*（percent-encoded UTF-8），header 全 ASCII 不崩。
     filename = archive_file.original_filename.replace(chr(34), "")
+    ascii_filename = (
+        filename.encode("ascii", "ignore").decode("ascii").strip() or "workspace.zip"
+    )
     return Response(
         content=archive_file.content,
         media_type=archive_file.content_type,
         headers={
             "Cache-Control": "private, max-age=60",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+            ),
         },
     )
 

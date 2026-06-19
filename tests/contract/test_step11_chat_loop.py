@@ -222,10 +222,12 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     assert kwargs["cwd"] == str(org_root)
     env = kwargs["env"]
     assert isinstance(env, dict)
-    assert env["RUDDER_ORG_ARTIFACTS_DIR"] == str(org_root / "artifacts")
-    assert "RUDDER_CONVERSATION_ARTIFACTS_DIR" not in env
-    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in env
-    assert "RUDDER_RUN_ARTIFACTS_DIR" not in env
+    assert env["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(org_root / "artifacts")
+    assert "OCTOPUS_CONVERSATION_ARTIFACTS_DIR" not in env
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in env
+    assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in env
+    assert all(not key.startswith("RUDDER" + "_") for key in env)
+    assert all(not key.startswith("CONTROL" + "_PLANE_") for key in env)
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],
         "role": "user",

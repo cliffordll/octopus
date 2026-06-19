@@ -1,4 +1,4 @@
----
+﻿---
 name: create-agent
 description: 通过 `control-plane` CLI 创建新的控制平面 agent，并遵守治理流程。用于检查 adapter 配置、比较已有 agent、草拟 prompt/config，并提交 hire request。
 ---
@@ -34,7 +34,7 @@ control-plane agent me --json
 
 如果返回 `{"error":"Agent authentication required"}`，说明本次运行缺少有效 agent 认证：
 
-- 不要在 heartbeat 中索要 `CONTROL_PLANE_API_KEY`。
+- 不要在 heartbeat 中索要 `OCTOPUS_API_KEY`。
 - 不要降级为手动文件系统创建。
 - 停止并报告本次运行缺少或注入了无效认证。
 

@@ -69,6 +69,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     create_parser.add_argument("--org-id", required=True)
     create_parser.add_argument("--title", required=True)
     create_parser.add_argument("--description")
+    create_parser.add_argument("--body")
     create_parser.add_argument("--status", choices=STATUSES)
     create_parser.add_argument("--priority", choices=PRIORITIES)
     create_parser.add_argument("--project-id")
@@ -87,6 +88,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
     update_parser = actions.add_parser("update", help="Update an issue")
     update_parser.add_argument("issue_id")
+    update_parser.add_argument("--org-id")
     update_parser.add_argument("--title")
     update_parser.add_argument("--description")
     update_parser.add_argument("--status", choices=STATUSES)
@@ -108,14 +110,26 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "comment", aliases=["comment-add"], help="Add an issue comment"
     )
     comment_add.add_argument("issue_id")
+    comment_add.add_argument("--org-id")
     comment_add.add_argument("--body", required=True)
     comment_add.set_defaults(handler=add_comment)
 
     review_parser = actions.add_parser("review", help="Record an issue review decision")
     review_parser.add_argument("issue_id")
     review_parser.add_argument("--decision", required=True, choices=DECISIONS)
+    review_parser.add_argument("--comment")
     review_parser.add_argument("--note")
     review_parser.set_defaults(handler=review_issue)
+
+    done_parser = actions.add_parser("done", help="Mark an issue done")
+    done_parser.add_argument("issue_id")
+    done_parser.add_argument("--comment", required=True)
+    done_parser.set_defaults(handler=done_issue)
+
+    block_parser = actions.add_parser("block", help="Mark an issue blocked")
+    block_parser.add_argument("issue_id")
+    block_parser.add_argument("--comment", required=True)
+    block_parser.set_defaults(handler=block_issue)
 
     attachment_list = actions.add_parser("attachments", help="List issue attachments")
     attachment_list.add_argument("issue_id")
@@ -187,7 +201,9 @@ def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
         key: value
         for key, value in {
             "title": args.title,
-            "description": args.description,
+            "description": args.description
+            if args.description is not None
+            else args.body,
             "status": args.status,
             "priority": args.priority,
             "projectId": args.project_id,
@@ -243,10 +259,27 @@ def add_comment(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, str] = {"decision": args.decision}
-    if args.note is not None:
-        payload["note"] = args.note
+    note = args.comment if args.comment is not None else args.note
+    if note is not None:
+        payload["note"] = note
     return client.request(
         "POST", f"/api/issues/{args.issue_id}/review-decision", json=payload
+    )
+
+
+def done_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "PATCH",
+        f"/api/issues/{args.issue_id}",
+        json={"status": "done", "comment": args.comment},
+    )
+
+
+def block_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "PATCH",
+        f"/api/issues/{args.issue_id}",
+        json={"status": "blocked", "comment": args.comment},
     )
 
 

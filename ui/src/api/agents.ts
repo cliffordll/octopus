@@ -8,6 +8,7 @@ import type {
   AgentInstructionsPathResult,
   AgentDetail,
   AgentHireResult,
+  AgentInboxItem,
   AgentMemoryFileDetail,
   AgentMemoryFileList,
   AgentRuntimeEnvironmentTestResult,
@@ -22,6 +23,7 @@ import type {
   ProviderQuotaResult,
   ResetAgentSessionPayload,
   RuntimeAdapterMetadata,
+  RuntimeAdapterListItem,
   UpdateAgentInstructionsBundlePayload,
   UpdateAgentInstructionsFilePayload,
   UpdateAgentInstructionsPathPayload,
@@ -36,6 +38,8 @@ function agentRoot(agentId: string): string {
 export const agentsApi = {
   list: (orgId: string): Promise<Agent[]> =>
     request<Agent[]>(`/api/orgs/${encodeURIComponent(orgId)}/agents`, { method: "GET" }),
+  adapters: (orgId: string): Promise<RuntimeAdapterListItem[]> =>
+    request<RuntimeAdapterListItem[]>(`/api/orgs/${encodeURIComponent(orgId)}/adapters`, { method: "GET" }),
   nameSuggestion: (orgId: string): Promise<{ name: string }> =>
     request<{ name: string }>(`/api/orgs/${encodeURIComponent(orgId)}/agents/name-suggestion`, { method: "GET" }),
   configurations: (orgId: string): Promise<AgentConfiguration[]> =>
@@ -97,6 +101,8 @@ export const agentsApi = {
     ),
   runtimeState: (agentId: string): Promise<AgentRuntimeState> =>
     request<AgentRuntimeState>(`${agentRoot(agentId)}/runtime-state`, { method: "GET" }),
+  inbox: (agentId: string): Promise<AgentInboxItem[]> =>
+    request<AgentInboxItem[]>(`${agentRoot(agentId)}/inbox-lite`, { method: "GET" }),
   taskSessions: (agentId: string): Promise<AgentTaskSession[]> =>
     request<AgentTaskSession[]>(`${agentRoot(agentId)}/task-sessions`, { method: "GET" }),
   resetSession: (agentId: string, payload: ResetAgentSessionPayload): Promise<AgentRuntimeState> =>

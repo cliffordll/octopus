@@ -58,11 +58,32 @@ _REVIEW_DECISION_STATUS_MAP = {
 }
 
 
+def _require_reviewer_for_in_review(values: Mapping[str, Any]) -> None:
+    if values.get("status") != "in_review":
+        return
+    if values.get("reviewer_agent_id") or values.get("reviewer_user_id"):
+        return
+    raise ValueError("in_review requires reviewerAgentId or reviewerUserId")
+
+
+def _require_distinct_assignee_and_reviewer(values: Mapping[str, Any]) -> None:
+    assignee_agent_id = values.get("assignee_agent_id")
+    reviewer_agent_id = values.get("reviewer_agent_id")
+    if (
+        assignee_agent_id
+        and reviewer_agent_id
+        and assignee_agent_id == reviewer_agent_id
+    ):
+        raise ValueError("reviewerAgentId must differ from assigneeAgentId")
+
+
 class IssueCheckoutConflictError(RuntimeError):
     pass
 
 
-def _apply_status_side_effects(values: dict[str, Any]) -> None:
+def _apply_status_side_effects(
+    values: dict[str, Any], *, previous_status: str | None = None
+) -> None:
     """Mirror upstream ``applyStatusSideEffects`` in ``issues.helpers.ts``.
 
     When ``status`` transitions to ``in_progress``/``done``/``cancelled`` and
@@ -78,8 +99,12 @@ def _apply_status_side_effects(values: dict[str, Any]) -> None:
         values["started_at"] = now
     if status == "done":
         values["completed_at"] = now
+    elif previous_status == "done":
+        values["completed_at"] = None
     if status == "cancelled":
         values["cancelled_at"] = now
+    elif previous_status == "cancelled":
+        values["cancelled_at"] = None
 
 
 ISSUE_CREATE_TO_COLUMN: dict[str, str] = {
@@ -153,14 +178,17 @@ class IssueService:
         return await self._to_detail(row)
 
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
-        rows = await list_issue_comments(self._session, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
+        if issue is None:
+            return []
+        rows = await list_issue_comments(self._session, issue.id)
         return list(rows)
 
     async def list_attachments(self, issue_id: str) -> list[IssueAttachmentType]:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             raise ValueError("Issue not found")
-        rows = await list_issue_attachments(self._session, issue_id)
+        rows = await list_issue_attachments(self._session, issue.id)
         return [_to_attachment(row, asset) for row, asset in rows]
 
     async def get_attachment(self, attachment_id: str) -> IssueAttachmentType | None:
@@ -190,12 +218,20 @@ class IssueService:
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
-        await self._apply_parent_values(
+        _require_reviewer_for_in_review(values)
+        parent = await self._apply_parent_values(
             org_id,
             values,
             issue_id=None,
             explicit_parent="parent_id" in values,
         )
+        if parent is not None:
+            self._inherit_parent_scope(values, parent)
+            existing = await self._find_existing_agent_child_issue(
+                values, actor_type=actor_type
+            )
+            if existing is not None:
+                return await self._to_detail(existing)
         if (
             actor_type == "agent"
             and values.get("created_by_agent_id") == actor_id
@@ -203,6 +239,7 @@ class IssueService:
             and "assignee_user_id" not in values
         ):
             values["assignee_agent_id"] = actor_id
+        _require_distinct_assignee_and_reviewer(values)
         if not values.get("project_id") and not values.get("goal_id"):
             default_goal = await GoalService(
                 self._session
@@ -287,7 +324,22 @@ class IssueService:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
 
-        _apply_status_side_effects(values)
+        effective_values = {
+            "status": values.get("status", current.status),
+            "assignee_agent_id": values.get(
+                "assignee_agent_id", current.assignee_agent_id
+            ),
+            "reviewer_agent_id": values.get(
+                "reviewer_agent_id", current.reviewer_agent_id
+            ),
+            "reviewer_user_id": values.get(
+                "reviewer_user_id", current.reviewer_user_id
+            ),
+        }
+        _require_reviewer_for_in_review(effective_values)
+        if "assignee_agent_id" in values or "reviewer_agent_id" in values:
+            _require_distinct_assignee_and_reviewer(effective_values)
+        _apply_status_side_effects(values, previous_status=current.status)
 
         row = await update_issue(self._session, issue_id, values)
         if row is None:
@@ -295,12 +347,7 @@ class IssueService:
         if "parent_id" in values:
             await self._refresh_descendant_depths(row)
         if values.get("status") == "done":
-            await self._auto_close_open_descendants(
-                row,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                run_id=run_id,
-            )
+            await self._reject_done_with_open_descendants(row)
 
         if values and review_decision is None:
             await insert_activity_log(
@@ -328,14 +375,7 @@ class IssueService:
             )
         return await self._to_detail(row)
 
-    async def _auto_close_open_descendants(
-        self,
-        parent: Issue,
-        *,
-        actor_type: str,
-        actor_id: str,
-        run_id: str | None,
-    ) -> None:
+    async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
         rows = (
             (
                 await self._session.execute(
@@ -350,33 +390,16 @@ class IssueService:
             if row.parent_id is not None:
                 children_by_parent.setdefault(row.parent_id, []).append(row)
 
-        now = datetime.now(UTC)
         stack = list(children_by_parent.get(parent.id, []))
         while stack:
             child = stack.pop()
             stack.extend(children_by_parent.get(child.id, []))
             if child.status in {"done", "cancelled"}:
                 continue
-            previous_status = child.status
-            child.status = "done"
-            child.completed_at = now
-            child.updated_at = now
-            await insert_activity_log(
-                self._session,
-                org_id=child.org_id,
-                actor_type=actor_type,
-                actor_id=actor_id,
-                action="issue.auto_closed_by_parent",
-                entity_type="issue",
-                entity_id=child.id,
-                run_id=run_id,
-                details={
-                    "parentId": parent.id,
-                    "previousStatus": previous_status,
-                    "status": "done",
-                },
+            raise ValueError(
+                "Cannot mark issue done while child issues are still open. "
+                f"Complete or cancel child issue {child.identifier or child.id} first."
             )
-        await self._session.flush()
 
     async def _apply_parent_values(
         self,
@@ -385,13 +408,13 @@ class IssueService:
         *,
         issue_id: str | None,
         explicit_parent: bool,
-    ) -> None:
+    ) -> Issue | None:
         if not explicit_parent:
-            return
+            return None
         parent_id = values.get("parent_id")
         if parent_id is None:
             values["request_depth"] = 0
-            return
+            return None
         if issue_id is not None and parent_id == issue_id:
             raise ValueError("Issue cannot be its own parent")
         parent = await get_issue_by_id(self._session, parent_id)
@@ -400,6 +423,41 @@ class IssueService:
         if issue_id is not None:
             await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
         values["request_depth"] = parent.request_depth + 1
+        return parent
+
+    @staticmethod
+    def _inherit_parent_scope(values: dict[str, Any], parent: Issue) -> None:
+        inherited_fields = {
+            "project_id": parent.project_id,
+            "goal_id": parent.goal_id,
+            "project_workspace_id": parent.project_workspace_id,
+            "execution_workspace_id": parent.execution_workspace_id,
+            "execution_workspace_preference": parent.execution_workspace_preference,
+            "execution_workspace_settings": parent.execution_workspace_settings,
+        }
+        for field, value in inherited_fields.items():
+            if values.get(field) is None and value is not None:
+                values[field] = value
+
+    async def _find_existing_agent_child_issue(
+        self, values: Mapping[str, Any], *, actor_type: str
+    ) -> Issue | None:
+        parent_id = values.get("parent_id")
+        title = values.get("title")
+        if actor_type != "agent" or not parent_id or not isinstance(title, str):
+            return None
+        result = await self._session.execute(
+            select(Issue)
+            .where(
+                Issue.org_id == values["org_id"],
+                Issue.parent_id == parent_id,
+                Issue.title == title,
+                Issue.hidden_at.is_(None),
+            )
+            .order_by(Issue.created_at, Issue.id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def _assert_parent_does_not_cycle(
         self, issue_id: str, parent_id: str, org_id: str
@@ -485,7 +543,7 @@ class IssueService:
         result = await self._session.execute(
             update(Issue)
             .where(
-                Issue.id == issue_id,
+                Issue.id == current.id,
                 Issue.status.in_(expected_statuses),
                 assignee_matches,
                 run_lock_matches,
@@ -574,7 +632,7 @@ class IssueService:
 
         values: dict[str, Any] = {
             "org_id": issue.org_id,
-            "issue_id": issue_id,
+            "issue_id": issue.id,
             "body": payload["body"],
         }
         if actor_type == "agent":
@@ -590,7 +648,7 @@ class IssueService:
             actor_id=actor_id,
             action="issue.comment_added",
             entity_type="issue",
-            entity_id=issue_id,
+            entity_id=issue.id,
             run_id=run_id,
             details=dict(payload),
         )

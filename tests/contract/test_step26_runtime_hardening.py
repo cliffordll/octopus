@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import sys
+import os
+import subprocess
 
 import httpx
 import pytest
 
+from packages.runtimes.common import runtime_subprocess_kwargs
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
 from packages.runtimes.http.environment import (
@@ -16,6 +19,28 @@ from packages.runtimes.opencode_local.environment import (
     test_environment as _test_opencode_environment,
 )
 from packages.runtimes.types import RuntimeExecutionContext
+
+
+def test_runtime_subprocesses_are_isolated_from_windows_console_ctrl_c() -> None:
+    kwargs = runtime_subprocess_kwargs()
+    if os.name == "nt":
+        assert kwargs == {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        assert kwargs == {}
+
+
+def test_runtime_subprocess_call_sites_use_shared_creation_kwargs() -> None:
+    runtime_root = Path("packages/runtimes")
+    for path in runtime_root.rglob("*.py"):
+        if path.name == "common.py":
+            continue
+        content = path.read_text(encoding="utf-8")
+        if (
+            "create_subprocess_exec(" in content
+            or "subprocess.run," in content
+            or "subprocess.run(" in content
+        ):
+            assert "runtime_subprocess_kwargs" in content, str(path)
 
 
 async def _noop_on_log(stream: str, chunk: str) -> None:

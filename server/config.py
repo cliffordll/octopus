@@ -14,6 +14,7 @@ class Settings:
     database_url: str
     auto_migrate: bool
     local_trusted: bool
+    graceful_shutdown_timeout_seconds: int
     heartbeat_scheduler_enabled: bool
     heartbeat_scheduler_interval_seconds: float
 
@@ -27,6 +28,10 @@ class Settings:
             or resolve_default_sqlite_database_url(),
             auto_migrate=_env_bool("OCTOPUS_AUTO_MIGRATE", False),
             local_trusted=_env_bool("OCTOPUS_LOCAL_TRUSTED", False),
+            graceful_shutdown_timeout_seconds=max(
+                0,
+                int(os.environ.get("OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS", "5")),
+            ),
             heartbeat_scheduler_enabled=_env_bool(
                 "OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED", True
             ),

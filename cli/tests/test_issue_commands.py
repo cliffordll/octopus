@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 
 import httpx
+import pytest
 
 from cli.__main__ import main
 from cli.client import ApiClient
@@ -110,6 +111,112 @@ def test_issue_commands_support_full_server_fields() -> None:
         b'"requestDepth":2}'
     )
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
+
+
+def test_issue_create_accepts_body_alias_for_description() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "title": "Child"})
+
+    assert (
+        main(
+            [
+                "issue",
+                "create",
+                "--org-id",
+                "org-1",
+                "--title",
+                "Child",
+                "--body",
+                "Child details",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+    assert requests[0].read() == b'{"title":"Child","description":"Child details"}'
+
+
+def test_json_flag_after_subcommand_is_normalized_from_sys_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[{"id": "agent-1", "name": "Agent"}])
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "control-plane",
+            "agent",
+            "list",
+            "--org-id",
+            "org-1",
+            "--json",
+        ],
+    )
+
+    output = io.StringIO()
+    assert (
+        main(
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/orgs/org-1/agents"
+    assert output.getvalue().strip().startswith("[")
+
+
+def test_issue_mutation_commands_tolerate_org_id_for_agent_scripts() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "title": "Child"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert (
+        main(
+            [
+                "issue",
+                "comment",
+                "--org-id",
+                "org-1",
+                "issue-1",
+                "--body",
+                "Progress",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "update",
+                "--org-id",
+                "org-1",
+                "issue-1",
+                "--description",
+                "Updated",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/issue-1/comments"
+    assert requests[0].read() == b'{"body":"Progress"}'
+    assert requests[1].url.path == "/api/issues/issue-1"
+    assert requests[1].read() == b'{"description":"Updated"}'
 
 
 def test_issue_list_sends_route_supported_filters() -> None:
@@ -253,6 +360,100 @@ def test_issue_comment_and_review_post_payloads() -> None:
     assert requests[1].read() == b'{"body":"Compatible"}'
     assert requests[2].url.path == "/api/issues/issue-1/review-decision"
     assert requests[2].read() == b'{"decision":"approve"}'
+
+
+def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "status": "done"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    output = io.StringIO()
+
+    assert (
+        main(
+            [
+                "issue",
+                "done",
+                "issue-1",
+                "--comment",
+                "Implemented and verified.",
+                "--json",
+            ],
+            client=client,
+            stdout=output,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "block",
+                "issue-2",
+                "--comment",
+                "Waiting for credentials.",
+                "--json",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "issue",
+                "review",
+                "issue-3",
+                "--decision",
+                "approve",
+                "--comment",
+                "Review passed.",
+                "--json",
+            ],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].method == "PATCH"
+    assert requests[0].url.path == "/api/issues/issue-1"
+    assert requests[0].read() == (
+        b'{"status":"done","comment":"Implemented and verified."}'
+    )
+    assert requests[1].method == "PATCH"
+    assert requests[1].url.path == "/api/issues/issue-2"
+    assert requests[1].read() == (
+        b'{"status":"blocked","comment":"Waiting for credentials."}'
+    )
+    assert requests[2].method == "POST"
+    assert requests[2].url.path == "/api/issues/issue-3/review-decision"
+    assert requests[2].read() == (b'{"decision":"approve","note":"Review passed."}')
+    assert output.getvalue().strip().startswith("{")
+
+
+def test_api_client_attaches_runtime_actor_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_AGENT_ID", "agent-1")
+    monkeypatch.setenv("OCTOPUS_ORG_ID", "org-1")
+    monkeypatch.setenv("OCTOPUS_RUN_ID", "run-1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-test-agent-id"] == "agent-1"
+        assert request.headers["x-test-org-id"] == "org-1"
+        assert request.headers["x-octopus-run-id"] == "run-1"
+        return httpx.Response(200, json={"id": "issue-1"})
+
+    assert (
+        main(
+            ["issue", "comment", "issue-1", "--body", "Progress"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
 
 
 def test_issue_attachment_commands_use_storage_routes(tmp_path) -> None:

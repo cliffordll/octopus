@@ -275,6 +275,61 @@ class AgentInstructionsService:
         )
         return _bundle(updated)
 
+    async def materialize_external_bundle(
+        self,
+        agent_id: str,
+        files: dict[str, str],
+        *,
+        entry_file: str = _ENTRY_FILE,
+        actor_type: str,
+        actor_id: str,
+    ) -> AgentInstructionsBundle | None:
+        """Force-write an external file set into the agent's managed bundle.
+
+        Unlike ``_write_bundle`` (which only writes missing/empty files), this
+        overwrites existing files so an imported organization package's
+        SOUL/MEMORY/HEARTBEAT/TOOLS replace the default onboarding bundle that
+        ``materialize_default_instructions_for_new_agent`` wrote at creation time.
+        Used by the organization-package importer.
+        """
+        row = await get_agent_by_id(self._session, agent_id)
+        if row is None:
+            return None
+        entry = _normalize_relative_file_path(entry_file)
+        root = _managed_instructions_root(row)
+        root.mkdir(parents=True, exist_ok=True)
+        for relative_path, content in files.items():
+            target = _resolve_path_within_root(root, relative_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        config = _apply_bundle_config(
+            dict(row.agent_runtime_config),
+            mode="managed",
+            root=root,
+            entry_file=entry,
+            clear_legacy_prompt_template=True,
+        )
+        updated = await self._persist_config(
+            row.id,
+            config,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            source="instructions_external_materialize",
+        )
+        if updated is None:
+            return None
+        await insert_activity_log(
+            self._session,
+            org_id=row.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="agent.instructions_bundle_materialized",
+            entity_type="agent",
+            entity_id=row.id,
+            details={"entryFile": entry, "files": sorted(files)},
+        )
+        return _bundle(updated)
+
     async def read_file(
         self, agent_id: str, relative_path: str
     ) -> AgentInstructionsFileDetail | None:

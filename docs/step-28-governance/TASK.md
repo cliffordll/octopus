@@ -22,12 +22,19 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 - 将 Step 14 的 quota window 兼容入口升级为真实 provider quota 读取：失败继续可解释，不阻断普通 run。
 - 明确 quota window、budget、cost 三者关系：quota 是 provider 使用窗口证据，budget 是组织/项目治理限制，cost 是 run/activity 归集结果。
 
-## 剩余待开发
+## 已实现记录
 
-- 当前没有 `BudgetPolicy`、`BudgetIncident` schema/query/service，也没有 budget policy 管理 API。
-- 当前没有 hard-stop enforcement：创建 run/wakeup 前不会按预算阻断，也不会因 budget incident 暂停 organization/agent/project。
-- 当前 quota window 只有 adapter probe，缺 organization 级聚合 API 和与 budget/cost 的解释关系。
-- 当前 skills analytics 仍不是基于 run/event/activity evidence 的真实统计。
+- 已新增 `BudgetPolicy`、`BudgetIncident` schema/query/service、migration 和 budget policy 管理 API。
+- 已实现 budget hard-stop enforcement：budget incident 可暂停 organization/agent/project scope，创建 run/wakeup 前会检查 budget block，并取消受影响 queued/running runs。
+- 已实现 organization 级 quota window 聚合 API；provider 失败或超时返回可解释错误项，不阻断普通 run。
+- 已将 skills analytics 从空兼容响应升级为基于持久化 run/event/activity evidence 的真实统计。
+- Step 28 bug-fix 补齐了两个回归边界：agent budget patch 必须按 agent 所属 organization 做访问校验；issue execute 遇到 budget hard-stop 必须返回可解释 422，而不是未处理异常。
+
+## 剩余边界
+
+- Quota window 只做 provider evidence 聚合和解释，不写入 budget policy，也不作为 cost event。
+- Skills analytics 只统计已持久化 evidence，不负责 runtime skills materialization、mount 或 organization skill 管理。
+- OpenClaw Gateway 等 runtime 的执行深化归 runtime/OpenClaw 后续实现，不属于 Step 28 governance 范围。
 
 ## 边界
 
@@ -89,7 +96,7 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
   - `POST /api/orgs/{orgId}/budget-incidents/{incidentId}/resolve`
   - `PATCH /api/orgs/{orgId}/budgets`
   - `PATCH /api/agents/{agentId}/budgets`
-- `tests/contract/test_step28_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch。
+- `tests/contract/test_step28_budget_routes.py`：覆盖 policy upsert、overview、resolve、org/agent budget patch、cross-org agent budget patch 拒绝和 issue execute budget hard-stop 422。
 - `tests/workflows/test_step28_budget_workflow.py`：覆盖 soft incident、hard incident、approval、pause、resume、cancel queued/running runs。
 
 验收：
@@ -168,6 +175,15 @@ uv run pytest tests/contract/test_step28_quota_windows.py -q
 - `uv run pytest tests/contract/test_step28_budget_contract.py tests/contract/test_step28_budget_routes.py tests/contract/test_step28_quota_windows.py tests/contract/test_step28_skills_analytics.py -q`：9 passed。
 - `uv run pytest tests/contract/test_step14_runtime_adapters.py::test_agent_skills_enable_private_and_analytics_routes -q`：1 passed。
 - `uv run ruff format --check .`：361 files already formatted。
+- `uv run pytest tests/contract/test_step28_budget_routes.py::test_agent_budget_patch_rejects_cross_org_agent_actor tests/contract/test_step28_budget_routes.py::test_issue_execute_returns_explainable_budget_block -q`：2 passed。
 - `uv run ruff check .`：All checks passed。
 - `uv run pyright .`：0 errors。
 - `uv run alembic upgrade head` 使用临时 SQLite 数据库升级到 `20260608_000020` 成功。
+
+## 已验证但不覆盖已知边界
+
+- 预算全链路工作流测试（soft incident → hard incident → approval → resume）未编写。核心边界（policy upsert、overview、hard-stop 422、cross-org agent budget 拒绝）已由 contract tests 覆盖。
+- Skills analytics 工作流测试（loaded/requested/used evidence 计数）未编写。API response shape 和 org/agent scope 隔离已由 contract tests 覆盖。
+- Quota windows 工作流测试未编写。provider failure/timeout/success 聚合已由 contract tests 覆盖。
+
+上述工作流测试纳入后续 hardening 步骤。当前关闭的优先级是进入 Step 29 Auth/Access。

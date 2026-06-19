@@ -1,4 +1,4 @@
-# Step 23: Database Portability / Persistence Hardening
+﻿# Step 23: Database Portability / Persistence Hardening
 
 状态：开发中
 
@@ -8,7 +8,7 @@
 
 EPAI/POD 写入链路需要生产级数据库能力，不能依赖 SQLite 的单写者锁模型。为避免把数据库差异泄漏到业务 service，本步骤单独收口数据库操作接口、方言兼容和测试矩阵。
 
-另一个需要同步收口的问题是数据库位置与上游 instance layout 对齐。上游 Rudder 默认使用 embedded PostgreSQL，并把数据库 cluster 放在 `<RUDDER_HOME>/instances/<RUDDER_INSTANCE_ID>/db`。Octopus 即使继续支持 SQLite，也应保持同样的 instance-scoped 语义：SQLite 文件默认放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，而不是随进程 cwd 生成 `./octopus.db`。关键约束是 DB、workspace、runtime home、storage、run logs 和 server logs 必须属于同一个 instance root。详细路径问题记录见 `docs/analyze/agent-runtime-bugs.md` 的 Bug 12。
+另一个需要同步收口的问题是数据库位置与上游 instance layout 对齐。上游 Rudder 默认使用 embedded PostgreSQL，并把数据库 cluster 放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db`。Octopus 即使继续支持 SQLite，也应保持同样的 instance-scoped 语义：SQLite 文件默认放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，而不是随进程 cwd 生成 `./octopus.db`。关键约束是 DB、workspace、runtime home、storage、run logs 和 server logs 必须属于同一个 instance root。详细路径问题记录见 `docs/analyze/agent-runtime-bugs.md` 的 Bug 12。
 
 ## 目标
 

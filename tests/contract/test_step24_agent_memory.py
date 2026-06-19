@@ -191,11 +191,13 @@ def test_runtime_context_env_falls_back_to_agent_memory_paths_from_octopus() -> 
     )
 
     assert env["AGENT_HOME"] == "D:/agents/agent-24"
-    assert env["RUDDER_AGENT_ROOT"] == "D:/agents/agent-24"
-    assert env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == "D:/agents/agent-24/instructions"
-    assert env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-24/memory"
-    assert env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-24/life"
-    assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-24/skills"
+    assert env["OCTOPUS_AGENT_ROOT"] == "D:/agents/agent-24"
+    assert env["OCTOPUS_AGENT_INSTRUCTIONS_DIR"] == "D:/agents/agent-24/instructions"
+    assert env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-24/memory"
+    assert env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-24/life"
+    assert env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-24/skills"
+    assert all(not key.startswith("RUDDER" + "_") for key in env)
+    assert all(not key.startswith("CONTROL" + "_PLANE_") for key in env)
 
 
 async def test_agent_memory_routes_write_read_list_and_delete_files(
