@@ -18,7 +18,13 @@ from fastapi.testclient import TestClient
 from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import ActivityLog, Base, HeartbeatRun, Organization
+from packages.database.schema import (
+    ActivityLog,
+    Agent,
+    Base,
+    HeartbeatRun,
+    Organization,
+)
 from server.app import create_app
 from server.services.heartbeat import HeartbeatService
 
@@ -32,6 +38,87 @@ def test_step13_run_recovery_contract_exposes_upstream_paths_and_limits() -> Non
     assert constants.AGENT_RUN_CONCURRENCY_DEFAULT == 3
     assert constants.AGENT_RUN_CONCURRENCY_MIN == 1
     assert constants.AGENT_RUN_CONCURRENCY_MAX == 10
+
+
+async def test_instance_scheduler_heartbeats_lists_timer_policy(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key="timer-policy",
+                name="Timer Policy",
+                issue_prefix="TP",
+            )
+        )
+        session.add_all(
+            [
+                Agent(
+                    id="agent-scheduled",
+                    org_id=org_id,
+                    name="Scheduled Agent",
+                    role="engineer",
+                    title="Builder",
+                    status="idle",
+                    agent_runtime_type="codex_local",
+                    runtime_config={
+                        "heartbeat": {
+                            "enabled": True,
+                            "intervalSec": 60,
+                            "wakeOnDemand": False,
+                        }
+                    },
+                ),
+                Agent(
+                    id="agent-inactive",
+                    org_id=org_id,
+                    name="Inactive Agent",
+                    role="qa",
+                    status="idle",
+                    agent_runtime_type="codex_local",
+                    runtime_config={"heartbeat": {"enabled": True, "intervalSec": 0}},
+                ),
+                Agent(
+                    id="agent-paused",
+                    org_id=org_id,
+                    name="Paused Agent",
+                    role="engineer",
+                    status="paused",
+                    agent_runtime_type="codex_local",
+                    runtime_config={"heartbeat": {"enabled": True, "intervalSec": 60}},
+                ),
+            ]
+        )
+        await session.commit()
+
+    code, body = await _request(
+        application, "GET", "/api/instance/scheduler-heartbeats"
+    )
+
+    assert code == 200
+    assert [item["id"] for item in body] == ["agent-inactive", "agent-scheduled"]
+    assert body[0]["heartbeatEnabled"] is True
+    assert body[0]["intervalSec"] == 300.0
+    assert body[0]["schedulerActive"] is True
+    assert body[1] == {
+        "id": "agent-scheduled",
+        "orgId": org_id,
+        "organizationName": "Timer Policy",
+        "organizationIssuePrefix": "TP",
+        "agentName": "Scheduled Agent",
+        "agentUrlKey": "scheduled-agent",
+        "role": "engineer",
+        "title": "Builder",
+        "status": "idle",
+        "agentRuntimeType": "codex_local",
+        "intervalSec": 60.0,
+        "heartbeatEnabled": True,
+        "schedulerActive": True,
+        "lastHeartbeatAt": None,
+    }
 
 
 def test_step13_events_contract_accepts_incremental_query_window() -> None:

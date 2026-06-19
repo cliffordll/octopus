@@ -42,13 +42,19 @@ async def get_asset_content(
             detail=str(exc),
         ) from exc
     filename = (asset.original_filename or "asset").replace('"', "")
+    # 裸 filename 段会被原样写入 HTTP 响应头，HTTP header 必须 latin-1 可编码；
+    # 非 ASCII（如中文）文件名会触发 UnicodeEncodeError 进而 500。故裸段降级为 ASCII
+    # fallback，完整文件名交给 RFC 5987 的 filename*（已 percent-encode，浏览器优先采用）。
+    ascii_filename = (
+        filename.encode("ascii", "ignore").decode("ascii").strip() or "asset"
+    )
     return Response(
         content=content,
         media_type=asset.content_type or "application/octet-stream",
         headers={
             "Cache-Control": "private, max-age=60",
             "Content-Disposition": (
-                f"inline; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"
+                f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
             ),
             "X-Content-Type-Options": "nosniff",
         },

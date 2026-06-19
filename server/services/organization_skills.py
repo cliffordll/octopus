@@ -56,12 +56,13 @@ _BUNDLED_SKILLS: tuple[tuple[str, str], ...] = (
     ("skill-optimizer", "skill-optimizer"),
     ("conversation-to-skill", "conversation-to-skill"),
 )
+BUNDLED_SKILL_KEYS = tuple(f"skills/{slug}" for slug, _ in _BUNDLED_SKILLS)
 _COMMUNITY_PRESET_SKILLS: tuple[str, ...] = (
     "deep-research",
     "software-product-advisor",
 )
 _BUNDLED_KEY_ORDER = {
-    f"skills/{slug}": index for index, (slug, _) in enumerate(_BUNDLED_SKILLS)
+    skill_key: index for index, skill_key in enumerate(BUNDLED_SKILL_KEYS)
 }
 
 

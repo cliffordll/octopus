@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
+    ensure_control_plane_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -79,11 +80,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         api_key_env="ANTHROPIC_API_KEY",
         base_url_env="ANTHROPIC_BASE_URL",
     )
-    await prepare_managed_home(
+    home = await prepare_managed_home(
         runtime_type="claude_local",
         context=context,
         env=env,
     )
+    ensure_control_plane_cli_shim(env, home)
     apply_runtime_context_env(env, context)
     skills_root = Path(tempfile.mkdtemp(prefix="octopus-claude-skills-"))
     loaded_skills = materialize_runtime_skills(
@@ -172,6 +174,7 @@ async def _run_once(
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **runtime_subprocess_kwargs(),
     )
     pid = getattr(process, "pid", None)
     if on_process_started is not None and isinstance(pid, int):
@@ -206,15 +209,14 @@ async def _run_once(
                 raise TimeoutError
             stdout, stderr = communication.result()
         elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=timeout_sec
+            )
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await communication
         await process.wait()
         return _result(
             process.returncode,
@@ -225,12 +227,9 @@ async def _run_once(
             loaded_skills=loaded_skills,
         )
     except asyncio.CancelledError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
-            process.kill()
-            await process.communicate()
-            await process.wait()
+        process.kill()
+        await communication
+        await process.wait()
         raise
 
     stdout_text = stdout.decode(errors="replace")

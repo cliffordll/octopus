@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -25,6 +26,7 @@ from packages.runtimes.opencode_local.runner import (
     _read_stdout as read_opencode_stdout,
 )
 from packages.runtimes.opencode_local.runner import execute as execute_opencode_local
+from packages.runtimes.process.runner import execute as execute_process
 from packages.runtimes.types import RuntimeExecutionContext
 from server.app import create_app
 
@@ -33,9 +35,34 @@ async def _noop_on_log(stream: str, chunk: str) -> None:
     return None
 
 
+@pytest.fixture(autouse=True)
+def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def blocked_create_subprocess_exec(
+        command: str, *args: Any, **kwargs: Any
+    ) -> Any:
+        raise AssertionError(
+            f"Codex runtime test attempted to launch a real subprocess: {command}"
+        )
+
+    def blocked_subprocess_run(args: Any, *pargs: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            f"Codex runtime test attempted to launch a blocking subprocess: {args}"
+        )
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        blocked_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.subprocess.run",
+        blocked_subprocess_run,
+    )
+
+
 def test_step14_runtime_contract_exposes_adapter_paths() -> None:
     paths = importlib.import_module("packages.shared.api_paths.agents")
 
+    assert paths.ORG_ADAPTER_LIST_PATH == "/api/orgs/{orgId}/adapters"
     assert paths.ORG_ADAPTER_MODELS_PATH == "/api/orgs/{orgId}/adapters/{type}/models"
     assert (
         paths.ORG_ADAPTER_TEST_ENVIRONMENT_PATH
@@ -56,6 +83,15 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
 def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
     registry = importlib.import_module("packages.runtimes.registry")
 
+    assert registry.list_runtime_adapter_types() == [
+        "process",
+        "codex_local",
+        "http",
+        "claude_local",
+        "opencode_local",
+        "openclaw_gateway",
+        "openclaw_local",
+    ]
     assert registry.get_runtime_adapter("http").type == "http"
     assert registry.get_runtime_adapter("claude_local").type == "claude_local"
     assert registry.get_runtime_adapter("opencode_local").type == "opencode_local"
@@ -65,6 +101,27 @@ def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
         == "OpenClawGatewayRuntimeAdapter"
     )
     assert registry.get_runtime_adapter("gemini_local").type == "gemini_local"
+
+
+def test_supported_local_runtime_homes_are_isolated_per_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from packages.runtimes.paths import resolve_managed_runtime_home
+
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+
+    for runtime_type in ("codex_local", "opencode_local", "claude_local"):
+        first = resolve_managed_runtime_home(
+            runtime_type, org_id="org-14", agent_id="agent-a"
+        )
+        second = resolve_managed_runtime_home(
+            runtime_type, org_id="org-14", agent_id="agent-b"
+        )
+
+        assert first != second
+        assert first.parts[-2:] == ("agents", "agent-a")
+        assert second.parts[-2:] == ("agents", "agent-b")
 
 
 async def test_openclaw_gateway_runtime_metadata_reports_environment_support() -> None:
@@ -80,6 +137,360 @@ async def test_openclaw_gateway_runtime_metadata_reports_environment_support() -
         "Configure url, authToken, headers, payloadTemplate, sessionKeyStrategy, "
         "timeoutSec and waitTimeoutMs for the OpenClaw Gateway WebSocket endpoint."
     )
+
+
+def test_step14_registry_resolves_openclaw_local() -> None:
+    registry = importlib.import_module("packages.runtimes.registry")
+
+    adapter = registry.get_runtime_adapter("openclaw_local")
+    assert adapter.type == "openclaw_local"
+    assert adapter.__class__.__name__ == "OpenClawLocalRuntimeAdapter"
+
+
+async def test_openclaw_local_runtime_metadata_reports_capabilities() -> None:
+    from packages.runtimes.registry import get_runtime_metadata
+
+    metadata = await get_runtime_metadata("openclaw_local")
+
+    assert metadata["type"] == "openclaw_local"
+    assert metadata["capabilities"]["environmentTest"] is True
+    assert metadata["capabilities"]["skills"] is True
+    assert metadata["supportsLocalAgentJwt"] is True
+    assert isinstance(metadata["agentConfigurationDoc"], str)
+
+
+async def test_openclaw_local_reports_skill_snapshot(tmp_path: Path) -> None:
+    from packages.runtimes.openclaw_local import OpenClawLocalRuntimeAdapter
+
+    skills_root = tmp_path / "skills"
+    skills_root.joinpath("review").mkdir(parents=True)
+    skills_root.joinpath("review", "SKILL.md").write_text(
+        "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+
+    adapter = OpenClawLocalRuntimeAdapter()
+    snapshot = await adapter.list_skills(
+        {"skillsRootPath": str(skills_root)}, desired_skills=["review"]
+    )
+
+    assert snapshot["agentRuntimeType"] == "openclaw_local"
+    assert snapshot["supported"] is True
+    assert snapshot["desiredSkills"] == ["review"]
+    assert any(
+        entry["key"] == "review" and entry["desired"] is True
+        for entry in snapshot["entries"]
+    )
+
+
+async def test_openclaw_local_registers_model_and_parses_reply(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    from packages.runtimes.openclaw_local.runner import (
+        execute as execute_openclaw_local,
+    )
+
+    calls: list[list[str]] = []
+    patch_stdin: dict[str, str] = {}
+
+    class FakeProcess:
+        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+            self._stdout = stdout
+            self._stderr = stderr
+            self.returncode = returncode
+            self.pid = 4242
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            if payload is not None:
+                patch_stdin["payload"] = payload.decode()
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        calls.append(list(args))
+        if "patch" in args:
+            return FakeProcess(b"Applied 6 config update(s).", b"", 0)
+        return FakeProcess(
+            b'{"payloads":[{"text":"hello from openclaw","mediaUrl":null}],'
+            b'"meta":{"agentMeta":{"sessionId":"sess-ocl-1",'
+            b'"usage":{"input":10,"output":2,"total":12}}}}',
+            b"",
+            0,
+        )
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_openclaw_local(
+        RuntimeExecutionContext(
+            run_id="run-ocl",
+            agent_id="agent-ocl",
+            org_id="org-ocl",
+            agent_name="OpenClaw",
+            config={
+                "command": "openclaw-test",
+                "model": "epai-test/deepseek-v4-flash",
+                "promptTemplate": "do the task",
+                "_octopus": {
+                    "runtimeProvider": {
+                        "baseUrl": "http://platform/v1",
+                        "apiKey": "sk-platform",
+                        "model": {
+                            "modelId": "deepseek-v4-flash",
+                            "displayName": "DeepSeek V4 Flash",
+                            "metadata": {"contextWindow": 131072},
+                        },
+                    }
+                },
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    patch_call = next(c for c in calls if "patch" in c)
+    assert patch_call[1:] == ["config", "patch", "--stdin"]
+    registered = json.loads(patch_stdin["payload"])
+    provider = registered["models"]["providers"]["epai-test"]
+    assert provider["baseUrl"] == "http://platform/v1"
+    assert provider["apiKey"] == "sk-platform"
+    assert provider["api"] == "openai-completions"
+    assert provider["models"][0]["id"] == "deepseek-v4-flash"
+    assert provider["models"][0]["contextWindow"] == 131072
+
+    agent_call = next(c for c in calls if "agent" in c and "--local" in c)
+    assert "--json" in agent_call
+    model_idx = agent_call.index("--model")
+    assert agent_call[model_idx + 1] == "epai-test/deepseek-v4-flash"
+    session_idx = agent_call.index("--session-key")
+    assert agent_call[session_idx + 1] == "agent:agent-ocl:run-ocl"
+    assert agent_call[-2] == "-m"
+    assert "do the task" in agent_call[-1]
+
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "hello from openclaw"
+    assert result.result_json.get("modelRegistrationError") is None
+    assert result.session_id_after == "sess-ocl-1"
+    assert result.usage_json == {
+        "inputTokens": 10,
+        "outputTokens": 2,
+        "totalTokens": 12,
+    }
+
+
+@pytest.mark.asyncio
+async def test_openclaw_local_fails_fast_when_registration_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-conflict registration failure must abort the run instead of letting
+    OpenClaw silently fall back to api.openai.com and hang."""
+    monkeypatch.chdir(tmp_path)
+    from packages.runtimes.openclaw_local.runner import (
+        execute as execute_openclaw_local,
+    )
+
+    calls: list[list[str]] = []
+
+    class FakeProcess:
+        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+            self._stdout = stdout
+            self._stderr = stderr
+            self.returncode = returncode
+            self.pid = 4242
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        calls.append(list(args))
+        if "patch" in args:
+            return FakeProcess(b"", b"fatal: bad config payload", 1)
+        return FakeProcess(b'{"payloads":[{"text":"should not run"}]}', b"", 0)
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_openclaw_local(
+        RuntimeExecutionContext(
+            run_id="run-ocl-fail",
+            agent_id="agent-ocl-fail",
+            org_id="org-ocl",
+            agent_name="OpenClaw",
+            config={
+                "command": "openclaw-test",
+                "model": "epai-test/deepseek-v4-flash",
+                "promptTemplate": "do the task",
+                "_octopus": {
+                    "runtimeProvider": {
+                        "baseUrl": "http://platform/v1",
+                        "apiKey": "sk-platform",
+                        "model": {"modelId": "deepseek-v4-flash"},
+                    }
+                },
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.exit_code == 1
+    assert result.error_message is not None
+    assert "registration failed" in result.error_message
+    # The agent must NOT be launched when registration failed.
+    assert not any("agent" in c and "--local" in c for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_openclaw_local_retries_registration_on_config_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent runs of the same agent race on the shared config; the transient
+    ConfigMutationConflictError must be retried, not surfaced as a failure."""
+    monkeypatch.chdir(tmp_path)
+    from packages.runtimes.openclaw_local.runner import (
+        execute as execute_openclaw_local,
+    )
+
+    patch_attempts = 0
+
+    class FakeProcess:
+        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+            self._stdout = stdout
+            self._stderr = stderr
+            self.returncode = returncode
+            self.pid = 4242
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            return None
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        nonlocal patch_attempts
+        if "patch" in args:
+            patch_attempts += 1
+            if patch_attempts == 1:
+                return FakeProcess(
+                    b"",
+                    b"ConfigMutationConflictError: config changed since last load",
+                    1,
+                )
+            return FakeProcess(b"Applied 6 config update(s).", b"", 0)
+        return FakeProcess(
+            b'{"payloads":[{"text":"hello after retry"}],'
+            b'"meta":{"agentMeta":{"sessionId":"sess-retry"}}}',
+            b"",
+            0,
+        )
+
+    monkeypatch.setattr(
+        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_openclaw_local(
+        RuntimeExecutionContext(
+            run_id="run-ocl-retry",
+            agent_id="agent-ocl-retry",
+            org_id="org-ocl",
+            agent_name="OpenClaw",
+            config={
+                "command": "openclaw-test",
+                "model": "epai-test/deepseek-v4-flash",
+                "promptTemplate": "do the task",
+                "_octopus": {
+                    "runtimeProvider": {
+                        "baseUrl": "http://platform/v1",
+                        "apiKey": "sk-platform",
+                        "model": {"modelId": "deepseek-v4-flash"},
+                    }
+                },
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert patch_attempts == 2
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "hello after retry"
+
+
+def test_openclaw_provider_already_registered_detects_matching_config(
+    tmp_path: Path,
+) -> None:
+    """`_provider_already_registered` lets the runner skip the race-prone config
+    patch only when the persisted config already has the exact provider+model."""
+    from packages.runtimes.openclaw_local.runner import (
+        _provider_already_registered,
+    )
+
+    config_dir = tmp_path / ".openclaw"
+    config_dir.mkdir(parents=True)
+    (config_dir / "openclaw.json").write_text(
+        json.dumps(
+            {
+                "models": {
+                    "providers": {
+                        "epai-test": {
+                            "baseUrl": "http://platform/v1",
+                            "apiKey": "sk-platform",
+                            "models": [{"id": "deepseek-v4-flash"}],
+                        }
+                    }
+                }
+            }
+        )
+    )
+    env = {"HOME": str(tmp_path)}
+    kwargs = {
+        "provider_name": "epai-test",
+        "model_id": "deepseek-v4-flash",
+        "base_url": "http://platform/v1",
+        "api_key": "sk-platform",
+    }
+    assert _provider_already_registered(env, **kwargs) is True
+    # Endpoint / key / model mismatches must NOT short-circuit the patch.
+    assert _provider_already_registered(
+        env, **{**kwargs, "base_url": "http://other/v1"}
+    ) is False
+    assert _provider_already_registered(
+        env, **{**kwargs, "api_key": "sk-other"}
+    ) is False
+    assert _provider_already_registered(
+        env, **{**kwargs, "model_id": "glm-5.1"}
+    ) is False
+    # Missing config file → cannot skip.
+    assert _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs) is False
 
 
 def test_opencode_extra_args_are_run_subcommand_options() -> None:
@@ -139,6 +550,58 @@ async def test_opencode_stdout_reader_accepts_long_jsonl_lines() -> None:
     assert "".join(chunk for _, chunk in logs) == payload
 
 
+async def test_process_timeout_drains_original_communication_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    communicate_calls = 0
+    communicate_cancelled = False
+    killed = asyncio.Event()
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            nonlocal communicate_calls, communicate_cancelled
+            communicate_calls += 1
+            try:
+                await killed.wait()
+            except asyncio.CancelledError:
+                communicate_cancelled = True
+                raise
+            return b"", b"terminated"
+
+        def kill(self) -> None:
+            killed.set()
+
+        async def wait(self) -> int:
+            await killed.wait()
+            return self.returncode
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.process.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_process(
+        RuntimeExecutionContext(
+            run_id="run-process-timeout",
+            agent_id="agent-process-timeout",
+            org_id="org-process-timeout",
+            agent_name="Process Timeout",
+            config={"command": "process-test", "timeoutSec": 0.01},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.timed_out is True
+    assert communicate_calls == 1
+    assert communicate_cancelled is False
+
+
 async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,11 +654,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "Do not guess tool input schemas" in captured_prompt
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
-    assert "D:/octopus/artifacts" in captured_prompt
-    assert "D:/octopus/artifacts/issues/ISSUE-1" not in captured_prompt
-    assert "Prefer the organization artifacts directory" in captured_prompt
+    assert "D:/octopus/worktree/artifacts" in captured_prompt
+    assert "D:/octopus/artifacts" not in captured_prompt
+    assert "project source/download directory" in captured_prompt
+    assert "downloaded source bundles" in captured_prompt
+    assert "Prefer the workspace artifacts directory" in captured_prompt
     assert (
-        "Do not write generated deliverables into external source paths"
+        "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
     )
 
@@ -346,6 +811,30 @@ async def test_adapter_models_and_environment_routes(
     assert unavailable_quota_code == 200
     assert unavailable_quota["provider"] == "gemini_local"
     assert unavailable_quota["ok"] is False
+
+
+async def test_adapter_list_route_returns_registered_runtime_types(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    response_code, adapters = await _request(
+        application, "GET", f"/api/orgs/{org_id}/adapters"
+    )
+
+    assert response_code == 200
+    assert [adapter["type"] for adapter in adapters] == [
+        "process",
+        "codex_local",
+        "http",
+        "claude_local",
+        "opencode_local",
+        "openclaw_gateway",
+        "openclaw_local",
+    ]
+    assert all("capabilities" in adapter["metadata"] for adapter in adapters)
+    assert "gemini_local" not in {adapter["type"] for adapter in adapters}
 
 
 async def test_local_runtime_environment_reports_cwd_command_and_auth_checks(
@@ -774,6 +1263,51 @@ async def test_opencode_local_update_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
+async def test_openclaw_local_agent_requires_provider_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    missing_code, missing_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {},
+        },
+    )
+    invalid_code, invalid_error = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {"model": "gpt-5"},
+        },
+    )
+    valid_code, valid = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenClaw Agent",
+            "agentRuntimeType": "openclaw_local",
+            "agentRuntimeConfig": {"model": "openai/gpt-5"},
+        },
+    )
+
+    assert missing_code == 422
+    assert "openclaw_local requires agentRuntimeConfig.model" in missing_error["detail"]
+    assert invalid_code == 422
+    assert "provider/model" in invalid_error["detail"]
+    assert valid_code == 201
+    assert valid["agentRuntimeType"] == "openclaw_local"
+
+
 async def test_codex_skills_sync_materializes_desired_bundled_skill(
     app: tuple[FastAPI, async_sessionmaker], tmp_path: Path
 ) -> None:
@@ -794,7 +1328,8 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     snapshot_code, snapshot = await _request(
         application, "GET", f"/api/agents/{agent['id']}/skills"
     )
-    target = codex_home / "skills" / "conversation-to-skill" / "SKILL.md"
+    agent_codex_home = codex_home / "agents" / agent["id"]
+    target = agent_codex_home / "skills" / "conversation-to-skill" / "SKILL.md"
     assert snapshot_code == 200
     assert target.exists() is False
 
@@ -811,7 +1346,7 @@ async def test_codex_skills_sync_materializes_desired_bundled_skill(
     assert entries["conversation-to-skill"]["state"] == "installed"
     assert entries["conversation-to-skill"]["managed"] is True
     assert entries["conversation-to-skill"]["targetPath"] == str(
-        codex_home / "skills" / "conversation-to-skill"
+        agent_codex_home / "skills" / "conversation-to-skill"
     )
 
 
@@ -820,10 +1355,20 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     codex_home = tmp_path / "codex-home"
-    skill_dir = codex_home / "skills" / "review"
+    source_skills_root = tmp_path / "source-skills"
+    skill_dir = source_skills_root / "review"
     skill_dir.mkdir(parents=True)
     skill_dir.joinpath("SKILL.md").write_text(
         "# Review\n\nReview code changes.", encoding="utf-8"
+    )
+    stale_source = source_skills_root / "debug"
+    stale_source.mkdir()
+    stale_source.joinpath("SKILL.md").write_text("# Debug\n", encoding="utf-8")
+    stale_target = codex_home / "agents" / "agent-14" / "skills" / "debug"
+    stale_target.mkdir(parents=True)
+    stale_target.joinpath("SKILL.md").write_text("# Debug\n", encoding="utf-8")
+    stale_target.joinpath(".octopus-source").write_text(
+        str(stale_source), encoding="utf-8"
     )
     captured_logs: list[tuple[str, str]] = []
     captured_env: dict[str, str] = {}
@@ -870,6 +1415,8 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
             agent_name="Codex",
             config={
                 "command": "codex-test",
+                "skillsRootPath": str(source_skills_root),
+                "_octopus": {"desiredSkills": ["review"]},
                 "env": {
                     "CODEX_HOME": str(codex_home),
                     "OPENAI_API_KEY": "test-key",
@@ -879,7 +1426,10 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
         )
     )
 
-    assert captured_env["CODEX_HOME"] == str(codex_home)
+    agent_codex_home = codex_home / "agents" / "agent-14"
+    assert captured_env["CODEX_HOME"] == str(agent_codex_home)
+    assert (agent_codex_home / "skills" / "review" / "SKILL.md").is_file()
+    assert stale_target.exists() is False
     assert result.usage_json == {
         "inputTokens": 10,
         "cachedInputTokens": 4,
@@ -1105,6 +1655,16 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     operator_home.joinpath(".npmrc").write_text(
         "//registry.npmjs.org/:_authToken=test\n", encoding="utf-8"
     )
+    operator_home.joinpath(".codex").mkdir()
+    operator_home.joinpath(".codex", "auth.json").write_text(
+        '{"tokens":"test"}\n', encoding="utf-8"
+    )
+    operator_home.joinpath(".codex", "cap_sid").write_text(
+        "test-capability-session\n", encoding="utf-8"
+    )
+    operator_home.joinpath(".codex", "config.toml").write_text(
+        'model = "gpt-test"\n', encoding="utf-8"
+    )
     codex_home = tmp_path / "codex-home"
     captured_env: dict[str, str] = {}
     logs: list[tuple[str, str]] = []
@@ -1147,7 +1707,7 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
                 "command": "codex-test",
                 "env": {
                     "CODEX_HOME": str(codex_home),
-                    "RUDDER_OPERATOR_HOME": str(operator_home),
+                    "OCTOPUS_OPERATOR_HOME": str(operator_home),
                     "GIT_AUTHOR_NAME": "Bad Author",
                     "GIT_AUTHOR_EMAIL": "agent@host.local",
                 },
@@ -1156,7 +1716,8 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
         )
     )
 
-    managed_home = codex_home / "home"
+    agent_codex_home = codex_home / "agents" / "agent-14"
+    managed_home = agent_codex_home / "home"
     assert captured_env["HOME"] == str(managed_home)
     assert captured_env["USERPROFILE"] == str(managed_home)
     assert "AGENT_HOME" not in captured_env
@@ -1172,7 +1733,14 @@ async def test_codex_execute_uses_managed_home_and_syncs_cli_credentials(
     )
     assert managed_home.joinpath(".config", "gh", "hosts.yml").exists()
     assert managed_home.joinpath(".npmrc").exists()
+    assert agent_codex_home.joinpath("auth.json").exists()
+    assert agent_codex_home.joinpath("cap_sid").exists()
+    assert agent_codex_home.joinpath("config.toml").exists()
     assert any("Shared 2 local CLI credential entries" in chunk for _, chunk in logs)
+    assert any(
+        "Shared 3 local Codex credential entries into managed CODEX_HOME" in chunk
+        for _, chunk in logs
+    )
 
 
 async def test_codex_execute_retries_unknown_resume_session(
@@ -1268,7 +1836,7 @@ async def test_codex_execute_injects_runtime_context_env(
         captured_env.update(kwargs["env"])
         return FakeCodexProcess()
 
-    monkeypatch.setenv("RUDDER_API_URL", "http://control.test")
+    monkeypatch.setenv("OCTOPUS_API_URL", "http://control.test")
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
@@ -1315,53 +1883,55 @@ async def test_codex_execute_injects_runtime_context_env(
                 "rudderRuntimePrimaryUrl": "http://svc",
             },
             env={
-                "RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
-                "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": '[{"serviceName":"preview"}]',
+                "OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
+                "OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON": '[{"serviceName":"preview"}]',
             },
             on_log=lambda stream, chunk: _noop_log(stream, chunk),
         )
     )
 
-    assert captured_env["RUDDER_AGENT_ID"] == "agent-14"
-    assert captured_env["RUDDER_ORG_ID"] == "org-14"
-    assert captured_env["RUDDER_RUN_ID"] == "run-14"
-    assert captured_env["RUDDER_API_URL"] == "http://control.test"
-    assert captured_env["RUDDER_TASK_ID"] == "task-1"
-    assert captured_env["RUDDER_WAKE_REASON"] == "assignment"
-    assert captured_env["RUDDER_WAKE_COMMENT_ID"] == "comment-1"
-    assert captured_env["RUDDER_APPROVAL_ID"] == "approval-1"
-    assert captured_env["RUDDER_APPROVAL_STATUS"] == "approved"
-    assert captured_env["RUDDER_LINKED_ISSUE_IDS"] == "issue-1,issue-2"
-    assert captured_env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
-    assert captured_env["RUDDER_WORKSPACE_SOURCE"] == "workspace"
-    assert captured_env["RUDDER_WORKSPACE_STRATEGY"] == "worktree"
-    assert captured_env["RUDDER_WORKSPACE_ID"] == "workspace-1"
-    assert captured_env["RUDDER_WORKSPACE_REPO_URL"] == "https://example.test/repo.git"
-    assert captured_env["RUDDER_WORKSPACE_REPO_REF"] == "main"
-    assert captured_env["RUDDER_WORKSPACE_BRANCH"] == "task-1"
-    assert captured_env["RUDDER_WORKSPACE_WORKTREE_PATH"] == "D:/worktrees/task-1"
+    assert captured_env["OCTOPUS_AGENT_ID"] == "agent-14"
+    assert captured_env["OCTOPUS_ORG_ID"] == "org-14"
+    assert captured_env["OCTOPUS_RUN_ID"] == "run-14"
+    assert captured_env["OCTOPUS_API_URL"] == "http://control.test"
+    assert captured_env["OCTOPUS_TASK_ID"] == "task-1"
+    assert captured_env["OCTOPUS_WAKE_REASON"] == "assignment"
+    assert captured_env["OCTOPUS_WAKE_COMMENT_ID"] == "comment-1"
+    assert captured_env["OCTOPUS_APPROVAL_ID"] == "approval-1"
+    assert captured_env["OCTOPUS_APPROVAL_STATUS"] == "approved"
+    assert captured_env["OCTOPUS_LINKED_ISSUE_IDS"] == "issue-1,issue-2"
+    assert captured_env["OCTOPUS_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+    assert captured_env["OCTOPUS_WORKSPACE_SOURCE"] == "workspace"
+    assert captured_env["OCTOPUS_WORKSPACE_STRATEGY"] == "worktree"
+    assert captured_env["OCTOPUS_WORKSPACE_ID"] == "workspace-1"
+    assert captured_env["OCTOPUS_WORKSPACE_REPO_URL"] == "https://example.test/repo.git"
+    assert captured_env["OCTOPUS_WORKSPACE_REPO_REF"] == "main"
+    assert captured_env["OCTOPUS_WORKSPACE_BRANCH"] == "task-1"
+    assert captured_env["OCTOPUS_WORKSPACE_WORKTREE_PATH"] == "D:/worktrees/task-1"
     assert captured_env["AGENT_HOME"] == "D:/agents/agent-14"
-    assert captured_env["RUDDER_AGENT_ROOT"] == "D:/agents/agent-14"
-    assert captured_env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+    assert captured_env["OCTOPUS_AGENT_ROOT"] == "D:/agents/agent-14"
+    assert captured_env["OCTOPUS_AGENT_INSTRUCTIONS_DIR"] == (
         "D:/agents/agent-14/instructions"
     )
-    assert captured_env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
-    assert captured_env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
-    assert captured_env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
-    assert captured_env["RUDDER_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
-    assert captured_env["RUDDER_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
-    assert captured_env["RUDDER_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
-    assert captured_env["RUDDER_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
-    assert "RUDDER_ISSUE_ARTIFACTS_DIR" not in captured_env
-    assert "RUDDER_RUN_ARTIFACTS_DIR" not in captured_env
-    assert captured_env["RUDDER_RUNTIME_SERVICES_JSON"] == (
+    assert captured_env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+    assert captured_env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
+    assert captured_env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+    assert captured_env["OCTOPUS_ORG_WORKSPACE_ROOT"] == "D:/orgs/org-14/workspaces"
+    assert captured_env["OCTOPUS_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
+    assert captured_env["OCTOPUS_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
+    assert captured_env["OCTOPUS_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in captured_env
+    assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in captured_env
+    assert captured_env["OCTOPUS_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'
     )
-    assert captured_env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
-    assert captured_env["RUDDER_RUNTIME_SERVICE_INTENTS_JSON"] == (
+    assert captured_env["OCTOPUS_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
+    assert captured_env["OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON"] == (
         '[{"serviceName":"preview"}]'
     )
-    assert captured_env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+    assert captured_env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
+    assert all(not key.startswith("RUDDER" + "_") for key in captured_env)
+    assert all(not key.startswith("CONTROL" + "_PLANE_") for key in captured_env)
 
 
 async def test_codex_execute_drops_inherited_sandbox_proxy_env(
@@ -1583,20 +2153,87 @@ async def test_claude_and_opencode_execute_inject_runtime_context_env(
 
     for command in ("claude-test", "opencode-test"):
         env = captured[command]
-        assert env["RUDDER_AGENT_ID"] == "agent-14"
-        assert env["RUDDER_ORG_ID"] == "org-14"
-        assert env["RUDDER_RUN_ID"] == "run-14"
-        assert env["RUDDER_TASK_ID"] == "task-1"
-        assert env["RUDDER_WORKSPACE_CWD"] == "D:/workspaces/task-1"
-        assert env["RUDDER_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
+        assert env["OCTOPUS_AGENT_ID"] == "agent-14"
+        assert env["OCTOPUS_ORG_ID"] == "org-14"
+        assert env["OCTOPUS_RUN_ID"] == "run-14"
+        assert env["OCTOPUS_TASK_ID"] == "task-1"
+        assert env["OCTOPUS_WORKSPACE_CWD"] == "D:/workspaces/task-1"
+        assert env["OCTOPUS_WORKSPACES_JSON"] == '[{"id":"workspace-1"}]'
         assert env["AGENT_HOME"] == "D:/agents/agent-14"
-        assert env["RUDDER_AGENT_INSTRUCTIONS_DIR"] == (
+        assert env["OCTOPUS_AGENT_INSTRUCTIONS_DIR"] == (
             "D:/agents/agent-14/instructions"
         )
-        assert env["RUDDER_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
-        assert env["RUDDER_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
-        assert env["RUDDER_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
-        assert env["RUDDER_RUNTIME_PRIMARY_URL"] == "http://svc"
+        assert env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-14/memory"
+        assert env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-14/life"
+        assert env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-14/skills"
+        assert env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
+
+
+async def test_local_runtimes_expose_control_plane_cli_shim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+    captured: dict[str, dict[str, str]] = {}
+
+    class FakeProcess:
+        returncode = 0
+        pid = 1234
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful local process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        captured[command] = dict(kwargs["env"])
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.claude_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await execute_claude_local(
+        _runtime_context_for_env(
+            command="claude-shim-test",
+            config={"command": "claude-shim-test"},
+        )
+    )
+    await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-shim-test",
+            config={"command": "opencode-shim-test", "model": "openai/gpt-5"},
+        )
+    )
+    await execute_codex_local(
+        _runtime_context_for_env(
+            command="codex-shim-test",
+            config={"command": "codex-shim-test"},
+        )
+    )
+
+    for command in ("claude-shim-test", "opencode-shim-test", "codex-shim-test"):
+        env = captured[command]
+        path_entries = env["PATH"].split(os.pathsep)
+        shim_dir = Path(path_entries[0])
+        assert (shim_dir / "control-plane").is_file()
+        if os.name == "nt":
+            assert (shim_dir / "control-plane.cmd").is_file()
 
 
 async def test_opencode_execute_materializes_database_provider_config(
@@ -1677,6 +2314,8 @@ async def test_opencode_execute_materializes_database_provider_config(
         / "organizations"
         / "org-14"
         / "opencode-home"
+        / "agents"
+        / "agent-14"
         / "home"
         / ".config"
         / "opencode"
@@ -1854,7 +2493,7 @@ def _runtime_context_for_env(
             },
             "rudderRuntimePrimaryUrl": "http://svc",
         },
-        env={"RUDDER_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
+        env={"OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
         on_log=lambda stream, chunk: _noop_log(stream, chunk),
     )
 
@@ -1932,7 +2571,9 @@ async def test_agent_skills_enable_private_and_analytics_routes(
         f"/api/agents/{agent['id']}/skills/enable",
         json={"skills": ["agent:incident-notes"]},
     )
-    private_target = codex_home / "skills" / "incident-notes" / "SKILL.md"
+    private_target = (
+        codex_home / "agents" / agent["id"] / "skills" / "incident-notes" / "SKILL.md"
+    )
     private_entries = {
         entry["selectionKey"]: entry for entry in private_enabled["entries"]
     }

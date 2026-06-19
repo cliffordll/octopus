@@ -16,6 +16,7 @@ from packages.database.schema import (
     Base,
     ChatConversation,
     ChatMessage,
+    Issue,
     Organization,
 )
 from server.app import create_app
@@ -180,6 +181,103 @@ async def test_convert_chat_issue_proposal_creates_issue_and_system_message(
         conversation = await session.get(ChatConversation, conversation_id)
         assert conversation is not None
         assert conversation.primary_issue_id == result["issue"]["id"]
+
+
+async def test_convert_chat_issue_proposal_keeps_later_chat_issues_parallel_without_parent_id(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        structured_payload={
+            "issueProposal": {
+                "title": "Parallel follow-up issue",
+                "description": "This is another top-level task in the same chat.",
+                "priority": "medium",
+            }
+        },
+    )
+    parent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Issue(
+                id=parent_id,
+                org_id=org_id,
+                title="Existing primary issue",
+                description="Already linked to the chat.",
+                status="todo",
+                priority="medium",
+                origin_kind="manual",
+            )
+        )
+        conversation = await session.get(ChatConversation, conversation_id)
+        assert conversation is not None
+        conversation.primary_issue_id = parent_id
+        await session.commit()
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["title"] == "Parallel follow-up issue"
+    assert result["issue"]["parentId"] is None
+    assert result["issue"]["requestDepth"] == 0
+
+
+async def test_convert_chat_issue_proposal_creates_subtask_when_parent_id_is_explicit(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        structured_payload={
+            "issueProposal": {
+                "title": "Explicit child issue",
+                "description": "This task was split from a parent issue.",
+                "priority": "medium",
+            }
+        },
+    )
+    parent_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Issue(
+                id=parent_id,
+                org_id=org_id,
+                title="Parent issue",
+                description="The issue being decomposed.",
+                status="todo",
+                priority="medium",
+                origin_kind="manual",
+            )
+        )
+        message = await session.get(ChatMessage, message_id)
+        assert message is not None
+        message.structured_payload = {
+            "issueProposal": {
+                **message.structured_payload["issueProposal"],
+                "parentId": parent_id,
+            }
+        }
+        await session.commit()
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["title"] == "Explicit child issue"
+    assert result["issue"]["parentId"] == parent_id
+    assert result["issue"]["requestDepth"] == 1
 
 
 async def test_convert_chat_issue_proposal_defaults_assignee_to_replying_agent(

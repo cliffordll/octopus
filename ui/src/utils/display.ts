@@ -127,6 +127,8 @@ const EN_ROLE_LABELS: Record<string, string> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
+  assignment: "任务分配",
+  automation: "自动化",
   bundled: "内置",
   "built-in": "内置",
   built_in: "内置",
@@ -134,13 +136,19 @@ const SOURCE_LABELS: Record<string, string> = {
   community_preset: "社区",
   external: "外部",
   local: "本地",
+  manual: "手动",
+  on_demand: "手动触发",
   runtime: "运行时",
   preset: "预置",
+  review: "评审",
   system: "系统",
   system_bundled: "内置",
+  timer: "定时心跳",
 };
 
 const EN_SOURCE_LABELS: Record<string, string> = {
+  assignment: "Assignment",
+  automation: "Automation",
   bundled: "Built-in",
   "built-in": "Built-in",
   built_in: "Built-in",
@@ -148,10 +156,14 @@ const EN_SOURCE_LABELS: Record<string, string> = {
   community_preset: "Community",
   external: "External",
   local: "Local",
+  manual: "Manual",
+  on_demand: "Manual",
   runtime: "Runtime",
   preset: "Preset",
+  review: "Review",
   system: "System",
   system_bundled: "Built-in",
+  timer: "Timer",
 };
 
 export function displayLabel(value: string | null | undefined): string {
@@ -176,6 +188,21 @@ export function roleLabel(value: string | null | undefined): string {
 
 export function sourceLabel(value: string | null | undefined): string {
   return displayLabel(value);
+}
+
+export function runErrorMessage(value: string | null | undefined): string | null {
+  const error = value?.trim();
+  if (!error) return null;
+  const english = getLocalePreference() === "en-US";
+  if (/^Process lost -- child pid \d+ is no longer running$/i.test(error)) {
+    return english
+      ? "Run process was interrupted. The child process exited before the server finished tracking it."
+      : "运行进程已中断。子进程在服务完成跟踪前已退出。";
+  }
+  if (error === "^C") {
+    return english ? "Run was interrupted by Ctrl+C." : "运行被 Ctrl+C 中断。";
+  }
+  return error;
 }
 
 export function formatDateTime(value: string | null | undefined): string {

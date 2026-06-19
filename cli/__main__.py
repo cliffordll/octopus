@@ -16,7 +16,7 @@ def main(
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
 ) -> int:
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_args(_normalize_global_flags(argv))
     api = client or ApiClient(args.api_base)
     try:
         data = args.handler(args, api)
@@ -25,6 +25,15 @@ def main(
         return 1
     write_output(data, json_mode=args.json_mode, stream=stdout)
     return 0
+
+
+def _normalize_global_flags(argv: Sequence[str] | None) -> list[str] | None:
+    if argv is None:
+        return _normalize_global_flags(sys.argv[1:])
+    if "--json" not in argv:
+        return list(argv)
+    normalized = [arg for arg in argv if arg != "--json"]
+    return ["--json", *normalized]
 
 
 if __name__ == "__main__":

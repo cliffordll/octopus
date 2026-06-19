@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 from sqlalchemy import event
@@ -33,9 +34,18 @@ def _ensure_sqlite_parent_directory(database: str | None) -> None:
 def _configure_sqlite_engine(engine: AsyncEngine) -> None:
     @event.listens_for(engine.sync_engine, "connect")
     def _set_sqlite_pragmas(dbapi_connection: Any, _: object) -> None:
-        cursor = dbapi_connection.cursor()
+        _apply_sqlite_pragmas(dbapi_connection)
+
+
+def _apply_sqlite_pragmas(dbapi_connection: Any) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
         try:
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA journal_mode=TRUNCATE")
-        finally:
-            cursor.close()
+            cursor.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as error:
+            if "database is locked" not in str(error).lower():
+                raise
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    finally:
+        cursor.close()

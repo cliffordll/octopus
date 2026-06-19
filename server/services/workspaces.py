@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from packages.database.queries.workspaces import (
     update_workspace_operation,
     update_workspace_runtime_service,
 )
-from packages.database.queries.assets import create_asset
+from packages.database.queries.assets import create_asset, get_asset_by_sha256
 from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
@@ -119,6 +120,20 @@ _GENERATED_FILE_EXTENSIONS = {
     ".xml",
     ".yaml",
     ".yml",
+    # Binary document deliverables agents commonly produce. Without these, a
+    # generated .docx/.pdf/... is silently skipped by the work-product scan and
+    # only ever surfaces as an issue attachment, never as a work product.
+    ".doc",
+    ".docx",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".pdf",
+    ".ppt",
+    ".pptx",
+    ".rtf",
+    ".xls",
+    ".xlsx",
 }
 _GENERATED_FILE_EXCLUDED_PARTS = {
     ".git",
@@ -132,7 +147,15 @@ _GENERATED_FILE_EXCLUDED_PARTS = {
     "dist",
     "node_modules",
 }
-_GENERATED_FILE_MAX_BYTES = 1_000_000
+_GENERATED_FILE_EXCLUDED_AGENT_DIRS = {
+    "instructions",
+    "life",
+    "memory",
+    "skills",
+}
+# Binary document deliverables (docx/pdf with embedded images) routinely exceed
+# the old 1 MB text-oriented cap; raise it so real deliverables aren't dropped.
+_GENERATED_FILE_MAX_BYTES = 25_000_000
 _GENERATED_FILE_MAX_COUNT = 20
 
 
@@ -154,6 +177,8 @@ def _iter_generated_workspace_files(root: Path, since: datetime | None) -> list[
         rel_parts = path.relative_to(root).parts
         if any(part in _GENERATED_FILE_EXCLUDED_PARTS for part in rel_parts):
             continue
+        if _is_agent_internal_generated_file(rel_parts):
+            continue
         if path.suffix.lower() not in _GENERATED_FILE_EXTENSIONS:
             continue
         try:
@@ -168,6 +193,14 @@ def _iter_generated_workspace_files(root: Path, since: datetime | None) -> list[
         candidates.append((modified_at, path))
     candidates.sort(key=lambda item: (item[0], item[1].as_posix()))
     return [path for _, path in candidates[:_GENERATED_FILE_MAX_COUNT]]
+
+
+def _is_agent_internal_generated_file(rel_parts: tuple[str, ...]) -> bool:
+    return (
+        len(rel_parts) >= 4
+        and rel_parts[0] == "agents"
+        and rel_parts[2] in _GENERATED_FILE_EXCLUDED_AGENT_DIRS
+    )
 
 
 def _parse_project_policy(value: Any) -> dict[str, Any] | None:
@@ -358,6 +391,8 @@ class WorkspaceService:
             project_workspace.id if project_workspace is not None else None
         )
         fallback_cwd: str | None = None
+        project_cwd = _string(project_workspace.cwd) if project_workspace else None
+        execution_cwd: str | None = None
         warnings: list[str] = []
         if project_workspace is None:
             fallback_cwd = str(self._org_workspace_root(issue.org_id))
@@ -365,12 +400,16 @@ class WorkspaceService:
                 "Project has no workspace configured. Run will start in "
                 f'shared organization workspace "{fallback_cwd}".'
             )
-        elif not _string(project_workspace.cwd):
+        elif not project_cwd:
             fallback_cwd = str(self._org_workspace_root(issue.org_id))
             warnings.append(
                 "Project workspace has no local cwd configured. Run will start "
                 f'in shared organization workspace "{fallback_cwd}".'
             )
+        elif mode == "shared_workspace":
+            execution_cwd = project_cwd
+        if fallback_cwd is not None:
+            execution_cwd = fallback_cwd
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -391,7 +430,7 @@ class WorkspaceService:
                 "strategy_type": strategy_type,
                 "name": f"{project.name} workspace",
                 "status": "active",
-                "cwd": fallback_cwd,
+                "cwd": execution_cwd,
                 "provider_type": "git_worktree"
                 if strategy_type == "git_worktree"
                 else "local_fs",
@@ -473,7 +512,7 @@ class WorkspaceService:
             "rudderRuntimeServices": services,
             "env": workspace_env,
         }
-        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = _json_dump(services)
+        runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = _json_dump(services)
         return {
             "issueId": issue.id,
             "projectId": issue.project_id,
@@ -549,7 +588,7 @@ class WorkspaceService:
             "rudderRuntimeServices": [],
             "env": workspace_env,
         }
-        runtime_context["env"]["RUDDER_RUNTIME_SERVICES_JSON"] = "[]"
+        runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = "[]"
         return {
             "conversationId": conversation_id,
             "issueId": None,
@@ -756,6 +795,8 @@ class WorkspaceService:
             if isinstance(workspace_context, dict)
             else None
         )
+        existing = await list_issue_work_products(self._session, issue.id)
+        seen_external_ids = {row.external_id for row in existing if row.external_id}
         stored: list[IssueWorkProductData] = []
         for product in products:
             if not isinstance(product, dict):
@@ -764,6 +805,11 @@ class WorkspaceService:
             product_type = _string(product.get("type"))
             provider = _string(product.get("provider")) or "rudder"
             if not title or not product_type:
+                continue
+            external_id = _string(product.get("externalId"))
+            # Idempotent capture: a re-scan (backfill after a transient failure)
+            # must not duplicate an already-registered artifact for this issue.
+            if external_id and external_id in seen_external_ids:
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
@@ -789,6 +835,8 @@ class WorkspaceService:
                     "created_by_run_id": run_id,
                 },
             )
+            if external_id:
+                seen_external_ids.add(external_id)
             stored.append(self._to_work_product(row))
         return stored
 
@@ -832,7 +880,7 @@ class WorkspaceService:
         )
         artifacts_dir = _string(workspace.get("orgArtifactsDir"))
         if not artifacts_dir and isinstance(workspace_env, dict):
-            artifacts_dir = _string(workspace_env.get("RUDDER_ORG_ARTIFACTS_DIR"))
+            artifacts_dir = _string(workspace_env.get("OCTOPUS_ORG_ARTIFACTS_DIR"))
         artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
         if artifacts_dir:
             assert artifacts_root is not None
@@ -865,7 +913,7 @@ class WorkspaceService:
                         "externalId": f"{source}:{workspace_ref}:{rel_path}",
                         "status": "active",
                         "reviewState": "none",
-                        "isPrimary": len(products) == 0,
+                        "isPrimary": False,
                         "summary": "Generated file captured from managed workspace storage.",
                         "content": content,
                         "contentType": content_type,
@@ -881,6 +929,20 @@ class WorkspaceService:
                 )
         if not products:
             return []
+        # Pick the primary deliverable from THIS run's own worktree (newest such
+        # file), not "the first file scanned" — which, because the shared org
+        # artifacts dir is scanned first and oldest-first, used to surface a stale
+        # file from another task as the headline product. Files are appended in
+        # ascending mtime per root, so the last worktree-sourced product is newest.
+        primary_idx = next(
+            (
+                i
+                for i in range(len(products) - 1, -1, -1)
+                if products[i]["metadata"].get("source") == "execution_workspace_scan"
+            ),
+            len(products) - 1,
+        )
+        products[primary_idx]["isPrimary"] = True
         return await self.persist_run_work_products(
             run_id=run_id,
             context_snapshot=context_snapshot,
@@ -905,27 +967,34 @@ class WorkspaceService:
             return product
         if not content:
             return product
-        storage = get_storage_service()
-        stored = await storage.put_file(
-            org_id=org_id,
-            namespace="work-products",
-            original_filename=_string(product.get("filename"))
-            or f"{_string(product.get('title')) or 'work-product'}.txt",
-            content_type=content_type,
-            body=content,
-        )
-        asset = await create_asset(
-            self._session,
-            {
-                "org_id": org_id,
-                "provider": stored["provider"],
-                "object_key": stored["objectKey"],
-                "content_type": stored["contentType"],
-                "byte_size": stored["byteSize"],
-                "sha256": stored["sha256"],
-                "original_filename": stored["originalFilename"],
-            },
-        )
+        # Reuse an existing asset with identical content instead of re-archiving:
+        # the same generated file is scanned/captured repeatedly (shared org
+        # artifacts dir, re-runs), and a fresh put_file each time would mint a new
+        # asset id and waste storage for byte-identical content.
+        digest = hashlib.sha256(content).hexdigest()
+        asset = await get_asset_by_sha256(self._session, org_id, digest)
+        if asset is None:
+            storage = get_storage_service()
+            stored = await storage.put_file(
+                org_id=org_id,
+                namespace="work-products",
+                original_filename=_string(product.get("filename"))
+                or f"{_string(product.get('title')) or 'work-product'}.txt",
+                content_type=content_type,
+                body=content,
+            )
+            asset = await create_asset(
+                self._session,
+                {
+                    "org_id": org_id,
+                    "provider": stored["provider"],
+                    "object_key": stored["objectKey"],
+                    "content_type": stored["contentType"],
+                    "byte_size": stored["byteSize"],
+                    "sha256": stored["sha256"],
+                    "original_filename": stored["originalFilename"],
+                },
+            )
         metadata = dict(product.get("metadata") or {})
         metadata.update(
             {
@@ -1172,22 +1241,22 @@ class WorkspaceService:
         workspaces_json = _json_dump([workspace])
         services_json = _json_dump([])
         return {
-            "RUDDER_WORKSPACE_CWD": workspace["cwd"] or "",
-            "RUDDER_WORKSPACE_SOURCE": workspace["providerType"],
-            "RUDDER_WORKSPACE_STRATEGY": workspace["strategyType"],
-            "RUDDER_WORKSPACE_ID": workspace["id"] or "",
-            "RUDDER_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
-            "RUDDER_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
-            "RUDDER_WORKSPACE_BRANCH": workspace["branchName"] or "",
-            "RUDDER_WORKSPACE_WORKTREE_PATH": workspace["cwd"] or "",
-            "RUDDER_WORKSPACES_JSON": workspaces_json,
-            "RUDDER_RUNTIME_SERVICE_INTENTS_JSON": "[]",
-            "RUDDER_RUNTIME_SERVICES_JSON": services_json,
-            "RUDDER_ORG_WORKSPACE_ROOT": str(org_root),
-            "RUDDER_ORG_AGENTS_DIR": str(agents_dir),
-            "RUDDER_ORG_SKILLS_DIR": str(skills_dir),
-            "RUDDER_ORG_PLANS_DIR": str(plans_dir),
-            "RUDDER_ORG_ARTIFACTS_DIR": str(artifacts_dir),
+            "OCTOPUS_WORKSPACE_CWD": workspace["cwd"] or "",
+            "OCTOPUS_WORKSPACE_SOURCE": workspace["providerType"],
+            "OCTOPUS_WORKSPACE_STRATEGY": workspace["strategyType"],
+            "OCTOPUS_WORKSPACE_ID": workspace["id"] or "",
+            "OCTOPUS_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
+            "OCTOPUS_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
+            "OCTOPUS_WORKSPACE_BRANCH": workspace["branchName"] or "",
+            "OCTOPUS_WORKSPACE_WORKTREE_PATH": workspace["cwd"] or "",
+            "OCTOPUS_WORKSPACES_JSON": workspaces_json,
+            "OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON": "[]",
+            "OCTOPUS_RUNTIME_SERVICES_JSON": services_json,
+            "OCTOPUS_ORG_WORKSPACE_ROOT": str(org_root),
+            "OCTOPUS_ORG_AGENTS_DIR": str(agents_dir),
+            "OCTOPUS_ORG_SKILLS_DIR": str(skills_dir),
+            "OCTOPUS_ORG_PLANS_DIR": str(plans_dir),
+            "OCTOPUS_ORG_ARTIFACTS_DIR": str(artifacts_dir),
         }
 
     async def _find_reusable_execution_workspace(
