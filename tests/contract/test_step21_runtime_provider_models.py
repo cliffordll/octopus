@@ -13,12 +13,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.queries.runtime_providers import get_llm_runtime_default
 from packages.database.schema import (
     Agent,
     Base,
+    LlmModel,
+    LlmProvider,
+    LlmProviderBinding,
     Organization,
-    RuntimeModel,
-    RuntimeProvider,
 )
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
@@ -44,6 +46,21 @@ def test_runtime_provider_model_contract_exposes_paths() -> None:
         == "/api/orgs/{orgId}/runtime-providers/{providerId}/models/{modelId:path}"
     )
     assert not hasattr(paths, "ORG_RUNTIME_MODEL_REFRESH_PATH")
+
+
+def test_llm_provider_model_contract_exposes_paths() -> None:
+    module_name = "packages.shared.api_paths.llm"
+
+    assert importlib.util.find_spec(module_name) is not None
+    paths = importlib.import_module(module_name)
+
+    assert paths.LLM_PROVIDER_LIST_PATH == "/api/llm/providers"
+    assert paths.LLM_PROVIDER_DETAIL_PATH == "/api/llm/providers/{providerId}"
+    assert paths.LLM_MODEL_LIST_PATH == "/api/llm/providers/{providerId}/models"
+    assert (
+        paths.LLM_MODEL_DETAIL_PATH
+        == "/api/llm/providers/{providerId}/models/{modelId:path}"
+    )
 
 
 @pytest.fixture
@@ -261,7 +278,7 @@ async def test_global_provider_and_model_are_visible_across_organizations(
         },
     )
     assert create_code == 201
-    assert created["scope"] == "global"
+    assert created["scope"] == "instance"
     assert created["orgId"] is None
 
     model_code, model = await _request(
@@ -275,7 +292,7 @@ async def test_global_provider_and_model_are_visible_across_organizations(
         },
     )
     assert model_code == 201
-    assert model["scope"] == "global"
+    assert model["scope"] == "instance"
 
     providers_code, providers = await _request(
         application,
@@ -285,7 +302,7 @@ async def test_global_provider_and_model_are_visible_across_organizations(
     )
     assert providers_code == 200
     assert [(provider["scope"], provider["providerId"]) for provider in providers] == [
-        ("global", "deepseek")
+        ("instance", "deepseek")
     ]
 
     models_code, models = await _request(
@@ -296,11 +313,115 @@ async def test_global_provider_and_model_are_visible_across_organizations(
     )
     assert models_code == 200
     assert [(item["scope"], item["modelId"]) for item in models] == [
-        ("global", "deepseek-v4-flash")
+        ("instance", "deepseek-v4-flash")
     ]
 
 
-async def test_organization_provider_and_model_stay_private_to_organization(
+async def test_llm_provider_and_model_are_visible_across_runtime_switches(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory, key="runtime-switch-provider-models")
+
+    create_code, created = await _request(
+        application,
+        "POST",
+        "/api/llm/providers",
+        json_body={
+            "providerId": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "openai_chat_completions",
+            "baseUrl": "https://deepseek.example/v1",
+            "apiKey": "sk-instance",
+        },
+    )
+    assert create_code == 201
+    assert created["providerId"] == "deepseek"
+    assert created["apiKey"] == "***REDACTED***"
+    assert created["hasApiKey"] is True
+
+    model_code, model = await _request(
+        application,
+        "POST",
+        "/api/llm/providers/deepseek/models",
+        json_body={
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+        },
+    )
+    assert model_code == 201
+    assert model["providerId"] == "deepseek"
+
+    for runtime_type in ["opencode_local", "codex_local", "claude_local"]:
+        providers_code, providers = await _request(
+            application,
+            "GET",
+            f"/api/orgs/{org_id}/runtime-providers",
+            params={"runtimeType": runtime_type},
+        )
+        assert providers_code == 200
+        assert [
+            (provider["scope"], provider["providerId"]) for provider in providers
+        ] == [("instance", "deepseek")]
+
+        models_code, models = await _request(
+            application,
+            "GET",
+            f"/api/orgs/{org_id}/runtime-providers/deepseek/models",
+            params={"runtimeType": runtime_type},
+        )
+        assert models_code == 200
+        assert [(item["scope"], item["modelId"]) for item in models] == [
+            ("instance", "deepseek-v4-flash")
+        ]
+
+
+async def test_llm_model_route_uses_runtime_type_query_for_default_model(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+
+    create_code, _ = await _request(
+        application,
+        "POST",
+        "/api/llm/providers",
+        json_body={
+            "runtimeType": "openclaw_local",
+            "providerId": "deepseek",
+            "name": "DeepSeek",
+            "protocol": "openai_chat_completions",
+        },
+    )
+    assert create_code == 201
+
+    model_code, model = await _request(
+        application,
+        "POST",
+        "/api/llm/providers/deepseek/models",
+        params={"runtimeType": "openclaw_local"},
+        json_body={
+            "modelId": "deepseek-v4-flash",
+            "displayName": "DeepSeek V4 Flash",
+        },
+    )
+    assert model_code == 201
+    assert model["providerId"] == "deepseek"
+
+    async with factory() as session:
+        openclaw_default = await get_llm_runtime_default(
+            session, "instance", "", "openclaw_local"
+        )
+        opencode_default = await get_llm_runtime_default(
+            session, "instance", "", "opencode_local"
+        )
+
+    assert openclaw_default is not None
+    assert openclaw_default.provider_id == "deepseek"
+    assert openclaw_default.model_id == "deepseek-v4-flash"
+    assert opencode_default is None
+
+
+async def test_llm_provider_and_model_are_instance_scoped_across_organizations(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
     application, factory = app
@@ -312,7 +433,6 @@ async def test_organization_provider_and_model_stay_private_to_organization(
         "POST",
         f"/api/orgs/{source_org_id}/runtime-providers",
         json_body={
-            "scope": "organization",
             "runtimeType": "opencode_local",
             "providerId": "private",
             "name": "Private",
@@ -320,8 +440,8 @@ async def test_organization_provider_and_model_stay_private_to_organization(
         },
     )
     assert create_code == 201
-    assert created["scope"] == "organization"
-    assert created["orgId"] == source_org_id
+    assert created["scope"] == "instance"
+    assert created["orgId"] is None
 
     model_code, model = await _request(
         application,
@@ -329,13 +449,12 @@ async def test_organization_provider_and_model_stay_private_to_organization(
         f"/api/orgs/{source_org_id}/runtime-providers/private/models",
         params={"runtimeType": "opencode_local"},
         json_body={
-            "scope": "organization",
             "modelId": "private-model",
             "displayName": "Private Model",
         },
     )
     assert model_code == 201
-    assert model["scope"] == "organization"
+    assert model["scope"] == "instance"
 
     providers_code, providers = await _request(
         application,
@@ -344,16 +463,20 @@ async def test_organization_provider_and_model_stay_private_to_organization(
         params={"runtimeType": "opencode_local"},
     )
     assert providers_code == 200
-    assert providers == []
+    assert [(provider["scope"], provider["providerId"]) for provider in providers] == [
+        ("instance", "private")
+    ]
 
-    models_code, missing = await _request(
+    models_code, models = await _request(
         application,
         "GET",
         f"/api/orgs/{target_org_id}/runtime-providers/private/models",
         params={"runtimeType": "opencode_local"},
     )
-    assert models_code == 404
-    assert missing["detail"] == "Runtime provider not found"
+    assert models_code == 200
+    assert [(item["scope"], item["modelId"]) for item in models] == [
+        ("instance", "private-model")
+    ]
 
 
 async def test_chat_runtime_config_uses_global_default_model_across_organizations(
@@ -475,14 +598,21 @@ async def test_chat_runtime_config_includes_database_provider_model(
                 )
             )
             session.add(
-                RuntimeProvider(
+                LlmProvider(
                     id=str(uuid.uuid4()),
-                    org_id=org_id,
-                    runtime_type=runtime_type,
                     provider_id="deepseek",
                     name="DeepSeek",
                     protocol="openai_chat_completions",
                     npm_package="@ai-sdk/openai-compatible",
+                    enabled=True,
+                )
+            )
+            session.add(
+                LlmProviderBinding(
+                    id=str(uuid.uuid4()),
+                    scope_type="instance",
+                    scope_id="",
+                    provider_id="deepseek",
                     base_url="https://deepseek.example/v1",
                     api_key="sk-db",
                     config_json={"timeoutSec": 30},
@@ -490,10 +620,8 @@ async def test_chat_runtime_config_includes_database_provider_model(
                 )
             )
             session.add(
-                RuntimeModel(
+                LlmModel(
                     id=str(uuid.uuid4()),
-                    org_id=org_id,
-                    runtime_type=runtime_type,
                     provider_id="deepseek",
                     model_id="deepseek-v4-flash",
                     display_name="DeepSeek V4 Flash",

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import re
@@ -12,10 +11,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
-from ..local_skills import configure_managed_profile_env
+from ..local_skills import (
+    configure_managed_profile_env,
+    desired_skills_from_config,
+    ensure_control_plane_cli_shim,
+    materialize_runtime_skills,
+)
 from ..provider_config import apply_provider_env, model_for_cli
 from ..paths import ensure_managed_runtime_home
 from ..session import effective_resume_session_id
@@ -69,11 +74,27 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         base_url_env="OPENAI_BASE_URL",
     )
     clear_inherited_blocking_proxy_env(env, explicit_keys=explicit_env_keys)
-    if not _string(env.get("CODEX_HOME")):
+    configured_codex_home = _string(env.get("CODEX_HOME"))
+    if configured_codex_home:
+        env["CODEX_HOME"] = str(
+            Path(configured_codex_home).expanduser().resolve()
+            / "agents"
+            / context.agent_id
+        )
+    else:
         env["CODEX_HOME"] = str(_default_codex_home(context))
-    await _prepare_managed_home(env, context.on_log)
+    managed_home = await _prepare_managed_home(env, context.on_log)
     _prepare_managed_git_config(env)
+    if managed_home is not None:
+        ensure_control_plane_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
+    materialize_runtime_skills(
+        runtime_type="codex_local",
+        config=context.config,
+        desired_skills=desired_skills_from_config(context.config),
+        skills_home=Path(env["CODEX_HOME"]) / "skills",
+        location_label="managed CODEX_HOME/skills",
+    )
     billing_type = _billing_type(env)
     biller = _biller(env, billing_type)
     loaded_skills = _loaded_skills(env)
@@ -153,6 +174,7 @@ async def _run_attempt(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **runtime_subprocess_kwargs(),
         )
     except PermissionError as exc:
         if _should_retry_with_blocking_subprocess(exc):
@@ -226,15 +248,14 @@ async def _run_attempt(
                 raise TimeoutError
             stdout, stderr = communication.result()
         elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=timeout_sec
+            )
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await communication
         await process.wait()
         stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
         result = RuntimeExecutionResult(
@@ -256,11 +277,8 @@ async def _run_attempt(
             raw_stderr=stderr.decode(errors="replace"),
         )
     except asyncio.CancelledError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        await process.communicate()
+        await communication
         await process.wait()
         raise
 
@@ -334,6 +352,7 @@ async def _run_blocking_subprocess_attempt(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout_sec if timeout_sec > 0 else None,
+            **runtime_subprocess_kwargs(),
         )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or b""
@@ -450,7 +469,7 @@ async def _completed_process_attempt(
 def _build_args(
     config: dict[str, Any], resume_session_id: str | None = None
 ) -> list[str]:
-    args = ["exec", "--json", "--disable", "plugins"]
+    args = ["exec", "--skip-git-repo-check", "--json", "--disable", "plugins"]
     if config.get("search") is True:
         args.insert(0, "--search")
     if config.get("dangerouslyBypassApprovalsAndSandbox") is True:
@@ -625,18 +644,22 @@ def _default_codex_home(context: RuntimeExecutionContext) -> Path:
     )
 
 
-async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
+async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> Path | None:
     codex_home = _string(env.get("CODEX_HOME"))
     if not codex_home:
-        return
+        return None
+    codex_home_path = Path(codex_home).expanduser()
     managed_home = Path(codex_home).expanduser() / "home"
     managed_home.mkdir(parents=True, exist_ok=True)
     operator_home = _operator_home(env)
     linked = _sync_local_cli_credential_home_entries(operator_home, managed_home)
+    linked_codex = _sync_local_codex_home_entries(operator_home, codex_home_path)
     env["HOME"] = str(managed_home)
     env["USERPROFILE"] = str(managed_home)
     configure_managed_profile_env(env, managed_home)
     env["OCTOPUS_OPERATOR_HOME"] = str(operator_home)
+    env.pop("AGENT_HOME", None)
+    env.pop("OCTOPUS_AGENT_ROOT", None)
     if linked:
         await on_log(
             "stdout",
@@ -646,6 +669,16 @@ async def _prepare_managed_home(env: dict[str, str], on_log: Any) -> None:
                 f"{managed_home}: {', '.join(linked)}\n"
             ),
         )
+    if linked_codex:
+        await on_log(
+            "stdout",
+            (
+                f"[octopus] Shared {len(linked_codex)} local Codex credential "
+                f"entr{'y' if len(linked_codex) == 1 else 'ies'} into managed "
+                f"CODEX_HOME {codex_home_path}: {', '.join(linked_codex)}\n"
+            ),
+        )
+    return managed_home
 
 
 def _prepare_managed_git_config(env: dict[str, str]) -> None:
@@ -690,8 +723,8 @@ def _append_git_config_env(env: dict[str, str], key: str, value: str) -> None:
 
 def _operator_home(env: dict[str, str]) -> Path:
     return Path(
-        _string(env.get("RUDDER_OPERATOR_HOME"))
-        or _string(os.environ.get("RUDDER_OPERATOR_HOME"))
+        _string(env.get("OCTOPUS_OPERATOR_HOME"))
+        or _string(os.environ.get("OCTOPUS_OPERATOR_HOME"))
         or _string(os.environ.get("HOME"))
         or _string(env.get("HOME"))
         or str(Path.home())
@@ -718,6 +751,29 @@ _LOCAL_CLI_CREDENTIAL_HOME_ENTRIES = (
     "Library/Application Support/gh",
     "Library/Application Support/com.heroku.cli",
 )
+
+_LOCAL_CODEX_HOME_CREDENTIAL_ENTRIES = (
+    "auth.json",
+    "cap_sid",
+    "config.toml",
+)
+
+
+def _sync_local_codex_home_entries(
+    source_home: Path, target_codex_home: Path
+) -> list[str]:
+    source_codex_home = source_home / ".codex"
+    if _same_path(source_codex_home, target_codex_home):
+        return []
+    linked: list[str] = []
+    for relative_entry in _LOCAL_CODEX_HOME_CREDENTIAL_ENTRIES:
+        source = source_codex_home / relative_entry
+        if not source.exists():
+            continue
+        target = target_codex_home / relative_entry
+        if _ensure_link_or_copy(source, target):
+            linked.append(relative_entry)
+    return linked
 
 
 def _sync_local_cli_credential_home_entries(

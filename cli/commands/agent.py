@@ -71,6 +71,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     get_parser = actions.add_parser("get")
     get_parser.add_argument("agent_id")
     get_parser.set_defaults(handler=get_agent)
+    inbox_parser = actions.add_parser("inbox")
+    inbox_parser.add_argument("--agent-id")
+    inbox_parser.set_defaults(handler=get_inbox)
     configuration_parser = actions.add_parser("configuration")
     configuration_parser.add_argument("agent_id")
     configuration_parser.set_defaults(handler=get_configuration)
@@ -357,6 +360,12 @@ def test_adapter_environment(args: argparse.Namespace, client: ApiClient) -> Any
 
 def get_agent(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/agents/{args.agent_id}")
+
+
+def get_inbox(args: argparse.Namespace, client: ApiClient) -> Any:
+    if args.agent_id:
+        return client.request("GET", f"/api/agents/{args.agent_id}/inbox-lite")
+    return client.request("GET", "/api/agents/me/inbox-lite")
 
 
 def get_configuration(args: argparse.Namespace, client: ApiClient) -> Any:

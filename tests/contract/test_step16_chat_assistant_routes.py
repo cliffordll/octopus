@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Agent, Approval, Base, Organization
+from packages.database.schema import Agent, Approval, Base, Issue, Organization
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from server.app import create_app
 
@@ -102,10 +102,13 @@ async def _create_chat(
     agent_id: str,
     *,
     issue_creation_mode: str | None = None,
+    plan_mode: bool | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"title": "Assistant chat", "preferredAgentId": agent_id}
     if issue_creation_mode is not None:
         payload["issueCreationMode"] = issue_creation_mode
+    if plan_mode is not None:
+        payload["planMode"] = plan_mode
     code, created = await _request(
         application,
         "POST",
@@ -169,6 +172,11 @@ async def test_assistant_reply_persists_kind_structured_payload_and_approval(
     assert "issueProposal" in prompt
     assert "server-side issue conversion mode" in prompt
     assert "conversation issueCreationMode" in prompt
+    assert "Multiple tasks in the same chat are parallel" in prompt
+    assert (
+        "Only set parentId when the user explicitly asks to split or decompose a parent issue"
+        in prompt
+    )
 
 
 async def test_assistant_json_text_issue_proposal_is_persisted(
@@ -320,6 +328,111 @@ async def test_auto_create_chat_issue_proposal_creates_issue(
     assert issues[0]["title"] == "输出 hello world"
     assert issues[0]["createdByAgentId"] == agent_id
     assert issues[0]["assigneeAgentId"] == agent_id
+
+
+async def test_auto_create_issue_proposal_uses_approval_when_label_selection_required(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": "我会先提交任务建议。",
+                "kind": "issue_proposal",
+                "structuredPayload": {
+                    "issueProposal": {
+                        "title": "补充标签后创建任务",
+                        "description": "这个任务需要人工选择标签。",
+                        "priority": "medium",
+                        "requiresLabelSelection": True,
+                    }
+                },
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(
+        application, org_id, agent_id, issue_creation_mode="auto_create"
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "请创建一个需要标签的任务"},
+    )
+
+    assert code == 201
+    assert len(result["messages"]) == 2
+    assistant_message = result["messages"][1]
+    assert assistant_message["kind"] == "issue_proposal"
+    assert assistant_message["approvalId"] is not None
+    async with factory() as session:
+        approval = await session.scalar(
+            select(Approval).where(Approval.id == assistant_message["approvalId"])
+        )
+        issues = (await session.execute(select(Issue))).scalars().all()
+    assert approval is not None
+    assert approval.type == "chat_issue_creation"
+    assert approval.payload["requiresHumanSelection"] is True
+    assert approval.payload["manualReason"] == "label_selection_required"
+    assert issues == []
+
+
+async def test_auto_create_issue_proposal_uses_approval_in_plan_mode(
+    app: tuple[FastAPI, async_sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import chats as chat_service_module
+
+    application, factory = app
+    org_id, agent_id = await _seed_org_agent(factory)
+    adapter = FakeChatAdapter(
+        [
+            {
+                "summary": "计划模式下先提交任务建议。",
+                "kind": "issue_proposal",
+                "structuredPayload": {
+                    "issueProposal": {
+                        "title": "计划模式任务",
+                        "description": "计划模式下不能自动创建。",
+                    }
+                },
+            }
+        ]
+    )
+    monkeypatch.setattr(chat_service_module, "get_runtime_adapter", lambda _: adapter)
+    chat = await _create_chat(
+        application,
+        org_id,
+        agent_id,
+        issue_creation_mode="auto_create",
+        plan_mode=True,
+    )
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{chat['id']}/messages",
+        json={"body": "计划一下并创建任务"},
+    )
+
+    assert code == 201
+    assert len(result["messages"]) == 2
+    assistant_message = result["messages"][1]
+    assert assistant_message["approvalId"] is not None
+    async with factory() as session:
+        approval = await session.scalar(
+            select(Approval).where(Approval.id == assistant_message["approvalId"])
+        )
+        issues = (await session.execute(select(Issue))).scalars().all()
+    assert approval is not None
+    assert approval.payload["manualReason"] == "plan_mode"
+    assert issues == []
 
 
 async def test_edit_user_message_supersedes_previous_turn_variant(

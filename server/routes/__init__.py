@@ -16,6 +16,7 @@ from .plugins import router as plugins_router
 from .projects import router as projects_router
 from .run_intelligence import router as run_intelligence_router
 from .runtime_providers import router as runtime_providers_router
+from .llm import router as llm_router
 from .chats import router as chats_router
 from .goals import router as goals_router
 from .workspace_operations import router as workspace_operations_router
@@ -33,6 +34,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(plugins_router)
     app.include_router(projects_router)
     app.include_router(runtime_providers_router)
+    app.include_router(llm_router)
     app.include_router(agents_router)
     app.include_router(workspace_operations_router)
     app.include_router(run_intelligence_router)

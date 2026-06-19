@@ -23,7 +23,7 @@ class ClosedLoopAdapter:
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         await context.on_log("stdout", "closed-loop-start\n")
-        artifacts_dir = (context.env or {}).get("RUDDER_ORG_ARTIFACTS_DIR")
+        artifacts_dir = (context.env or {}).get("OCTOPUS_ORG_ARTIFACTS_DIR")
         assert isinstance(artifacts_dir, str)
         output_path = Path(artifacts_dir) / "ACCEPTANCE.md"
         output_path.write_text(
@@ -98,6 +98,15 @@ async def app(
         heartbeat_module,
         "get_runtime_adapter",
         lambda runtime_type: ClosedLoopAdapter(),
+    )
+
+    async def closeout_signal_exists(*args: object, **kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        heartbeat_module.HeartbeatService,
+        "_run_has_issue_closeout_signal",
+        closeout_signal_exists,
     )
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:

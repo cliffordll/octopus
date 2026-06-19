@@ -42,6 +42,9 @@ class HeartbeatRun(Base):
     invocation_source: Mapped[str] = mapped_column(
         Text, nullable=False, default="on_demand"
     )
+    run_purpose: Mapped[str] = mapped_column(
+        Text, nullable=False, default="task_execution"
+    )
     trigger_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, BinaryIO
+import os
 
 import httpx
 
@@ -20,7 +21,11 @@ class ApiClient:
         *,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._client = httpx.Client(base_url=api_base.rstrip("/"), transport=transport)
+        self._client = httpx.Client(
+            base_url=api_base.rstrip("/"),
+            transport=transport,
+            headers=_runtime_actor_headers(),
+        )
 
     def request(
         self,
@@ -65,3 +70,24 @@ class ApiClient:
                 pass
             raise ApiError(response.status_code, message)
         return response.content
+
+
+def _runtime_actor_headers() -> dict[str, str]:
+    headers: dict[str, str] = {}
+    agent_id = _env("OCTOPUS_AGENT_ID")
+    org_id = _env("OCTOPUS_ORG_ID")
+    run_id = _env("OCTOPUS_RUN_ID")
+    api_key = _env("OCTOPUS_API_KEY")
+    if agent_id and org_id:
+        headers["x-test-agent-id"] = agent_id
+        headers["x-test-org-id"] = org_id
+    if run_id:
+        headers["x-octopus-run-id"] = run_id
+    if api_key:
+        headers["x-api-key"] = api_key
+    return headers
+
+
+def _env(key: str) -> str | None:
+    value = os.environ.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None

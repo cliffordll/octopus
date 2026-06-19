@@ -296,13 +296,21 @@ async def test_issue_heartbeat_runs_route_returns_task_execution_summary(
 
     assert code == 200
     assert len(runs) == 1
+    assert runs[0]["id"] == run_id
     assert runs[0]["runId"] == run_id
+    assert runs[0]["orgId"] == org_id
     assert runs[0]["status"] == "failed"
     assert runs[0]["agentId"] == agent_id
+    assert runs[0]["invocationSource"] == "on_demand"
+    assert runs[0]["triggerDetail"] == "manual"
+    assert runs[0]["retryOfRunId"] is None
+    assert runs[0]["processLossRetryCount"] == 0
     assert runs[0]["issueId"] == issue_id
     assert runs[0]["issueIdentifier"] is None
     assert runs[0]["issueTitle"] == "Observed issue"
     assert runs[0]["summary"] == "failed"
+    assert runs[0]["resultJson"] == {"summary": "failed"}
+    assert runs[0]["usageJson"] is None
     assert runs[0]["error"] == "adapter exploded"
 
     assert detail_code == 200

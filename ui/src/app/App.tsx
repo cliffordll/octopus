@@ -11,10 +11,12 @@ import { GoalPage } from "../pages/GoalPage";
 import { GoalsPage } from "../pages/GoalsPage";
 import { HomePage } from "../pages/HomePage";
 import { HeartbeatRunsPage } from "../pages/HeartbeatRunsPage";
+import { InstanceHeartbeatsPage } from "../pages/InstanceHeartbeatsPage";
 import { IssuePage } from "../pages/IssuePage";
 import { IssuesPage } from "../pages/IssuesPage";
 import { MessengerPage } from "../pages/MessengerPage";
 import {
+  OrganizationCostsPage,
   OrganizationIndexPage,
   OrganizationPage,
   OrganizationResourcesPage,
@@ -32,6 +34,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
+        <Route path="instance/settings/heartbeats" element={<InstanceHeartbeatsPage />} />
         <Route path="organizations" element={<OrganizationsPage />} />
         <Route path="orgs/:orgId" element={<OrganizationIndexPage />} />
         <Route path="orgs/:orgId/structure" element={<OrganizationStructurePage />} />
@@ -40,6 +43,7 @@ export function App() {
         <Route path="orgs/:orgId/skills/:skillId" element={<OrganizationSkillsPage />} />
         <Route path="orgs/:orgId/skills/:skillId/files/*" element={<OrganizationSkillsPage />} />
         <Route path="orgs/:orgId/settings" element={<OrganizationPage />} />
+        <Route path="orgs/:orgId/costs" element={<OrganizationCostsPage />} />
         <Route path="orgs/:orgId/heartbeat-runs" element={<HeartbeatRunsPage />} />
         <Route path="orgs/:orgId/run-intelligence" element={<RunIntelligencePage />} />
         <Route path="orgs/:orgId/workspaces" element={<OrganizationWorkspacesPage />} />

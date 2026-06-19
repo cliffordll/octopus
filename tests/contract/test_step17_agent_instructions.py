@@ -31,6 +31,29 @@ DEFAULT_INSTRUCTIONS_FILES = [
 ]
 
 
+def test_closeout_governance_instructions_are_hard_gated() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    control_plane_skill = (
+        repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    default_heartbeat = (
+        repo_root / "server" / "onboarding" / "default" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+    ceo_heartbeat = (
+        repo_root / "server" / "onboarding" / "ceo" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+
+    for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
+        assert "Close-out gate" in content
+        assert "issue_passive_followup" in content
+        assert "control-plane issue done" in content
+        assert "control-plane issue block" in content
+        assert "control-plane issue comment" in content
+        assert "issue_review_closeout_missing" in content
+        assert "control-plane issue review" in content
+        assert "Do not exit" in content
+
+
 def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> None:
     modules = (
         "packages.shared.api_paths.agents",

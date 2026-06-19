@@ -14,4 +14,5 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level,
+        timeout_graceful_shutdown=settings.graceful_shutdown_timeout_seconds,
     )

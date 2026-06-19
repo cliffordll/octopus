@@ -5,12 +5,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.types.organization import OrganizationDetail
 
+from ..services.organization_import import OrganizationImportService
 from ..services.orgs import OrgService
 from .database import get_session
 
 
 def get_org_service(session: AsyncSession = Depends(get_session)) -> OrgService:
     return OrgService(session)
+
+
+def get_organization_import_service(
+    session: AsyncSession = Depends(get_session),
+) -> OrganizationImportService:
+    return OrganizationImportService(session)
 
 
 async def get_org_detail(

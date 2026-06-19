@@ -1,4 +1,4 @@
-# Step 15: Workspace 与执行产物
+﻿# Step 15: Workspace 与执行产物
 
 状态：15A-15H 已完成并通过基线验收
 
@@ -70,7 +70,13 @@ Organization
 
 Runtime adapter 在执行时应通过统一 context/env 获取 workspace 信息，例如主 workspace、workspace 列表、worktree path、repo/ref/branch、organization workspace root、artifacts dir 和 runtime services JSON，而不是直接理解数据库表关系。
 
-上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `RUDDER_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
+上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
+
+Project workspace 支持后，它就是项目对应的本地源码与下载物锚点。项目相关的仓库 checkout、导入或下载的源码包、依赖快照、项目内临时文件、代码修改和 patch 应放在 project workspace / execution workspace 的 `cwd` 下。Runtime 子进程的相对路径读写默认也发生在这个 `cwd` 中。
+
+如果希望任务直接在项目本地目录执行，例如 `D:\coding\test`，项目的执行工作区策略应选择 `shared_workspace`。`isolated_workspace` 和 `operator_branch` 会基于项目工作区创建或解析每次任务独立的 execution workspace，实际 cwd 不会直接等于项目主工作区目录。
+
+Project workspace 不应承担正式交付物归档职责。报告、截图、CSV、mockup、运行日志摘要、handoff 文档等 durable output 应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，再由 server 扫描并登记为 issue work products 或 documents。这样可以避免源码目录混入交付归档，也避免只靠文件系统目录推断 issue/run 关系。
 
 ## Preflight 的含义
 
@@ -144,7 +150,9 @@ queued run
 实施记录：
 
 - `HeartbeatService._prepare_workspace_context()` 在 adapter 执行前调用 workspace preflight，并将结果写入 run `context_snapshot`。
-- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `RUDDER_WORKSPACE_ID`、`RUDDER_WORKSPACES_JSON`、`RUDDER_ORG_WORKSPACE_ROOT`、`RUDDER_ORG_SKILLS_DIR`、`RUDDER_ORG_PLANS_DIR`、`RUDDER_ORG_ARTIFACTS_DIR`。
+- Runtime adapter 收到 `workspace` context、workspace env、managed cwd，包含 `OCTOPUS_WORKSPACE_ID`、`OCTOPUS_WORKSPACES_JSON`、`OCTOPUS_ORG_WORKSPACE_ROOT`、`OCTOPUS_ORG_SKILLS_DIR`、`OCTOPUS_ORG_PLANS_DIR`、`OCTOPUS_ORG_ARTIFACTS_DIR`。
+- issue/project run 解析出 project workspace 或 execution workspace `cwd` 后，`HeartbeatService` 会用该 `cwd` 覆盖 agent runtime config 中的旧 `cwd`；agent runtime config 的 `cwd` 只作为非 issue/project run 或无 workspace 上下文时的 fallback。
+- Runtime guidance 会提示本地 CLI：把项目源码、下载物、依赖快照和代码修改放在 workspace worktree，将报告、截图、CSV、mockup、日志和 handoff 文档放在 organization artifacts。
 - Project 没有 workspace，或选中的 project workspace 没有本地 `cwd` 时，preflight 按上游行为使用组织共享 workspace root 作为执行 cwd，并在 execution workspace metadata 中记录 `fallback=organization_workspace` 和 warning。
 - 本地 managed workspace 目录由 `WorkspaceService._ensure_managed_workspace_paths()` 统一生成，不由 route 或 adapter 拼接。
 
@@ -206,7 +214,7 @@ $base = "http://127.0.0.1:8000"
 $org = curl.exe -s -X POST "$base/api/orgs" -H "Content-Type: application/json" -d '{"urlKey":"step15-demo","name":"Step 15 Demo","issuePrefix":"WKS"}' | ConvertFrom-Json
 $project = curl.exe -s -X POST "$base/api/orgs/$($org.id)/projects" -H "Content-Type: application/json" -d '{"name":"Workspace Demo","executionWorkspacePolicy":{"enabled":true,"defaultMode":"isolated_workspace"}}' | ConvertFrom-Json
 curl.exe -s -X POST "$base/api/projects/$($project.id)/workspaces" -H "Content-Type: application/json" -d '{"name":"Primary","cwd":"D:/work/step15-demo"}'
-$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" -H "Content-Type: application/json" -d '{"name":"Workspace Agent","agentRuntimeType":"process","agentRuntimeConfig":{"command":"python","args":["-c","import os; print(os.environ.get(\"RUDDER_WORKSPACE_ID\"))"]}}' | ConvertFrom-Json
+$agent = curl.exe -s -X POST "$base/api/orgs/$($org.id)/agents" -H "Content-Type: application/json" -d '{"name":"Workspace Agent","agentRuntimeType":"process","agentRuntimeConfig":{"command":"python","args":["-c","import os; print(os.environ.get(\"OCTOPUS_WORKSPACE_ID\"))"]}}' | ConvertFrom-Json
 $issue = curl.exe -s -X POST "$base/api/orgs/$($org.id)/issues" -H "Content-Type: application/json" -d "{\"title\":\"Workspace run demo\",\"projectId\":\"$($project.id)\"}" | ConvertFrom-Json
 curl.exe -s -X POST "$base/api/agents/$($agent.id)/wakeup" -H "Content-Type: application/json" -d "{\"payload\":{\"issueId\":\"$($issue.id)\"}}"
 ```

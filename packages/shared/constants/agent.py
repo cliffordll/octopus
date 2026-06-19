@@ -25,6 +25,7 @@ AgentRuntimeType = Literal[
     "pi_local",
     "cursor",
     "openclaw_gateway",
+    "openclaw_local",
     "hermes_local",
 ]
 AGENT_RUNTIME_TYPES: tuple[AgentRuntimeType, ...] = (
@@ -37,6 +38,7 @@ AGENT_RUNTIME_TYPES: tuple[AgentRuntimeType, ...] = (
     "pi_local",
     "cursor",
     "openclaw_gateway",
+    "openclaw_local",
     "hermes_local",
 )
 

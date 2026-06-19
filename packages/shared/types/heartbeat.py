@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, NotRequired, TypedDict
 
 from packages.shared.constants.heartbeat import (
     HeartbeatInvocationSource,
+    HeartbeatRunPurpose,
     HeartbeatRunStatus,
     WakeupTriggerDetail,
 )
+from packages.shared.constants.agent import AgentRole, AgentRuntimeType, AgentStatus
 
 
 class WakeAgentPayload(TypedDict, total=False):
@@ -17,6 +20,7 @@ class WakeAgentPayload(TypedDict, total=False):
     contextSnapshot: dict[str, Any] | None
     idempotencyKey: str | None
     forceFreshSession: bool
+    requestedAt: datetime | str
 
 
 class HeartbeatRun(TypedDict):
@@ -24,6 +28,7 @@ class HeartbeatRun(TypedDict):
     orgId: str
     agentId: str
     invocationSource: HeartbeatInvocationSource
+    runPurpose: HeartbeatRunPurpose
     triggerDetail: WakeupTriggerDetail | None
     status: HeartbeatRunStatus
     startedAt: str | None
@@ -72,3 +77,20 @@ class HeartbeatRunEvent(TypedDict):
     message: str | None
     payload: dict[str, Any] | None
     createdAt: str
+
+
+class InstanceSchedulerHeartbeatAgent(TypedDict):
+    id: str
+    orgId: str
+    organizationName: str
+    organizationIssuePrefix: str
+    agentName: str
+    agentUrlKey: str
+    role: AgentRole
+    title: str | None
+    status: AgentStatus
+    agentRuntimeType: AgentRuntimeType
+    intervalSec: float
+    heartbeatEnabled: bool
+    schedulerActive: bool
+    lastHeartbeatAt: str | None

@@ -119,6 +119,31 @@ def test_default_actor_context_middleware_avoids_base_http_middleware(
     assert BaseHTTPMiddleware not in middleware_classes
 
 
+async def test_local_actor_context_uses_octopus_run_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    application = create_app()
+
+    @application.get("/actor-probe")
+    async def actor_probe(request: Request) -> dict[str, Any]:
+        return request.state.actor
+
+    code, body = await _request(
+        application,
+        "GET",
+        "/actor-probe",
+        headers={
+            "x-test-agent-id": "agent-1",
+            "x-test-org-id": "org-1",
+            "x-octopus-run-id": "run-1",
+        },
+    )
+
+    assert code == 200
+    assert body["runId"] == "run-1"
+
+
 async def test_local_trusted_actor_enables_org_creation(
     app: FastAPI,
     session_factory: async_sessionmaker[AsyncSession],

@@ -54,6 +54,7 @@ _ISSUE_PROPOSAL_FIELDS = {
     "reviewerAgentId",
     "reviewerUserId",
     "labelIds",
+    "requiresLabelSelection",
 }
 
 _OPERATION_DECISION_ACTIONS = {"approve", "reject", "requestRevision"}
@@ -158,6 +159,10 @@ def validate_convert_chat_to_issue(
                 raise ValueError("'labelIds' must be an array")
             for value in label_ids:
                 _validate_uuid(value, "labelIds")
+        if "requiresLabelSelection" in proposal and not isinstance(
+            proposal["requiresLabelSelection"], bool
+        ):
+            raise ValueError("'requiresLabelSelection' must be a boolean")
         result["proposal"] = proposal
     return cast(ConvertChatToIssuePayload, result)
 

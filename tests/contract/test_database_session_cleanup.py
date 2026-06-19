@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+import inspect
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 
+from server import lifespan as lifespan_module
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
-from server.lifespan import _dispose_engine
+from server.lifespan import (
+    _cancel_task,
+    _dispose_engine,
+    _heartbeat_scheduler,
+    _stop_task_cooperatively,
+)
+from server.routes import agents as agent_routes
+from server.routes import chats as chat_routes
 
 
 class BrokenTransaction:
@@ -46,9 +55,11 @@ class BrokenSession:
 class SlowCloseSession:
     def __init__(self) -> None:
         self.invalidate_called = False
+        self.close_finished = False
 
     async def close(self) -> None:
-        await asyncio.sleep(10)
+        await asyncio.sleep(0.05)
+        self.close_finished = True
 
     async def invalidate(self) -> None:
         self.invalidate_called = True
@@ -61,6 +72,25 @@ class SlowDisposeEngine:
     async def dispose(self) -> None:
         self.dispose_started = True
         await asyncio.sleep(10)
+
+
+class EmptyAsyncContext:
+    async def __aenter__(self) -> object:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class SchedulerTestSession:
+    async def __aenter__(self) -> "SchedulerTestSession":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def begin(self) -> EmptyAsyncContext:
+        return EmptyAsyncContext()
 
 
 async def test_get_session_preserves_original_exception_when_cleanup_fails() -> None:
@@ -83,7 +113,7 @@ async def test_get_session_preserves_original_exception_when_cleanup_fails() -> 
     assert session.close_called
 
 
-async def test_close_session_times_out_and_invalidates(
+async def test_close_session_timeout_keeps_background_close_without_invalidating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(database_dependency, "REQUEST_DB_CLEANUP_TIMEOUT_SECONDS", 0.01)
@@ -91,7 +121,68 @@ async def test_close_session_times_out_and_invalidates(
 
     await database_dependency._close_session(session)  # type: ignore[arg-type]
 
-    assert session.invalidate_called
+    assert session.invalidate_called is False
+    await asyncio.sleep(0.06)
+    assert session.close_finished
+
+
+async def test_shielded_cleanup_finishes_before_propagating_task_cancellation() -> None:
+    cleanup_started = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def cleanup() -> None:
+        cleanup_started.set()
+        await asyncio.sleep(0.02)
+        cleanup_finished.set()
+
+    task = asyncio.create_task(
+        database_dependency._run_shielded_cleanup(
+            "test cleanup",
+            cleanup,
+            timeout_seconds=1.0,
+        )
+    )
+    await cleanup_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cleanup_finished.is_set()
+
+
+async def test_shielded_cleanup_timeout_does_not_cancel_database_reset() -> None:
+    cleanup_cancelled = False
+
+    async def cleanup() -> None:
+        nonlocal cleanup_cancelled
+        try:
+            await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            cleanup_cancelled = True
+            raise
+
+    error = await database_dependency._run_shielded_cleanup(
+        "test cleanup",
+        cleanup,
+        timeout_seconds=0.01,
+    )
+
+    assert isinstance(error, TimeoutError)
+    await asyncio.sleep(0.06)
+    assert cleanup_cancelled is False
+
+
+def test_cleanup_timeout_does_not_require_connection_invalidation() -> None:
+    assert (
+        database_dependency._cleanup_error_requires_invalidate(TimeoutError()) is False
+    )
+    assert (
+        database_dependency._cleanup_error_requires_invalidate(
+            RuntimeError("connection is broken")
+        )
+        is True
+    )
 
 
 async def test_dispose_engine_times_out() -> None:
@@ -100,3 +191,190 @@ async def test_dispose_engine_times_out() -> None:
     await _dispose_engine(engine, timeout_seconds=0.01)  # type: ignore[arg-type]
 
     assert engine.dispose_started
+
+
+async def test_heartbeat_scheduler_recovers_orphaned_runs_on_each_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recover_modes: list[bool] = []
+    dispatch_calls = 0
+    tick_complete = asyncio.Event()
+
+    class FakeHeartbeatService:
+        def __init__(self, _session: object) -> None:
+            return None
+
+        async def recover_orphaned_runs(
+            self, *, require_process_loss: bool = False
+        ) -> list[object]:
+            recover_modes.append(require_process_loss)
+            return []
+
+        async def tick_timers(self, _org_id: str) -> list[object]:
+            return []
+
+    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
+        nonlocal dispatch_calls
+        dispatch_calls += 1
+        if dispatch_calls >= 2:
+            tick_complete.set()
+
+    async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
+        return [SimpleNamespace(id="org-1")]
+
+    monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
+    monkeypatch.setattr(
+        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
+    )
+    monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
+
+    def _make_session_factory() -> SchedulerTestSession:
+        return SchedulerTestSession()
+
+    task = asyncio.create_task(_heartbeat_scheduler(_make_session_factory, 0.01))  # type: ignore[arg-type]
+    try:
+        await asyncio.wait_for(tick_complete.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert recover_modes[:2] == [False, True]
+
+
+async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tick_started = asyncio.Event()
+    allow_tick_finish = asyncio.Event()
+    tick_cancelled = False
+
+    class FakeHeartbeatService:
+        def __init__(self, _session: object) -> None:
+            return None
+
+        async def recover_orphaned_runs(
+            self, *, require_process_loss: bool = False
+        ) -> list[object]:
+            nonlocal tick_cancelled
+            if require_process_loss:
+                tick_started.set()
+                try:
+                    await allow_tick_finish.wait()
+                except asyncio.CancelledError:
+                    tick_cancelled = True
+                    raise
+            return []
+
+        async def tick_timers(self, _org_id: str) -> list[object]:
+            return []
+
+    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
+        return None
+
+    async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
+        return []
+
+    monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
+    monkeypatch.setattr(
+        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
+    )
+    monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
+
+    def _make_session_factory() -> SchedulerTestSession:
+        return SchedulerTestSession()
+
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(
+        _heartbeat_scheduler(
+            _make_session_factory, 30, stop_event  # type: ignore[arg-type]
+        )
+    )
+    await asyncio.wait_for(tick_started.wait(), timeout=1)
+
+    stop_waiter = asyncio.create_task(
+        _stop_task_cooperatively(
+            task,
+            "heartbeat scheduler",
+            stop_event=stop_event,
+            timeout_seconds=1,
+        )
+    )
+    await asyncio.sleep(0)
+    assert task.done() is False
+
+    allow_tick_finish.set()
+    await asyncio.wait_for(stop_waiter, timeout=1)
+
+    assert tick_cancelled is False
+    assert task.done() is True
+
+
+async def test_cooperative_stop_propagates_caller_cancellation() -> None:
+    async def never_finishes() -> None:
+        await asyncio.Event().wait()
+
+    target_task = asyncio.create_task(never_finishes())
+    stop_event = asyncio.Event()
+    stopper_task = asyncio.create_task(
+        _stop_task_cooperatively(
+            target_task,
+            "test task",
+            stop_event=stop_event,
+            timeout_seconds=30,
+        )
+    )
+    await asyncio.sleep(0)
+
+    stopper_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper_task
+
+    assert target_task.done() is False
+    target_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await target_task
+
+
+async def test_cancel_task_propagates_caller_cancellation() -> None:
+    cancel_started = asyncio.Event()
+    allow_cancel_finish = asyncio.Event()
+
+    async def slow_cancel() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancel_started.set()
+            await allow_cancel_finish.wait()
+            raise
+
+    target_task = asyncio.create_task(slow_cancel())
+    await asyncio.sleep(0)
+
+    stopper_task = asyncio.create_task(
+        _cancel_task(target_task, "test task", timeout_seconds=30)
+    )
+    await asyncio.wait_for(cancel_started.wait(), timeout=1)
+
+    stopper_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopper_task
+
+    allow_cancel_finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await target_task
+
+
+def test_heartbeat_run_stream_uses_shielded_session_cleanup() -> None:
+    source = inspect.getsource(agent_routes.stream_heartbeat_run_route)
+
+    assert "heartbeat: HeartbeatService = Depends(get_heartbeat_service)" not in source
+    assert "async with session_factory() as session" not in source
+    assert source.count("_close_session(session)") >= 2
+
+
+def test_chat_message_stream_uses_shielded_session_cleanup() -> None:
+    source = inspect.getsource(chat_routes.add_chat_message_stream_route)
+
+    assert "async with session_factory() as session" not in source
+    assert "_close_session(session)" in source

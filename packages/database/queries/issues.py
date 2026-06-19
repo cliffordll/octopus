@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Issue, IssueApproval
@@ -49,8 +49,46 @@ async def list_org_issues(
     return result.scalars().all()
 
 
+async def list_agent_inbox_issues(
+    session: AsyncSession, org_id: str, agent_id: str
+) -> Sequence[Issue]:
+    relationship_rank = case(
+        (Issue.reviewer_agent_id == agent_id, 0),
+        (Issue.status == "in_progress", 1),
+        (Issue.status == "todo", 2),
+        else_=3,
+    )
+    priority_rank = case(
+        (Issue.priority == "critical", 0),
+        (Issue.priority == "high", 1),
+        (Issue.priority == "medium", 2),
+        else_=3,
+    )
+    result = await session.execute(
+        select(Issue)
+        .where(
+            Issue.org_id == org_id,
+            Issue.hidden_at.is_(None),
+            or_(
+                (
+                    (Issue.reviewer_agent_id == agent_id)
+                    & Issue.status.in_(("in_review", "blocked"))
+                ),
+                (
+                    (Issue.assignee_agent_id == agent_id)
+                    & Issue.status.in_(("todo", "in_progress", "blocked"))
+                ),
+            ),
+        )
+        .order_by(relationship_rank, priority_rank, Issue.updated_at.desc(), Issue.id)
+    )
+    return result.scalars().all()
+
+
 async def get_issue_by_id(session: AsyncSession, issue_id: str) -> Issue | None:
-    result = await session.execute(select(Issue).where(Issue.id == issue_id))
+    result = await session.execute(
+        select(Issue).where(or_(Issue.id == issue_id, Issue.identifier == issue_id))
+    )
     return result.scalar_one_or_none()
 
 
@@ -66,7 +104,10 @@ async def update_issue(
     values["updated_at"] = datetime.now(UTC)
 
     result = await session.execute(
-        update(Issue).where(Issue.id == issue_id).values(**values).returning(Issue)
+        update(Issue)
+        .where(or_(Issue.id == issue_id, Issue.identifier == issue_id))
+        .values(**values)
+        .returning(Issue)
     )
     return result.scalar_one_or_none()
 
