@@ -669,6 +669,56 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     )
 
 
+async def test_opencode_fallback_timeout_drains_original_communication_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    communicate_calls = 0
+    communicate_cancelled = False
+    killed = asyncio.Event()
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            nonlocal communicate_calls, communicate_cancelled
+            communicate_calls += 1
+            try:
+                await killed.wait()
+            except asyncio.CancelledError:
+                communicate_cancelled = True
+                raise
+            return b"", b"terminated"
+
+        def kill(self) -> None:
+            killed.set()
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        RuntimeExecutionContext(
+            run_id="run-opencode-timeout",
+            agent_id="agent-opencode-timeout",
+            org_id="org-opencode-timeout",
+            agent_name="OpenCode Timeout",
+            config={"command": "opencode-test", "timeoutSec": 0.01},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.timed_out is True
+    assert communicate_calls == 1
+    assert communicate_cancelled is False
+
+
 async def test_opencode_tool_error_with_later_text_is_diagnostic_not_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
