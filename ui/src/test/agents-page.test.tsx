@@ -389,8 +389,8 @@ it("manages runtime providers and models from settings", async () => {
     }
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([
-        { scope: "instance", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
-        { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
+        { scope: "instance", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true, updatedAt: "2026-06-01T00:00:00Z" },
+        { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false, updatedAt: "2026-06-20T00:00:00Z" },
       ]);
     }
     if (path === "/api/llm/providers" && init?.method === "GET") {
@@ -467,6 +467,8 @@ it("manages runtime providers and models from settings", async () => {
   expect(kimiProvider.getByText("价格：输入 $0.12 / 输出 $0.24 每 100 万 tokens")).toBeInTheDocument();
   expect(kimiProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
+  const providerArticles = await dialog.findAllByRole("article", { name: /provider/ });
+  expect(providerArticles[0]).toHaveAccessibleName("OpenRouter provider");
   expect(openrouterProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
@@ -585,6 +587,32 @@ it("manages runtime providers and models from settings", async () => {
   );
 
 }, 10000);
+
+it("opens global provider settings without an active organization", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/llm/providers" && init?.method === "GET") {
+      return respond([
+        { scope: "instance", providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true },
+      ]);
+    }
+    if (path === "/api/llm/providers/openai/models?runtimeType=codex_local" && init?.method === "GET") {
+      return respond([]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/organizations");
+  await userEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const dialog = within(screen.getByRole("dialog", { name: "设置" }));
+
+  expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.queryByText("请选择组织后再配置模型供应商。")).not.toBeInTheDocument();
+  expect(await dialog.findByRole("article", { name: "OpenAI provider" })).toBeInTheDocument();
+});
 
 it("manages runtime providers and models from settings", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

@@ -11,11 +11,11 @@ import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
 type SettingsSection = "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
-  { id: "providers", eyebrow: "Runtime Providers", label: "供应商", description: "运行时 provider 和 model。" },
+  { id: "providers", eyebrow: "Runtime Providers", label: "供应商", description: "全局运行时 provider 和 model。" },
   { id: "heartbeats", eyebrow: "Timer Heartbeats", label: "心跳", description: "智能体定时心跳。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
   { id: "plugins", eyebrow: "Plugins", label: "插件", description: "安装、启用和检查插件。" },
-  { id: "general", eyebrow: "General", label: "通用", description: "组织级基础设置。" },
+  { id: "general", eyebrow: "General", label: "通用", description: "实例级界面偏好。" },
   { id: "about", eyebrow: "About", label: "关于", description: "组织和版本信息。" },
 ];
 
@@ -69,7 +69,7 @@ function StorageSettingsSection({ current }: { current: (typeof SETTINGS_SECTION
   );
 }
 
-export function OrganizationSettingsPanel({ orgId }: { orgId: string }) {
+export function OrganizationSettingsPanel({ orgId }: { orgId?: string }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("providers");
   const [locale, setLocale] = useState<AppLocale>(() => getLocalePreference());
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];

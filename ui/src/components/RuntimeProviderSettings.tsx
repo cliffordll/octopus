@@ -16,7 +16,9 @@ const MODEL_PROVIDER_RUNTIMES: AgentRuntimeType[] = [
   "openclaw_local",
 ];
 
-export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
+const INSTANCE_PROVIDER_CONTEXT = "instance";
+
+export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: { orgId?: string }) {
   const english = isEnglishLocale();
   const queryClient = useQueryClient();
   const runtimeType = SETTINGS_RUNTIME_TYPE;
@@ -39,9 +41,8 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const providers = useQuery({
     queryKey: ["llm-providers", orgId],
     queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
-    enabled: Boolean(orgId),
   });
-  const providerRows = Array.isArray(providers.data) ? providers.data : [];
+  const providerRows = sortProviders(Array.isArray(providers.data) ? providers.data : []);
 
   const createProvider = useMutation({
     mutationFn: () =>
@@ -749,6 +750,24 @@ function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) 
   if (scope === "instance") return "Instance";
   if (scope === "global") return "Global";
   return "Organization";
+}
+
+function sortProviders(providers: RuntimeProvider[]) {
+  return [...providers].sort((left, right) => {
+    const leftTime = providerTimestamp(left);
+    const rightTime = providerTimestamp(right);
+    if (leftTime !== rightTime) return rightTime - leftTime;
+    const leftName = left.name || left.providerId;
+    const rightName = right.name || right.providerId;
+    return leftName.localeCompare(rightName, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+
+function providerTimestamp(provider: RuntimeProvider) {
+  return Date.parse(provider.updatedAt || provider.createdAt || "") || 0;
 }
 
 function runtimeLabel(runtimeType: AgentRuntimeType) {
