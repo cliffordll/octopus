@@ -4,6 +4,7 @@ from typing import Any
 
 from packages.shared.constants.plugins import PLUGIN_CAPABILITIES
 
+from .git_worker import GIT_PLUGIN_KEY, BuiltinGitWorker
 from .registry import PluginRegistryService
 from .worker_manager import PluginWorkerManager
 
@@ -57,6 +58,18 @@ class PluginToolDispatcher:
             raise LookupError("Plugin tool not found")
         if "agent.tools.register" not in PLUGIN_CAPABILITIES:
             raise RuntimeError("Plugin tool capability is not configured")
+        plugin_key = plugin["pluginKey"]
+        if plugin_key == GIT_PLUGIN_KEY and not self._worker_manager.is_running(
+            plugin_id
+        ):
+            return await BuiltinGitWorker().call(
+                "executeTool",
+                {
+                    "toolName": tool_name,
+                    "parameters": parameters,
+                    "context": context,
+                },
+            )
         return await self._worker_manager.call(
             plugin_id,
             "executeTool",

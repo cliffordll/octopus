@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import asyncio
 from typing import Any
 
 import pytest
@@ -90,6 +91,56 @@ async def _install_ready_plugin(
         await registry.enable_plugin(plugin["id"])
         await session.commit()
         return plugin["id"], registry
+
+
+async def _run_git(cwd: Any, args: list[str]) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        raise AssertionError(
+            (stderr or stdout).decode("utf-8", errors="replace").strip()
+        )
+
+
+def _git_manifest() -> dict[str, Any]:
+    return {
+        "id": "git.local",
+        "apiVersion": 1,
+        "version": "0.1.0",
+        "displayName": "Git",
+        "description": "Local Git workflow tools scoped to the runtime workspace cwd.",
+        "author": "Octopus",
+        "categories": ["workspace", "git"],
+        "capabilities": ["agent.tools.register", "project.workspaces.read"],
+        "entrypoints": {"worker": "./dist/worker.js"},
+        "tools": [
+            {
+                "name": "git.status",
+                "displayName": "Git Status",
+                "description": "Show branch and dirty-file status.",
+                "parametersSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "git.branch.create",
+                "displayName": "Create Branch",
+                "description": "Create a local branch. Requires confirm=true.",
+                "parametersSchema": {
+                    "type": "object",
+                    "required": ["branchName", "confirm"],
+                    "properties": {
+                        "branchName": {"type": "string"},
+                        "confirm": {"type": "boolean", "const": True},
+                    },
+                },
+            },
+        ],
+    }
 
 
 async def test_step29_worker_manager_calls_registered_worker() -> None:
@@ -199,6 +250,82 @@ async def test_step29_tool_dispatcher_rejects_disabled_plugins(
 
         with pytest.raises(ValueError, match="Plugin is not ready"):
             await dispatcher.execute_tool(plugin["id"], "echo", {}, context={})
+
+
+async def test_step29_builtin_git_tool_uses_runtime_workspace_cwd(
+    session_factory: async_sessionmaker,
+    tmp_path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    await _run_git(repo, ["init"])
+    await _run_git(repo, ["config", "user.name", "Octopus Test"])
+    await _run_git(repo, ["config", "user.email", "octopus@example.test"])
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    await _run_git(repo, ["add", "README.md"])
+    await _run_git(repo, ["commit", "-m", "Initial commit"])
+    (repo / "README.md").write_text("hello\nworld\n", encoding="utf-8")
+
+    async with session_factory() as session:
+        registry = PluginRegistryService(session)
+        plugin = await registry.install_plugin(
+            manifest=_git_manifest(),
+            source_type="bundled",
+            source_locator="server/plugins/bundled/plugin-git",
+        )
+        await registry.enable_plugin(plugin["id"])
+        await session.commit()
+
+    async with session_factory() as session:
+        dispatcher = PluginToolDispatcher(
+            PluginRegistryService(session),
+            PluginWorkerManager(),
+        )
+        result = await dispatcher.execute_tool(
+            plugin["id"],
+            "git.status",
+            {},
+            context={"workspace": {"rudderWorkspace": {"cwd": str(repo)}}},
+        )
+
+    assert result["ok"] is True
+    assert result["cwd"] == str(repo.resolve())
+    assert "README.md" in result["stdout"]
+
+
+async def test_step29_builtin_git_tool_requires_confirm_for_mutations(
+    session_factory: async_sessionmaker,
+    tmp_path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    await _run_git(repo, ["init"])
+
+    async with session_factory() as session:
+        registry = PluginRegistryService(session)
+        plugin = await registry.install_plugin(
+            manifest=_git_manifest(),
+            source_type="bundled",
+            source_locator="server/plugins/bundled/plugin-git",
+        )
+        await registry.enable_plugin(plugin["id"])
+        await session.commit()
+
+    async with session_factory() as session:
+        dispatcher = PluginToolDispatcher(
+            PluginRegistryService(session),
+            PluginWorkerManager(),
+        )
+        with pytest.raises(
+            PermissionError,
+            match="Mutating git tools require 'confirm: true'",
+        ):
+            await dispatcher.execute_tool(
+                plugin["id"],
+                "git.branch.create",
+                {"branchName": "demo"},
+                context={"workspace": {"rudderWorkspace": {"cwd": str(repo)}}},
+            )
 
 
 async def test_step29_host_services_gate_state_logs_and_entities(

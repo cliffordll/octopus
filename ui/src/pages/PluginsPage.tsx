@@ -183,44 +183,48 @@ export function PluginsPage({ embedded = false }: { embedded?: boolean } = {}) {
               const isSelected = installedPlugin?.id === selectedPluginId;
               return (
                 <article className={`plugin-row ${isSelected ? "selected" : ""}`} key={plugin.id}>
-                  <button
-                    className="plugin-row-main"
-                    disabled={!installedPlugin}
-                    onClick={() => installedPlugin && setSelectedPluginId(installedPlugin.id)}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{plugin.displayName}</strong>
-                      <small>{plugin.id}</small>
-                    </span>
-                    <Badge>{statusText(installedPlugin?.status)}</Badge>
-                  </button>
+                  <div className="plugin-row-header">
+                    <button
+                      className="plugin-row-main"
+                      disabled={!installedPlugin}
+                      onClick={() => installedPlugin && setSelectedPluginId(installedPlugin.id)}
+                      type="button"
+                    >
+                      <span className="plugin-row-title">
+                        <strong>{plugin.displayName}</strong>
+                        <small>{plugin.id}</small>
+                      </span>
+                    </button>
+                    <div className="plugin-row-side">
+                      {installedPlugin && <Badge>{statusText(installedPlugin.status)}</Badge>}
+                      <div className="plugin-row-actions">
+                        {!installedPlugin && (
+                          <button className="small-button" disabled={install.isPending} onClick={() => install.mutate(plugin)} type="button">
+                            安装
+                          </button>
+                        )}
+                        {installedPlugin && installedPlugin.status !== "ready" && installedPlugin.status !== "uninstalled" && (
+                          <button className="small-button" disabled={enable.isPending} onClick={() => enable.mutate(installedPlugin.id)} type="button">
+                            启用
+                          </button>
+                        )}
+                        {installedPlugin?.status === "ready" && (
+                          <button
+                            className="secondary small-button"
+                            disabled={disable.isPending}
+                            onClick={() => disable.mutate(installedPlugin.id)}
+                            type="button"
+                          >
+                            停用
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                   <p className="muted">{plugin.manifest.description ?? capabilitySummary(plugin)}</p>
                   <div className="plugin-row-meta">
                     <span>{capabilitySummary(plugin)}</span>
                     <span>{plugin.version}</span>
-                  </div>
-                  <div className="plugin-row-actions">
-                    {!installedPlugin && (
-                      <button disabled={install.isPending} onClick={() => install.mutate(plugin)} type="button">
-                        安装
-                      </button>
-                    )}
-                    {installedPlugin && installedPlugin.status !== "ready" && installedPlugin.status !== "uninstalled" && (
-                      <button disabled={enable.isPending} onClick={() => enable.mutate(installedPlugin.id)} type="button">
-                        启用
-                      </button>
-                    )}
-                    {installedPlugin?.status === "ready" && (
-                      <button
-                        className="secondary"
-                        disabled={disable.isPending}
-                        onClick={() => disable.mutate(installedPlugin.id)}
-                        type="button"
-                      >
-                        停用
-                      </button>
-                    )}
                   </div>
                 </article>
               );
