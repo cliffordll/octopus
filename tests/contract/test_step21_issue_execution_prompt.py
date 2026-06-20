@@ -75,6 +75,7 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
         "After creating delegated child issues, the parent issue must wait for those child issues to run and report back"
         in prompt
     )
+    assert "Never assign a delegated child issue to yourself" in prompt
     assert (
         "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
         in prompt

@@ -220,6 +220,41 @@ async def test_child_issue_does_not_reuse_parent_isolated_execution_workspace(
     assert child_row.request_depth == 1
 
 
+async def test_agent_cannot_delegate_child_issue_to_self(
+    session: AsyncSession,
+) -> None:
+    org = await _seed_org(session)
+    service = IssueService(session)
+
+    async with async_transaction(session):
+        parent = await service.create_issue(
+            org.id,
+            {
+                "title": "Parent coordination issue",
+                "status": "in_progress",
+                "originKind": "manual",
+            },
+            actor_type="board",
+            actor_id="user-1",
+        )
+
+    with pytest.raises(ValueError, match="Agent cannot delegate a child issue to itself"):
+        async with async_transaction(session):
+            await service.create_issue(
+                org.id,
+                {
+                    "title": "Self-assigned child",
+                    "status": "todo",
+                    "originKind": "manual",
+                    "parentId": parent["id"],
+                    "assigneeAgentId": "agent-parent",
+                },
+                actor_type="agent",
+                actor_id="agent-parent",
+                run_id="run-parent",
+            )
+
+
 async def test_agent_child_issue_create_is_idempotent_by_parent_and_title(
     session: AsyncSession,
 ) -> None:

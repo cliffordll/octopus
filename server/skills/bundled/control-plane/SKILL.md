@@ -268,7 +268,7 @@ Delegated child issues must be assigned explicitly and should be moved into exec
 control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json
 ```
 
-When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; prefer a suitable agent other than yourself when one is available.
+When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.
 
 After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 
