@@ -168,6 +168,58 @@ async def test_child_issue_inherits_parent_project_and_workspace(
     assert child_row.request_depth == 1
 
 
+async def test_child_issue_does_not_reuse_parent_isolated_execution_workspace(
+    session: AsyncSession,
+) -> None:
+    org = await _seed_org(session)
+    service = IssueService(session)
+
+    async with async_transaction(session):
+        parent = await service.create_issue(
+            org.id,
+            {
+                "title": "Parent with isolated workspace",
+                "status": "in_progress",
+                "originKind": "manual",
+                "projectId": "project-1",
+                "goalId": "goal-1",
+            },
+            actor_type="board",
+            actor_id="user-1",
+        )
+        parent_row = await session.get(Issue, parent["id"])
+        assert parent_row is not None
+        parent_row.project_workspace_id = "project-workspace-1"
+        parent_row.execution_workspace_id = "parent-execution-workspace"
+        parent_row.execution_workspace_preference = "isolated_workspace"
+        parent_row.execution_workspace_settings = {"mode": "isolated_workspace"}
+
+    async with async_transaction(session):
+        child = await service.create_issue(
+            org.id,
+            {
+                "title": "Delegated isolated child",
+                "status": "todo",
+                "originKind": "manual",
+                "parentId": parent["id"],
+                "assigneeAgentId": "agent-1",
+            },
+            actor_type="agent",
+            actor_id="agent-parent",
+            run_id="run-parent",
+        )
+
+    child_row = await session.get(Issue, child["id"])
+    assert child_row is not None
+    assert child_row.project_id == "project-1"
+    assert child_row.goal_id == "goal-1"
+    assert child_row.project_workspace_id == "project-workspace-1"
+    assert child_row.execution_workspace_id is None
+    assert child_row.execution_workspace_preference == "isolated_workspace"
+    assert child_row.execution_workspace_settings == {"mode": "isolated_workspace"}
+    assert child_row.request_depth == 1
+
+
 async def test_agent_child_issue_create_is_idempotent_by_parent_and_title(
     session: AsyncSession,
 ) -> None:
