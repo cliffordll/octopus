@@ -270,6 +270,8 @@ control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or
 
 When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; prefer a suitable agent other than yourself when one is available.
 
+After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
+
 Do not mark the parent issue done while child issues are still open. Wait for child issues to finish, or explicitly close/cancel them with a reason.
 
 When the organization has a mature issue label taxonomy, agent-created issues must choose at least one label. List the available labels first when you are not sure which one applies:
