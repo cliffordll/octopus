@@ -431,13 +431,29 @@ class IssueService:
             "project_id": parent.project_id,
             "goal_id": parent.goal_id,
             "project_workspace_id": parent.project_workspace_id,
-            "execution_workspace_id": parent.execution_workspace_id,
             "execution_workspace_preference": parent.execution_workspace_preference,
             "execution_workspace_settings": parent.execution_workspace_settings,
         }
+        if not IssueService._parent_workspace_is_issue_scoped(parent):
+            inherited_fields["execution_workspace_id"] = parent.execution_workspace_id
         for field, value in inherited_fields.items():
             if values.get(field) is None and value is not None:
                 values[field] = value
+
+    @staticmethod
+    def _parent_workspace_is_issue_scoped(parent: Issue) -> bool:
+        if parent.execution_workspace_preference in {
+            "isolated_workspace",
+            "operator_branch",
+        }:
+            return True
+        settings = parent.execution_workspace_settings
+        if not isinstance(settings, Mapping):
+            return False
+        mode = settings.get("mode")
+        if mode == "isolated":
+            mode = "isolated_workspace"
+        return mode in {"isolated_workspace", "operator_branch"}
 
     async def _find_existing_agent_child_issue(
         self, values: Mapping[str, Any], *, actor_type: str
