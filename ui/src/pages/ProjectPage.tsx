@@ -621,6 +621,13 @@ export function ProjectPage() {
                   </details>
                 </div>
               </section>
+              {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
+              {!workspacePolicyError && update.error && <ErrorNotice error={update.error} />}
+              <div className="project-property-actions">
+                <button disabled={update.isPending} type="submit">
+                  {update.isPending ? "保存中..." : "保存项目"}
+                </button>
+              </div>
               <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
               <section className="project-config-section project-workspace-manager" aria-label="项目工作区管理">
               <div className="project-section-heading">
@@ -723,15 +730,10 @@ export function ProjectPage() {
               </div>
             </section>
             </div>
-            {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
-            {!workspacePolicyError && update.error && <ErrorNotice error={update.error} />}
             {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
             {setPrimaryWorkspace.error && <ErrorNotice error={setPrimaryWorkspace.error} />}
             {removeWorkspace.error && <ErrorNotice error={removeWorkspace.error} />}
             {removeProject.error && <ErrorNotice error={removeProject.error} />}
-            <div className="project-property-actions">
-              <button type="submit">保存项目</button>
-            </div>
           </form>}
           {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
             <div className="project-resource-hero-card">
