@@ -44,7 +44,7 @@
 
 ## 6. 委派
 
-- 创建子任务前，先运行 `control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --json`，如果已有标题匹配的子任务就复用。创建新子任务时使用 `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --title "<subtask title>" --description "<details>" --json`。始终保留父任务关联和 goal 上下文。委派型子任务还必须设置 `--status todo` 和明确的 `--assignee-agent-id`；需要选择执行者时先运行 `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json`。创建委派型子任务后，父任务必须等待这些子任务实际运行并回报结果后，才能汇总。不要在父任务 run 中直接完成已委派的子任务内容，然后把这些子任务标记为 `blocked` 或 `cancelled` 当作“不需要执行”。`blocked` 只用于真实阻塞，例如信息缺失、权限不可用、依赖失败，或需要人工/外部动作。子任务仍未完成时，不要把父任务标记为 done。
+- 创建子任务前，先运行 `control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --json`，如果已有标题匹配的子任务就复用。创建新子任务时使用 `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --title "<subtask title>" --description "<details>" --json`。始终保留父任务关联和 goal 上下文。委派型子任务还必须设置 `--status todo` 和明确的 `--assignee-agent-id`；需要选择执行者时先运行 `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json`。不要把委派型子任务分配给自己；如果你会在父任务 run 内完成这部分工作，就不要为它创建子任务。创建委派型子任务后，父任务必须等待这些子任务实际运行并回报结果后，才能汇总。不要在父任务 run 中直接完成已委派的子任务内容，然后把这些子任务标记为 `blocked` 或 `cancelled` 当作“不需要执行”。`blocked` 只用于真实阻塞，例如信息缺失、权限不可用、依赖失败，或需要人工/外部动作。子任务仍未完成时，不要把父任务标记为 done。
 - 招聘新智能体时使用 `create-agent` skill。
 - 把工作分配给最合适的智能体。
 - 对 hire/create-agent 任务，在身份确认成功后立即调用 `create-agent`。除非 API 结果表明你需要一个具体配置示例，否则不要先浏览本地 agent 目录或说明文件。

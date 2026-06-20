@@ -77,6 +77,21 @@ def _require_distinct_assignee_and_reviewer(values: Mapping[str, Any]) -> None:
         raise ValueError("reviewerAgentId must differ from assigneeAgentId")
 
 
+def _reject_agent_self_delegated_child_issue(
+    values: Mapping[str, Any], *, actor_type: str, actor_id: str
+) -> None:
+    if (
+        actor_type == "agent"
+        and values.get("parent_id") is not None
+        and values.get("assignee_agent_id") == actor_id
+    ):
+        raise ValueError(
+            "Agent cannot delegate a child issue to itself. Do the work in the "
+            "parent issue without creating a child issue, or assign the child "
+            "issue to a different agent."
+        )
+
+
 class IssueCheckoutConflictError(RuntimeError):
     pass
 
@@ -227,6 +242,10 @@ class IssueService:
         )
         if parent is not None:
             self._inherit_parent_scope(values, parent)
+        _reject_agent_self_delegated_child_issue(
+            values, actor_type=actor_type, actor_id=actor_id
+        )
+        if parent is not None:
             existing = await self._find_existing_agent_child_issue(
                 values, actor_type=actor_type
             )
