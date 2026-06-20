@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -131,6 +132,28 @@ def _ui_manifest(plugin_id: str = "linear.connector") -> dict[str, Any]:
                 },
             ]
         },
+    }
+
+
+def _git_manifest() -> dict[str, Any]:
+    return {
+        "id": "git.local",
+        "apiVersion": 1,
+        "version": "0.1.0",
+        "displayName": "Git",
+        "description": "Local Git workflow tools scoped to the runtime workspace cwd.",
+        "author": "Octopus",
+        "categories": ["workspace", "git"],
+        "capabilities": ["agent.tools.register", "project.workspaces.read"],
+        "entrypoints": {"worker": "./dist/worker.js"},
+        "tools": [
+            {
+                "name": "git.status",
+                "displayName": "Git Status",
+                "description": "Show branch and dirty-file status.",
+                "parametersSchema": {"type": "object", "properties": {}},
+            }
+        ],
     }
 
 
@@ -428,6 +451,80 @@ async def test_step29_plugin_detail_config_health_and_dashboard_routes(
     assert dashboard_code == 200
     assert dashboard["counts"]["jobs"] == 1
     assert dashboard["health"]["workerRunning"] is True
+
+
+async def test_step29_builtin_git_plugin_health_does_not_require_external_worker(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, _ = app
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _git_manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-git",
+        },
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+
+    health_code, health = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/health"
+    )
+    dashboard_code, dashboard = await _request(
+        application, "GET", f"/api/plugins/{installed['id']}/dashboard"
+    )
+
+    assert health_code == 200
+    assert health["healthy"] is True
+    assert health["workerRunning"] is False
+    assert health["workerMode"] == "builtin"
+    assert dashboard_code == 200
+    assert dashboard["health"]["workerMode"] == "builtin"
+
+
+async def test_step29_plugin_tool_routes_discover_and_execute_builtin_git(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "init",
+        cwd=str(repo),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    assert proc.returncode == 0, (stderr or stdout).decode("utf-8", errors="replace")
+    application, _ = app
+    _, installed = await _request(
+        application,
+        "POST",
+        "/api/plugins/install",
+        json_body={
+            "manifest": _git_manifest(),
+            "sourceType": "bundled",
+            "sourceLocator": "server/plugins/bundled/plugin-git",
+        },
+    )
+    await _request(application, "POST", f"/api/plugins/{installed['id']}/enable")
+
+    tools_code, tools = await _request(application, "GET", "/api/plugins/tools")
+    execute_code, result = await _request(
+        application,
+        "POST",
+        f"/api/plugins/{installed['id']}/tools/git.status/execute",
+        json_body={"context": {"workspace": {"rudderWorkspace": {"cwd": str(repo)}}}},
+    )
+
+    assert tools_code == 200
+    assert tools["items"][0]["name"] == "git.status"
+    assert execute_code == 200
+    assert result["ok"] is True
+    assert result["cwd"] == str(repo.resolve())
 
 
 async def test_step29_plugin_registry_jobs_logs_and_webhook_delivery(

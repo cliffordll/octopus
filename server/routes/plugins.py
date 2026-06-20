@@ -25,6 +25,8 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_LOGS_PATH,
     PLUGIN_LIST_PATH,
     PLUGIN_STATIC_PATH,
+    PLUGIN_TOOL_EXECUTE_PATH,
+    PLUGIN_TOOLS_PATH,
     PLUGIN_UI_CONTRIBUTIONS_PATH,
     PLUGIN_UI_STREAM_PATH,
     PLUGIN_WEBHOOK_PATH,
@@ -38,7 +40,9 @@ from ..plugins.catalog import (
     load_plugin_catalog,
 )
 from ..plugins.jobs import PluginJobCoordinator
+from ..plugins.git_worker import GIT_PLUGIN_KEY
 from ..plugins.registry import PluginRegistryService
+from ..plugins.tool_dispatcher import PluginToolDispatcher
 from ..plugins.ui_bridge import PluginUiBridge
 from ..plugins.webhooks import PluginWebhookDispatcher
 from ..plugins.worker_manager import PluginWorkerHandle, PluginWorkerManager
@@ -101,6 +105,14 @@ async def list_available_plugins_route(request: Request) -> dict[str, Any]:
 async def list_example_plugins_route(request: Request) -> dict[str, Any]:
     catalog = _load_catalog(request)
     return _catalog_response(catalog, examples_only=True)
+
+
+@router.get(PLUGIN_TOOLS_PATH)
+async def list_plugin_tools_route(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    return {"items": await _tool_dispatcher(request, session).discover_tools()}
 
 
 @router.get(PLUGIN_DETAIL_PATH)
@@ -246,6 +258,7 @@ async def get_plugin_health_route(
         worker_running = (
             worker_manager.is_running(pluginId) if worker_manager is not None else False
         )
+        builtin_worker = plugin["pluginKey"] == GIT_PLUGIN_KEY
         return {
             "pluginId": plugin["id"],
             "pluginKey": plugin["pluginKey"],
@@ -254,8 +267,10 @@ async def get_plugin_health_route(
             "healthy": plugin["status"] == "ready"
             and (
                 worker_running
+                or builtin_worker
                 or "worker" not in plugin["manifest"].get("entrypoints", {})
             ),
+            "workerMode": "builtin" if builtin_worker else "external",
         }
     except LookupError as exc:
         raise HTTPException(
@@ -289,6 +304,9 @@ async def get_plugin_dashboard_route(
                 "workerRunning": worker_manager.is_running(pluginId)
                 if worker_manager is not None
                 else False,
+                "workerMode": "builtin"
+                if plugin["pluginKey"] == GIT_PLUGIN_KEY
+                else "external",
             },
             "recentLogs": logs[:5],
             "jobs": jobs,
@@ -296,6 +314,38 @@ async def get_plugin_dashboard_route(
     except LookupError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+
+@router.post(PLUGIN_TOOL_EXECUTE_PATH)
+async def execute_plugin_tool_route(
+    request: Request,
+    pluginId: str,
+    toolName: str,
+    body: dict[str, Any] | None = Body(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    payload = body if isinstance(body, dict) else {}
+    parameters = payload.get("parameters", {})
+    context = payload.get("context", {})
+    try:
+        return await _tool_dispatcher(request, session).execute_tool(
+            pluginId,
+            toolName,
+            parameters if isinstance(parameters, dict) else {},
+            context=context if isinstance(context, dict) else {},
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
 
 
@@ -542,6 +592,13 @@ def _ui_bridge(request: Request, session: AsyncSession) -> PluginUiBridge:
     return PluginUiBridge(
         PluginRegistryService(session),
         worker_manager=_worker_manager(request),
+    )
+
+
+def _tool_dispatcher(request: Request, session: AsyncSession) -> PluginToolDispatcher:
+    return PluginToolDispatcher(
+        PluginRegistryService(session),
+        _worker_manager(request) or PluginWorkerManager(),
     )
 
 

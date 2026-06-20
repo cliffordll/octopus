@@ -12,6 +12,8 @@ from packages.shared.api_paths.plugins import (
     PLUGIN_EXAMPLES_PATH,
     PLUGIN_LIST_PATH,
     PLUGIN_STATIC_PATH,
+    PLUGIN_TOOL_EXECUTE_PATH,
+    PLUGIN_TOOLS_PATH,
     PLUGIN_UI_CONTRIBUTIONS_PATH,
     PLUGIN_UI_STREAM_PATH,
 )
@@ -110,6 +112,10 @@ def test_step29_plugin_paths_match_management_contract() -> None:
     assert PLUGIN_EXAMPLES_PATH == "/api/plugins/examples"
     assert PLUGIN_DETAIL_PATH == "/api/plugins/{pluginId}"
     assert PLUGIN_CONFIG_PATH == "/api/plugins/{pluginId}/config"
+    assert PLUGIN_TOOLS_PATH == "/api/plugins/tools"
+    assert (
+        PLUGIN_TOOL_EXECUTE_PATH == "/api/plugins/{pluginId}/tools/{toolName}/execute"
+    )
     assert PLUGIN_UI_CONTRIBUTIONS_PATH == "/api/plugins/ui/contributions"
     assert PLUGIN_UI_STREAM_PATH == "/api/plugins/{pluginId}/stream"
     assert PLUGIN_STATIC_PATH == "/api/plugins/{pluginId}/static/{assetPath:path}"
@@ -263,6 +269,7 @@ async def test_step29_plugin_default_catalog_exposes_bundled_required_plugins() 
         "plugin-file-browser-example",
         "kitchen-sink",
         "github.connector",
+        "git.local",
         "slack.connector",
         "jira.connector",
         "notion.connector",

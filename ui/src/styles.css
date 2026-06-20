@@ -517,12 +517,19 @@ small {
   border: 1px solid #273244;
   border-radius: 8px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   padding: 12px;
 }
 
 .plugin-row.selected {
   border-color: #3b82f6;
+}
+
+.plugin-row-header {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .plugin-row-main {
@@ -533,7 +540,9 @@ small {
   cursor: pointer;
   display: flex;
   font: inherit;
-  justify-content: space-between;
+  justify-content: flex-start;
+  min-height: 0;
+  min-width: 0;
   padding: 0;
   text-align: left;
   width: 100%;
@@ -544,19 +553,47 @@ small {
   opacity: 1;
 }
 
+.plugin-row-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plugin-row-side {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .plugin-row-main strong,
 .plugin-detail-header strong {
+  color: #f4f8ff;
   display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plugin-row-main small {
   color: #8ea0b8;
-  display: block;
-  margin-top: 2px;
+  display: inline;
+  flex: 0 1 auto;
+  margin-top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plugin-row p {
   margin: 0;
+}
+
+.plugin-row .muted {
+  font-size: 11px;
+  line-height: 1.12;
 }
 
 .plugin-row-meta {
@@ -569,7 +606,15 @@ small {
 
 .plugin-row-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+}
+
+.plugin-row-actions .small-button {
+  border-radius: 999px;
+  min-height: 26px;
+  padding: 4px 10px;
 }
 
 .plugin-detail {
@@ -671,6 +716,27 @@ small {
 
 .plugin-config-message {
   color: #86efac;
+}
+
+@media (max-width: 960px) {
+  .plugin-row-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plugin-row-side,
+  .plugin-row-actions {
+    justify-content: flex-start;
+  }
+
+  .plugin-row-title {
+    align-items: start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .plugin-row-main small {
+    white-space: normal;
+  }
 }
 
 .cost-settings-summary,

@@ -75,7 +75,7 @@ it("shows bundled plugins and manages lifecycle actions", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: /插件/ }));
   expect(await screen.findByText("GitHub")).toBeInTheDocument();
-  expect(screen.getByText("未安装")).toBeInTheDocument();
+  expect(screen.queryByText("未安装")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "安装" }));
 
   await waitFor(() => {
