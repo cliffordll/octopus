@@ -84,7 +84,6 @@ describe("runtime provider API", () => {
 
     await runtimeProvidersApi.listProviders("org-1", "opencode_local");
     await runtimeProvidersApi.createProvider("org-1", {
-      runtimeType: "opencode_local",
       providerId: "kimi",
       name: "Kimi",
       protocol: "openai_chat_completions",
@@ -113,7 +112,6 @@ describe("runtime provider API", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          runtimeType: "opencode_local",
           providerId: "kimi",
           name: "Kimi",
           protocol: "openai_chat_completions",

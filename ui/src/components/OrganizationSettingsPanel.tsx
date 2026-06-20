@@ -11,7 +11,7 @@ import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
 type SettingsSection = "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
-  { id: "providers", eyebrow: "Runtime Providers", label: "供应商", description: "全局运行时 provider 和 model。" },
+  { id: "providers", eyebrow: "LLM Providers", label: "供应商", description: "全局 LLM provider 和 model。" },
   { id: "heartbeats", eyebrow: "Timer Heartbeats", label: "心跳", description: "智能体定时心跳。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
   { id: "plugins", eyebrow: "Plugins", label: "插件", description: "安装、启用和检查插件。" },

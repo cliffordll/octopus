@@ -448,7 +448,7 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getAllByText("Runtime Providers")).toHaveLength(1);
+  expect(dialog.getAllByText("LLM Providers")).toHaveLength(1);
   const englishKimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   expect(englishKimiProvider.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   expect(englishKimiProvider.queryByRole("button", { name: "Edit" })).toBeInTheDocument();
@@ -460,7 +460,7 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
+  expect(dialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
@@ -479,7 +479,7 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: "新建 Provider" }));
   const providerDialog = within(screen.getByRole("dialog", { name: "新建 Provider" }));
-  await userEvent.selectOptions(providerDialog.getByLabelText("运行时"), "openclaw_local");
+  expect(providerDialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   await userEvent.type(providerDialog.getByLabelText("Provider ID"), "openrouter");
   await userEvent.type(providerDialog.getByLabelText("Provider 名称"), "OpenRouter");
   await userEvent.type(providerDialog.getByLabelText("Base URL"), "https://openrouter.ai/api/v1");
@@ -496,7 +496,7 @@ it("manages runtime providers and models from settings", async () => {
     "/api/llm/providers",
     expect.objectContaining({
       method: "POST",
-      body: expect.stringContaining('"runtimeType":"openclaw_local"'),
+      body: expect.not.stringContaining('"runtimeType"'),
     }),
   );
 
@@ -668,7 +668,7 @@ it("manages runtime providers and models from settings", async () => {
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
+  expect(dialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
