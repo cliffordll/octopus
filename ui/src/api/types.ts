@@ -1082,7 +1082,7 @@ export interface UpdateAgentPayload {
 export interface RuntimeProvider {
   scope?: RuntimeProviderScope;
   orgId?: string;
-  runtimeType: AgentRuntimeType;
+  runtimeType?: AgentRuntimeType | null;
   providerId: string;
   name?: string | null;
   protocol?: string | null;
@@ -1099,7 +1099,7 @@ export interface RuntimeProvider {
 export interface RuntimeModel {
   scope?: RuntimeProviderScope;
   orgId?: string;
-  runtimeType: AgentRuntimeType;
+  runtimeType?: AgentRuntimeType | null;
   providerId: string;
   modelId: string;
   displayName?: string | null;
@@ -1113,7 +1113,6 @@ export type RuntimeProviderScope = "instance" | "global" | "organization";
 
 export interface CreateRuntimeProviderPayload {
   scope?: RuntimeProviderScope;
-  runtimeType: AgentRuntimeType;
   providerId: string;
   name?: string | null;
   protocol?: string | null;
