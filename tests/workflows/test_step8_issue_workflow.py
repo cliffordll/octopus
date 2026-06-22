@@ -238,7 +238,9 @@ async def test_agent_cannot_delegate_child_issue_to_self(
             actor_id="user-1",
         )
 
-    with pytest.raises(ValueError, match="Agent cannot delegate a child issue to itself"):
+    with pytest.raises(
+        ValueError, match="Agent cannot delegate a child issue to itself"
+    ):
         async with async_transaction(session):
             await service.create_issue(
                 org.id,

@@ -663,6 +663,8 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
     assert "Prefer the workspace artifacts directory" in captured_prompt
+    assert "artifacts/issues/<current-issue-id>/" in captured_prompt
+    assert "organization artifacts root are not auto-registered" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
