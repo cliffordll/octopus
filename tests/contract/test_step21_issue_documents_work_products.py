@@ -207,6 +207,111 @@ async def test_generated_work_product_captures_binary_document(
     assert any(title.endswith(".docx") for title in titles)
 
 
+async def test_shared_workspace_generated_scan_ignores_unscoped_cwd_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    shared_cwd.mkdir()
+    (shared_cwd / "other-task.md").write_text("belongs to another task")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert rows == []
+
+
+async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    issue_artifacts = shared_cwd / "artifacts" / "issues" / issue_id
+    issue_artifacts.mkdir(parents=True)
+    (shared_cwd / "other-task.md").write_text("belongs to another task")
+    (issue_artifacts / "deliverable.md").write_text("belongs to this issue")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert len(rows) == 1
+    md = rows[0]["metadata"]
+    assert md
+    assert md["workspacePath"] == "deliverable.md"
+    assert md["source"] == "issue_artifacts_scan"
+
+
+async def test_generated_scan_ignores_organization_artifacts_root(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    artifacts = tmp_path / "org-artifacts"
+    artifacts.mkdir()
+    (artifacts / "other-task.md").write_text("belongs to another task")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-1",
+                "mode": "isolated_workspace",
+                "cwd": str(worktree),
+                "orgArtifactsDir": str(artifacts),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert rows == []
+
+
 async def test_issue_documents_are_versioned_and_listed_on_detail(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
