@@ -397,6 +397,20 @@ async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
             actor_type="board",
             actor_id="local-board",
         )
+        await session.refresh(issue)
+        first_reviewer_wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == reviewer["id"],
+                        AgentWakeupRequest.reason == "issue_review_requested",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(first_reviewer_wakeups) == 1
         issue.status = "in_progress"
         second = await heartbeat.wakeup(
             assignee["id"],
@@ -412,26 +426,26 @@ async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
             actor_type="board",
             actor_id="local-board",
         )
+        reviewer_wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == reviewer["id"],
+                        AgentWakeupRequest.reason == "issue_review_requested",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(reviewer_wakeups) == 2
+        origin_run_ids: set[str] = set()
+        for wakeup in reviewer_wakeups:
+            assert wakeup.payload is not None
+            origin_run_ids.add(wakeup.payload["originRunId"])
 
     assert first is not None and first["status"] == "succeeded"
     assert second is not None and second["status"] == "succeeded"
-    reviewer_wakeups = (
-        (
-            await session.execute(
-                select(AgentWakeupRequest).where(
-                    AgentWakeupRequest.agent_id == reviewer["id"],
-                    AgentWakeupRequest.reason == "issue_review_requested",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(reviewer_wakeups) == 2
-    origin_run_ids: set[str] = set()
-    for wakeup in reviewer_wakeups:
-        assert wakeup.payload is not None
-        origin_run_ids.add(wakeup.payload["originRunId"])
     assert origin_run_ids == {
         first["id"],
         second["id"],

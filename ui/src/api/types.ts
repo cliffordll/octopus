@@ -203,6 +203,122 @@ export interface ServerHealth {
   storagePathStyle?: boolean | null;
 }
 
+export type PluginStatus =
+  | "installed"
+  | "ready"
+  | "disabled"
+  | "error"
+  | "upgrade_pending"
+  | "uninstalled";
+
+export interface PluginManifest {
+  id: string;
+  apiVersion: number;
+  version: string;
+  displayName: string;
+  description?: string;
+  author?: string;
+  categories?: string[];
+  capabilities: string[];
+  entrypoints: Record<string, string | undefined>;
+  instanceConfigSchema?: Record<string, unknown>;
+  ui?: {
+    slots?: Array<Record<string, unknown>>;
+  };
+  jobs?: Array<Record<string, unknown>>;
+  webhooks?: Array<Record<string, unknown>>;
+  tools?: Array<Record<string, unknown>>;
+}
+
+export interface PluginSummary {
+  id: string;
+  pluginKey: string;
+  displayName: string;
+  version: string;
+  status: PluginStatus;
+  sourceType: string;
+  sourceLocator: string;
+  manifest: PluginManifest;
+  installedAt: string | null;
+  enabledAt: string | null;
+  disabledAt: string | null;
+  uninstalledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AvailablePluginItem {
+  id: string;
+  displayName: string;
+  version: string;
+  sourcePath: string;
+  example: boolean;
+  manifest: PluginManifest;
+}
+
+export interface PluginCatalogResponse {
+  items: AvailablePluginItem[];
+  errors: Array<{ id: string; manifestPath: string; message: string }>;
+}
+
+export interface PluginJob {
+  id: string;
+  pluginId: string;
+  jobKey: string;
+  displayName: string;
+  schedule: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginLog {
+  id: string;
+  pluginId: string;
+  level: string;
+  message: string;
+  detailsJson: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface PluginConfig {
+  pluginId: string;
+  configJson: Record<string, unknown>;
+  updatedAt: string | null;
+}
+
+export interface PluginConfigTestResult {
+  valid: boolean;
+  missing?: string[];
+  source?: string;
+  message?: string;
+}
+
+export interface PluginHealth {
+  pluginId: string;
+  pluginKey: string;
+  status: PluginStatus;
+  workerRunning: boolean;
+  healthy: boolean;
+}
+
+export interface PluginDashboard {
+  plugin?: PluginSummary;
+  counts: {
+    jobs: number;
+    logs: number;
+    uiSlots: number;
+    tools: number;
+    webhooks: number;
+  };
+  health: {
+    status: PluginStatus;
+    workerRunning: boolean;
+  };
+  recentLogs: PluginLog[];
+  jobs: PluginJob[];
+}
+
 export interface IssueDetail extends IssueListItem {
   description: string | null;
   reviewerAgentId: string | null;
@@ -966,7 +1082,7 @@ export interface UpdateAgentPayload {
 export interface RuntimeProvider {
   scope?: RuntimeProviderScope;
   orgId?: string;
-  runtimeType: AgentRuntimeType;
+  runtimeType?: AgentRuntimeType | null;
   providerId: string;
   name?: string | null;
   protocol?: string | null;
@@ -983,7 +1099,7 @@ export interface RuntimeProvider {
 export interface RuntimeModel {
   scope?: RuntimeProviderScope;
   orgId?: string;
-  runtimeType: AgentRuntimeType;
+  runtimeType?: AgentRuntimeType | null;
   providerId: string;
   modelId: string;
   displayName?: string | null;
@@ -997,7 +1113,6 @@ export type RuntimeProviderScope = "instance" | "global" | "organization";
 
 export interface CreateRuntimeProviderPayload {
   scope?: RuntimeProviderScope;
-  runtimeType: AgentRuntimeType;
   providerId: string;
   name?: string | null;
   protocol?: string | null;

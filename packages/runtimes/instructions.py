@@ -287,9 +287,13 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             'Create each real subtask with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
             f'"{issue_ref}" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json` before treating it as delegated.',
             "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
+            "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
+            "After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results.",
+            "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary.",
+            "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.",
             "Do not mark the parent issue done while child issues are still open; wait for child issues to finish, or explicitly close/cancel them with a reason.",
             "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
-            "If you intentionally complete the split work inside this run without creating child issues, say that explicitly in the close-out comment.",
+            "If the work should stay inside the parent run, do not create delegated child issues for it; say that explicitly in the close-out comment.",
         ]
     )
 

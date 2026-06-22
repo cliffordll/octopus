@@ -71,6 +71,16 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert (
         "Do not mark the parent issue done while child issues are still open" in prompt
     )
+    assert (
+        "After creating delegated child issues, the parent issue must wait for those child issues to run and report back"
+        in prompt
+    )
+    assert "Never assign a delegated child issue to yourself" in prompt
+    assert (
+        "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
+        in prompt
+    )
+    assert "Use `blocked` only for a real blocker" in prompt
     assert "internal `task` subagent call" in prompt
     assert "do not appear in the board" in prompt
 

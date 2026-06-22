@@ -1,0 +1,45 @@
+{
+  "id": "plugin-file-browser-example",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "File Browser Example",
+  "description": "Workspace file browser fixture for project UI extension surfaces.",
+  "author": "Octopus",
+  "categories": ["example", "workspace"],
+  "capabilities": [
+    "project.workspaces.read",
+    "projects.read",
+    "ui.detailTab.register",
+    "ui.sidebar.register",
+    "ui.commentAnnotation.register",
+    "ui.action.register"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "projectSidebarItem",
+        "id": "file-browser-sidebar",
+        "displayName": "Files",
+        "exportName": "FileBrowserSidebar"
+      },
+      {
+        "type": "detailTab",
+        "id": "file-browser-project-tab",
+        "displayName": "Files",
+        "exportName": "FileBrowserProjectTab",
+        "entityTypes": ["project"]
+      },
+      {
+        "type": "commentAnnotation",
+        "id": "file-browser-comment-annotation",
+        "displayName": "File Reference",
+        "exportName": "FileReferenceAnnotation",
+        "entityTypes": ["comment"]
+      }
+    ]
+  }
+}

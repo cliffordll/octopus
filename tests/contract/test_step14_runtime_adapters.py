@@ -480,17 +480,21 @@ def test_openclaw_provider_already_registered_detects_matching_config(
     }
     assert _provider_already_registered(env, **kwargs) is True
     # Endpoint / key / model mismatches must NOT short-circuit the patch.
-    assert _provider_already_registered(
-        env, **{**kwargs, "base_url": "http://other/v1"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "api_key": "sk-other"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "model_id": "glm-5.1"}
-    ) is False
+    assert (
+        _provider_already_registered(env, **{**kwargs, "base_url": "http://other/v1"})
+        is False
+    )
+    assert (
+        _provider_already_registered(env, **{**kwargs, "api_key": "sk-other"}) is False
+    )
+    assert (
+        _provider_already_registered(env, **{**kwargs, "model_id": "glm-5.1"}) is False
+    )
     # Missing config file → cannot skip.
-    assert _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs) is False
+    assert (
+        _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs)
+        is False
+    )
 
 
 def test_opencode_extra_args_are_run_subcommand_options() -> None:
@@ -659,10 +663,62 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
     assert "Prefer the workspace artifacts directory" in captured_prompt
+    assert "artifacts/issues/<current-issue-id>/" in captured_prompt
+    assert "organization artifacts root are not auto-registered" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
     )
+
+
+async def test_opencode_fallback_timeout_drains_original_communication_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    communicate_calls = 0
+    communicate_cancelled = False
+    killed = asyncio.Event()
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            nonlocal communicate_calls, communicate_cancelled
+            communicate_calls += 1
+            try:
+                await killed.wait()
+            except asyncio.CancelledError:
+                communicate_cancelled = True
+                raise
+            return b"", b"terminated"
+
+        def kill(self) -> None:
+            killed.set()
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        RuntimeExecutionContext(
+            run_id="run-opencode-timeout",
+            agent_id="agent-opencode-timeout",
+            org_id="org-opencode-timeout",
+            agent_name="OpenCode Timeout",
+            config={"command": "opencode-test", "timeoutSec": 0.01},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.timed_out is True
+    assert communicate_calls == 1
+    assert communicate_cancelled is False
 
 
 async def test_opencode_tool_error_with_later_text_is_diagnostic_not_failure(

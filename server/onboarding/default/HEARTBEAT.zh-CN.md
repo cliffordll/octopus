@@ -27,6 +27,7 @@
 
 - 工作前始终先 checkout。
 - 执行工作。完成后更新状态并评论。
+- 对委派型子任务，不要把委派型子任务分配给自己；如果你会在父任务 run 内完成这部分工作，就不要为它创建子任务。父任务必须等待这些子任务实际运行并回报结果后，才能汇总。不要在父任务 run 中直接完成已委派的子任务内容，然后把这些子任务标记为 `blocked` 或 `cancelled` 当作“不需要执行”。`blocked` 只用于真实阻塞，例如信息缺失、权限不可用、依赖失败，或需要人工/外部动作。
 - Close-out gate：退出活跃 issue heartbeat 前，必须先让匹配的控制平面 close-out 命令成功执行。
 - 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`，先检查当前 issue 状态，然后在退出前只执行一个 close-out 命令：`control-plane issue done ...`、`control-plane issue block ...` 或 `control-plane issue comment ...`。如果被审查的 issue 被阻塞，评论要清楚到足以让 reviewer 判断下一步。不要只用最终 assistant 总结结束这次唤醒。
 - 如果你是 reviewer，包括处理 `blocked` issue，也要用 `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...` 记录结构化审查结论。只在确认存在人工或外部阻塞时使用 `blocked`，并在评论中说明下一个人工动作。

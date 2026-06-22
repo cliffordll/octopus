@@ -884,9 +884,20 @@ class WorkspaceService:
         artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
         if artifacts_dir:
             assert artifacts_root is not None
-            if artifacts_root.is_dir() and artifacts_root != worktree_root:
-                scan_roots.append(("organization_artifacts_scan", artifacts_root))
-        scan_roots.append(("execution_workspace_scan", worktree_root))
+        workspace_mode = _string(workspace.get("mode"))
+        strategy_type = _string(workspace.get("strategyType"))
+        shared_workspace = workspace_mode == "shared_workspace" or strategy_type in {
+            "project_primary",
+            "organization_workspace",
+        }
+        if shared_workspace:
+            issue_artifacts_root = (
+                worktree_root / "artifacts" / "issues" / issue.id
+            ).resolve()
+            if issue_artifacts_root.is_dir():
+                scan_roots.append(("issue_artifacts_scan", issue_artifacts_root))
+        else:
+            scan_roots.append(("execution_workspace_scan", worktree_root))
         seen_paths: set[Path] = set()
         for source, root in scan_roots:
             for path in _iter_generated_workspace_files(root, threshold):

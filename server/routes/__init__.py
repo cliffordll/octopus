@@ -12,6 +12,7 @@ from .issues import router as issues_router
 from .messenger import router as messenger_router
 from .organization_skills import router as organization_skills_router
 from .orgs import router as orgs_router
+from .plugins import router as plugins_router
 from .projects import router as projects_router
 from .run_intelligence import router as run_intelligence_router
 from .runtime_providers import router as runtime_providers_router
@@ -30,6 +31,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(assets_router)
     app.include_router(issues_router)
     app.include_router(approvals_router)
+    app.include_router(plugins_router)
     app.include_router(projects_router)
     app.include_router(runtime_providers_router)
     app.include_router(llm_router)

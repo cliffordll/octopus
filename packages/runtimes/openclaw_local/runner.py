@@ -224,9 +224,7 @@ async def _ensure_model_registered(
         )
         if rc == 0:
             return model_ref, None
-        last_message = (
-            _first_meaningful_line(err) or f"config patch exited with {rc}"
-        )
+        last_message = _first_meaningful_line(err) or f"config patch exited with {rc}"
         # Only conflicts are transient and worth retrying; bail on anything else.
         if not any(marker in (err or "") for marker in _CONFIG_CONFLICT_MARKERS):
             break
@@ -275,9 +273,7 @@ def _provider_already_registered(
     models = provider.get("models")
     if not isinstance(models, list):
         return False
-    return any(
-        isinstance(m, dict) and _string(m.get("id")) == model_id for m in models
-    )
+    return any(isinstance(m, dict) and _string(m.get("id")) == model_id for m in models)
 
 
 def _openclaw_provider_name(raw: str) -> str:
