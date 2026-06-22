@@ -290,6 +290,21 @@ async def list_issue_work_products(
     return result.scalars().all()
 
 
+async def list_work_products_by_external_id(
+    session: AsyncSession, *, org_id: str, provider: str, external_id: str
+) -> Sequence[IssueWorkProduct]:
+    result = await session.execute(
+        select(IssueWorkProduct)
+        .where(
+            IssueWorkProduct.org_id == org_id,
+            IssueWorkProduct.provider == provider,
+            IssueWorkProduct.external_id == external_id,
+        )
+        .order_by(desc(IssueWorkProduct.updated_at))
+    )
+    return result.scalars().all()
+
+
 async def get_issue_work_product(
     session: AsyncSession, product_id: str
 ) -> IssueWorkProduct | None:

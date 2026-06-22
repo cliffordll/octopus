@@ -24,6 +24,7 @@ from packages.database.queries.workspaces import (
     get_workspace_operation,
     list_execution_workspaces,
     list_issue_work_products,
+    list_work_products_by_external_id,
     list_project_workspaces,
     list_running_workspace_operations_for_run,
     list_workspace_operations_for_run,
@@ -903,7 +904,23 @@ class WorkspaceService:
                     artifacts_root=artifacts_root,
                 )
                 content = path.read_bytes()
+                content_sha256 = hashlib.sha256(content).hexdigest()
                 content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
+                external_id = f"{source}:{workspace_ref}:{rel_path}"
+                if source == "organization_artifacts_scan":
+                    existing_products = await list_work_products_by_external_id(
+                        self._session,
+                        org_id=issue.org_id,
+                        provider="rudder",
+                        external_id=external_id,
+                    )
+                    if any(
+                        row.issue_id != issue.id
+                        and isinstance(row.metadata_json, dict)
+                        and row.metadata_json.get("sha256") == content_sha256
+                        for row in existing_products
+                    ):
+                        continue
                 products.append(
                     {
                         "title": rel_path,
@@ -911,7 +928,7 @@ class WorkspaceService:
                         if path.suffix.lower() in {".md", ".txt"}
                         else "artifact",
                         "provider": "rudder",
-                        "externalId": f"{source}:{workspace_ref}:{rel_path}",
+                        "externalId": external_id,
                         "status": "active",
                         "reviewState": "none",
                         "isPrimary": False,
@@ -925,6 +942,7 @@ class WorkspaceService:
                             "workspaceBrowserPath": workspace_browser_path,
                             "executionWorkspaceId": workspace_id,
                             "byteSize": len(content),
+                            "sha256": content_sha256,
                         },
                     }
                 )

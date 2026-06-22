@@ -246,6 +246,77 @@ async def test_generated_work_product_allows_small_storage_clock_skew(
     assert "excluded.md" not in titles
 
 
+async def test_shared_artifacts_skip_file_already_registered_for_another_issue(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    import os
+
+    _, factory = app
+    org_id, first_issue_id = await _seed_issue(factory)
+    second_issue_id = str(uuid.uuid4())
+    from server.services.workspaces import WorkspaceService
+
+    async with factory() as session:
+        session.add(
+            Issue(
+                id=second_issue_id,
+                org_id=org_id,
+                project_id=str(uuid.uuid4()),
+                title="Second issue",
+                status="todo",
+                priority="medium",
+            )
+        )
+        await session.commit()
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    test_file = artifacts / "test.md"
+    test_file.write_text("same deliverable")
+
+    first_product = {
+        "title": "test.md",
+        "type": "document",
+        "provider": "rudder",
+        "externalId": "organization_artifacts_scan:ws-1:test.md",
+        "content": b"same deliverable",
+        "contentType": "text/markdown",
+        "filename": "test.md",
+    }
+    async with factory() as session:
+        first_rows = await WorkspaceService(session).persist_run_work_products(
+            run_id="run-1",
+            context_snapshot={"issueId": first_issue_id},
+            products=[first_product],
+        )
+        await session.commit()
+    assert len(first_rows) == 1
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    since = datetime(2026, 6, 22, 9, 17, 2, tzinfo=UTC)
+    os.utime(test_file, ((since - timedelta(seconds=30)).timestamp(),) * 2)
+    snapshot = {
+        "issueId": second_issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-1",
+                "cwd": str(worktree),
+                "orgArtifactsDir": str(artifacts),
+            }
+        },
+    }
+
+    async with factory() as session:
+        second_rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-2", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    assert [row["title"] for row in second_rows] == []
+
+
 async def test_issue_documents_are_versioned_and_listed_on_detail(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
