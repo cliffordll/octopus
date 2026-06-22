@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import uuid
 
@@ -207,6 +208,42 @@ async def test_generated_work_product_captures_binary_document(
 
     titles = [row["title"] for row in rows]
     assert any(title.endswith(".docx") for title in titles)
+
+
+async def test_generated_work_product_allows_small_storage_clock_skew(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    import os
+
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    included = worktree / "included.md"
+    excluded = worktree / "excluded.md"
+    included.write_text("included")
+    excluded.write_text("excluded")
+    since = datetime(2026, 6, 22, 9, 17, 2, tzinfo=UTC)
+    os.utime(included, ((since - timedelta(seconds=90)).timestamp(),) * 2)
+    os.utime(excluded, ((since - timedelta(seconds=121)).timestamp(),) * 2)
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {"rudderWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    titles = {row["title"] for row in rows}
+    assert "included.md" in titles
+    assert "excluded.md" not in titles
 
 
 async def test_issue_documents_are_versioned_and_listed_on_detail(
