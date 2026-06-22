@@ -157,6 +157,7 @@ _GENERATED_FILE_EXCLUDED_AGENT_DIRS = {
 # the old 1 MB text-oriented cap; raise it so real deliverables aren't dropped.
 _GENERATED_FILE_MAX_BYTES = 25_000_000
 _GENERATED_FILE_MAX_COUNT = 20
+_GENERATED_FILE_SCAN_LOOKBACK = timedelta(seconds=120)
 
 
 @dataclass(frozen=True)
@@ -870,7 +871,7 @@ class WorkspaceService:
         worktree_root = Path(cwd).resolve()
         if not worktree_root.is_dir():
             return []
-        threshold = _aware_utc(since) - timedelta(seconds=1) if since else None
+        threshold = _aware_utc(since) - _GENERATED_FILE_SCAN_LOOKBACK if since else None
         products: list[dict[str, Any]] = []
         scan_roots: list[tuple[str, Path]] = []
         workspace_env = (
