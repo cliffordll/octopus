@@ -954,8 +954,8 @@ small {
   border: 1px solid transparent;
   border-radius: 12px;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
 .runtime-provider-group:hover {
@@ -963,14 +963,19 @@ small {
 }
 
 .runtime-provider-group-header {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
   gap: 12px;
   justify-content: space-between;
 }
 
 .runtime-provider-group-header > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .runtime-provider-actions {
@@ -1096,12 +1101,15 @@ small {
 }
 
 .runtime-provider-group-header > div {
-  display: grid;
-  gap: 3px;
+  min-width: 0;
 }
 
 .runtime-provider-group-header strong {
   color: #f8fafc;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .runtime-provider-group-header span,
@@ -1110,11 +1118,22 @@ small {
   color: #8b99ad;
   font-size: 12px;
   font-style: normal;
+  min-width: 0;
+}
+
+.runtime-provider-group-header small {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.runtime-provider-group-header em {
+  flex: 0 0 auto;
 }
 
 .runtime-provider-group-header .badge {
   color: #a9caef;
-  justify-self: flex-start;
+  flex: 0 0 auto;
 }
 
 .runtime-model-list.compact {
@@ -1455,6 +1474,14 @@ small {
   overflow: auto;
   padding: 0;
   width: 100%;
+}
+
+.org-content:has(> .org-content-full > .chat-thread-shell) {
+  overflow: hidden;
+}
+
+.org-content:has(> .org-content-full > .chat-panel) {
+  overflow: hidden;
 }
 
 .product-organization-menu {

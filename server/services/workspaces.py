@@ -296,6 +296,44 @@ def _resolve_strategy_type(
     return "project_primary"
 
 
+def _strategy_record(
+    *,
+    project_policy: dict[str, Any] | None,
+    issue_settings: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if issue_settings and isinstance(issue_settings.get("workspaceStrategy"), dict):
+        return cast(dict[str, Any], issue_settings["workspaceStrategy"])
+    if project_policy and isinstance(project_policy.get("workspaceStrategy"), dict):
+        return cast(dict[str, Any], project_policy["workspaceStrategy"])
+    return {}
+
+
+def _safe_branch_suffix(value: str) -> str:
+    cleaned = value.strip().replace("\\", "-").replace("/", "-").replace(" ", "-")
+    cleaned = "".join(
+        char for char in cleaned if char.isalnum() or char in {".", "_", "-"}
+    ).strip(".-")
+    return cleaned or "workspace"
+
+
+def _render_branch_template(template: str, *, issue: Issue) -> str:
+    identifier = _safe_branch_suffix(str(getattr(issue, "identifier", "") or issue.id))
+    return (
+        template.replace("{issueId}", issue.id)
+        .replace("{issueIdentifier}", identifier)
+        .replace("{issueNumber}", str(getattr(issue, "issue_number", "") or ""))
+    )
+
+
+def _default_workspace_branch(*, issue: Issue) -> str:
+    identifier = _safe_branch_suffix(str(getattr(issue, "identifier", "") or issue.id))
+    return f"octopus/{identifier}"
+
+
+def _worktree_path(*, parent: Path, branch_name: str) -> Path:
+    return parent / _safe_branch_suffix(branch_name)
+
+
 class WorkspaceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -345,17 +383,20 @@ class WorkspaceService:
         return self._to_execution_workspace(row) if row is not None else None
 
     async def resolve_for_issue(self, issue: Issue) -> ExecutionWorkspaceData | None:
+        existing: ExecutionWorkspace | None = None
         if issue.execution_workspace_id:
-            existing = await get_execution_workspace_by_id(
+            existing_row = await get_execution_workspace_by_id(
                 self._session, issue.execution_workspace_id
             )
-            if existing is not None and existing.org_id == issue.org_id:
-                touched = await update_execution_workspace(
-                    self._session,
-                    existing.id,
-                    {"last_used_at": datetime.now(UTC)},
-                )
-                return self._to_execution_workspace(touched or existing)
+            if existing_row is not None and existing_row.org_id == issue.org_id:
+                existing = existing_row
+        if existing is not None and issue.project_id is None:
+            touched = await update_execution_workspace(
+                self._session,
+                existing.id,
+                {"last_used_at": datetime.now(UTC)},
+            )
+            return self._to_execution_workspace(touched or existing)
         if issue.project_id is None:
             org_root = self._org_workspace_root(issue.org_id)
             return self._organization_workspace_fallback(
@@ -390,9 +431,31 @@ class WorkspaceService:
         project_workspace_id = (
             project_workspace.id if project_workspace is not None else None
         )
+        strategy = _strategy_record(
+            project_policy=project_policy,
+            issue_settings=issue_settings,
+        )
         fallback_cwd: str | None = None
         project_cwd = _string(project_workspace.cwd) if project_workspace else None
+        project_repo_url = (
+            _string(project_workspace.repo_url) if project_workspace else None
+        )
+        project_base_ref = (
+            (
+                _string(project_workspace.default_ref)
+                or _string(project_workspace.repo_ref)
+            )
+            if project_workspace
+            else None
+        )
         execution_cwd: str | None = None
+        execution_repo_url: str | None = None
+        execution_base_ref: str | None = None
+        execution_branch_name: str | None = None
+        execution_metadata: dict[str, Any] = {
+            "resolvedForIssueId": issue.id,
+            "resolvedMode": mode,
+        }
         warnings: list[str] = []
         if project_workspace is None:
             fallback_cwd = str(self._org_workspace_root(issue.org_id))
@@ -408,8 +471,42 @@ class WorkspaceService:
             )
         elif mode == "shared_workspace":
             execution_cwd = project_cwd
+            execution_repo_url = project_repo_url
+            execution_base_ref = project_base_ref
+        elif strategy_type == "git_worktree":
+            branch_template = _string(strategy.get("branchTemplate"))
+            execution_branch_name = (
+                _render_branch_template(branch_template, issue=issue)
+                if branch_template
+                else _default_workspace_branch(issue=issue)
+            )
+            worktree_parent_value = _string(strategy.get("worktreeParentDir"))
+            worktree_parent = (
+                Path(worktree_parent_value)
+                if worktree_parent_value
+                else Path(project_cwd) / ".octopus" / "worktrees"
+            )
+            execution_cwd = str(
+                _worktree_path(
+                    parent=worktree_parent, branch_name=execution_branch_name
+                )
+            )
+            execution_repo_url = project_repo_url
+            execution_base_ref = _string(strategy.get("baseRef")) or project_base_ref
+            execution_metadata.update(
+                {
+                    "sourceWorkspaceCwd": project_cwd,
+                    "sourceWorkspaceRepoUrl": project_repo_url,
+                }
+            )
         if fallback_cwd is not None:
             execution_cwd = fallback_cwd
+            execution_metadata.update(
+                {
+                    "fallback": "organization_workspace",
+                    "warnings": warnings,
+                }
+            )
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -417,37 +514,37 @@ class WorkspaceService:
             issue_id=issue.id,
             mode=mode,
         )
-        row = reusable or await create_execution_workspace(
-            self._session,
-            {
-                "org_id": issue.org_id,
-                "project_id": project.id,
-                "project_workspace_id": project_workspace_id,
-                "source_issue_id": issue.id
-                if mode in {"isolated_workspace", "operator_branch"}
-                else None,
-                "mode": mode,
-                "strategy_type": strategy_type,
-                "name": f"{project.name} workspace",
-                "status": "active",
-                "cwd": execution_cwd,
-                "provider_type": "git_worktree"
-                if strategy_type == "git_worktree"
-                else "local_fs",
-                "metadata_json": {
-                    "resolvedForIssueId": issue.id,
-                    "resolvedMode": mode,
-                    **(
-                        {
-                            "fallback": "organization_workspace",
-                            "warnings": warnings,
-                        }
-                        if fallback_cwd
-                        else {}
-                    ),
-                },
-            },
-        )
+        row = existing or reusable
+        workspace_fields = {
+            "org_id": issue.org_id,
+            "project_id": project.id,
+            "project_workspace_id": project_workspace_id,
+            "source_issue_id": issue.id
+            if mode in {"isolated_workspace", "operator_branch"}
+            else None,
+            "mode": mode,
+            "strategy_type": strategy_type,
+            "name": f"{project.name} workspace",
+            "status": "active",
+            "cwd": execution_cwd,
+            "repo_url": execution_repo_url,
+            "base_ref": execution_base_ref,
+            "branch_name": execution_branch_name,
+            "provider_type": "git_worktree"
+            if strategy_type == "git_worktree"
+            else "local_fs",
+            "metadata_json": execution_metadata,
+        }
+        if row is None:
+            row = await create_execution_workspace(self._session, workspace_fields)
+        else:
+            patch: dict[str, Any] = {"last_used_at": datetime.now(UTC)}
+            for key, value in workspace_fields.items():
+                if key in {"org_id", "project_id", "source_issue_id"}:
+                    continue
+                if getattr(row, key) != value:
+                    patch[key] = value
+            row = await update_execution_workspace(self._session, row.id, patch) or row
         issue.execution_workspace_id = row.id
         issue.execution_workspace_preference = cast(ExecutionWorkspaceMode, mode)
         await self._session.execute(

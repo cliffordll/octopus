@@ -20,12 +20,17 @@ from server.app import create_app
 
 class ClosedLoopAdapter:
     type = "process"
+    issue_id: str | None = None
 
     async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         await context.on_log("stdout", "closed-loop-start\n")
-        artifacts_dir = (context.env or {}).get("OCTOPUS_ORG_ARTIFACTS_DIR")
-        assert isinstance(artifacts_dir, str)
-        output_path = Path(artifacts_dir) / "ACCEPTANCE.md"
+        issue_id = self.issue_id
+        assert isinstance(issue_id, str)
+        workspace_cwd = (context.env or {}).get("OCTOPUS_WORKSPACE_CWD")
+        assert isinstance(workspace_cwd, str)
+        output_dir = Path(workspace_cwd) / "artifacts" / "issues" / issue_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "ACCEPTANCE.md"
         output_path.write_text(
             "# Acceptance\n\nClosed loop output.\n", encoding="utf-8"
         )
@@ -182,6 +187,7 @@ async def test_step22_closed_loop_acceptance_uses_public_api_and_service_boundar
         },
     )
     assert issue_code == 200
+    ClosedLoopAdapter.issue_id = issue["id"]
 
     execute_code, queued_run = await _request(
         application, "POST", f"/api/issues/{issue['id']}/execute"

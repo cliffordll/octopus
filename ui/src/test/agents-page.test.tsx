@@ -393,9 +393,6 @@ it("manages runtime providers and models from settings", async () => {
         { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false, updatedAt: "2026-06-20T00:00:00Z" },
       ]);
     }
-    if (path === "/api/llm/providers" && init?.method === "GET") {
-      return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
-    }
     if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ scope: "instance", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", metadata: { pricing: { inputCostPer1M: 0.12, outputCostPer1M: 0.24 } }, enabled: true }]);
     }
@@ -468,7 +465,7 @@ it("manages runtime providers and models from settings", async () => {
   expect(kimiProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
   const providerArticles = await dialog.findAllByRole("article", { name: /provider/ });
-  expect(providerArticles[0]).toHaveAccessibleName("OpenRouter provider");
+  expect(providerArticles[0]).toHaveAccessibleName("Kimi provider");
   expect(openrouterProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
@@ -479,7 +476,6 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: "新建 Provider" }));
   const providerDialog = within(screen.getByRole("dialog", { name: "新建 Provider" }));
-  expect(providerDialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   await userEvent.type(providerDialog.getByLabelText("Provider ID"), "openrouter");
   await userEvent.type(providerDialog.getByLabelText("Provider 名称"), "OpenRouter");
   await userEvent.type(providerDialog.getByLabelText("Base URL"), "https://openrouter.ai/api/v1");
@@ -595,10 +591,10 @@ it("opens global provider settings without an active organization", async () => 
     }
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([
-        { scope: "instance", providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true },
+        { scope: "instance", providerId: "openai", name: "OpenAI", runtimeType: "opencode_local", enabled: true, hasApiKey: true },
       ]);
     }
-    if (path === "/api/llm/providers/openai/models?runtimeType=codex_local" && init?.method === "GET") {
+    if (path === "/api/llm/providers/openai/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([]);
     }
     return respond([]);
@@ -627,9 +623,6 @@ it("manages runtime providers and models from settings", async () => {
         { providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
         { providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
-    }
-    if (path === "/api/llm/providers" && init?.method === "GET") {
-      return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);

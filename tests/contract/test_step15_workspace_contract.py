@@ -288,6 +288,97 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(project_cwd)
 
 
+async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) -> None:
+    project_cwd = tmp_path / "mytest"
+    project_cwd.mkdir()
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-operator-worktree",
+                name="Step 15 Operator Worktree",
+                issue_prefix="OPW",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Operator Branch Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                        "workspaceStrategy": {"mode": "operator_branch"},
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "sourceType": "git_repo",
+                    "cwd": str(project_cwd),
+                    "repoUrl": "https://github.com/cliffordll/mytest.git",
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert project_workspace is not None
+            issue = await IssueService(session).create_issue(
+                org.id,
+                {
+                    "projectId": project["id"],
+                    "title": "Run in operator branch",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-operator-worktree",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue["id"]},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    expected_branch = f"octopus/{issue['identifier']}"
+    expected_cwd = project_cwd / ".octopus" / "worktrees" / "octopus-OPW-1"
+    assert workspace["mode"] == "operator_branch"
+    assert workspace["strategyType"] == "git_worktree"
+    assert workspace["providerType"] == "git_worktree"
+    assert workspace["projectWorkspaceId"] == project_workspace["id"]
+    assert workspace["cwd"] == str(expected_cwd)
+    assert workspace["repoUrl"] == "https://github.com/cliffordll/mytest.git"
+    assert workspace["baseRef"] == "main"
+    assert workspace["branchName"] == expected_branch
+    assert workspace["metadata"]["sourceWorkspaceCwd"] == str(project_cwd)
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(expected_cwd)
+    assert (
+        context["workspace"]["env"]["OCTOPUS_WORKSPACE_REPO_URL"]
+        == "https://github.com/cliffordll/mytest.git"
+    )
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_BRANCH"] == expected_branch
+
+
 async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     tmp_path: Path, monkeypatch
 ) -> None:

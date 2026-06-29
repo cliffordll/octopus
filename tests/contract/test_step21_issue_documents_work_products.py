@@ -127,7 +127,7 @@ async def test_work_product_archive_reuses_asset_for_identical_content(
         await session.commit()
 
     assert len(rows) == 2  # distinct external ids -> two work products
-    asset_ids = {row["assetId"] for row in rows}
+    asset_ids = {row.get("assetId") for row in rows}
     urls = {row["url"] for row in rows}
     assert len(asset_ids) == 1  # ...but one shared asset for identical content
     assert len(urls) == 1

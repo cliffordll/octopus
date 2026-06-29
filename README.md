@@ -101,7 +101,7 @@ PowerShell：
 
 ```powershell
 $env:OCTOPUS_HOME = ".octopus"
-$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_INSTANCE_ID = "default"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
@@ -112,7 +112,7 @@ macOS / Linux：
 
 ```bash
 export OCTOPUS_HOME=".octopus"
-export OCTOPUS_INSTANCE_ID="local-pg"
+export OCTOPUS_INSTANCE_ID="default"
 export OCTOPUS_LOCAL_TRUSTED=1
 export OCTOPUS_AUTO_MIGRATE=1
 export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"

@@ -20,6 +20,10 @@ from typing import Any, Literal
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.shared.constants.agent import AGENT_RUNTIME_TYPES, AgentRuntimeType
+from packages.shared.types.agent import CreateAgentPayload
+from packages.shared.types.project import CreateProjectPayload
+
 from .agent_instructions import AgentInstructionsService
 from .agents import AgentService
 from .organization_skills import OrganizationSkillService
@@ -117,6 +121,12 @@ def _infer_role(*candidates: str | None) -> str:
     return "general"
 
 
+def _agent_runtime_type(value: str) -> AgentRuntimeType:
+    if value not in AGENT_RUNTIME_TYPES:
+        raise ValueError(f"Unsupported agent runtime type: {value}")
+    return value
+
+
 def parse_company_package(root: Path) -> dict[str, Any]:
     """Parse a directory-style organization package into an import manifest."""
     root = Path(root)
@@ -146,7 +156,10 @@ def parse_company_package(root: Path) -> dict[str, Any]:
             warnings.append(
                 f"Failed to parse {ext_file.name}; ignoring extension config."
             )
-    ext_agents = ext.get("agents") if isinstance(ext.get("agents"), dict) else {}
+    ext_agents_raw = ext.get("agents")
+    ext_agents: dict[str, Any] = (
+        ext_agents_raw if isinstance(ext_agents_raw, dict) else {}
+    )
 
     agents: list[dict[str, Any]] = []
     agents_dir = root / "agents"
@@ -158,18 +171,17 @@ def parse_company_package(root: Path) -> dict[str, Any]:
                 warnings.append(f"Agent '{slug}' has no {_AGENT_ENTRY}; skipped.")
                 continue
             fm, body = _parse_frontmatter(md_text)
-            ext_entry = (
-                ext_agents.get(slug) if isinstance(ext_agents.get(slug), dict) else {}
+            ext_entry_raw = ext_agents.get(slug)
+            ext_entry: dict[str, Any] = (
+                ext_entry_raw if isinstance(ext_entry_raw, dict) else {}
             )
-            ext_adapter = (
-                ext_entry.get("adapter")
-                if isinstance(ext_entry.get("adapter"), dict)
-                else {}
+            ext_adapter_raw = ext_entry.get("adapter")
+            ext_adapter: dict[str, Any] = (
+                ext_adapter_raw if isinstance(ext_adapter_raw, dict) else {}
             )
-            ext_cfg = (
-                ext_adapter.get("config")
-                if isinstance(ext_adapter.get("config"), dict)
-                else {}
+            ext_cfg_raw = ext_adapter.get("config")
+            ext_cfg: dict[str, Any] = (
+                ext_cfg_raw if isinstance(ext_cfg_raw, dict) else {}
             )
 
             bundle: dict[str, str] = {}
@@ -272,7 +284,7 @@ class OrganizationImportService:
 
         # Validate models before any writes so we fail fast and atomically-ish.
         for agent in manifest["agents"]:
-            eff_runtime = agent["runtimeType"] or runtime_type
+            eff_runtime = _agent_runtime_type(agent["runtimeType"] or runtime_type)
             eff_model = model or agent["model"]
             if eff_runtime in _PROVIDER_MODEL_RUNTIMES and (
                 not eff_model or "/" not in eff_model
@@ -344,7 +356,7 @@ class OrganizationImportService:
         slug_to_id: dict[str, str] = {}
         created_agents: list[dict[str, Any]] = []
         for agent in manifest["agents"]:
-            eff_runtime = agent["runtimeType"] or runtime_type
+            eff_runtime = _agent_runtime_type(agent["runtimeType"] or runtime_type)
             eff_model = model or agent["model"]
             desired: list[str] = []
             for skill_ref in agent["skills"]:
@@ -362,7 +374,7 @@ class OrganizationImportService:
                         f"Agent '{agent['slug']}' references skill '{skill_ref}' "
                         "not present in imported skills; not enabled."
                     )
-            payload: dict[str, Any] = {
+            agent_payload: CreateAgentPayload = {
                 "role": agent["role"],
                 "name": agent["name"],
                 "title": agent["title"],
@@ -372,7 +384,9 @@ class OrganizationImportService:
                 "budgetMonthlyCents": 0,
                 "desiredSkills": desired,
             }
-            created = await self._agents.create_agent(resolved_org_id, payload, **actor)
+            created = await self._agents.create_agent(
+                resolved_org_id, agent_payload, **actor
+            )
             agent_id = created["id"]
             slug_to_id[agent["slug"]] = agent_id
             await self._instructions.materialize_external_bundle(
@@ -412,7 +426,7 @@ class OrganizationImportService:
         created_projects: list[dict[str, Any]] = []
         for project in manifest["projects"]:
             try:
-                payload = {
+                project_payload: CreateProjectPayload = {
                     "name": project["name"],
                     "description": project["description"],
                 }
@@ -422,9 +436,9 @@ class OrganizationImportService:
                     else None
                 )
                 if lead_id:
-                    payload["leadAgentId"] = lead_id
+                    project_payload["leadAgentId"] = lead_id
                 created = await self._projects.create_project(
-                    resolved_org_id, payload, **actor
+                    resolved_org_id, project_payload, **actor
                 )
                 created_projects.append(
                     {
