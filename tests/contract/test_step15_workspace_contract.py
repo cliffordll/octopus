@@ -4,11 +4,13 @@ import asyncio
 import importlib
 import importlib.util
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import cast
 import uuid
 
+import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -32,6 +34,36 @@ from server.services.heartbeat import HeartbeatService
 from server.services.issues import IssueService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
+from packages.shared.validators.workspace import (
+    validate_issue_execution_workspace_settings,
+    validate_project_execution_workspace_policy,
+)
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _init_repo_with_branch(path: Path, branch: str) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", str(path)], check=True, capture_output=True, text=True
+    )
+    _git(path, "config", "user.name", "Octopus Test")
+    _git(path, "config", "user.email", "octopus-test@example.invalid")
+    path.joinpath("README.md").write_text("# Test repo\n", encoding="utf-8")
+    _git(path, "add", "README.md")
+    _git(path, "commit", "-m", "initial")
+    _git(path, "branch", "-M", branch)
+
+
+def _git_path_text(path: Path) -> str:
+    return path.resolve().as_posix()
 
 
 def test_workspace_contract_modules_are_defined() -> None:
@@ -57,6 +89,39 @@ def test_workspace_contract_modules_are_defined() -> None:
     )
     assert payload["status"] == "idle"
     assert payload["metadata"] == {"reason": "reuse"}
+
+
+def test_workspace_policy_validators_normalize_three_mode_contract() -> None:
+    project_policy = validate_project_execution_workspace_policy(
+        {
+            "enabled": True,
+            "defaultMode": "isolated",
+            "allowIssueOverride": True,
+            "workspaceStrategy": {
+                "mode": "operator_branch",
+                "baseRef": "main",
+                "branchTemplate": "octopus/{issueIdentifier}",
+                "operatorBranch": "feature/full-stack",
+            },
+            "branchPolicy": {"operatorBranch": "feature/full-stack"},
+        }
+    )
+
+    project_policy_dict = cast(dict[str, object], project_policy)
+    project_strategy = cast(dict[str, object], project_policy_dict["workspaceStrategy"])
+    assert project_policy_dict["defaultMode"] == "isolated_workspace"
+    assert project_strategy["type"] == "git_worktree"
+    assert project_strategy["mode"] == "operator_branch"
+    assert project_strategy["operatorBranch"] == "feature/full-stack"
+
+    issue_settings = validate_issue_execution_workspace_settings(
+        {"mode": "project_primary", "workspaceStrategy": {"mode": "shared_workspace"}}
+    )
+
+    issue_settings_dict = cast(dict[str, object], issue_settings)
+    issue_strategy = cast(dict[str, object], issue_settings_dict["workspaceStrategy"])
+    assert issue_settings_dict["mode"] == "shared_workspace"
+    assert issue_strategy["type"] == "project_primary"
 
 
 def test_workspace_tables_match_upstream_step15_scope() -> None:
@@ -142,7 +207,7 @@ async def test_project_detail_includes_workspace_aggregation() -> None:
                 {
                     "name": "Main",
                     "cwd": "D:/work/main",
-                    "repoUrl": "https://example.test/org/repo.git",
+                    "repoUrl": None,
                     "repoRef": "main",
                 },
                 actor_type="user",
@@ -216,7 +281,10 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
     assert workspace["sourceIssueId"] == issue.id
     assert workspace["mode"] == "isolated_workspace"
-    assert workspace["strategyType"] == "git_worktree"
+    assert workspace["strategyType"] == "local_fs"
+    assert workspace["providerType"] == "local_fs"
+    assert workspace["metadata"] is not None
+    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
 
 
 async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -> None:
@@ -289,9 +357,270 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(project_cwd)
 
 
+async def test_shared_workspace_preflight_does_not_switch_project_branch(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "step-29-plugins")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-shared-branch-guard",
+                name="Step 15 Shared Branch Guard",
+                issue_prefix="SBG",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Shared Branch Guard",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Do not switch shared workspace branch",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-shared-branch-guard",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            with pytest.raises(ValueError, match="Shared workspace branch mismatch"):
+                await WorkspaceService(session).prepare_runtime_context_for_run(
+                    run.id, run.context_snapshot
+                )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert _git(project_cwd, "branch", "--show-current").stdout.strip() == (
+        "step-29-plugins"
+    )
+
+
+async def test_isolated_workspace_directory_is_a_real_git_worktree(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-real-worktree-contract",
+                name="Step 15 Real Worktree Contract",
+                issue_prefix="RWT",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Real Worktree Contract",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                        "workspaceStrategy": {
+                            "type": "git_worktree",
+                            "baseRef": "main",
+                        },
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use a real git worktree",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-real-worktree-contract",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["providerType"] == "git_worktree"
+    worktree_cwd = Path(workspace["cwd"]).resolve()
+    assert (
+        _git(worktree_cwd, "rev-parse", "--is-inside-work-tree").stdout.strip()
+        == "true"
+    )
+    assert (
+        Path(
+            _git(worktree_cwd, "rev-parse", "--show-toplevel").stdout.strip()
+        ).resolve()
+        == worktree_cwd
+    )
+    assert (
+        _git_path_text(worktree_cwd)
+        in _git(project_cwd, "worktree", "list", "--porcelain").stdout
+    )
+
+
+async def test_isolated_workspace_reuses_existing_issue_worktree(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-reuse-worktree",
+                name="Step 15 Reuse Worktree",
+                issue_prefix="RWT",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Reuse Worktree",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                        "workspaceStrategy": {
+                            "type": "git_worktree",
+                            "baseRef": "main",
+                        },
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Reuse the issue worktree",
+            )
+            session.add(issue)
+            await session.flush()
+            run_one = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-reuse-worktree",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run_one)
+            await session.flush()
+            first_context = await WorkspaceService(
+                session
+            ).prepare_runtime_context_for_run(run_one.id, run_one.context_snapshot)
+            assert first_context is not None
+            first_workspace = first_context["workspace"]["rudderWorkspace"]
+            Path(first_workspace["cwd"], "generated.md").write_text(
+                "# generated\n", encoding="utf-8"
+            )
+            run_two = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-reuse-worktree",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run_two)
+            await session.flush()
+            second_context = await WorkspaceService(
+                session
+            ).prepare_runtime_context_for_run(run_two.id, run_two.context_snapshot)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert second_context is not None
+    second_workspace = second_context["workspace"]["rudderWorkspace"]
+    assert first_workspace["id"] == second_workspace["id"]
+    assert first_workspace["cwd"] == second_workspace["cwd"]
+    assert Path(second_workspace["cwd"], "generated.md").is_file()
+    assert _git(project_cwd, "branch", "--show-current").stdout.strip() == "main"
+    assert (
+        _git_path_text(Path(second_workspace["cwd"]))
+        in _git(project_cwd, "worktree", "list", "--porcelain").stdout
+    )
+
+
 async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) -> None:
     project_cwd = tmp_path / "mytest"
-    project_cwd.mkdir()
+    _init_repo_with_branch(project_cwd, "main")
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -313,7 +642,10 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
                     "executionWorkspacePolicy": {
                         "enabled": True,
                         "defaultMode": "operator_branch",
-                        "workspaceStrategy": {"mode": "operator_branch"},
+                        "workspaceStrategy": {
+                            "mode": "operator_branch",
+                            "operatorBranch": "feature/full-stack",
+                        },
                     },
                 },
                 actor_type="user",
@@ -361,8 +693,8 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
 
     assert context is not None
     workspace = context["workspace"]["rudderWorkspace"]
-    expected_branch = f"octopus/{issue['identifier']}"
-    expected_cwd = project_cwd / ".octopus" / "worktrees" / "octopus-OPW-1"
+    expected_branch = "feature/full-stack"
+    expected_cwd = project_cwd / ".octopus" / "worktrees" / "feature-full-stack"
     assert workspace["mode"] == "operator_branch"
     assert workspace["strategyType"] == "git_worktree"
     assert workspace["providerType"] == "git_worktree"
@@ -378,6 +710,279 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
         == "https://github.com/cliffordll/mytest.git"
     )
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_BRANCH"] == expected_branch
+    assert workspace["sourceIssueId"] is None
+    assert workspace["metadata"]["operatorWorkspace"] is True
+
+
+async def test_operator_branch_reuses_fixed_project_worktree_for_multiple_issues(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "mytest"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-operator-reuse",
+                name="Step 15 Operator Reuse",
+                issue_prefix="OPR",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Operator Reuse Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                        "branchPolicy": {"operatorBranch": "feature/full-stack"},
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "sourceType": "git_repo",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue_one = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Server work",
+            )
+            issue_two = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="UI work",
+            )
+            session.add_all([issue_one, issue_two])
+            await session.flush()
+            run_one = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-operator-reuse",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue_one.id},
+            )
+            run_two = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-operator-reuse",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue_two.id},
+            )
+            session.add_all([run_one, run_two])
+            await session.flush()
+            context_one = await WorkspaceService(
+                session
+            ).prepare_runtime_context_for_run(run_one.id, run_one.context_snapshot)
+            context_two = await WorkspaceService(
+                session
+            ).prepare_runtime_context_for_run(run_two.id, run_two.context_snapshot)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context_one is not None
+    assert context_two is not None
+    workspace_one = context_one["workspace"]["rudderWorkspace"]
+    workspace_two = context_two["workspace"]["rudderWorkspace"]
+    assert workspace_one["id"] == workspace_two["id"]
+    assert workspace_one["cwd"] == workspace_two["cwd"]
+    assert workspace_one["branchName"] == "feature/full-stack"
+    assert workspace_two["branchName"] == "feature/full-stack"
+    assert _git(project_cwd, "branch", "--show-current").stdout.strip() == "main"
+    assert (
+        _git_path_text(Path(workspace_one["cwd"]))
+        in _git(project_cwd, "worktree", "list", "--porcelain").stdout
+    )
+
+
+async def test_repo_url_only_shared_workspace_creates_managed_checkout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_repo = tmp_path / "source-repo"
+    _init_repo_with_branch(source_repo, "main")
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-managed-shared",
+                name="Step 15 Managed Shared",
+                issue_prefix="MGS",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Managed Shared",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Remote Only",
+                    "cwd": None,
+                    "repoUrl": str(source_repo),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use managed checkout",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-managed-shared",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            detail = await project_service.get_by_id(project["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert project_workspace is not None
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    expected_checkout = org_root / "projects" / project["id"][:8] / "checkout"
+    assert workspace["mode"] == "shared_workspace"
+    assert workspace["strategyType"] == "project_primary"
+    assert workspace["cwd"] == str(expected_checkout)
+    assert (
+        _git(expected_checkout, "rev-parse", "--is-inside-work-tree").stdout.strip()
+        == "true"
+    )
+    assert detail is not None
+    assert detail["primaryWorkspace"] is not None
+    assert detail["primaryWorkspace"]["cwd"] == str(expected_checkout)
+
+
+async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_checkout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_repo = tmp_path / "source-repo"
+    _init_repo_with_branch(source_repo, "main")
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-managed-isolated",
+                name="Step 15 Managed Isolated",
+                issue_prefix="MGI",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Managed Isolated",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Remote Only",
+                    "cwd": None,
+                    "repoUrl": str(source_repo),
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use managed checkout worktree",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-managed-isolated",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    managed_checkout = org_root / "projects" / project["id"][:8] / "checkout"
+    assert workspace["providerType"] == "git_worktree"
+    assert workspace["metadata"]["sourceWorkspaceCwd"] == str(managed_checkout)
+    assert (
+        _git(
+            Path(workspace["cwd"]), "rev-parse", "--is-inside-work-tree"
+        ).stdout.strip()
+        == "true"
+    )
+    assert _git(managed_checkout, "branch", "--show-current").stdout.strip() == "main"
 
 
 async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
@@ -560,7 +1165,7 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
                 {
                     "name": "Remote Metadata Only",
                     "cwd": None,
-                    "repoUrl": "https://example.test/org/repo.git",
+                    "repoUrl": None,
                     "repoRef": "main",
                 },
                 actor_type="user",
@@ -902,6 +1507,194 @@ async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
     assert expected_cwd.is_dir()
     assert run["contextSnapshot"] is not None
     assert run["contextSnapshot"]["workspaceFallback"] == "agent_heartbeat_workspace"
+
+
+async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-workspace-lease",
+                name="Step 15 Workspace Lease",
+                issue_prefix="LSE",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Workspace Lease Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                        "branchPolicy": {"operatorBranch": "feature/full-stack"},
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue_one = Issue(org_id=org.id, project_id=project["id"], title="One")
+            issue_two = Issue(org_id=org.id, project_id=project["id"], title="Two")
+            session.add_all([issue_one, issue_two])
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace_one = await service.resolve_for_issue(issue_one)
+            workspace_two = await service.resolve_for_issue(issue_two)
+            assert workspace_one is not None
+            assert workspace_two is not None
+            assert workspace_one["id"] == workspace_two["id"]
+            await service.begin_operation(
+                org_id=org.id,
+                run_id="run-one",
+                execution_workspace_id=workspace_one["id"],
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace_one["cwd"],
+                metadata={"adapterExecution": True},
+            )
+            with pytest.raises(ValueError, match="already leased"):
+                await service.begin_operation(
+                    org_id=org.id,
+                    run_id="run-two",
+                    execution_workspace_id=workspace_two["id"],
+                    phase="workspace_provision",
+                    command="runtime_adapter.execute",
+                    cwd=workspace_two["cwd"],
+                    metadata={"adapterExecution": True},
+                )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def test_workspace_archive_blocks_running_adapter_operation(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-archive-running",
+                name="Step 15 Archive Running",
+                issue_prefix="ARC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Archive Running Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(org_id=org.id, project_id=project["id"], title="Archive")
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            await service.begin_operation(
+                org_id=org.id,
+                run_id="run-one",
+                execution_workspace_id=workspace["id"],
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace["cwd"],
+                metadata={"adapterExecution": True},
+            )
+            with pytest.raises(ValueError, match="adapter operation is running"):
+                await service.update_execution_workspace(
+                    workspace["id"], {"status": "archived"}
+                )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def test_workspace_archive_blocks_dirty_git_worktree(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-archive-dirty",
+                name="Step 15 Archive Dirty",
+                issue_prefix="ARD",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Archive Dirty Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(org_id=org.id, project_id=project["id"], title="Archive")
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            workspace = await service._ensure_managed_workspace_paths(workspace)
+            assert workspace["cwd"] is not None
+            Path(workspace["cwd"], "dirty.md").write_text("dirty\n", encoding="utf-8")
+            with pytest.raises(ValueError, match="uncommitted changes"):
+                await service.update_execution_workspace(
+                    workspace["id"], {"status": "archived"}
+                )
+            await session.commit()
+    finally:
+        await engine.dispose()
 
 
 async def test_adapter_runtime_services_are_persisted_and_released(
