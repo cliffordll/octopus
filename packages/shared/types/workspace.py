@@ -24,8 +24,10 @@ from packages.shared.constants.workspace import (
 
 class ExecutionWorkspaceStrategy(TypedDict, total=False):
     type: ExecutionWorkspaceStrategyType
+    mode: str | None
     baseRef: str | None
     branchTemplate: str | None
+    operatorBranch: str | None
     worktreeParentDir: str | None
     provisionCommand: str | None
     teardownCommand: str | None

@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Literal
 
 ExecutionWorkspaceStrategyType = Literal[
-    "project_primary", "git_worktree", "adapter_managed", "cloud_sandbox"
+    "project_primary", "git_worktree", "local_fs", "adapter_managed", "cloud_sandbox"
 ]
 EXECUTION_WORKSPACE_STRATEGY_TYPES: tuple[ExecutionWorkspaceStrategyType, ...] = (
     "project_primary",
     "git_worktree",
+    "local_fs",
     "adapter_managed",
     "cloud_sandbox",
 )
@@ -47,6 +48,7 @@ ExecutionWorkspaceProviderType = Literal[
 EXECUTION_WORKSPACE_PROVIDER_TYPES: tuple[ExecutionWorkspaceProviderType, ...] = (
     "local_fs",
     "git_worktree",
+    "local_fs",
     "adapter_managed",
     "cloud_sandbox",
 )

@@ -12,6 +12,7 @@ from ..constants.project import (
     PROJECT_RESOURCE_ATTACHMENT_ROLES,
     PROJECT_STATUSES,
 )
+from .workspace import validate_project_execution_workspace_policy
 from ..types.project import (
     CreateProjectInlineResourceInput,
     CreateProjectPayload,
@@ -195,6 +196,11 @@ def _validate_project_fields(
     ):
         if not isinstance(payload["executionWorkspacePolicy"], dict):
             raise ValueError("'executionWorkspacePolicy' must be an object or null")
+        result["executionWorkspacePolicy"] = (
+            validate_project_execution_workspace_policy(
+                payload["executionWorkspacePolicy"]
+            )
+        )
     if "archivedAt" in payload and payload["archivedAt"] is not None:
         try:
             datetime.fromisoformat(str(payload["archivedAt"]).replace("Z", "+00:00"))

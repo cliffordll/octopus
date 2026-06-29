@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,9 +27,11 @@ from packages.database.queries.workspaces import (
     list_issue_work_products,
     list_project_workspaces,
     list_running_workspace_operations_for_run,
+    list_workspace_operations_for_execution_workspace,
     list_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
+    update_project_workspace,
     update_issue_work_product,
     update_workspace_operation,
     update_workspace_runtime_service,
@@ -52,6 +55,10 @@ from server.storage import get_storage_service
 from packages.shared.types.workspace import WorkspaceOperation as WorkspaceOperationData
 from packages.shared.types.workspace import (
     WorkspaceRuntimeService as RuntimeServiceData,
+)
+from packages.shared.validators.workspace import (
+    validate_issue_execution_workspace_settings,
+    validate_project_execution_workspace_policy,
 )
 
 from .logs import (
@@ -208,49 +215,14 @@ def _parse_project_policy(value: Any) -> dict[str, Any] | None:
     parsed = _as_record(value)
     if not parsed:
         return None
-    default_mode = parsed.get("defaultMode")
-    if default_mode == "project_primary":
-        default_mode = "shared_workspace"
-    if default_mode == "isolated":
-        default_mode = "isolated_workspace"
-    return {
-        "enabled": bool(parsed.get("enabled")),
-        **({"defaultMode": default_mode} if isinstance(default_mode, str) else {}),
-        **(
-            {"allowIssueOverride": parsed["allowIssueOverride"]}
-            if isinstance(parsed.get("allowIssueOverride"), bool)
-            else {}
-        ),
-        **(
-            {"defaultProjectWorkspaceId": parsed["defaultProjectWorkspaceId"]}
-            if isinstance(parsed.get("defaultProjectWorkspaceId"), str)
-            else {}
-        ),
-        **(
-            {"workspaceStrategy": parsed["workspaceStrategy"]}
-            if isinstance(parsed.get("workspaceStrategy"), dict)
-            else {}
-        ),
-    }
+    return dict(validate_project_execution_workspace_policy(parsed))
 
 
 def _parse_issue_settings(value: Any) -> dict[str, Any] | None:
     parsed = _as_record(value)
     if not parsed:
         return None
-    mode = parsed.get("mode")
-    if mode == "project_primary":
-        mode = "shared_workspace"
-    if mode == "isolated":
-        mode = "isolated_workspace"
-    result: dict[str, Any] = {}
-    if isinstance(mode, str):
-        result["mode"] = mode
-    if isinstance(parsed.get("workspaceStrategy"), dict):
-        result["workspaceStrategy"] = parsed["workspaceStrategy"]
-    if isinstance(parsed.get("workspaceRuntime"), dict):
-        result["workspaceRuntime"] = parsed["workspaceRuntime"]
-    return result or None
+    return dict(validate_issue_execution_workspace_settings(parsed)) or None
 
 
 def _resolve_mode(
@@ -327,12 +299,199 @@ def _render_branch_template(template: str, *, issue: Issue) -> str:
 
 
 def _default_workspace_branch(*, issue: Issue) -> str:
-    identifier = _safe_branch_suffix(str(getattr(issue, "identifier", "") or issue.id))
+    fallback = str(issue.id)[:8] if issue.id else "workspace"
+    identifier = _safe_branch_suffix(str(getattr(issue, "identifier", "") or fallback))
     return f"octopus/{identifier}"
+
+
+def _operator_branch_name(
+    *, project_policy: dict[str, Any] | None, strategy: dict[str, Any]
+) -> str:
+    branch_policy = cast(
+        dict[str, Any],
+        project_policy.get("branchPolicy")
+        if project_policy and isinstance(project_policy.get("branchPolicy"), dict)
+        else {},
+    )
+    configured = (
+        _string(strategy.get("operatorBranch"))
+        or _string(branch_policy.get("operatorBranch"))
+        or _string(strategy.get("branchName"))
+    )
+    return configured or "octopus/operator"
 
 
 def _worktree_path(*, parent: Path, branch_name: str) -> Path:
     return parent / _safe_branch_suffix(branch_name)
+
+
+def _normalize_ref_name(value: str) -> str:
+    ref = value.strip()
+    for prefix in ("refs/heads/", "origin/"):
+        if ref.startswith(prefix):
+            ref = ref[len(prefix) :]
+    return ref
+
+
+def _current_git_branch(cwd: Path) -> str | None:
+    try:
+        inside = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--is-inside-work-tree"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return None
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(cwd), "branch", "--show-current"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if branch.returncode != 0:
+        return None
+    return branch.stdout.strip() or None
+
+
+def _ensure_shared_workspace_branch_matches(workspace: ExecutionWorkspaceData) -> None:
+    if (
+        workspace["mode"] != "shared_workspace"
+        or workspace["strategyType"] != "project_primary"
+    ):
+        return
+    expected = _string(workspace["baseRef"])
+    cwd = _string(workspace["cwd"])
+    if not expected or not cwd:
+        return
+    actual = _current_git_branch(Path(cwd))
+    if actual is None:
+        return
+    normalized_expected = _normalize_ref_name(expected)
+    if _normalize_ref_name(actual) != normalized_expected:
+        raise ValueError(
+            "Shared workspace branch mismatch: expected "
+            f"'{normalized_expected}' but current branch is '{actual}'. "
+            "Octopus will not switch the project main worktree branch automatically."
+        )
+
+
+def _run_git(
+    cwd: Path, *args: str, timeout: int = 20
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _require_git_success(
+    cwd: Path, *args: str, timeout: int = 20
+) -> subprocess.CompletedProcess[str]:
+    result = _run_git(cwd, *args, timeout=timeout)
+    if result.returncode != 0:
+        command = "git -C <repo> " + " ".join(args)
+        detail = (result.stderr or result.stdout or "Git command failed").strip()
+        raise ValueError(f"{command} failed: {detail}")
+    return result
+
+
+def _is_git_worktree(path: Path) -> bool:
+    if not path.exists():
+        return False
+    result = _run_git(path, "rev-parse", "--is-inside-work-tree")
+    if result.returncode != 0 or result.stdout.strip() != "true":
+        return False
+    top_level = _run_git(path, "rev-parse", "--show-toplevel")
+    if top_level.returncode != 0:
+        return False
+    try:
+        return Path(top_level.stdout.strip()).resolve() == path.resolve()
+    except OSError:
+        return False
+
+
+def _branch_exists(repo: Path, branch_name: str) -> bool:
+    result = _run_git(
+        repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"
+    )
+    return result.returncode == 0
+
+
+def _is_git_repository(path: Path) -> bool:
+    result = _run_git(path, "rev-parse", "--is-inside-work-tree")
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _git_worktree_source_available(project_cwd: str | None) -> bool:
+    if not project_cwd:
+        return False
+    try:
+        return _is_git_repository(Path(project_cwd))
+    except OSError:
+        return False
+
+
+def _ensure_git_worktree(workspace: ExecutionWorkspaceData) -> None:
+    cwd_value = _string(workspace["cwd"])
+    branch_name = _string(workspace["branchName"])
+    metadata = workspace.get("metadata") or {}
+    source_cwd = (
+        _string(metadata.get("sourceWorkspaceCwd"))
+        if isinstance(metadata, dict)
+        else None
+    )
+    base_ref = _string(workspace["baseRef"]) or "HEAD"
+    if not cwd_value or not branch_name or not source_cwd:
+        raise ValueError(
+            "Git worktree workspace is missing cwd, branchName, or sourceWorkspaceCwd"
+        )
+    worktree = Path(cwd_value).resolve()
+    source_repo = Path(source_cwd).resolve()
+    _require_git_success(source_repo, "rev-parse", "--is-inside-work-tree")
+    if _is_git_worktree(worktree):
+        current = _current_git_branch(worktree)
+        if current and _normalize_ref_name(current) != _normalize_ref_name(branch_name):
+            raise ValueError(
+                "Existing worktree branch mismatch: expected "
+                f"'{branch_name}' but current branch is '{current}'."
+            )
+        return
+    if worktree.exists() and any(worktree.iterdir()):
+        raise ValueError(
+            f"Git worktree path '{worktree}' exists but is not an empty Git worktree"
+        )
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    if _branch_exists(source_repo, branch_name):
+        result = _run_git(
+            source_repo, "worktree", "add", str(worktree), branch_name, timeout=60
+        )
+    else:
+        result = _run_git(
+            source_repo,
+            "worktree",
+            "add",
+            "-b",
+            branch_name,
+            str(worktree),
+            base_ref,
+            timeout=60,
+        )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git worktree add failed").strip()
+        raise ValueError(f"Failed to prepare Git worktree '{worktree}': {detail}")
+    if not _is_git_worktree(worktree):
+        raise ValueError(f"Prepared path '{worktree}' is not a Git worktree")
 
 
 class WorkspaceService:
@@ -369,6 +528,8 @@ class WorkspaceService:
     async def update_execution_workspace(
         self, workspace_id: str, fields: dict[str, Any]
     ) -> ExecutionWorkspaceData | None:
+        if fields.get("status") == "archived":
+            await self._ensure_workspace_can_archive(workspace_id)
         values = {
             "status": fields["status"] if "status" in fields else None,
             "cleanup_eligible_at": _parse_datetime(fields.get("cleanupEligibleAt"))
@@ -437,7 +598,15 @@ class WorkspaceService:
             issue_settings=issue_settings,
         )
         fallback_cwd: str | None = None
-        project_cwd = _string(project_workspace.cwd) if project_workspace else None
+        project_cwd = (
+            await self._ensure_project_checkout(
+                org_id=issue.org_id,
+                project_id=project.id,
+                project_workspace=project_workspace,
+            )
+            if project_workspace is not None
+            else None
+        )
         project_repo_url = (
             _string(project_workspace.repo_url) if project_workspace else None
         )
@@ -476,17 +645,27 @@ class WorkspaceService:
             execution_base_ref = project_base_ref
         elif strategy_type == "git_worktree":
             branch_template = _string(strategy.get("branchTemplate"))
-            execution_branch_name = (
-                _render_branch_template(branch_template, issue=issue)
-                if branch_template
-                else _default_workspace_branch(issue=issue)
-            )
+            if mode == "operator_branch":
+                execution_branch_name = _operator_branch_name(
+                    project_policy=project_policy, strategy=strategy
+                )
+                execution_metadata["operatorWorkspace"] = True
+            else:
+                execution_branch_name = (
+                    _render_branch_template(branch_template, issue=issue)
+                    if branch_template
+                    else _default_workspace_branch(issue=issue)
+                )
             worktree_parent_value = _string(strategy.get("worktreeParentDir"))
-            worktree_parent = (
-                Path(worktree_parent_value)
-                if worktree_parent_value
-                else Path(project_cwd) / ".octopus" / "worktrees"
-            )
+            if worktree_parent_value:
+                worktree_parent = Path(worktree_parent_value)
+            else:
+                source_path = Path(project_cwd)
+                worktree_parent = (
+                    source_path.parent / "worktrees"
+                    if source_path.name == "checkout"
+                    else source_path / ".octopus" / "worktrees"
+                )
             execution_cwd = str(
                 _worktree_path(
                     parent=worktree_parent, branch_name=execution_branch_name
@@ -500,6 +679,25 @@ class WorkspaceService:
                     "sourceWorkspaceRepoUrl": project_repo_url,
                 }
             )
+            if not _git_worktree_source_available(project_cwd):
+                if mode == "operator_branch" or project_repo_url:
+                    raise ValueError(
+                        "Git worktree mode requires the project cwd to be an existing Git repository. "
+                        "Octopus will not create a fake git_worktree directory."
+                    )
+                strategy_type = "local_fs"
+                execution_repo_url = None
+                execution_base_ref = None
+                execution_branch_name = None
+                execution_metadata.update(
+                    {
+                        "fallback": "local_fs_execution_workspace",
+                        "warnings": [
+                            "Project workspace is not a Git repository. "
+                            "Run will use a local_fs execution workspace instead of a fake git_worktree."
+                        ],
+                    }
+                )
         if fallback_cwd is not None:
             execution_cwd = fallback_cwd
             execution_metadata.update(
@@ -514,15 +712,14 @@ class WorkspaceService:
             project_workspace_id=project_workspace_id,
             issue_id=issue.id,
             mode=mode,
+            branch_name=execution_branch_name,
         )
         row = existing or reusable
         workspace_fields = {
             "org_id": issue.org_id,
             "project_id": project.id,
             "project_workspace_id": project_workspace_id,
-            "source_issue_id": issue.id
-            if mode in {"isolated_workspace", "operator_branch"}
-            else None,
+            "source_issue_id": issue.id if mode == "isolated_workspace" else None,
             "mode": mode,
             "strategy_type": strategy_type,
             "name": f"{project.name} workspace",
@@ -559,6 +756,58 @@ class WorkspaceService:
         )
         return self._to_execution_workspace(row)
 
+    async def _ensure_project_checkout(
+        self,
+        *,
+        org_id: str,
+        project_id: str,
+        project_workspace: Any,
+    ) -> str | None:
+        cwd = _string(project_workspace.cwd)
+        if cwd:
+            return cwd
+        repo_url = _string(project_workspace.repo_url)
+        if not repo_url:
+            return None
+        checkout = (
+            self._org_workspace_root(org_id)
+            / "projects"
+            / _safe_branch_suffix(project_id[:8])
+            / "checkout"
+        ).resolve()
+        if checkout.exists():
+            if _is_git_repository(checkout):
+                await update_project_workspace(
+                    self._session, project_workspace.id, {"cwd": str(checkout)}
+                )
+                return str(checkout)
+            if any(checkout.iterdir()):
+                raise ValueError(
+                    f"Managed project checkout path '{checkout}' exists but is not a Git repository"
+                )
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        ref = _string(project_workspace.default_ref) or _string(
+            project_workspace.repo_ref
+        )
+        args = ["clone"]
+        if ref:
+            args.extend(["--branch", ref])
+        args.extend([repo_url, str(checkout)])
+        result = subprocess.run(
+            ["git", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "git clone failed").strip()
+            raise ValueError(f"Failed to prepare managed project checkout: {detail}")
+        await update_project_workspace(
+            self._session, project_workspace.id, {"cwd": str(checkout)}
+        )
+        return str(checkout)
+
     async def prepare_runtime_context_for_run(
         self, run_id: str, context_snapshot: dict[str, Any] | None
     ) -> dict[str, Any] | None:
@@ -572,6 +821,7 @@ class WorkspaceService:
         workspace = await self.resolve_for_issue(issue)
         if workspace is None:
             return None
+        _ensure_shared_workspace_branch_matches(workspace)
         workspace = await self._ensure_managed_workspace_paths(workspace)
         services = await self.list_runtime_services_for_workspace(workspace["id"])
         org_root = self._org_workspace_root(issue.org_id)
@@ -1220,6 +1470,13 @@ class WorkspaceService:
         cwd: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> WorkspaceOperationData:
+        await self._ensure_workspace_write_lease_available(
+            execution_workspace_id=execution_workspace_id,
+            run_id=run_id,
+            phase=phase,
+            command=command,
+            metadata=metadata,
+        )
         row = await create_workspace_operation(
             self._session,
             {
@@ -1252,6 +1509,63 @@ class WorkspaceService:
         )
         assert row is not None
         return self._to_operation(row)
+
+    async def _ensure_workspace_can_archive(self, workspace_id: str) -> None:
+        row = await get_execution_workspace_by_id(self._session, workspace_id)
+        if row is None:
+            return
+        operations = await list_workspace_operations_for_execution_workspace(
+            self._session, workspace_id
+        )
+        for operation in operations:
+            metadata = operation.metadata_json or {}
+            if (
+                operation.status == "running"
+                and isinstance(metadata, dict)
+                and metadata.get("adapterExecution")
+            ):
+                raise ValueError(
+                    "Execution workspace cannot be archived while an adapter operation is running."
+                )
+        if row.provider_type == "git_worktree" and row.cwd:
+            cwd = Path(row.cwd)
+            if _is_git_worktree(cwd):
+                status = _run_git(cwd, "status", "--porcelain")
+                if status.returncode == 0 and status.stdout.strip():
+                    raise ValueError(
+                        "Execution workspace cannot be archived because the Git worktree has uncommitted changes."
+                    )
+
+    async def _ensure_workspace_write_lease_available(
+        self,
+        *,
+        execution_workspace_id: str | None,
+        run_id: str | None,
+        phase: str,
+        command: str | None,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        if (
+            execution_workspace_id is None
+            or phase != "workspace_provision"
+            or command != "runtime_adapter.execute"
+        ):
+            return
+        rows = await list_workspace_operations_for_execution_workspace(
+            self._session, execution_workspace_id
+        )
+        for row in rows:
+            if row.status != "running" or row.heartbeat_run_id == run_id:
+                continue
+            row_metadata = row.metadata_json or {}
+            if not isinstance(row_metadata, dict) or not row_metadata.get(
+                "adapterExecution"
+            ):
+                continue
+            raise ValueError(
+                "Execution workspace is already leased by running adapter operation "
+                f"{row.id} for run {row.heartbeat_run_id}."
+            )
 
     async def append_operation_log(
         self,
@@ -1386,7 +1700,10 @@ class WorkspaceService:
             )
             if row is not None:
                 workspace = self._to_execution_workspace(row)
-        worktree.mkdir(parents=True, exist_ok=True)
+        if workspace["providerType"] == "git_worktree":
+            _ensure_git_worktree(workspace)
+        else:
+            worktree.mkdir(parents=True, exist_ok=True)
         log_dir = worktree.parent / "logs"
         tmp_dir = worktree.parent / "tmp"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -1465,10 +1782,9 @@ class WorkspaceService:
         project_workspace_id: str | None,
         issue_id: str,
         mode: str,
+        branch_name: str | None,
     ) -> ExecutionWorkspace | None:
-        issue_scope = (
-            issue_id if mode in {"isolated_workspace", "operator_branch"} else None
-        )
+        issue_scope = issue_id if mode == "isolated_workspace" else None
         rows = await list_execution_workspaces(
             self._session,
             org_id,
@@ -1477,7 +1793,14 @@ class WorkspaceService:
             issue_id=issue_scope,
             reuse_eligible=True,
         )
-        return rows[0] if rows else None
+        for row in rows:
+            if row.mode != mode:
+                continue
+            if mode == "operator_branch" and branch_name is not None:
+                if row.branch_name != branch_name:
+                    continue
+            return row
+        return None
 
     def _to_execution_workspace(
         self, row: ExecutionWorkspace
