@@ -59,6 +59,7 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
         workspace_context.get("worktreePath") or workspace_context.get("cwd")
     )
     artifacts_dir = _string(workspace_context.get("orgArtifactsDir"))
+    git_write_policy = _string(workspace_context.get("gitWritePolicy"))
     workspace_artifacts_dir = (
         f"{worktree.rstrip('/\\\\')}/artifacts" if worktree else None
     )
@@ -76,6 +77,14 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     ]
     if worktree:
         lines.append(f"- Workspace worktree: `{worktree}`")
+    if git_write_policy == "read_only":
+        lines.extend(
+            [
+                "- Git write policy: `read_only`.",
+                "- Do not run Git commands that change branches, refs, the index, the working tree, or remotes.",
+                "- Do not bypass this policy by invoking Git through an absolute executable path or another process.",
+            ]
+        )
     if workspace_artifacts_dir:
         lines.append(f"- Workspace artifacts directory: `{workspace_artifacts_dir}`")
     elif artifacts_dir:

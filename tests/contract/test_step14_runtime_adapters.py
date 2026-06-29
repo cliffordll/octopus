@@ -2056,20 +2056,30 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         fake_create_subprocess_exec,
     )
 
+    def read_only_context(
+        *, command: str, config: dict[str, Any]
+    ) -> RuntimeExecutionContext:
+        context = _runtime_context_for_env(command=command, config=config)
+        assert context.env is not None
+        assert context.workspace is not None
+        context.env["OCTOPUS_GIT_WRITE_POLICY"] = "read_only"
+        context.workspace["rudderWorkspace"]["gitWritePolicy"] = "read_only"
+        return context
+
     await execute_claude_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="claude-shim-test",
             config={"command": "claude-shim-test"},
         )
     )
     await execute_opencode_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="opencode-shim-test",
             config={"command": "opencode-shim-test", "model": "openai/gpt-5"},
         )
     )
     await execute_codex_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="codex-shim-test",
             config={"command": "codex-shim-test"},
         )
@@ -2079,9 +2089,12 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         env = captured[command]
         path_entries = env["PATH"].split(os.pathsep)
         shim_dir = Path(path_entries[0])
+        assert env["OCTOPUS_GIT_WRITE_POLICY"] == "read_only"
         assert (shim_dir / "control-plane").is_file()
+        assert (shim_dir / "git").is_file()
         if os.name == "nt":
             assert (shim_dir / "control-plane.cmd").is_file()
+            assert (shim_dir / "git.cmd").is_file()
 
 
 async def test_opencode_execute_materializes_database_provider_config(

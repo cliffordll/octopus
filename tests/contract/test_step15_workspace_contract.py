@@ -6,6 +6,7 @@ import importlib.util
 import shutil
 import sys
 from pathlib import Path
+from typing import cast
 import uuid
 
 from sqlalchemy import Table, text
@@ -24,7 +25,7 @@ from packages.database.schema import (
     WorkspaceRuntimeService,
 )
 from packages.database.queries.workspaces import list_workspace_operations_for_run
-from packages.runtimes.types import RuntimeExecutionResult
+from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
@@ -793,6 +794,114 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env() -> Non
     assert context_snapshot["executionWorkspaceId"] == workspace["id"]
     result_json = run["resultJson"] or {}
     assert workspace["id"] in result_json["stdout"]
+
+
+async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingAdapter:
+        type = "process"
+
+        async def execute(self, context):
+            captured["context"] = context
+            return RuntimeExecutionResult(exit_code=0, result_json={"ok": True})
+
+        async def test_environment(self, config):
+            raise NotImplementedError
+
+        async def list_models(self):
+            return []
+
+        async def list_skills(self, config):
+            return {}
+
+        async def sync_skills(self, config, desired_skills):
+            return {}
+
+        async def get_metadata(self):
+            return {}
+
+        async def get_quota_windows(self):
+            return {}
+
+    monkeypatch.setattr(
+        runtime_registry,
+        "get_runtime_adapter",
+        lambda runtime_type: CapturingAdapter(),
+    )
+    import server.services.heartbeat as heartbeat_module
+
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda runtime_type: CapturingAdapter(),
+    )
+    org_root = tmp_path / "org-workspace"
+    sandbox_root = tmp_path / "heartbeat-sandbox"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    monkeypatch.setattr(
+        "server.services.workspaces.agent_heartbeat_workspace_root",
+        lambda org_id, workspace_key: (
+            sandbox_root / workspace_key / "heartbeat-workspace"
+        ),
+    )
+
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-heartbeat-sandbox",
+                name="Step 15 Heartbeat Sandbox",
+                issue_prefix="HBS",
+            )
+            session.add(org)
+            await session.flush()
+            agent = await AgentService(session).create_agent(
+                org.id,
+                {
+                    "name": "Heartbeat Sandbox Agent",
+                    "agentRuntimeType": "process",
+                    "agentRuntimeConfig": {"command": sys.executable},
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            run = await HeartbeatService(session).wakeup(
+                agent["id"],
+                {"payload": {"reason": "timer_without_issue"}},
+                actor_type="user",
+                actor_id="scheduler",
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+    context = cast(RuntimeExecutionContext, captured["context"])
+    expected_cwd = Path(context.config["cwd"])
+    assert expected_cwd.name == "heartbeat-workspace"
+    assert expected_cwd.parent.parent == sandbox_root
+    assert context.config["cwd"] == str(expected_cwd)
+    assert context.env is not None
+    assert context.env["OCTOPUS_GIT_WRITE_POLICY"] == "read_only"
+    assert context.workspace is not None
+    workspace = context.workspace["rudderWorkspace"]
+    assert workspace["cwd"] == str(expected_cwd)
+    assert workspace["mode"] == "agent_default"
+    assert workspace["strategyType"] == "adapter_managed"
+    assert workspace["gitWritePolicy"] == "read_only"
+    assert expected_cwd.is_dir()
+    assert run["contextSnapshot"] is not None
+    assert run["contextSnapshot"]["workspaceFallback"] == "agent_heartbeat_workspace"
 
 
 async def test_adapter_runtime_services_are_persisted_and_released(

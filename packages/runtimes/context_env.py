@@ -61,6 +61,11 @@ def apply_runtime_context_env(
     _set_env(env, "OCTOPUS_WORKSPACE_BRANCH", workspace_context.get("branchName"))
     _set_env(
         env,
+        "OCTOPUS_GIT_WRITE_POLICY",
+        workspace_context.get("gitWritePolicy"),
+    )
+    _set_env(
+        env,
         "OCTOPUS_WORKSPACE_WORKTREE_PATH",
         workspace_context.get("worktreePath"),
     )

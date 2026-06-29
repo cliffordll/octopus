@@ -88,6 +88,7 @@ class ExecutionWorkspace(TypedDict):
     baseRef: str | None
     branchName: str | None
     providerType: ExecutionWorkspaceProviderType
+    gitWritePolicy: NotRequired[str]
     providerRef: str | None
     derivedFromExecutionWorkspaceId: str | None
     lastUsedAt: str

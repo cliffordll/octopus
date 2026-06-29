@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from server.services.workspace_paths import (
+    agent_heartbeat_workspace_root,
     ensure_organization_workspace_root,
     ensure_octopus_run_log_dir,
     ensure_octopus_storage_dir,
@@ -260,3 +261,56 @@ def test_ensure_organization_workspace_does_not_merge_instance_org_container(
     assert canonical_root == organization_workspace_root("org-1")
     assert not (canonical_root / "other-org" / "artifacts" / "report.md").exists()
     assert legacy_other_org.read_text(encoding="utf-8") == "# Other\n"
+
+
+def test_heartbeat_workspace_uses_dedicated_sandbox_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sandbox_root = tmp_path / "sandboxes"
+    monkeypatch.setenv("OCTOPUS_SANDBOX_DIR", str(sandbox_root))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test-instance")
+
+    workspace = agent_heartbeat_workspace_root("org-1", "agent-1")
+
+    assert (
+        workspace
+        == (
+            sandbox_root
+            / "test-instance"
+            / "organizations"
+            / "org-1"
+            / "agents"
+            / "agent-1"
+            / "heartbeat-workspace"
+        ).resolve()
+    )
+
+
+def test_heartbeat_workspace_rejects_path_escape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OCTOPUS_SANDBOX_DIR", str(tmp_path / "sandboxes"))
+
+    for value in ("../../escape", "..\\..\\escape", "..", ""):
+        with pytest.raises(ValueError, match="Invalid agent workspace key"):
+            agent_heartbeat_workspace_root("org-1", value)
+
+
+def test_heartbeat_workspace_moves_outside_configured_git_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repo"
+    (repository / ".git").mkdir(parents=True)
+    safe_temp = tmp_path / "safe-temp"
+    safe_temp.mkdir()
+    monkeypatch.setenv("OCTOPUS_SANDBOX_DIR", str(repository / ".octopus"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "git-safe")
+    monkeypatch.setattr(
+        "server.services.workspace_paths.tempfile.gettempdir",
+        lambda: str(safe_temp),
+    )
+
+    workspace = agent_heartbeat_workspace_root("org-1", "agent-1")
+
+    assert workspace.is_relative_to(safe_temp)
+    assert not workspace.is_relative_to(repository)
