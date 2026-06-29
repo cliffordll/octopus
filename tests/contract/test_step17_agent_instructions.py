@@ -67,7 +67,10 @@ def test_subtask_coordination_instructions_require_child_execution() -> None:
     ).read_text(encoding="utf-8")
 
     for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
-        assert "must wait for those child issues to run and report back" in content
+        assert (
+            "must wait for those child issues to run and report back" in content
+            or "must wait for delegated child issues to run and report back" in content
+        )
         assert (
             "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
             in content

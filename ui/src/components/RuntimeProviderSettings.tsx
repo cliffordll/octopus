@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRuntimeType, RuntimeModel, RuntimeProvider, RuntimeProviderScope } from "../api/types";
@@ -8,13 +8,12 @@ import { ErrorNotice } from "./ErrorNotice";
 
 const DEFAULT_PROTOCOL = "openai_chat_completions";
 const PRICING_KEYS = ["inputCostPer1M", "outputCostPer1M"] as const;
-const DEFAULT_MODEL_RUNTIME_TYPE: AgentRuntimeType = "opencode_local";
-
+const SETTINGS_RUNTIME_TYPE: AgentRuntimeType = "opencode_local";
 const INSTANCE_PROVIDER_CONTEXT = "instance";
-
 export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: { orgId?: string }) {
   const english = isEnglishLocale();
   const queryClient = useQueryClient();
+  const runtimeType = SETTINGS_RUNTIME_TYPE;
   const [providerId, setProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -32,9 +31,10 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
 
   const providers = useQuery({
     queryKey: ["llm-providers", orgId],
-    queryFn: () => runtimeProvidersApi.listProviders(orgId, DEFAULT_MODEL_RUNTIME_TYPE),
+    queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
+    enabled: Boolean(orgId),
   });
-  const providerRows = sortProviders(Array.isArray(providers.data) ? providers.data : []);
+  const providerRows = Array.isArray(providers.data) ? providers.data : [];
 
   const createProvider = useMutation({
     mutationFn: () =>
@@ -62,7 +62,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
 
   const updateProvider = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateProvider(orgId, providerRuntimeType(editingProvider), editingProvider!.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, editingProvider!.providerId, {
         name: providerName.trim() || editingProvider!.providerId,
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
         baseUrl: baseUrl.trim() || null,
@@ -78,7 +78,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
 
   const toggleProvider = useMutation({
     mutationFn: (provider: RuntimeProvider) =>
-      runtimeProvidersApi.updateProvider(orgId, providerRuntimeType(provider), provider.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, provider.providerId, {
         enabled: provider.enabled === false,
       }),
     onSuccess: () => {
@@ -90,7 +90,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
   const createModel = useMutation({
     mutationFn: () => {
       const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
-      return runtimeProvidersApi.createModel(orgId, providerRuntimeType(provider), modelDialogProviderId, {
+      return runtimeProvidersApi.createModel(orgId, runtimeType, modelDialogProviderId, {
         scope: provider?.scope ?? "instance",
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
@@ -99,8 +99,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
       });
     },
     onSuccess: () => {
-      const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
-      const modelRuntimeType = providerRuntimeType(provider);
+      const modelRuntimeType = runtimeType;
       setModelId("");
       setModelName("");
       setModelDialogProviderId("");
@@ -118,7 +117,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
       }),
     onSuccess: () => {
       const providerId = editingModel?.providerId;
-      const modelRuntimeType = editingModel?.runtimeType ?? DEFAULT_MODEL_RUNTIME_TYPE;
+      const modelRuntimeType = editingModel?.runtimeType ?? runtimeType;
       clearModelForm();
       if (providerId) {
         void queryClient.invalidateQueries({ queryKey: ["runtime-models", orgId, modelRuntimeType, providerId] });
@@ -139,7 +138,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
   });
 
   const deleteProvider = useMutation({
-    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, providerRuntimeType(provider), provider.providerId),
+    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, runtimeType, provider.providerId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
@@ -266,7 +265,7 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
           <div className="runtime-provider-title-line">
             <h3>模型供应商</h3>
             <p className="muted">
-              {english ? "Manage global LLM providers and models." : "维护全局 LLM provider 和 model。"}
+              {english ? "Manage shared LLM providers and models for all runtimes." : "维护所有运行时共享的 LLM provider 和 model。"}
             </p>
           </div>
         </div>
@@ -286,15 +285,15 @@ export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: {
             <ProviderModelGroup
               key={provider.providerId}
               onCreateModel={() => openModelCreate(provider.providerId)}
-              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, providerRuntimeType(provider), model)}
+              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, runtimeType, model)}
               onDeleteProvider={() => confirmDeleteProvider(provider)}
-              onEditModel={(model) => openModelEdit(provider.providerId, providerRuntimeType(provider), model)}
+              onEditModel={(model) => openModelEdit(provider.providerId, runtimeType, model)}
               onEditProvider={() => openProviderEdit(provider)}
-              onToggleModel={(model) => toggleModelEnabled(provider.providerId, providerRuntimeType(provider), model)}
+              onToggleModel={(model) => toggleModelEnabled(provider.providerId, runtimeType, model)}
               onToggleProvider={() => toggleProvider.mutate(provider)}
               orgId={orgId}
               provider={provider}
-              runtimeType={providerRuntimeType(provider)}
+              runtimeType={runtimeType}
             />
           ))}
         </div>
@@ -581,7 +580,6 @@ function ProviderModelGroup({
     queryFn: () => runtimeProvidersApi.listModels(orgId, runtimeType, provider.providerId),
     enabled: Boolean(orgId && provider.providerId),
   });
-  const modelRows = Array.isArray(models.data) ? models.data : [];
   const providerName = provider.name || provider.providerId;
   const english = isEnglishLocale();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -663,7 +661,7 @@ function ProviderModelGroup({
         </div>
       </div>
       <div className="runtime-model-list compact">
-        {modelRows.map((model) => (
+        {(models.data ?? []).map((model) => (
           <article key={model.modelId}>
             <div className="runtime-model-row-content">
               <div className="runtime-model-row-main">
@@ -719,27 +717,6 @@ function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) 
   return "Organization";
 }
 
-function sortProviders(providers: RuntimeProvider[]) {
-  return [...providers].sort((left, right) => {
-    const leftTime = providerTimestamp(left);
-    const rightTime = providerTimestamp(right);
-    if (leftTime !== rightTime) return rightTime - leftTime;
-    const leftName = left.name || left.providerId;
-    const rightName = right.name || right.providerId;
-    return leftName.localeCompare(rightName, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
-}
-
-function providerTimestamp(provider: RuntimeProvider) {
-  return Date.parse(provider.updatedAt || provider.createdAt || "") || 0;
-}
-
-function providerRuntimeType(provider: RuntimeProvider | null | undefined): AgentRuntimeType {
-  return provider?.runtimeType ?? DEFAULT_MODEL_RUNTIME_TYPE;
-}
 
 function modelPricing(metadata: RuntimeModel["metadata"] | undefined) {
   const pricing = metadata?.pricing;

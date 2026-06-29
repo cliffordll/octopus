@@ -1,4 +1,4 @@
-export type OrganizationStatus = "active" | "paused" | "archived";
+﻿export type OrganizationStatus = "active" | "paused" | "archived";
 
 export interface OrganizationSummary {
   id: string;
@@ -1123,7 +1123,7 @@ export interface CreateRuntimeProviderPayload {
   enabled?: boolean;
 }
 
-export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "runtimeType" | "providerId">>;
+export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "providerId">>;
 
 export interface CreateRuntimeModelPayload {
   scope?: RuntimeProviderScope;
