@@ -1,0 +1,81 @@
+{
+  "id": "jira.connector",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Jira",
+  "description": "Integration contract fixture for issue import, project mapping, status mapping, comments, and webhooks.",
+  "author": "Octopus",
+  "categories": ["connector", "issue-tracking"],
+  "capabilities": [
+    "http.outbound",
+    "secrets.read-ref",
+    "plugin.state.read",
+    "plugin.state.write",
+    "issues.read",
+    "issues.create",
+    "issues.update",
+    "projects.read",
+    "agent.tools.register",
+    "webhooks.receive",
+    "ui.page.register",
+    "ui.detailTab.register",
+    "activity.log.write"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "instanceConfigSchema": {
+    "type": "object",
+    "required": ["baseUrl", "credentialSecretRef"],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "credentialSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      }
+    }
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "page",
+        "id": "jira-page",
+        "displayName": "Jira",
+        "exportName": "JiraPage",
+        "routePath": "jira"
+      },
+      {
+        "type": "detailTab",
+        "id": "jira-issue-tab",
+        "displayName": "Jira",
+        "exportName": "JiraIssueTab",
+        "entityTypes": ["issue"]
+      }
+    ]
+  },
+  "webhooks": [
+    {
+      "endpointKey": "issue",
+      "displayName": "Issue"
+    }
+  ],
+  "tools": [
+    {
+      "name": "jira.search",
+      "displayName": "Search Jira",
+      "description": "Search Jira issues.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

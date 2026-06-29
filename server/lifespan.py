@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 scheduler_stop_event,
             )
         )
+    app.state.heartbeat_scheduler_task = scheduler_task
+    app.state.heartbeat_scheduler_stop_event = scheduler_stop_event
     try:
         yield
     finally:
@@ -97,6 +99,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 stop_event=scheduler_stop_event,
                 timeout_seconds=SHUTDOWN_TASK_TIMEOUT_SECONDS,
             )
+        app.state.heartbeat_scheduler_task = None
+        app.state.heartbeat_scheduler_stop_event = None
         dispatch_tasks = list(getattr(app.state, "heartbeat_dispatch_tasks", set()))
         if dispatch_tasks:
             await _cancel_tasks(

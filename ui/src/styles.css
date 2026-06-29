@@ -445,6 +445,300 @@ small {
   padding: 14px;
 }
 
+.plugins-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.plugins-list-panel,
+.plugins-detail-panel {
+  min-width: 0;
+}
+
+.plugin-settings-section {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.plugins-settings-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.plugins-settings-header h3,
+.plugins-settings-header p {
+  margin: 0;
+}
+
+.plugin-settings-section .plugins-list-panel,
+.plugin-settings-section .plugins-detail-panel {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.plugin-settings-section .plugins-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.plugin-settings-section .plugin-row,
+.plugin-settings-section .plugin-detail-row {
+  background: #0b1018;
+}
+
+.plugins-panel-heading {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.plugins-panel-heading h2,
+.plugins-panel-heading p {
+  margin: 0;
+}
+
+.plugins-panel-heading h2 {
+  margin-bottom: 4px;
+}
+
+.plugins-list {
+  display: grid;
+  gap: 10px;
+}
+
+.plugin-row {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.plugin-row.selected {
+  border-color: #3b82f6;
+}
+
+.plugin-row-header {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.plugin-row-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  justify-content: flex-start;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.plugin-row-main:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.plugin-row-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plugin-row-side {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.plugin-row-main strong,
+.plugin-detail-header strong {
+  color: #f4f8ff;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-row-main small {
+  color: #8ea0b8;
+  display: inline;
+  flex: 0 1 auto;
+  margin-top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-row p {
+  margin: 0;
+}
+
+.plugin-row .muted {
+  font-size: 11px;
+  line-height: 1.12;
+}
+
+.plugin-row-meta {
+  color: #8ea0b8;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  gap: 8px;
+}
+
+.plugin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.plugin-row-actions .small-button {
+  border-radius: 999px;
+  min-height: 26px;
+  padding: 4px 10px;
+}
+
+.plugin-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.plugin-detail-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.plugin-detail-header h3,
+.plugin-detail-header p,
+.plugin-detail section h3 {
+  margin: 0;
+}
+
+.plugin-health-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  min-width: 0;
+}
+
+.plugin-health-strip span {
+  background: #0b1018;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  color: #cbd8ea;
+  font-size: var(--text-xs);
+  padding: 8px 10px;
+}
+
+.plugin-detail section {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-detail-list {
+  display: grid;
+  gap: 6px;
+}
+
+.plugin-detail-row {
+  align-items: center;
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+.plugin-detail-row span {
+  color: #8ea0b8;
+  font-size: var(--text-xs);
+}
+
+.plugin-config-editor {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plugin-config-editor span,
+.plugin-config-error,
+.plugin-config-message {
+  font-size: var(--text-xs);
+}
+
+.plugin-config-editor textarea {
+  background: #070b11;
+  border: 1px solid #273244;
+  border-radius: 8px;
+  color: #dce7f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  min-width: 0;
+  padding: 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.plugin-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plugin-config-error {
+  color: #fca5a5;
+}
+
+.plugin-config-message {
+  color: #86efac;
+}
+
+@media (max-width: 960px) {
+  .plugin-row-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plugin-row-side,
+  .plugin-row-actions {
+    justify-content: flex-start;
+  }
+
+  .plugin-row-title {
+    align-items: start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .plugin-row-main small {
+    white-space: normal;
+  }
+}
+
 .cost-settings-summary,
 .cost-settings-grid {
   display: grid;

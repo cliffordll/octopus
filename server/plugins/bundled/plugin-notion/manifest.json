@@ -1,0 +1,66 @@
+{
+  "id": "notion.connector",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Notion",
+  "description": "Integration contract fixture for database/page reading, knowledge retrieval, page import, and agent tools.",
+  "author": "Octopus",
+  "categories": ["connector", "knowledge"],
+  "capabilities": [
+    "http.outbound",
+    "secrets.read-ref",
+    "plugin.state.read",
+    "plugin.state.write",
+    "issues.create",
+    "agent.tools.register",
+    "ui.page.register",
+    "ui.dashboardWidget.register",
+    "activity.log.write"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "instanceConfigSchema": {
+    "type": "object",
+    "required": ["integrationSecretRef"],
+    "properties": {
+      "integrationSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      }
+    }
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "page",
+        "id": "notion-page",
+        "displayName": "Notion",
+        "exportName": "NotionPage",
+        "routePath": "notion"
+      },
+      {
+        "type": "dashboardWidget",
+        "id": "notion-widget",
+        "displayName": "Notion",
+        "exportName": "NotionWidget"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "notion.search",
+      "displayName": "Search Notion",
+      "description": "Search Notion pages and databases.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

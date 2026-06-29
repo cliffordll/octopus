@@ -106,7 +106,7 @@ routes
 
 这会造成一个明显的使用问题：用户在一个 organization 里录入 provider、api key、base URL 和 models 后，切换到另一个 organization 还需要重新录入。provider/model 连接配置本质上可以在当前 Octopus instance 内复用，而 organization 更适合只保存默认选择或私有覆盖。
 
-本子步骤不引入真实 user scope。真实用户、权限和 secret store 仍归 Step 29；本步骤只先建立 `global + organization + agent override` 的数据模型和解析规则。
+本子步骤不引入真实 user scope。真实用户、权限和 secret store 仍归 Step 30；本步骤只先建立 `global + organization + agent override` 的数据模型和解析规则。
 
 ### 目标
 
@@ -217,7 +217,7 @@ unique(scope_type, scope_id, runtime_type)
 ### 边界
 
 - 不实现真实 user-level provider/model。
-- 不实现 secret store、secret rotation 或 user credential isolation；这些归 Step 29。
+- 不实现 secret store、secret rotation 或 user credential isolation；这些归 Step 30。
 - 不把 global 理解为跨 instance 或跨部署共享；global 只表示当前 Octopus instance 内共享。
 - 不重做 Step 27 cost 或 Step 28 quota/governance。
 
