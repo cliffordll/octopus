@@ -62,6 +62,7 @@ from .logs import (
 )
 from . import workspace_paths as workspace_paths_module
 from .workspace_paths import (
+    agent_heartbeat_workspace_root,
     ensure_organization_workspace_root,
     ensure_octopus_workspace_operation_log_dir,
     organization_workspace_root,
@@ -616,6 +617,95 @@ class WorkspaceService:
             "projectWorkspaceId": workspace["projectWorkspaceId"],
             "executionWorkspaceId": workspace["id"],
             "workspace": runtime_context,
+        }
+
+    async def prepare_runtime_context_for_heartbeat(
+        self,
+        run_id: str,
+        context_snapshot: dict[str, Any] | None,
+        *,
+        org_id: str,
+        agent_workspace_key: str,
+    ) -> dict[str, Any]:
+        """Resolve an issue workspace or isolate an unassigned heartbeat.
+
+        Timer heartbeats frequently have no issue context. They must never leave
+        ``cwd`` unset because local adapters would then inherit the server's
+        working directory.
+        """
+        issue_context = await self.prepare_runtime_context_for_run(
+            run_id, context_snapshot
+        )
+        if issue_context is not None:
+            return issue_context
+
+        org_root = self._org_workspace_root(org_id)
+        agents_dir = org_root / "agents"
+        skills_dir = org_root / "skills"
+        plans_dir = org_root / "plans"
+        artifacts_dir = org_root / "artifacts"
+        heartbeat_root = agent_heartbeat_workspace_root(org_id, agent_workspace_key)
+        for path in (
+            org_root,
+            agents_dir,
+            skills_dir,
+            plans_dir,
+            artifacts_dir,
+            heartbeat_root,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+        fallback = self._organization_workspace_fallback(
+            _IssueWorkspaceFallback(org_id=org_id, id=run_id),
+            cwd=str(heartbeat_root),
+            warning=(
+                "Heartbeat has no issue workspace. Run is isolated in the "
+                f'read-only agent heartbeat workspace "{heartbeat_root}".'
+            ),
+        )
+        fallback.update(
+            {
+                "mode": "agent_default",
+                "strategyType": "adapter_managed",
+                "name": "Agent heartbeat workspace",
+                "gitWritePolicy": "read_only",
+                "metadata": {
+                    **(fallback.get("metadata") or {}),
+                    "fallback": "agent_heartbeat_workspace",
+                    "gitWritePolicy": "read_only",
+                },
+            }
+        )
+        workspace = self._with_organization_workspace_paths(
+            workspace=fallback,
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
+        workspace_env = self._workspace_env(
+            workspace=workspace,
+            org_root=org_root,
+            agents_dir=agents_dir,
+            skills_dir=skills_dir,
+            plans_dir=plans_dir,
+            artifacts_dir=artifacts_dir,
+        )
+        workspace_env["OCTOPUS_GIT_WRITE_POLICY"] = "read_only"
+        runtime_context = {
+            "rudderWorkspace": workspace,
+            "rudderWorkspaces": [workspace],
+            "rudderRuntimeServiceIntents": [],
+            "rudderRuntimeServices": [],
+            "env": workspace_env,
+        }
+        return {
+            "executionWorkspaceId": None,
+            "projectWorkspaceId": None,
+            "workspace": runtime_context,
+            "workspaceFallback": "agent_heartbeat_workspace",
+            "gitWritePolicy": "read_only",
         }
 
     async def prepare_runtime_context_for_chat(

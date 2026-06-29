@@ -92,6 +92,12 @@ def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
     )
 
     path = env.get("PATH", "")
+    _ensure_git_policy_shims(
+        env,
+        shim_dir=shim_dir,
+        python_executable=python_executable,
+        search_path=path,
+    )
     entries = [entry for entry in path.split(os.pathsep) if entry]
     shim_text = str(shim_dir)
     entries = [
@@ -101,6 +107,49 @@ def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
     ]
     env["PATH"] = os.pathsep.join([shim_text, *entries])
     return shim_dir
+
+
+def _ensure_git_policy_shims(
+    env: dict[str, str],
+    *,
+    shim_dir: Path,
+    python_executable: Path,
+    search_path: str,
+) -> None:
+    filtered_entries = [
+        entry
+        for entry in search_path.split(os.pathsep)
+        if entry and os.path.normcase(entry) != os.path.normcase(str(shim_dir))
+    ]
+    real_git = shutil.which("git", path=os.pathsep.join(filtered_entries))
+    unix_shim = shim_dir / "git"
+    windows_shim = shim_dir / "git.cmd"
+    if not real_git:
+        unix_shim.unlink(missing_ok=True)
+        windows_shim.unlink(missing_ok=True)
+        return
+
+    unix_shim.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env sh",
+                f'exec "{python_executable}" -m packages.runtimes.git_policy "{real_git}" "$@"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    unix_shim.chmod(unix_shim.stat().st_mode | stat.S_IEXEC)
+    windows_shim.write_text(
+        "\r\n".join(
+            [
+                "@echo off",
+                f'"{python_executable}" -m packages.runtimes.git_policy "{real_git}" %*',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def desired_skills_from_config(config: dict[str, Any]) -> list[str]:

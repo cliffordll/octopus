@@ -1567,7 +1567,7 @@ class HeartbeatService:
 
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
-            workspace_context = await self._prepare_workspace_context(running)
+            workspace_context = await self._prepare_workspace_context(agent, running)
             adapter_operation = await self._begin_adapter_workspace_operation(
                 running, workspace_context
             )
@@ -1929,13 +1929,16 @@ class HeartbeatService:
         return sequence + 2
 
     async def _prepare_workspace_context(
-        self, running: HeartbeatRunRow
+        self, agent: AgentRow, running: HeartbeatRunRow
     ) -> dict[str, Any] | None:
         workspace_context = await WorkspaceService(
             self._session
-        ).prepare_runtime_context_for_run(running.id, running.context_snapshot)
-        if workspace_context is None:
-            return None
+        ).prepare_runtime_context_for_heartbeat(
+            running.id,
+            running.context_snapshot,
+            org_id=agent.org_id,
+            agent_workspace_key=(agent.workspace_key or f"agent--{str(agent.id)[:8]}"),
+        )
         next_snapshot = dict(running.context_snapshot or {})
         next_snapshot.update(workspace_context)
         updated = await update_run(
