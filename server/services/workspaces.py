@@ -442,6 +442,89 @@ def _git_worktree_source_available(project_cwd: str | None) -> bool:
         return False
 
 
+def _workspace_metadata(workspace: ExecutionWorkspaceData) -> dict[str, Any]:
+    metadata = workspace.get("metadata")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _workspace_expected_branch(workspace: ExecutionWorkspaceData) -> str | None:
+    metadata = _workspace_metadata(workspace)
+    return (
+        _string(metadata.get("expectedBranch"))
+        or _string(workspace.get("branchName"))
+        or _string(metadata.get("createdFromBranch"))
+    )
+
+
+def _workspace_target_ref(workspace: ExecutionWorkspaceData) -> str | None:
+    metadata = _workspace_metadata(workspace)
+    return _string(metadata.get("targetRef")) or _string(workspace.get("baseRef"))
+
+
+def _workspace_source_repo(workspace: ExecutionWorkspaceData) -> Path | None:
+    metadata = _workspace_metadata(workspace)
+    source_cwd = _string(metadata.get("sourceWorkspaceCwd"))
+    cwd = _string(workspace.get("cwd"))
+    value = source_cwd or cwd
+    return Path(value) if value else None
+
+
+def _assert_workspace_branch_guard(
+    workspace: ExecutionWorkspaceData, *, operation: str
+) -> None:
+    cwd = _string(workspace.get("cwd"))
+    expected = _workspace_expected_branch(workspace)
+    if not cwd or not expected:
+        return
+    actual = _current_git_branch(Path(cwd))
+    if actual is None:
+        return
+    if _normalize_ref_name(actual) != _normalize_ref_name(expected):
+        raise ValueError(
+            f"Cannot {operation}: execution workspace branch mismatch. "
+            f"Expected '{expected}' but current branch is '{actual}'."
+        )
+
+
+def _git_commit(cwd: Path, ref: str) -> str | None:
+    result = _run_git(cwd, "rev-parse", "--verify", f"{ref}^{{commit}}")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _extract_merge_conflict_files(output: str) -> list[str]:
+    files: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if lowered.startswith("changed in both") or lowered.startswith("added in both"):
+            parts = stripped.split()
+            if parts:
+                candidate = parts[-1]
+                if candidate not in files:
+                    files.append(candidate)
+        elif lowered.startswith("<<<<<<<"):
+            continue
+    return files
+
+
+def _git_dirty(cwd: Path, *, ignore_octopus: bool = False) -> bool:
+    args = ["status", "--porcelain"]
+    if ignore_octopus:
+        args.extend(["--", ".", ":!/.octopus", ":!.octopus"])
+    status = _run_git(cwd, *args)
+    return status.returncode == 0 and bool(status.stdout.strip())
+
+
+def _remote_http_url(fetch_url: str) -> str:
+    value = fetch_url.strip()
+    if value.startswith("git@") and ":" in value:
+        host, path = value[4:].split(":", 1)
+        return f"https://{host}/{path.removesuffix('.git')}"
+    return value.removesuffix(".git")
+
+
 def _ensure_git_worktree(workspace: ExecutionWorkspaceData) -> None:
     cwd_value = _string(workspace["cwd"])
     branch_name = _string(workspace["branchName"])
@@ -524,6 +607,458 @@ class WorkspaceService:
     ) -> ExecutionWorkspaceData | None:
         row = await get_execution_workspace_by_id(self._session, workspace_id)
         return self._to_execution_workspace(row) if row is not None else None
+
+    async def workspace_status(self, workspace_id: str) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        operations = await list_workspace_operations_for_execution_workspace(
+            self._session, workspace_id
+        )
+        running_adapter = [
+            operation
+            for operation in operations
+            if operation.status == "running"
+            and isinstance(operation.metadata_json, dict)
+            and operation.metadata_json.get("adapterExecution")
+        ]
+        git_status = self._git_status_for_workspace(workspace)
+        return {
+            "workspace": workspace,
+            "git": git_status,
+            "lease": {
+                "locked": bool(running_adapter),
+                "operationId": running_adapter[0].id if running_adapter else None,
+                "runId": running_adapter[0].heartbeat_run_id
+                if running_adapter
+                else None,
+            },
+            "canArchive": not running_adapter
+            and not bool((git_status or {}).get("dirty")),
+            "operations": [self._to_operation(row) for row in operations[:10]],
+        }
+
+    async def git_diff_for_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            return {
+                "available": False,
+                "diff": "",
+                "error": "Workspace is not a Git worktree",
+            }
+        result = _run_git(cwd, "diff", "--stat")
+        stat = result.stdout if result.returncode == 0 else ""
+        diff = _run_git(cwd, "diff", "--", timeout=20)
+        return {
+            "available": diff.returncode == 0,
+            "stat": stat,
+            "diff": diff.stdout if diff.returncode == 0 else "",
+            "error": None
+            if diff.returncode == 0
+            else (diff.stderr or diff.stdout).strip(),
+        }
+
+    async def merge_preview(
+        self, workspace_id: str, *, target_ref: str | None = None
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        if workspace["mode"] == "shared_workspace":
+            return {
+                "available": False,
+                "canMerge": False,
+                "conflict": False,
+                "targetRef": target_ref or _workspace_target_ref(workspace),
+                "sourceBranch": _current_git_branch(Path(workspace["cwd"]))
+                if workspace["cwd"]
+                else None,
+                "error": "Shared workspace already runs in the project worktree; use diff/push instead of merge.",
+                "preview": "",
+                "conflictFiles": [],
+            }
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            raise ValueError("Workspace is not a Git worktree")
+        _assert_workspace_branch_guard(workspace, operation="preview merge")
+        source_repo = _workspace_source_repo(workspace) or cwd
+        target = target_ref or _workspace_target_ref(workspace)
+        if not target:
+            raise ValueError("Merge preview requires a target ref")
+        source_commit = _git_commit(cwd, "HEAD")
+        target_commit = _git_commit(source_repo, target)
+        if not source_commit:
+            raise ValueError("Cannot resolve execution workspace HEAD")
+        if not target_commit:
+            raise ValueError(f"Cannot resolve target ref '{target}'")
+        result = _run_git(
+            source_repo,
+            "merge-tree",
+            "--write-tree",
+            target_commit,
+            source_commit,
+            timeout=60,
+        )
+        unsupported = (
+            result.returncode != 0
+            and "unknown option" in (result.stderr or result.stdout).lower()
+        )
+        if unsupported:
+            base = _run_git(source_repo, "merge-base", target_commit, source_commit)
+            if base.returncode != 0 or not base.stdout.strip():
+                raise ValueError(
+                    (base.stderr or base.stdout or "git merge-base failed").strip()
+                )
+            result = _run_git(
+                source_repo,
+                "merge-tree",
+                base.stdout.strip(),
+                target_commit,
+                source_commit,
+                timeout=60,
+            )
+            output = (
+                result.stdout
+                if result.returncode == 0
+                else result.stderr or result.stdout
+            )
+            conflict = "<<<<<<<" in output or "changed in both" in output.lower()
+        else:
+            output = (
+                result.stdout
+                if result.returncode == 0
+                else result.stderr or result.stdout
+            )
+            conflict = result.returncode != 0
+        conflict_files = _extract_merge_conflict_files(output)
+        return {
+            "available": True,
+            "canMerge": result.returncode == 0 and not conflict,
+            "conflict": conflict,
+            "conflictFiles": conflict_files,
+            "targetRef": target,
+            "targetCommit": target_commit,
+            "sourceBranch": _current_git_branch(cwd),
+            "sourceCommit": source_commit,
+            "preview": output,
+            "error": None
+            if result.returncode == 0 and not conflict
+            else output.strip(),
+        }
+
+    async def merge_workspace(
+        self, workspace_id: str, *, target_ref: str | None = None
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        await self._ensure_no_running_adapter_operation(workspace_id, action="merged")
+        if workspace["mode"] == "shared_workspace":
+            raise ValueError(
+                "Shared workspace changes are already in the project worktree; merge is not applicable"
+            )
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            raise ValueError("Workspace is not a Git worktree")
+        _assert_workspace_branch_guard(workspace, operation="merge")
+        source_repo = _workspace_source_repo(workspace)
+        if source_repo is None or not _is_git_repository(source_repo):
+            raise ValueError("Merge requires a source project Git repository")
+        target = target_ref or _workspace_target_ref(workspace)
+        if not target:
+            raise ValueError("Merge requires a target ref")
+        source_commit = _git_commit(cwd, "HEAD")
+        if not source_commit:
+            raise ValueError("Cannot resolve execution workspace HEAD")
+        current_target_branch = _current_git_branch(source_repo)
+        normalized_target = _normalize_ref_name(target)
+        if _normalize_ref_name(current_target_branch or "") != normalized_target:
+            raise ValueError(
+                "Cannot merge because target ref is not the current project branch. "
+                f"Expected project workspace to already be on '{normalized_target}' but it is on '{current_target_branch}'. "
+                "Octopus will not checkout the target branch automatically."
+            )
+        if _git_dirty(source_repo, ignore_octopus=True):
+            raise ValueError(
+                "Cannot merge because the target project workspace has uncommitted changes"
+            )
+        preview = await self.merge_preview(workspace_id, target_ref=target)
+        if preview is None or not preview.get("canMerge"):
+            raise ValueError("Cannot merge because merge preview is not clean")
+        result = _run_git(
+            source_repo,
+            "merge",
+            "--no-ff",
+            source_commit,
+            "-m",
+            f"Merge execution workspace {workspace_id}",
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise ValueError(
+                (result.stderr or result.stdout or "git merge failed").strip()
+            )
+        merged_head = _git_commit(source_repo, "HEAD")
+        await self.update_execution_workspace(
+            workspace_id,
+            {
+                "status": "merged",
+                "metadata": {
+                    **_workspace_metadata(workspace),
+                    "mergedAt": datetime.now(UTC).isoformat(),
+                    "mergedInto": normalized_target,
+                    "mergedCommit": merged_head,
+                },
+            },
+        )
+        return {
+            "merged": True,
+            "targetRef": normalized_target,
+            "sourceCommit": source_commit,
+            "mergedCommit": merged_head,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    async def prepare_pull_request(
+        self,
+        workspace_id: str,
+        *,
+        remote: str = "origin",
+        target_ref: str | None = None,
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        cwd = self._workspace_git_cwd(workspace)
+        branch = _string(workspace["branchName"])
+        if cwd is None or not branch:
+            raise ValueError("Workspace does not have a Git branch for PR preparation")
+        _assert_workspace_branch_guard(workspace, operation="prepare PR")
+        target = target_ref or _workspace_target_ref(workspace) or "main"
+        remote_result = _run_git(cwd, "remote", "get-url", remote)
+        remote_url = (
+            remote_result.stdout.strip() if remote_result.returncode == 0 else None
+        )
+        web_url = _remote_http_url(remote_url) if remote_url else None
+        compare_url = f"{web_url}/compare/{target}...{branch}" if web_url else None
+        command = f"gh pr create --base {target} --head {branch}"
+        return {
+            "remote": remote,
+            "remoteUrl": remote_url,
+            "sourceBranch": branch,
+            "targetRef": target,
+            "compareUrl": compare_url,
+            "command": command,
+        }
+
+    async def create_pull_request(
+        self,
+        workspace_id: str,
+        *,
+        remote: str = "origin",
+        target_ref: str | None = None,
+        title: str | None = None,
+        body: str | None = None,
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        plan = await self.prepare_pull_request(
+            workspace_id, remote=remote, target_ref=target_ref
+        )
+        assert plan is not None
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            raise ValueError("Workspace is not a Git worktree")
+        args = [
+            "pr",
+            "create",
+            "--base",
+            str(plan["targetRef"]),
+            "--head",
+            str(plan["sourceBranch"]),
+        ]
+        if title:
+            args.extend(["--title", title])
+        else:
+            args.extend(["--fill"])
+        if body:
+            args.extend(["--body", body])
+        try:
+            result = subprocess.run(
+                ["gh", *args],
+                cwd=str(cwd),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except FileNotFoundError as exc:
+            raise ValueError("GitHub CLI 'gh' is not installed or not on PATH") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("GitHub CLI timed out while creating PR") from exc
+        if result.returncode != 0:
+            raise ValueError(
+                (result.stderr or result.stdout or "gh pr create failed").strip()
+            )
+        pr_url = (
+            result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
+        )
+        return {
+            "created": True,
+            "url": pr_url,
+            "remote": remote,
+            "sourceBranch": plan["sourceBranch"],
+            "targetRef": plan["targetRef"],
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    async def abandon_workspace(
+        self, workspace_id: str
+    ) -> ExecutionWorkspaceData | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        await self._ensure_no_running_adapter_operation(
+            workspace_id, action="abandoned"
+        )
+        return await self.update_execution_workspace(
+            workspace_id,
+            {
+                "status": "abandoned",
+                "metadata": {
+                    **_workspace_metadata(workspace),
+                    "abandonedAt": datetime.now(UTC).isoformat(),
+                },
+            },
+        )
+
+    async def cleanup_workspace(
+        self, workspace_id: str, *, discard_dirty: bool = False
+    ) -> ExecutionWorkspaceData | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        if workspace["mode"] == "shared_workspace":
+            raise ValueError("Cleanup is not allowed for shared project workspaces")
+        if discard_dirty:
+            cwd = self._workspace_git_cwd(workspace)
+            if cwd is not None and _git_dirty(cwd):
+                _assert_workspace_branch_guard(
+                    workspace, operation="discard dirty changes"
+                )
+                _require_git_success(cwd, "reset", "--hard", timeout=60)
+                _require_git_success(cwd, "clean", "-fd", timeout=60)
+        archived = await self.archive_workspace(workspace_id)
+        if archived is None:
+            return None
+        metadata = _workspace_metadata(archived)
+        return await self.update_execution_workspace(
+            workspace_id,
+            {
+                "status": archived["status"],
+                "metadata": {
+                    **metadata,
+                    "cleanedAt": datetime.now(UTC).isoformat(),
+                    "discardedDirtyChanges": discard_dirty,
+                },
+            },
+        )
+
+    async def push_workspace_branch(
+        self, workspace_id: str, *, remote: str = "origin", set_upstream: bool = True
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        cwd = self._workspace_git_cwd(workspace)
+        branch = _string(workspace["branchName"])
+        if cwd is None or not branch:
+            raise ValueError("Workspace does not have a Git branch to push")
+        _assert_workspace_branch_guard(workspace, operation="push")
+        args = ["push"]
+        if set_upstream:
+            args.append("--set-upstream")
+        args.extend([remote, branch])
+        result = _run_git(cwd, *args, timeout=120)
+        if result.returncode != 0:
+            raise ValueError(
+                (result.stderr or result.stdout or "git push failed").strip()
+            )
+        return {
+            "pushed": True,
+            "remote": remote,
+            "branch": branch,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    async def archive_workspace(
+        self, workspace_id: str
+    ) -> ExecutionWorkspaceData | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        await self._ensure_workspace_can_archive(workspace_id)
+        _assert_workspace_branch_guard(workspace, operation="archive")
+        if workspace["providerType"] == "git_worktree" and workspace["cwd"]:
+            cwd = Path(workspace["cwd"])
+            if _is_git_worktree(cwd):
+                metadata = workspace.get("metadata") or {}
+                source_cwd = (
+                    _string(metadata.get("sourceWorkspaceCwd"))
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                git_cwd = Path(source_cwd) if source_cwd else cwd.parent
+                result = _run_git(git_cwd, "worktree", "remove", str(cwd), timeout=60)
+                if result.returncode != 0:
+                    raise ValueError(
+                        (
+                            result.stderr
+                            or result.stdout
+                            or "git worktree remove failed"
+                        ).strip()
+                    )
+        return await self.update_execution_workspace(
+            workspace_id,
+            {"status": "archived", "cleanupReason": "explicit_archive"},
+        )
+
+    def _workspace_git_cwd(self, workspace: ExecutionWorkspaceData) -> Path | None:
+        cwd = _string(workspace["cwd"])
+        if not cwd:
+            return None
+        path = Path(cwd)
+        return path if _is_git_worktree(path) else None
+
+    def _git_status_for_workspace(
+        self, workspace: ExecutionWorkspaceData
+    ) -> dict[str, Any] | None:
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            return None
+        branch = _current_git_branch(cwd)
+        status = _run_git(cwd, "status", "--porcelain=v1", "--branch")
+        if status.returncode != 0:
+            return {
+                "available": False,
+                "error": (status.stderr or status.stdout).strip(),
+            }
+        lines = [line for line in status.stdout.splitlines() if line]
+        dirty_lines = [line for line in lines if not line.startswith("## ")]
+        return {
+            "available": True,
+            "branch": branch,
+            "dirty": bool(dirty_lines),
+            "entries": dirty_lines,
+            "summary": lines[0] if lines and lines[0].startswith("## ") else None,
+        }
 
     async def update_execution_workspace(
         self, workspace_id: str, fields: dict[str, Any]
@@ -706,6 +1241,20 @@ class WorkspaceService:
                     "warnings": warnings,
                 }
             )
+        if project_cwd:
+            created_from_branch = _current_git_branch(Path(project_cwd))
+            created_from_head = _git_commit(Path(project_cwd), "HEAD")
+            if created_from_branch:
+                execution_metadata["createdFromBranch"] = created_from_branch
+            if created_from_head:
+                execution_metadata["createdFromHead"] = created_from_head
+        expected_branch = execution_branch_name
+        if mode == "shared_workspace" and execution_base_ref:
+            expected_branch = execution_base_ref
+        if expected_branch:
+            execution_metadata["expectedBranch"] = expected_branch
+        if execution_base_ref:
+            execution_metadata["targetRef"] = execution_base_ref
         reusable = await self._find_reusable_execution_workspace(
             org_id=issue.org_id,
             project_id=project.id,
@@ -1510,10 +2059,9 @@ class WorkspaceService:
         assert row is not None
         return self._to_operation(row)
 
-    async def _ensure_workspace_can_archive(self, workspace_id: str) -> None:
-        row = await get_execution_workspace_by_id(self._session, workspace_id)
-        if row is None:
-            return
+    async def _ensure_no_running_adapter_operation(
+        self, workspace_id: str, *, action: str
+    ) -> None:
         operations = await list_workspace_operations_for_execution_workspace(
             self._session, workspace_id
         )
@@ -1525,8 +2073,14 @@ class WorkspaceService:
                 and metadata.get("adapterExecution")
             ):
                 raise ValueError(
-                    "Execution workspace cannot be archived while an adapter operation is running."
+                    f"Execution workspace cannot be {action} while an adapter operation is running."
                 )
+
+    async def _ensure_workspace_can_archive(self, workspace_id: str) -> None:
+        row = await get_execution_workspace_by_id(self._session, workspace_id)
+        if row is None:
+            return
+        await self._ensure_no_running_adapter_operation(workspace_id, action="archived")
         if row.provider_type == "git_worktree" and row.cwd:
             cwd = Path(row.cwd)
             if _is_git_worktree(cwd):
