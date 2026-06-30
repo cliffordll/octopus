@@ -91,6 +91,8 @@ class ExecutionWorkspace(TypedDict):
     branchName: str | None
     providerType: ExecutionWorkspaceProviderType
     gitWritePolicy: NotRequired[str]
+    issueArtifactsDir: NotRequired[str]
+    leaseKey: NotRequired[str]
     providerRef: str | None
     derivedFromExecutionWorkspaceId: str | None
     lastUsedAt: str
