@@ -2153,6 +2153,46 @@ small {
   padding: 12px;
 }
 
+button.project-workspace-item {
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+button.project-workspace-item:hover,
+.project-workspace-item.selected {
+  border-color: #4f8cff;
+}
+
+.workspace-diff-preview {
+  background: #0b1018;
+  border: 1px solid #263246;
+  border-radius: 10px;
+  color: #d7e0ee;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.workspace-danger-confirm {
+  align-items: center;
+  color: #b45309;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.workspace-danger-confirm input {
+  margin: 0;
+}
+
 .project-workspace-item.compact {
   align-items: flex-start;
   padding: 10px 12px;

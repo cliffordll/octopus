@@ -329,6 +329,7 @@ export interface IssueDetail extends IssueListItem {
   startedAt: string | null;
   completedAt: string | null;
   cancelledAt?: string | null;
+  executionWorkspaceId?: string | null;
   workProducts?: IssueWorkProduct[];
   documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
@@ -783,6 +784,83 @@ export interface WorkspaceRuntimeService {
   healthStatus: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ExecutionWorkspace {
+  id: string;
+  orgId: string;
+  projectId: string;
+  projectWorkspaceId: string | null;
+  sourceIssueId: string | null;
+  mode: string;
+  strategyType: string;
+  name: string;
+  status: string;
+  cwd: string | null;
+  repoUrl: string | null;
+  baseRef: string | null;
+  branchName: string | null;
+  providerType: string;
+  providerRef: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExecutionWorkspaceStatus {
+  workspace: ExecutionWorkspace;
+  git: { available: boolean; branch?: string | null; dirty?: boolean; entries?: string[]; summary?: string | null; error?: string | null } | null;
+  lease: { locked: boolean; operationId: string | null; runId: string | null };
+  canArchive: boolean;
+  operations: WorkspaceOperation[];
+}
+
+export interface ExecutionWorkspaceDiff {
+  available: boolean;
+  stat?: string;
+  diff: string;
+  error: string | null;
+}
+
+export interface ExecutionWorkspaceMergePreview {
+  available: boolean;
+  canMerge: boolean;
+  conflict: boolean;
+  conflictFiles: string[];
+  targetRef: string | null;
+  targetCommit?: string | null;
+  sourceBranch?: string | null;
+  sourceCommit?: string | null;
+  preview: string;
+  error: string | null;
+}
+
+export interface ExecutionWorkspaceMergeResult {
+  merged: boolean;
+  targetRef: string;
+  sourceCommit: string;
+  mergedCommit: string | null;
+  stdout: string;
+  stderr: string;
+}
+
+export interface ExecutionWorkspacePullRequestPlan {
+  remote: string;
+  remoteUrl: string | null;
+  sourceBranch: string;
+  targetRef: string;
+  compareUrl: string | null;
+  command: string;
+}
+
+export interface ExecutionWorkspacePullRequestResult {
+  created: boolean;
+  url: string | null;
+  remote: string;
+  sourceBranch: string;
+  targetRef: string;
+  stdout: string;
+  stderr: string;
 }
 
 export interface ProjectWorkspace {

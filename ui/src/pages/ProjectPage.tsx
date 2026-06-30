@@ -5,7 +5,14 @@ import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { OrganizationResource, ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
+import type {
+  ExecutionWorkspace,
+  OrganizationResource,
+  ProjectCodebase,
+  ProjectResourceRole,
+  ProjectStatus,
+  ProjectWorkspace,
+} from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
@@ -225,6 +232,200 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
     </section>
   );
 }
+
+function ExecutionWorkspacePanel({
+  abandonPending,
+  archivePending,
+  cleanupDiscardConfirmed,
+  cleanupPending,
+  createPrPending,
+  diffPending,
+  diffPreview,
+  error,
+  onAbandon,
+  onArchive,
+  onCleanup,
+  onCleanupDiscardConfirmed,
+  onCreatePr,
+  onLoadDiff,
+  onMerge,
+  onMergePreview,
+  onPreparePr,
+  onPush,
+  onSelect,
+  mergePending,
+  mergePreview,
+  mergePreviewPending,
+  preparePrPending,
+  pushPending,
+  selectedId,
+  status,
+  statusPending,
+  workspaces,
+}: {
+  abandonPending: boolean;
+  archivePending: boolean;
+  cleanupDiscardConfirmed: boolean;
+  cleanupPending: boolean;
+  createPrPending: boolean;
+  diffPending: boolean;
+  diffPreview: string;
+  error: unknown;
+  onAbandon: (workspaceId: string) => void;
+  onArchive: (workspaceId: string) => void;
+  onCleanup: (workspaceId: string, discardDirty: boolean) => void;
+  onCleanupDiscardConfirmed: (confirmed: boolean) => void;
+  onCreatePr: (workspaceId: string) => void;
+  onLoadDiff: (workspaceId: string) => void;
+  onMerge: (workspaceId: string) => void;
+  onMergePreview: (workspaceId: string) => void;
+  onPreparePr: (workspaceId: string) => void;
+  onPush: (workspaceId: string) => void;
+  onSelect: (workspaceId: string) => void;
+  mergePending: boolean;
+  mergePreview: string;
+  mergePreviewPending: boolean;
+  preparePrPending: boolean;
+  pushPending: boolean;
+  selectedId: string;
+  status: {
+    git: { available: boolean; branch?: string | null; dirty?: boolean; entries?: string[]; summary?: string | null; error?: string | null } | null;
+    lease: { locked: boolean; operationId: string | null; runId: string | null };
+    canArchive: boolean;
+  } | undefined;
+  statusPending: boolean;
+  workspaces: ExecutionWorkspace[];
+}) {
+  const selected = workspaces.find((workspace) => workspace.id === selectedId);
+  const selectedDirty = Boolean(status?.git?.dirty);
+  const canCleanup = Boolean(status?.canArchive) || (selectedDirty && cleanupDiscardConfirmed && !status?.lease.locked);
+  return (
+    <section className="project-config-section project-workspace-manager" aria-label="执行工作区状态">
+      <div className="project-section-heading">
+        <div>
+          <p className="eyebrow">EXECUTION WORKSPACES</p>
+          <h2>执行工作区</h2>
+          <p className="muted">查看每个任务实际执行目录的 Git 状态，并在审核后执行 diff、push 或归档。</p>
+        </div>
+      </div>
+      {Boolean(error) && <ErrorNotice error={error} />}
+      <div className="project-workspace-list">
+        {workspaces.length === 0 && <p className="project-workspace-empty">暂无执行工作区。任务开始运行后会创建记录。</p>}
+        {workspaces.map((workspace) => (
+          <button
+            className={`project-workspace-item ${workspace.id === selectedId ? "selected" : ""}`}
+            key={workspace.id}
+            onClick={() => onSelect(workspace.id)}
+            type="button"
+          >
+            <div className="project-workspace-main">
+              <div className="project-workspace-name-row">
+                <strong>{workspace.name}</strong>
+                <div className="project-workspace-badges">
+                  <Badge>{workspace.mode}</Badge>
+                  <Badge>{workspace.status}</Badge>
+                  {workspace.branchName && <Badge>{workspace.branchName}</Badge>}
+                </div>
+              </div>
+              <span title={nullableText(workspace.cwd)}>{nullableText(workspace.cwd)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+      {selected && (
+        <div className="project-workspace-fallback">
+          <strong>{selected.name}</strong>
+          <span>目录：{nullableText(selected.cwd)}</span>
+          <span>分支：{status?.git?.branch ?? selected.branchName ?? "未识别"}</span>
+          <span>Git：{statusPending ? "检查中..." : status?.git?.available ? (status.git.dirty ? "有未提交改动" : "干净") : status?.git?.error ?? "不可用"}</span>
+          <span>租约：{status?.lease.locked ? `运行中 ${status.lease.operationId ?? ""}` : "空闲"}</span>
+          {selectedDirty && (
+            <label className="workspace-danger-confirm">
+              <input checked={cleanupDiscardConfirmed} onChange={(event) => onCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
+              确认清理时丢弃该执行工作区的未提交改动
+            </label>
+          )}
+          <div className="project-workspace-actions">
+            <button
+              className="secondary small-button"
+              disabled={diffPending}
+              onClick={() => onLoadDiff(selected.id)}
+              type="button"
+            >
+              查看 diff
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={mergePreviewPending || selected.mode === "shared_workspace"}
+              onClick={() => onMergePreview(selected.id)}
+              type="button"
+            >
+              检查 merge
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)}
+              onClick={() => onMerge(selected.id)}
+              type="button"
+            >
+              merge 到目标分支
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={preparePrPending || !selected.branchName}
+              onClick={() => onPreparePr(selected.id)}
+              type="button"
+            >
+              准备 PR
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={createPrPending || !selected.branchName}
+              onClick={() => onCreatePr(selected.id)}
+              type="button"
+            >
+              创建 PR
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={pushPending || !selected.branchName}
+              onClick={() => onPush(selected.id)}
+              type="button"
+            >
+              push 分支
+            </button>
+            <button
+              className="danger small-button"
+              disabled={abandonPending || Boolean(status?.lease.locked)}
+              onClick={() => onAbandon(selected.id)}
+              type="button"
+            >
+              放弃结果
+            </button>
+            <button
+              className="danger small-button"
+              disabled={cleanupPending || !canCleanup}
+              onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)}
+              type="button"
+            >
+              清理目录
+            </button>
+            <button
+              className="danger small-button"
+              disabled={archivePending || !status?.canArchive}
+              onClick={() => onArchive(selected.id)}
+              type="button"
+            >
+              归档旧流程
+            </button>
+          </div>
+          {mergePreview && <pre className="workspace-diff-preview">{mergePreview}</pre>}
+          {diffPreview && <pre className="workspace-diff-preview">{diffPreview}</pre>}
+        </div>
+      )}
+    </section>
+  );
+}
 export function ProjectPage() {
   const { orgId = "", projectId = "", tab = "configuration" } = useParams();
   const activeTab = ["configuration", "resources", "issues", "budget"].includes(tab) ? tab : "configuration";
@@ -249,6 +450,10 @@ export function ProjectPage() {
   const [newResourceDescription, setNewResourceDescription] = useState("");
   const [newResourceRole, setNewResourceRole] = useState<ProjectResourceRole>("reference");
   const [newResourceNote, setNewResourceNote] = useState("");
+  const [selectedExecutionWorkspaceId, setSelectedExecutionWorkspaceId] = useState("");
+  const [workspaceDiffPreview, setWorkspaceDiffPreview] = useState("");
+  const [workspaceMergePreview, setWorkspaceMergePreview] = useState("");
+  const [cleanupDiscardConfirmed, setCleanupDiscardConfirmed] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const project = useQuery({
@@ -275,6 +480,16 @@ export function ProjectPage() {
     queryFn: () => agentsApi.list(orgId),
     enabled: activeTab === "configuration" || activeTab === "issues",
   });
+  const executionWorkspaces = useQuery({
+    queryKey: ["execution-workspaces", orgId, projectId],
+    queryFn: () => projectsApi.listExecutionWorkspaces(orgId, projectId),
+    enabled: activeTab === "configuration" && Boolean(orgId && projectId),
+  });
+  const executionWorkspaceStatus = useQuery({
+    queryKey: ["execution-workspace-status", selectedExecutionWorkspaceId],
+    queryFn: () => projectsApi.executionWorkspaceStatus(selectedExecutionWorkspaceId),
+    enabled: activeTab === "configuration" && Boolean(selectedExecutionWorkspaceId),
+  });
   useEffect(() => {
     if (project.data) {
       setProjectName(project.data.name);
@@ -289,6 +504,11 @@ export function ProjectPage() {
       setWorkspacePolicyError("");
     }
   }, [project.data]);
+  const executionWorkspaceList = Array.isArray(executionWorkspaces.data) ? executionWorkspaces.data : [];
+  useEffect(() => {
+    const firstWorkspaceId = executionWorkspaceList[0]?.id ?? "";
+    if (!selectedExecutionWorkspaceId && firstWorkspaceId) setSelectedExecutionWorkspaceId(firstWorkspaceId);
+  }, [executionWorkspaceList, selectedExecutionWorkspaceId]);
   const update = useMutation({
     mutationFn: () => {
       const executionWorkspacePolicy = parseJsonObject(workspacePolicy || workspacePolicyForMode("", workspacePolicyMode));
@@ -342,6 +562,81 @@ export function ProjectPage() {
   const removeWorkspace = useMutation({
     mutationFn: (workspaceId: string) => projectsApi.removeWorkspace(projectId, workspaceId),
     onSuccess: invalidateProject,
+  });
+  const refreshExecutionWorkspaces = () => {
+    void queryClient.invalidateQueries({ queryKey: ["execution-workspaces", orgId, projectId] });
+    if (selectedExecutionWorkspaceId) {
+      void queryClient.invalidateQueries({ queryKey: ["execution-workspace-status", selectedExecutionWorkspaceId] });
+    }
+  };
+  const loadWorkspaceDiff = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.executionWorkspaceDiff(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceDiffPreview(payload.diff || payload.stat || payload.error || "无 diff");
+    },
+  });
+  const previewExecutionWorkspaceMerge = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.executionWorkspaceMergePreview(workspaceId),
+    onSuccess: (payload) => {
+      const title = payload.canMerge ? "可以 clean merge" : payload.conflict ? "存在 merge 冲突" : "不能 merge";
+      const files = payload.conflictFiles.length > 0 ? `
+冲突文件：${payload.conflictFiles.join(", ")}` : "";
+      setWorkspaceMergePreview(`${title}
+目标：${payload.targetRef ?? "未设置"}
+来源：${payload.sourceBranch ?? "未识别"}${files}
+
+${payload.preview || payload.error || "无详细输出"}`);
+    },
+  });
+  const mergeExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.mergeExecutionWorkspace(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`已 merge 到 ${payload.targetRef}
+merge commit: ${payload.mergedCommit ?? "未识别"}`);
+      refreshExecutionWorkspaces();
+    },
+  });
+  const prepareExecutionWorkspacePr = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.prepareExecutionWorkspacePr(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`PR 准备信息
+源分支：${payload.sourceBranch}
+目标：${payload.targetRef}
+命令：${payload.command}
+${payload.compareUrl ?? "未识别远端 compare URL"}`);
+    },
+  });
+  const createExecutionWorkspacePr = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.createExecutionWorkspacePr(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`已创建 PR：${payload.url ?? (payload.stdout || "未返回 URL")}`);
+      refreshExecutionWorkspaces();
+    },
+  });
+  const pushExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.pushExecutionWorkspace(workspaceId),
+    onSuccess: refreshExecutionWorkspaces,
+  });
+  const archiveExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.archiveExecutionWorkspace(workspaceId),
+    onSuccess: () => {
+      setWorkspaceDiffPreview("");
+      setWorkspaceMergePreview("");
+      refreshExecutionWorkspaces();
+    },
+  });
+  const abandonExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.abandonExecutionWorkspace(workspaceId),
+    onSuccess: refreshExecutionWorkspaces,
+  });
+  const cleanupExecutionWorkspace = useMutation({
+    mutationFn: ({ workspaceId, discardDirty }: { workspaceId: string; discardDirty: boolean }) => projectsApi.cleanupExecutionWorkspace(workspaceId, discardDirty),
+    onSuccess: () => {
+      setWorkspaceDiffPreview("");
+      setWorkspaceMergePreview("");
+      setCleanupDiscardConfirmed(false);
+      refreshExecutionWorkspaces();
+    },
   });
   const addResource = useMutation({
     mutationFn: (payload: { resourceId: string; role?: ProjectResourceRole; note?: string | null; sortOrder?: number }) =>
@@ -629,6 +924,41 @@ export function ProjectPage() {
                 </button>
               </div>
               <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
+              <ExecutionWorkspacePanel
+                abandonPending={abandonExecutionWorkspace.isPending}
+                archivePending={archiveExecutionWorkspace.isPending}
+                cleanupDiscardConfirmed={cleanupDiscardConfirmed}
+                cleanupPending={cleanupExecutionWorkspace.isPending}
+                createPrPending={createExecutionWorkspacePr.isPending}
+                diffPending={loadWorkspaceDiff.isPending}
+                diffPreview={workspaceDiffPreview}
+                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
+                mergePending={mergeExecutionWorkspace.isPending}
+                mergePreview={workspaceMergePreview}
+                mergePreviewPending={previewExecutionWorkspaceMerge.isPending}
+                onAbandon={(workspaceId) => abandonExecutionWorkspace.mutate(workspaceId)}
+                onArchive={(workspaceId) => archiveExecutionWorkspace.mutate(workspaceId)}
+                onCleanup={(workspaceId, discardDirty) => cleanupExecutionWorkspace.mutate({ workspaceId, discardDirty })}
+                onCleanupDiscardConfirmed={setCleanupDiscardConfirmed}
+                onCreatePr={(workspaceId) => createExecutionWorkspacePr.mutate(workspaceId)}
+                onLoadDiff={(workspaceId) => loadWorkspaceDiff.mutate(workspaceId)}
+                onMerge={(workspaceId) => mergeExecutionWorkspace.mutate(workspaceId)}
+                onMergePreview={(workspaceId) => previewExecutionWorkspaceMerge.mutate(workspaceId)}
+                onPreparePr={(workspaceId) => prepareExecutionWorkspacePr.mutate(workspaceId)}
+                onPush={(workspaceId) => pushExecutionWorkspace.mutate(workspaceId)}
+                preparePrPending={prepareExecutionWorkspacePr.isPending}
+                onSelect={(workspaceId) => {
+                  setSelectedExecutionWorkspaceId(workspaceId);
+                  setWorkspaceDiffPreview("");
+                  setWorkspaceMergePreview("");
+                  setCleanupDiscardConfirmed(false);
+                }}
+                pushPending={pushExecutionWorkspace.isPending}
+                selectedId={selectedExecutionWorkspaceId}
+                status={executionWorkspaceStatus.data}
+                statusPending={executionWorkspaceStatus.isFetching}
+                workspaces={executionWorkspaceList}
+              />
               <section className="project-config-section project-workspace-manager" aria-label="项目工作区管理">
               <div className="project-section-heading">
                 <div>

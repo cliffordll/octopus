@@ -152,6 +152,396 @@ def test_workspace_tables_match_upstream_step15_scope() -> None:
     }
 
 
+async def test_execution_workspace_status_diff_and_archive_service(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-workspace-api",
+                name="Workspace API",
+                issue_prefix="WAPI",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Workspace API Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Workspace API issue",
+            )
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            workspace = await service._ensure_managed_workspace_paths(workspace)
+            status_payload = await service.workspace_status(workspace["id"])
+            diff_payload = await service.git_diff_for_workspace(workspace["id"])
+            archived = await service.archive_workspace(workspace["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert status_payload is not None
+    assert status_payload["workspace"]["id"] == workspace["id"]
+    assert status_payload["git"]["available"] is True
+    assert diff_payload is not None
+    assert diff_payload["available"] is True
+    assert archived is not None
+    assert archived["status"] == "archived"
+
+
+async def test_execution_workspace_records_branch_guard_metadata(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-workspace-guard-metadata",
+                name="Workspace Guard Metadata",
+                issue_prefix="WGM",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Workspace Guard Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                        "workspaceStrategy": {
+                            "type": "git_worktree",
+                            "baseRef": "main",
+                        },
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(org_id=org.id, project_id=project["id"], title="Guard")
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            workspace = await service._ensure_managed_workspace_paths(workspace)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert workspace["branchName"] is not None
+    metadata = workspace["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["expectedBranch"] == workspace["branchName"]
+    assert metadata["targetRef"] == "main"
+    assert metadata["createdFromBranch"] == "main"
+    assert len(metadata["createdFromHead"]) == 40
+
+
+async def test_execution_workspace_push_blocks_branch_mismatch(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-branch-guard",
+                name="Branch Guard",
+                issue_prefix="BGD",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Branch Guard Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(org_id=org.id, project_id=project["id"], title="Guard")
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            workspace = await service._ensure_managed_workspace_paths(workspace)
+            assert workspace["cwd"] is not None
+            _git(Path(workspace["cwd"]), "checkout", "-b", "unexpected-branch")
+            with pytest.raises(ValueError, match="branch mismatch"):
+                await service.push_workspace_branch(workspace["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def test_execution_workspace_merge_preview_reports_clean_and_conflict(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-merge-preview",
+                name="Merge Preview",
+                issue_prefix="MGP",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Merge Preview Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            service = WorkspaceService(session)
+            clean_issue = Issue(org_id=org.id, project_id=project["id"], title="Clean")
+            session.add(clean_issue)
+            await session.flush()
+            clean_workspace = await service.resolve_for_issue(clean_issue)
+            assert clean_workspace is not None
+            clean_workspace = await service._ensure_managed_workspace_paths(
+                clean_workspace
+            )
+            assert clean_workspace["cwd"] is not None
+            clean_cwd = Path(clean_workspace["cwd"])
+            clean_cwd.joinpath("clean.md").write_text("clean\n", encoding="utf-8")
+            _git(clean_cwd, "add", "clean.md")
+            _git(clean_cwd, "commit", "-m", "clean change")
+            clean_preview = await service.merge_preview(clean_workspace["id"])
+
+            conflict_issue = Issue(
+                org_id=org.id, project_id=project["id"], title="Conflict"
+            )
+            session.add(conflict_issue)
+            await session.flush()
+            conflict_workspace = await service.resolve_for_issue(conflict_issue)
+            assert conflict_workspace is not None
+            conflict_workspace = await service._ensure_managed_workspace_paths(
+                conflict_workspace
+            )
+            assert conflict_workspace["cwd"] is not None
+            conflict_cwd = Path(conflict_workspace["cwd"])
+            conflict_cwd.joinpath("README.md").write_text(
+                "# worktree\n", encoding="utf-8"
+            )
+            _git(conflict_cwd, "add", "README.md")
+            _git(conflict_cwd, "commit", "-m", "worktree readme")
+            project_cwd.joinpath("README.md").write_text("# target\n", encoding="utf-8")
+            _git(project_cwd, "add", "README.md")
+            _git(project_cwd, "commit", "-m", "target readme")
+            conflict_preview = await service.merge_preview(conflict_workspace["id"])
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert clean_preview is not None
+    assert clean_preview["available"] is True
+    assert clean_preview["canMerge"] is True
+    assert clean_preview["conflict"] is False
+    assert conflict_preview is not None
+    assert conflict_preview["available"] is True
+    assert conflict_preview["canMerge"] is False
+    assert conflict_preview["conflict"] is True
+
+
+async def test_execution_workspace_merge_pr_abandon_and_cleanup_flow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    _git(project_cwd, "remote", "add", "origin", "git@github.com:acme/demo.git")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    original_subprocess_run = subprocess.run
+
+    def fake_subprocess_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        command = args[0] if args else kwargs.get("args")
+        if isinstance(command, list) and command[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="https://github.com/acme/demo/pull/1\n",
+                stderr="",
+            )
+        return original_subprocess_run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-review-flow",
+                name="Review Flow",
+                issue_prefix="RVF",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Review Flow Project",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "sourceType": "git_repo",
+                    "cwd": str(project_cwd),
+                    "repoUrl": "git@github.com:acme/demo.git",
+                    "defaultRef": "main",
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            service = WorkspaceService(session)
+            merge_issue = Issue(org_id=org.id, project_id=project["id"], title="Merge")
+            session.add(merge_issue)
+            await session.flush()
+            merge_workspace = await service.resolve_for_issue(merge_issue)
+            assert merge_workspace is not None
+            merge_workspace = await service._ensure_managed_workspace_paths(
+                merge_workspace
+            )
+            assert merge_workspace["cwd"] is not None
+            merge_cwd = Path(merge_workspace["cwd"])
+            merge_cwd.joinpath("merged.md").write_text("merged\n", encoding="utf-8")
+            _git(merge_cwd, "add", "merged.md")
+            _git(merge_cwd, "commit", "-m", "merge me")
+            pr_plan = await service.prepare_pull_request(merge_workspace["id"])
+            created_pr = await service.create_pull_request(merge_workspace["id"])
+            merged = await service.merge_workspace(merge_workspace["id"])
+
+            cleanup_issue = Issue(
+                org_id=org.id, project_id=project["id"], title="Cleanup"
+            )
+            session.add(cleanup_issue)
+            await session.flush()
+            cleanup_workspace = await service.resolve_for_issue(cleanup_issue)
+            assert cleanup_workspace is not None
+            cleanup_workspace = await service._ensure_managed_workspace_paths(
+                cleanup_workspace
+            )
+            assert cleanup_workspace["cwd"] is not None
+            cleanup_cwd = Path(cleanup_workspace["cwd"])
+            cleanup_cwd.joinpath("scratch.md").write_text("scratch\n", encoding="utf-8")
+            abandoned = await service.abandon_workspace(cleanup_workspace["id"])
+            cleaned = await service.cleanup_workspace(
+                cleanup_workspace["id"], discard_dirty=True
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert pr_plan is not None
+    merge_branch = merge_workspace["branchName"]
+    assert merge_branch is not None
+    assert pr_plan["sourceBranch"] == merge_branch
+    assert pr_plan["targetRef"] == "main"
+    assert created_pr is not None
+    assert created_pr["created"] is True
+    assert created_pr["url"] == "https://github.com/acme/demo/pull/1"
+    assert created_pr["sourceBranch"] == merge_branch
+    assert created_pr["targetRef"] == "main"
+    assert (
+        pr_plan["compareUrl"]
+        == "https://github.com/acme/demo/compare/main..." + merge_branch
+    )
+    assert merged is not None
+    assert merged["merged"] is True
+    assert _git(project_cwd, "branch", "--show-current").stdout.strip() == "main"
+    assert project_cwd.joinpath("merged.md").read_text(encoding="utf-8") == "merged\n"
+    assert abandoned is not None
+    assert abandoned["status"] == "abandoned"
+    assert cleaned is not None
+    assert cleaned["status"] == "archived"
+    assert not cleanup_cwd.exists()
+
+
 async def test_upgrade_to_head_creates_workspace_tables(tmp_path: Path) -> None:
     db_path = tmp_path / "step15-upgrade.db"
     await upgrade_to_head(f"sqlite+aiosqlite:///{db_path}")
