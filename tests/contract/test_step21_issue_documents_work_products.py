@@ -239,6 +239,46 @@ async def test_shared_workspace_generated_scan_ignores_unscoped_cwd_files(
     assert rows == []
 
 
+async def test_shared_workspace_generated_scan_captures_root_artifacts_from_run(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    artifacts = shared_cwd / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "report.md").write_text("belongs to this run")
+    other_issue_artifacts = artifacts / "issues" / "other-issue"
+    other_issue_artifacts.mkdir(parents=True)
+    (other_issue_artifacts / "other.md").write_text("belongs to another issue")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "rudderWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert len(rows) == 1
+    metadata = rows[0]["metadata"]
+    assert metadata is not None
+    assert metadata["source"] == "shared_artifacts_scan"
+    assert metadata["workspacePath"] == "report.md"
+
+
 async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
     app: tuple[FastAPI, async_sessionmaker],
     tmp_path: Path,

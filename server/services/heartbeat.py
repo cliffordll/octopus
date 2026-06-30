@@ -1569,6 +1569,7 @@ class HeartbeatService:
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
             workspace_context = await self._prepare_workspace_context(agent, running)
+            sequence = await self._next_event_sequence(running.id)
             adapter_operation = await self._begin_adapter_workspace_operation(
                 running, workspace_context
             )

@@ -1432,7 +1432,7 @@ export interface HeartbeatRun {
   invocationSource: string;
   runPurpose?: "task_execution" | "closeout_followup" | "review" | "heartbeat";
   triggerDetail?: string | null;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out";
+  status: "queued" | "running" | "waiting_for_children" | "succeeded" | "failed" | "cancelled" | "timed_out";
   error?: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;

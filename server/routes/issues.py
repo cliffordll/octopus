@@ -728,6 +728,16 @@ async def update_issue_route(
         assignee_agent_id = updated.get("assigneeAgentId")
         if assignee_agent_id:
             _schedule_dispatch(request, assignee_agent_id)
+    if detail["status"] != updated["status"] and updated["status"] in {
+        "done",
+        "cancelled",
+        "blocked",
+    }:
+        parent_agent_id = await heartbeat.queue_parent_continuation_for_settled_child(
+            id
+        )
+        if parent_agent_id:
+            _schedule_dispatch(request, parent_agent_id)
     return updated
 
 

@@ -63,6 +63,9 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     workspace_artifacts_dir = (
         f"{worktree.rstrip('/\\\\')}/artifacts" if worktree else None
     )
+    workspace_artifacts_dir = (
+        _string(workspace_context.get("issueArtifactsDir")) or workspace_artifacts_dir
+    )
     preferred_artifacts_label = (
         "workspace artifacts directory"
         if workspace_artifacts_dir
@@ -94,7 +97,7 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
             "- Treat the workspace worktree as the project source/download directory for this run.",
             "- Put project-specific checkouts, downloaded source bundles, dependency snapshots, and code edits under the workspace worktree.",
             f"- Prefer the {preferred_artifacts_label} for durable deliverables produced by this run, such as reports, screenshots, CSV files, mockups, logs, and handoff documents.",
-            "- In a shared workspace, put auto-captured issue deliverables under `artifacts/issues/<current-issue-id>/`; files in the workspace root or organization artifacts root are not auto-registered.",
+            "- Use `OCTOPUS_ISSUE_ARTIFACTS_DIR` for issue deliverables. In a shared workspace, files created directly under the workspace `artifacts/` directory are also captured for compatibility when this run owns the write lease.",
             "- Use relative paths under the workspace worktree for source changes, patches, temporary project files, and project-local generated files.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",
         ]

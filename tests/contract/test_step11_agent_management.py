@@ -268,6 +268,7 @@ def test_heartbeat_contract_modules_define_execution_boundary() -> None:
     assert constants.HEARTBEAT_RUN_STATUSES == (
         "queued",
         "running",
+        "waiting_for_children",
         "succeeded",
         "failed",
         "cancelled",
@@ -1541,6 +1542,7 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
         "lifecycle",
         "lifecycle",
         "adapter.invoke",
+        "workspace.preflight",
         "lifecycle",
         "log",
         "lifecycle",
@@ -1550,7 +1552,8 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
         "run queued",
         "run started",
         "adapter invocation",
-        events[3]["message"].strip(),
+        "workspace context prepared",
+        events[4]["message"].strip(),
         "adapter-ok",
         "run succeeded",
     ]
