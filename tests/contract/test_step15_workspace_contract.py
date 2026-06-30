@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import importlib
 import importlib.util
 import shutil
@@ -11,13 +12,15 @@ from typing import cast
 import uuid
 
 import pytest
-from sqlalchemy import Table, text
+from sqlalchemy import Table, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import (
+    Agent,
+    AgentWakeupRequest,
     Base,
     HeartbeatRun,
     Issue,
@@ -33,7 +36,7 @@ from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
 from server.services.issues import IssueService
 from server.services.projects import ProjectService
-from server.services.workspaces import WorkspaceService
+from server.services.workspaces import WorkspaceLeaseUnavailable, WorkspaceService
 from packages.shared.validators.workspace import (
     validate_issue_execution_workspace_settings,
     validate_project_execution_workspace_policy,
@@ -618,7 +621,9 @@ async def test_project_detail_includes_workspace_aggregation() -> None:
     assert detail["codebase"]["workspaceId"] == workspace["id"]
 
 
-async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None:
+async def test_execution_workspace_resolution_binds_issue_to_workspace(
+    tmp_path: Path,
+) -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -645,9 +650,11 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace() -> None
                 actor_type="user",
                 actor_id="dev",
             )
+            project_cwd = tmp_path / "primary"
+            project_cwd.mkdir()
             project_workspace = await projects.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/primary"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -745,6 +752,13 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
     assert workspace["cwd"] == str(project_cwd)
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(project_cwd)
+    issue_artifacts_dir = (
+        Path(context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"])
+        / "issues"
+        / issue.id
+    )
+    assert workspace["issueArtifactsDir"] == str(issue_artifacts_dir)
+    assert not str(issue_artifacts_dir).startswith(str(project_cwd))
 
 
 async def test_shared_workspace_preflight_does_not_switch_project_branch(
@@ -1440,7 +1454,10 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
-    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in context["workspace"]["env"]
+    issue_artifacts_dir = org_root / "artifacts" / "issues" / issue.id
+    assert context["workspace"]["env"]["OCTOPUS_ISSUE_ARTIFACTS_DIR"] == str(
+        issue_artifacts_dir
+    )
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
     assert all(
         not key.startswith("RUDDER" + "_") for key in context["workspace"]["env"]
@@ -1448,7 +1465,7 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert all(
         not key.startswith("CONTROL" + "_PLANE_") for key in context["workspace"]["env"]
     )
-    assert "issueArtifactsDir" not in workspace
+    assert workspace["issueArtifactsDir"] == str(issue_artifacts_dir)
     assert "runArtifactsDir" not in workspace
 
 
@@ -1900,7 +1917,7 @@ async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
 
 
 async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project_cwd = tmp_path / "project-repo"
     _init_repo_with_branch(project_cwd, "main")
@@ -1947,7 +1964,7 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
             assert workspace_one is not None
             assert workspace_two is not None
             assert workspace_one["id"] == workspace_two["id"]
-            await service.begin_operation(
+            first_operation = await service.begin_operation(
                 org_id=org.id,
                 run_id="run-one",
                 execution_workspace_id=workspace_one["id"],
@@ -1966,7 +1983,261 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
                     cwd=workspace_two["cwd"],
                     metadata={"adapterExecution": True},
                 )
+
+            async def skip_lease_precheck(*args, **kwargs) -> None:
+                return None
+
+            monkeypatch.setattr(
+                WorkspaceService,
+                "_ensure_workspace_write_lease_available",
+                skip_lease_precheck,
+            )
+            with pytest.raises(WorkspaceLeaseUnavailable):
+                await service.begin_operation(
+                    org_id=org.id,
+                    run_id="run-two",
+                    execution_workspace_id=workspace_two["id"],
+                    phase="workspace_provision",
+                    command="runtime_adapter.execute",
+                    cwd=workspace_two["cwd"],
+                    metadata={"adapterExecution": True},
+                )
+            await service.finish_operation(first_operation["id"], status="succeeded")
+            second_operation = await service.begin_operation(
+                org_id=org.id,
+                run_id="run-two",
+                execution_workspace_id=workspace_two["id"],
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace_two["cwd"],
+                metadata={"adapterExecution": True},
+            )
+            assert second_operation["status"] == "running"
+            await service.mark_run_workspace_interrupted(
+                "run-two", reason="process_lost", message="process exited"
+            )
+            third_operation = await service.begin_operation(
+                org_id=org.id,
+                run_id="run-three",
+                execution_workspace_id=workspace_two["id"],
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace_two["cwd"],
+                metadata={"adapterExecution": True},
+            )
+            assert third_operation["status"] == "running"
             await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def test_workspace_lease_conflict_requeues_run_instead_of_failing() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-workspace-wait",
+                name="Step 15 Workspace Wait",
+                issue_prefix="LSW",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Waiting Agent", status="running")
+            session.add(agent)
+            await session.flush()
+            wakeup = AgentWakeupRequest(
+                org_id=org.id,
+                agent_id=agent.id,
+                source="assignment",
+                trigger_detail="system",
+                status="claimed",
+            )
+            session.add(wakeup)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="running",
+                started_at=datetime.now(UTC),
+                wakeup_request_id=wakeup.id,
+            )
+            session.add(run)
+            await session.flush()
+            wakeup.run_id = run.id
+
+            queued = await HeartbeatService(session)._defer_run_for_workspace_lease(
+                agent=agent,
+                running=run,
+                sequence=1,
+                lease=WorkspaceLeaseUnavailable(
+                    "workspace-1",
+                    operation_id="operation-1",
+                    run_id="owner-run",
+                ),
+            )
+            await session.flush()
+            await session.refresh(wakeup)
+            await session.refresh(agent)
+
+            assert queued.status == "queued"
+            assert queued.error_code == "workspace_lease_wait"
+            assert queued.finished_at is None
+            assert wakeup.status == "queued"
+            assert wakeup.claimed_at is None
+            assert wakeup.requested_at > wakeup.created_at
+            assert agent.status == "idle"
+    finally:
+        await engine.dispose()
+
+
+async def test_settled_children_queue_parent_continuation() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-child-continuation",
+                name="Step 15 Child Continuation",
+                issue_prefix="CHD",
+            )
+            session.add(org)
+            await session.flush()
+            parent_agent = Agent(org_id=org.id, name="Parent Agent")
+            child_agent = Agent(org_id=org.id, name="Child Agent")
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Child",
+                status="done",
+                assignee_agent_id=child_agent.id,
+            )
+            session.add(child)
+            await session.flush()
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": child.id},
+            )
+            session.add(child_run)
+            await session.flush()
+
+            await HeartbeatService(session)._wake_parent_after_child_settled(
+                child_run, child
+            )
+            await session.flush()
+
+            result = await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.agent_id == parent_agent.id,
+                    HeartbeatRun.status == "queued",
+                )
+            )
+            continuation = result.scalar_one()
+            assert continuation.context_snapshot is not None
+            assert continuation.context_snapshot["issueId"] == parent.id
+            assert (
+                continuation.context_snapshot["wakeReason"] == "issue_children_settled"
+            )
+    finally:
+        await engine.dispose()
+
+
+async def test_parent_run_with_active_children_is_valid_stage_closeout() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-parent-waiting",
+                name="Step 15 Parent Waiting",
+                issue_prefix="PWT",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            session.add(
+                Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title="Active Child",
+                    status="todo",
+                )
+            )
+            wakeup = AgentWakeupRequest(
+                org_id=org.id,
+                agent_id=agent.id,
+                source="assignment",
+                trigger_detail="system",
+                status="claimed",
+            )
+            session.add(wakeup)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                wakeup_request_id=wakeup.id,
+                context_snapshot={"issueId": parent.id},
+            )
+            session.add(run)
+            await session.flush()
+            wakeup.run_id = run.id
+            parent.execution_run_id = run.id
+            await session.flush()
+
+            final = await HeartbeatService(session)._complete_finalized_run(
+                agent=agent,
+                running=run,
+                final=run,
+                final_status="succeeded",
+                result=RuntimeExecutionResult(exit_code=0),
+                sequence=1,
+            )
+            await session.flush()
+            await session.refresh(wakeup)
+            await session.refresh(agent)
+            await session.refresh(parent)
+
+            assert final.status == "waiting_for_children"
+            assert final.error_code is None
+            assert wakeup.status == "completed"
+            assert agent.status == "idle"
+            assert parent.execution_run_id is None
     finally:
         await engine.dispose()
 
@@ -2245,6 +2516,7 @@ async def test_adapter_runtime_services_are_persisted_and_released(
 
 
 async def test_successful_run_captures_generated_workspace_files_as_work_products(
+    tmp_path: Path,
     monkeypatch,
 ) -> None:
     issue_ref: dict[str, str] = {}
@@ -2255,7 +2527,9 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
         async def execute(self, context):
             workspace = context.config.get("cwd")
             assert isinstance(workspace, str)
-            issue_artifacts = Path(workspace) / "artifacts" / "issues" / issue_ref["id"]
+            issue_artifacts_env = (context.env or {}).get("OCTOPUS_ISSUE_ARTIFACTS_DIR")
+            assert isinstance(issue_artifacts_env, str)
+            issue_artifacts = Path(issue_artifacts_env)
             issue_artifacts.mkdir(parents=True, exist_ok=True)
             report = issue_artifacts / "CLAUDE_SUMMARY.md"
             report.write_text("# Summary\n\nGenerated by runtime.\n", encoding="utf-8")
@@ -2335,9 +2609,11 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
                 actor_type="user",
                 actor_id="dev",
             )
+            project_cwd = tmp_path / "generated-primary"
+            project_cwd.mkdir()
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/generated-primary"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2622,7 +2898,9 @@ async def test_runtime_log_callbacks_are_serialized_for_one_session(
     assert "stderr-one\n" in messages
 
 
-async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
+async def test_cancel_running_run_marks_workspace_resources_terminal(
+    tmp_path: Path,
+) -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -2647,9 +2925,11 @@ async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
                 actor_type="user",
                 actor_id="dev",
             )
+            project_cwd = tmp_path / "cancel-cleanup"
+            project_cwd.mkdir()
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/cancel-cleanup"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2735,7 +3015,9 @@ async def test_cancel_running_run_marks_workspace_resources_terminal() -> None:
     assert operation_metadata["reason"] == "cancelled"
 
 
-async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None:
+async def test_orphaned_running_run_marks_workspace_resources_terminal(
+    tmp_path: Path,
+) -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -2760,9 +3042,11 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None
                 actor_type="user",
                 actor_id="dev",
             )
+            project_cwd = tmp_path / "recovery-cleanup"
+            project_cwd.mkdir()
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/recovery-cleanup"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2845,3 +3129,356 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal() -> None
     assert operation_metadata is not None
     assert operation_metadata["interrupted"] is True
     assert operation_metadata["reason"] == "process_lost"
+
+
+async def test_isolated_workspace_without_project_workspace_uses_managed_local_fs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-isolated-no-project-workspace",
+                name="Step 15 Isolated No Project Workspace",
+                issue_prefix="INW",
+            )
+            session.add(org)
+            await session.flush()
+            project = await ProjectService(session).create_project(
+                org.id,
+                {
+                    "name": "Isolated No Workspace",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use managed local fs",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-isolated-no-workspace",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["mode"] == "isolated_workspace"
+    assert workspace["strategyType"] == "local_fs"
+    assert workspace["providerType"] == "local_fs"
+    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
+    assert workspace["cwd"] == str(
+        org_root / "executions" / workspace["id"] / "worktree"
+    )
+    assert workspace["cwd"] != str(org_root)
+    assert Path(workspace["cwd"]).is_dir()
+
+
+async def test_operator_branch_without_project_workspace_fails_preflight() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-operator-no-project-workspace",
+                name="Step 15 Operator No Project Workspace",
+                issue_prefix="ONW",
+            )
+            session.add(org)
+            await session.flush()
+            project = await ProjectService(session).create_project(
+                org.id,
+                {
+                    "name": "Operator No Workspace",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Operator needs git source",
+            )
+            session.add(issue)
+            await session.flush()
+
+            with pytest.raises(ValueError, match="requires a project Git workspace"):
+                await WorkspaceService(session).resolve_for_issue(issue)
+    finally:
+        await engine.dispose()
+
+
+async def test_isolated_workspace_without_cwd_or_repo_uses_managed_local_fs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-isolated-empty-cwd",
+                name="Step 15 Isolated Empty Cwd",
+                issue_prefix="IEC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Isolated Empty Cwd",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {"name": "No Cwd", "cwd": None, "repoUrl": None},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=project_workspace["id"],
+                title="Use local fs fallback",
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-isolated-empty-cwd",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["rudderWorkspace"]
+    assert workspace["mode"] == "isolated_workspace"
+    assert workspace["providerType"] == "local_fs"
+    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
+    assert workspace["cwd"] != str(org_root)
+
+
+async def test_operator_branch_without_cwd_or_repo_fails_preflight() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-operator-empty-cwd",
+                name="Step 15 Operator Empty Cwd",
+                issue_prefix="OEC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {
+                    "name": "Operator Empty Cwd",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {"name": "No Cwd", "cwd": None, "repoUrl": None},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=project_workspace["id"],
+                title="Operator needs cwd",
+            )
+            session.add(issue)
+            await session.flush()
+
+            with pytest.raises(ValueError, match="requires the project workspace"):
+                await WorkspaceService(session).resolve_for_issue(issue)
+    finally:
+        await engine.dispose()
+
+
+async def test_configured_missing_project_workspace_cwd_fails_preflight(
+    tmp_path: Path,
+) -> None:
+    missing_cwd = tmp_path / "missing-project"
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-missing-cwd",
+                name="Step 15 Missing Cwd",
+                issue_prefix="MCW",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Missing Cwd Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Missing", "cwd": str(missing_cwd)},
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Missing cwd should fail",
+            )
+            session.add(issue)
+            await session.flush()
+
+            with pytest.raises(ValueError, match="does not exist"):
+                await WorkspaceService(session).resolve_for_issue(issue)
+    finally:
+        await engine.dispose()
+
+
+async def test_projectless_workspace_fallback_uses_org_lease_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-projectless-lease",
+                name="Step 15 Projectless Lease",
+                issue_prefix="PLL",
+            )
+            session.add(org)
+            await session.flush()
+            issue = Issue(org_id=org.id, title="Projectless lease")
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-projectless-lease",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                run.id, run.context_snapshot
+            )
+            assert context is not None
+            workspace = context["workspace"]["rudderWorkspace"]
+            assert workspace["id"] is None
+            assert workspace["leaseKey"] == org.id
+            service = WorkspaceService(session)
+            first = await service.begin_operation(
+                org_id=org.id,
+                run_id="run-one",
+                execution_workspace_id=None,
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace["cwd"],
+                metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
+            )
+            with pytest.raises(WorkspaceLeaseUnavailable):
+                await service.begin_operation(
+                    org_id=org.id,
+                    run_id="run-two",
+                    execution_workspace_id=None,
+                    phase="workspace_provision",
+                    command="runtime_adapter.execute",
+                    cwd=workspace["cwd"],
+                    metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
+                )
+            await service.finish_operation(first["id"], status="succeeded")
+            second = await service.begin_operation(
+                org_id=org.id,
+                run_id="run-two",
+                execution_workspace_id=None,
+                phase="workspace_provision",
+                command="runtime_adapter.execute",
+                cwd=workspace["cwd"],
+                metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
+            )
+            assert second["status"] == "running"
+    finally:
+        await engine.dispose()
