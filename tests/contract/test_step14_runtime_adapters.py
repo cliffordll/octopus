@@ -438,6 +438,7 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
                     "cwd": "D:/octopus/worktree",
                     "worktreePath": "D:/octopus/worktree",
                     "orgArtifactsDir": "D:/octopus/artifacts",
+                    "issueArtifactsDir": "D:/octopus/worktree/artifacts/issues/issue-1",
                 }
             },
         )
@@ -450,13 +451,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "Do not guess tool input schemas" in captured_prompt
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
-    assert "D:/octopus/worktree/artifacts" in captured_prompt
+    assert "D:/octopus/worktree/artifacts/issues/issue-1" in captured_prompt
     assert "D:/octopus/artifacts" not in captured_prompt
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
     assert "Prefer the workspace artifacts directory" in captured_prompt
-    assert "artifacts/issues/<current-issue-id>/" in captured_prompt
-    assert "organization artifacts root are not auto-registered" in captured_prompt
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" in captured_prompt
+    assert "captured for compatibility" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
@@ -1726,6 +1727,7 @@ async def test_codex_execute_injects_runtime_context_env(
                     "orgSkillsDir": "D:/orgs/org-14/skills",
                     "orgPlansDir": "D:/orgs/org-14/plans",
                     "orgArtifactsDir": "D:/orgs/org-14/artifacts",
+                    "issueArtifactsDir": "D:/worktrees/task-1/artifacts",
                 },
                 "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
                 "rudderRuntimePrimaryUrl": "http://svc",
@@ -1768,7 +1770,9 @@ async def test_codex_execute_injects_runtime_context_env(
     assert captured_env["OCTOPUS_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
     assert captured_env["OCTOPUS_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
     assert captured_env["OCTOPUS_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
-    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in captured_env
+    assert (
+        captured_env["OCTOPUS_ISSUE_ARTIFACTS_DIR"] == "D:/worktrees/task-1/artifacts"
+    )
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in captured_env
     assert captured_env["OCTOPUS_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'

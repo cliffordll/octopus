@@ -1,4 +1,4 @@
-﻿import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { activityApi } from "../api/activity";
@@ -124,9 +124,9 @@ function isRerunnableRun(status?: string | null): boolean {
   return status === "failed" || status === "timed_out" || status === "cancelled";
 }
 
-function isTerminalRun(status?: string | null): boolean {
-  return status === "succeeded" || isRerunnableRun(status);
-}
+function isTerminalRun(status?: string | null): boolean {
+  return status === "succeeded" || status === "waiting_for_children" || isRerunnableRun(status);
+}
 
 function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
   return run?.id || run?.runId || "";
@@ -677,7 +677,7 @@ function issueRunCostSummary(runs: HeartbeatRun[]): {
     (summary, run) => {
       if (runHasReportedUsage(run)) {
         summary.reportedRuns += 1;
-      } else if (run.usageJson || ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status)) {
+      } else if (run.usageJson || ["waiting_for_children", "succeeded", "failed", "cancelled", "timed_out"].includes(run.status)) {
         summary.unreportedRuns += 1;
       }
       const costCents = numericUsageValue(run, "costCents");
@@ -2631,11 +2631,11 @@ export function IssuePage() {
             <div className="issue-detail-title-block">
               <div className="issue-detail-kicker">
                 <Badge>{issueDisplayId(issue.data)}</Badge>
-                <Badge>任务状态：{statusLabel(issue.data.status)}</Badge>
-                <Badge>{priorityLabel(issue.data.priority)}</Badge>
+                <Badge>任务阶段：{statusLabel(issue.data.status)}</Badge>
+                <Badge>优先级：{priorityLabel(issue.data.priority)}</Badge>
                 {latestRun && (
                   <StatusPill status={latestRun.status}>
-                    {latestRunBadgeLabel(latestRun)}：{latestRunStatusText(latestRun)}
+                    {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
                   </StatusPill>
                 )}
               </div>
@@ -2673,7 +2673,7 @@ export function IssuePage() {
             {executeNotice && <p className="issue-action-notice" role="status">{executeNotice}</p>}
             {latestRun && isRerunnableRun(latestRun.status) && latestRunErrorNotice && !hideLatestRunError && (
               <p className="error-notice" role="status">
-                {latestRunBadgeLabel(latestRun)}：{latestRunStatusText(latestRun)}
+                {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
                 {latestRunErrorNotice ? `：${latestRunErrorNotice}` : ""}
               </p>
             )}

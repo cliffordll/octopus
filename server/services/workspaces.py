@@ -1956,6 +1956,10 @@ class WorkspaceService:
         artifacts_dir = _string(workspace.get("orgArtifactsDir"))
         if not artifacts_dir and isinstance(workspace_env, dict):
             artifacts_dir = _string(workspace_env.get("OCTOPUS_ORG_ARTIFACTS_DIR"))
+        if not artifacts_dir:
+            default_artifacts_dir = worktree_root / "artifacts"
+            if default_artifacts_dir.is_dir():
+                artifacts_dir = str(default_artifacts_dir)
         artifacts_root = Path(artifacts_dir).resolve() if artifacts_dir else None
         if artifacts_dir:
             assert artifacts_root is not None
@@ -1966,6 +1970,8 @@ class WorkspaceService:
             "organization_workspace",
         }
         if shared_workspace:
+            if artifacts_root is not None and artifacts_root.is_dir():
+                scan_roots.append(("shared_artifacts_scan", artifacts_root))
             issue_artifacts_dir = _string(workspace.get("issueArtifactsDir"))
             issue_artifacts_root = (
                 Path(issue_artifacts_dir).resolve()
