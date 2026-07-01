@@ -447,6 +447,40 @@ def _workspace_metadata(workspace: ExecutionWorkspaceData) -> dict[str, Any]:
     return metadata if isinstance(metadata, dict) else {}
 
 
+def _workspace_warnings(workspace: ExecutionWorkspaceData) -> list[str]:
+    metadata = _workspace_metadata(workspace)
+    warnings = metadata.get("warnings")
+    if not isinstance(warnings, list):
+        return []
+    return [str(warning) for warning in warnings if isinstance(warning, str)]
+
+
+def _workspace_kind(workspace: ExecutionWorkspaceData) -> str:
+    metadata = _workspace_metadata(workspace)
+    explicit = _string(metadata.get("workspaceKind"))
+    if explicit:
+        return explicit
+    if workspace.get("strategyType") == "organization_workspace":
+        return "organization_scratch"
+    if workspace.get("projectId"):
+        return "project_execution"
+    return "agent_scratch"
+
+
+def _workspace_code_source_kind(workspace: ExecutionWorkspaceData) -> str:
+    metadata = _workspace_metadata(workspace)
+    explicit = _string(metadata.get("codeSourceKind"))
+    if explicit:
+        return explicit
+    if workspace.get("strategyType") == "organization_workspace":
+        return "none"
+    if _string(workspace.get("repoUrl")) and not _string(workspace.get("cwd")):
+        return "repo_url_pending_checkout"
+    if _string(workspace.get("cwd")):
+        return "local_cwd"
+    return "none"
+
+
 def _workspace_expected_branch(workspace: ExecutionWorkspaceData) -> str | None:
     metadata = _workspace_metadata(workspace)
     return (
@@ -1134,6 +1168,9 @@ class WorkspaceService:
             issue_settings=issue_settings,
         )
         fallback_cwd: str | None = None
+        project_had_configured_cwd = bool(
+            _string(project_workspace.cwd) if project_workspace else None
+        )
         project_cwd = (
             await self._ensure_project_checkout(
                 org_id=issue.org_id,
@@ -1142,6 +1179,13 @@ class WorkspaceService:
             )
             if project_workspace is not None
             else None
+        )
+        project_code_source_kind = self._project_code_source_kind(
+            org_id=issue.org_id,
+            project_id=project.id,
+            cwd=project_cwd,
+            had_configured_cwd=project_had_configured_cwd,
+            repo_url=_string(project_workspace.repo_url) if project_workspace else None,
         )
         project_repo_url = (
             _string(project_workspace.repo_url) if project_workspace else None
@@ -1247,6 +1291,16 @@ class WorkspaceService:
             execution_metadata.update(
                 {
                     "fallback": "organization_workspace",
+                    "workspaceKind": "organization_scratch",
+                    "codeSourceKind": "none",
+                    "warnings": warnings,
+                }
+            )
+        else:
+            execution_metadata.update(
+                {
+                    "workspaceKind": "project_execution",
+                    "codeSourceKind": project_code_source_kind,
                     "warnings": warnings,
                 }
             )
@@ -2283,6 +2337,36 @@ class WorkspaceService:
             return organization_workspace_root(org_id)
         return ensure_organization_workspace_root(org_id)
 
+    def _managed_project_checkout_path(self, org_id: str, project_id: str) -> Path:
+        return (
+            self._org_workspace_root(org_id)
+            / "projects"
+            / _safe_branch_suffix(project_id[:8])
+            / "checkout"
+        ).resolve()
+
+    def _project_code_source_kind(
+        self,
+        *,
+        org_id: str,
+        project_id: str,
+        cwd: str | None,
+        had_configured_cwd: bool,
+        repo_url: str | None,
+    ) -> str:
+        if not cwd:
+            return "repo_url_pending_checkout" if repo_url else "none"
+        try:
+            if Path(cwd).resolve() == self._managed_project_checkout_path(
+                org_id, project_id
+            ):
+                return "managed_checkout"
+        except OSError:
+            pass
+        if had_configured_cwd:
+            return "local_cwd"
+        return "local_cwd"
+
     def _with_organization_workspace_paths(
         self,
         *,
@@ -2299,6 +2383,13 @@ class WorkspaceService:
                 "source": workspace["providerType"],
                 "strategy": workspace["strategyType"],
                 "workspaceId": workspace["id"],
+                "workspaceKind": _workspace_kind(workspace),
+                "codeSourceKind": _workspace_code_source_kind(workspace),
+                "workspaceCwd": workspace.get("cwd"),
+                "warnings": _workspace_warnings(workspace),
+                "requiresLease": False,
+                "canRun": True,
+                "failureReason": None,
                 "orgWorkspaceRoot": str(org_root),
                 "orgAgentsDir": str(agents_dir),
                 "orgSkillsDir": str(skills_dir),
@@ -2325,6 +2416,12 @@ class WorkspaceService:
             "OCTOPUS_WORKSPACE_CWD": workspace["cwd"] or "",
             "OCTOPUS_WORKSPACE_SOURCE": workspace["providerType"],
             "OCTOPUS_WORKSPACE_STRATEGY": workspace["strategyType"],
+            "OCTOPUS_WORKSPACE_KIND": _workspace_kind(workspace),
+            "OCTOPUS_WORKSPACE_CODE_SOURCE": _workspace_code_source_kind(workspace),
+            "OCTOPUS_WORKSPACE_WARNINGS_JSON": _json_dump(
+                _workspace_warnings(workspace)
+            ),
+            "OCTOPUS_WORKSPACE_REQUIRES_LEASE": "false",
             "OCTOPUS_WORKSPACE_ID": workspace["id"] or "",
             "OCTOPUS_WORKSPACE_REPO_URL": workspace["repoUrl"] or "",
             "OCTOPUS_WORKSPACE_REPO_REF": workspace["baseRef"] or "",
@@ -2435,6 +2532,8 @@ class WorkspaceService:
                     "resolvedForIssueId": issue.id,
                     "resolvedMode": "shared_workspace",
                     "fallback": "organization_workspace",
+                    "workspaceKind": "organization_scratch",
+                    "codeSourceKind": "none",
                     "warnings": [warning],
                 },
                 "createdAt": now,

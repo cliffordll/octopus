@@ -55,6 +55,18 @@ def apply_runtime_context_env(
     _set_env(env, "OCTOPUS_WORKSPACE_CWD", workspace_context.get("cwd"))
     _set_env(env, "OCTOPUS_WORKSPACE_SOURCE", workspace_context.get("source"))
     _set_env(env, "OCTOPUS_WORKSPACE_STRATEGY", workspace_context.get("strategy"))
+    _set_env(env, "OCTOPUS_WORKSPACE_KIND", workspace_context.get("workspaceKind"))
+    _set_env(
+        env,
+        "OCTOPUS_WORKSPACE_CODE_SOURCE",
+        workspace_context.get("codeSourceKind"),
+    )
+    warnings = workspace_context.get("warnings")
+    if isinstance(warnings, list):
+        env["OCTOPUS_WORKSPACE_WARNINGS_JSON"] = json.dumps(warnings)
+    requires_lease = workspace_context.get("requiresLease")
+    if isinstance(requires_lease, bool):
+        env["OCTOPUS_WORKSPACE_REQUIRES_LEASE"] = "true" if requires_lease else "false"
     _set_env(env, "OCTOPUS_WORKSPACE_ID", workspace_context.get("workspaceId"))
     _set_env(env, "OCTOPUS_WORKSPACE_REPO_URL", workspace_context.get("repoUrl"))
     _set_env(env, "OCTOPUS_WORKSPACE_REPO_REF", workspace_context.get("repoRef"))

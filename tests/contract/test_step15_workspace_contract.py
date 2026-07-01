@@ -752,7 +752,17 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
     assert workspace["strategyType"] == "project_primary"
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
     assert workspace["cwd"] == str(project_cwd)
+    assert workspace["workspaceKind"] == "project_execution"
+    assert workspace["codeSourceKind"] == "local_cwd"
+    assert workspace["warnings"] == []
+    assert workspace["requiresLease"] is False
+    assert workspace["canRun"] is True
+    assert workspace["failureReason"] is None
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(project_cwd)
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_KIND"] == "project_execution"
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CODE_SOURCE"] == "local_cwd"
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_WARNINGS_JSON"] == "[]"
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_REQUIRES_LEASE"] == "false"
     issue_artifacts_dir = (
         Path(context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"])
         / "issues"
@@ -1296,6 +1306,12 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
     assert workspace["cwd"] == str(expected_checkout)
+    assert workspace["workspaceKind"] == "project_execution"
+    assert workspace["codeSourceKind"] == "managed_checkout"
+    assert (
+        context["workspace"]["env"]["OCTOPUS_WORKSPACE_CODE_SOURCE"]
+        == "managed_checkout"
+    )
     assert (
         _git(expected_checkout, "rev-parse", "--is-inside-work-tree").stdout.strip()
         == "true"
@@ -1380,6 +1396,8 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
     workspace = context["workspace"]["rudderWorkspace"]
     managed_checkout = org_root / "projects" / project["id"][:8] / "checkout"
     assert workspace["providerType"] == "git_worktree"
+    assert workspace["workspaceKind"] == "project_execution"
+    assert workspace["codeSourceKind"] == "managed_checkout"
     assert workspace["metadata"]["sourceWorkspaceCwd"] == str(managed_checkout)
     assert (
         _git(
@@ -1450,7 +1468,15 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert workspace["metadata"]["warnings"] == [
         f'Project has no workspace configured. Run will start in shared organization workspace "{org_root}".'
     ]
+    assert workspace["workspaceKind"] == "organization_scratch"
+    assert workspace["codeSourceKind"] == "none"
+    assert workspace["warnings"] == workspace["metadata"]["warnings"]
+    assert workspace["requiresLease"] is False
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(org_root)
+    assert (
+        context["workspace"]["env"]["OCTOPUS_WORKSPACE_KIND"] == "organization_scratch"
+    )
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CODE_SOURCE"] == "none"
     assert context["workspace"]["env"]["OCTOPUS_ORG_WORKSPACE_ROOT"] == str(org_root)
     assert context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
@@ -1526,7 +1552,15 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     assert workspace["metadata"]["warnings"] == [
         f'Issue has no project configured. Run will start in shared organization workspace "{org_root}".'
     ]
+    assert workspace["workspaceKind"] == "organization_scratch"
+    assert workspace["codeSourceKind"] == "none"
+    assert workspace["warnings"] == workspace["metadata"]["warnings"]
+    assert workspace["requiresLease"] is False
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CWD"] == str(org_root)
+    assert (
+        context["workspace"]["env"]["OCTOPUS_WORKSPACE_KIND"] == "organization_scratch"
+    )
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CODE_SOURCE"] == "none"
     assert context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(
         org_root / "artifacts"
     )
@@ -1617,6 +1651,9 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
         "Project workspace has no local cwd configured. Run will start "
         f'in shared organization workspace "{org_root}".'
     ]
+    assert workspace["workspaceKind"] == "organization_scratch"
+    assert workspace["codeSourceKind"] == "none"
+    assert workspace["warnings"] == workspace["metadata"]["warnings"]
 
 
 async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
@@ -1732,7 +1769,9 @@ async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
     assert (run["resultJson"] or {})["cwd"] == str(org_root)
 
 
-async def test_run_preflight_injects_workspace_context_into_runtime_env(tmp_path: Path) -> None:
+async def test_run_preflight_injects_workspace_context_into_runtime_env(
+    tmp_path: Path,
+) -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3061,7 +3100,9 @@ async def test_isolated_workspace_without_project_workspace_fails_preflight() ->
             session.add(issue)
             await session.flush()
 
-            with pytest.raises(ValueError, match="requires a project Git workspace or repo URL"):
+            with pytest.raises(
+                ValueError, match="requires a project Git workspace or repo URL"
+            ):
                 await WorkspaceService(session).resolve_for_issue(issue)
     finally:
         await engine.dispose()
@@ -3149,7 +3190,10 @@ async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
             session.add(issue)
             await session.flush()
 
-            with pytest.raises(ValueError, match="requires the project workspace to have a local Git cwd or repo URL"):
+            with pytest.raises(
+                ValueError,
+                match="requires the project workspace to have a local Git cwd or repo URL",
+            ):
                 await WorkspaceService(session).resolve_for_issue(issue)
     finally:
         await engine.dispose()
