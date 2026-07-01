@@ -1,4 +1,4 @@
-﻿"""Import a companies.sh / Octopus directory-style organization package.
+"""Import a companies.sh / Octopus directory-style organization package.
 
 Supports both layouts in one parser:
 - Paperclip-native: COMPANY.md + .paperclip.yaml + agents/<slug>/AGENTS.md

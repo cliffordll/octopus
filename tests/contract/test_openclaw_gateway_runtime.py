@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from packages.runtimes.openclaw_gateway.protocol import (
     build_agent_payload,
