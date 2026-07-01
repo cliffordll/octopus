@@ -65,6 +65,18 @@ health: http://127.0.0.1:8000/api/health
 
 ### 测试命令
 
+提交前完整检查：
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright .
+uv run pytest
+cd ui
+npm run typecheck
+npm test
+```
+
 后端类型检查：
 
 ```powershell
@@ -98,17 +110,28 @@ cd ui
 npm test -- project-page.test.tsx
 ```
 
-提交前完整检查：
+### 测试失败时先看这里
+
+先确认依赖是同步过的：
 
 ```powershell
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright .
-uv run pytest
+uv sync
 cd ui
-npm run typecheck
-npm test
+npm install
+cd ..
 ```
+
+常见失败和处理方式：
+
+| 现象 | 处理方式 |
+| --- | --- |
+| `uv run pyright .` 报缺包、找不到模块 | 先执行 `uv sync`。如果正在运行 server 导致 `.venv` 文件被锁，先停 server，或改用 `uv run --no-sync pyright .`。 |
+| `uv run ruff format --check .` 失败 | 运行 `uv run ruff format .`，再重新执行 `uv run ruff check .` 和 `uv run ruff format --check .`。 |
+| `uv run pytest` 失败但不知道是哪一个测试 | 用失败输出里的完整节点重跑：`uv run pytest path\to\test_file.py::test_name -q -vv -x`。 |
+| 数据库、迁移、本地数据相关测试失败 | 确认没有连到旧数据库：`Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue`。需要本地 server 数据库时再执行 `uv run alembic upgrade head`。 |
+| UI `npm run typecheck` 或 `npm test` 报依赖缺失 | 在 `ui/` 下执行 `npm install`，再重跑对应命令。 |
+| UI 测试失败但不知道如何缩小范围 | 用文件名重跑：`npm test -- project-page.test.tsx`。如果是某个断言失败，先看 Vitest 输出里的测试名和 DOM 片段。 |
+| 运行 UI 测试后 `ui/package-lock.json` 发生无关变化 | 先看 `git diff -- ui/package-lock.json`。如果只是 npm 自动更新子依赖版本，且本次任务不涉及依赖升级，不要提交这个 lockfile 漂移。 |
 
 ## 1. 依赖和环境准备
 
@@ -639,6 +662,53 @@ npm run build
 cd ui
 npm test -- project-page.test.tsx
 ```
+
+### 常见失败处理
+
+Pyright 找不到依赖或类型：
+
+```powershell
+uv sync
+uv run pyright .
+```
+
+如果 Windows 上正在运行的 server 锁住 `.venv`，先停 server；只做静态检查时也可以使用：
+
+```powershell
+uv run --no-sync pyright .
+```
+
+Ruff 格式检查失败：
+
+```powershell
+uv run ruff format .
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Pytest 失败时先用失败节点缩小范围：
+
+```powershell
+uv run pytest tests\contract\test_step15_workspace_contract.py::test_name -q -vv -x
+```
+
+如果失败涉及本地数据库或迁移，先确认没有误连旧数据库：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+uv run alembic upgrade head
+```
+
+UI 依赖或 Vitest 失败时：
+
+```powershell
+cd ui
+npm install
+npm run typecheck
+npm test -- project-page.test.tsx
+```
+
+如果 `npm install` 或测试命令改动了 `ui/package-lock.json`，先检查 diff；只有明确升级依赖时才提交 lockfile。
 
 提交前检查补充：
 
