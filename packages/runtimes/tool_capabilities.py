@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -97,7 +97,7 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
             "- Treat the workspace worktree as the project source/download directory for this run.",
             "- Put project-specific checkouts, downloaded source bundles, dependency snapshots, and code edits under the workspace worktree.",
             f"- Prefer the {preferred_artifacts_label} for durable deliverables produced by this run, such as reports, screenshots, CSV files, mockups, logs, and handoff documents.",
-            "- Use `OCTOPUS_ISSUE_ARTIFACTS_DIR` for issue deliverables.",
+            "- Use `OCTOPUS_ISSUE_ARTIFACTS_DIR` for issue deliverables; this path is captured for compatibility with issue documents and work products.",
             "- Use relative paths under the workspace worktree for source changes, patches, temporary project files, and project-local generated files.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",
         ]

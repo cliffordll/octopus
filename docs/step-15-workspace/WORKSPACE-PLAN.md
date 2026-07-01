@@ -24,8 +24,8 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | 第一阶段：清理 Shared 错误模型 | 已执行 | 已删除 workspace operation lease、shared workspace lease 队列、相关 migration 与测试断言 |
-| 第二阶段：统一 Preflight/API 事实输出 | 未开始 | 下一步处理 `workspaceKind`、`codeSourceKind`、warnings 等结构化输出 |
-| 第三阶段：UI 调整 | 未开始 | 依赖第二阶段 API 事实输出 |
+| 第二阶段：统一 Preflight/API 事实输出 | 已执行 | 已输出 `workspaceKind`、`codeSourceKind`、warnings、lease/canRun 等结构化事实 |
+| 第三阶段：UI 调整 | 进行中 | 项目页开始按“项目代码来源 / 主工作区 / 运行时目录”展示，并清理组织共享 fallback 文案 |
 | 第四阶段：Shared Workspace 实现目标 | 部分完成 | 已移除 workspace 长锁；仍需继续收敛无代码来源 fallback 的 API/UI 语义 |
 | 第五阶段：Isolated Workspace 实现目标 | 部分完成 | 已禁止 local_fs fallback；仍需补齐 repoUrl-only/managed checkout/worktree 测试 |
 | 第六阶段：Operator Branch 后续计划 | 未开始 | 等 Shared/Isolated 稳定后再讨论 |

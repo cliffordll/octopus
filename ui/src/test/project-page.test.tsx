@@ -191,7 +191,7 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/budget",
   );
-  expect(screen.getByText("代码库")).toBeInTheDocument();
+  expect(screen.getByText("代码来源")).toBeInTheDocument();
   expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
   expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
@@ -354,10 +354,12 @@ it("saves the selected workspace policy when the project has no existing policy"
       workspaceStrategy: { mode: "shared_workspace" },
     }, null, 2),
   );
-  expect(screen.getByText("将使用组织共享工作区")).toBeInTheDocument();
+  expect(screen.getAllByText("未配置项目主工作区").length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("organizations/org-1/workspaces")).toBeInTheDocument();
   expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
-  expect(screen.getByText("暂无项目工作区。任务运行时会使用组织共享工作区。")).toBeInTheDocument();
+  expect(screen.getByText("暂无项目主工作区。请设置本地 cwd 或仓库 URL。")).toBeInTheDocument();
+  expect(screen.getAllByText(/组织草稿目录/).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByLabelText(/共享工作区/)).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
 
   expect(fetchMock).toHaveBeenCalledWith(

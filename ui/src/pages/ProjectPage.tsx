@@ -54,17 +54,17 @@ const WORKSPACE_POLICY_OPTIONS: Array<{
   {
     mode: "shared_workspace",
     label: "共享工作区",
-    description: "多个任务复用项目主工作区，适合常规项目协作。",
+    description: "直接使用项目主工作区 cwd，不创建任务级执行目录。",
   },
   {
     mode: "isolated_workspace",
     label: "独立工作区",
-    description: "每个任务准备独立执行目录，适合需要隔离改动的任务。",
+    description: "每个任务使用独立 Git worktree，适合隔离改动。",
   },
   {
     mode: "operator_branch",
     label: "操作分支",
-    description: "按任务派生分支或工作区，适合需要保留任务分支痕迹的场景。",
+    description: "基于固定操作分支推进，需先具备 Git 代码来源。",
   },
 ];
 
@@ -143,6 +143,20 @@ function projectHasLocalWorkspace(workspaces: ProjectWorkspace[]): boolean {
   return workspaces.some((workspace) => Boolean(workspace.cwd?.trim()));
 }
 
+function projectHasRepoUrl(workspaces: ProjectWorkspace[], codebase?: ProjectCodebase): boolean {
+  return Boolean(codebase?.repoUrl?.trim() || workspaces.some((workspace) => Boolean(workspace.repoUrl?.trim())));
+}
+
+function projectHasCodeSource(workspaces: ProjectWorkspace[], codebase?: ProjectCodebase): boolean {
+  return projectHasLocalWorkspace(workspaces) || projectHasRepoUrl(workspaces, codebase);
+}
+
+function projectWorkspaceDisplay(workspace: ProjectWorkspace): string {
+  if (workspace.cwd?.trim()) return workspace.cwd;
+  if (workspace.repoUrl?.trim()) return "首次运行会创建受管 checkout";
+  return "未设置本地 cwd 或仓库 URL";
+}
+
 function roleCount(
   resources: Array<{ role: ProjectResourceRole }>,
   role: ProjectResourceRole,
@@ -166,51 +180,71 @@ function resourceKindMark(kind: OrganizationResource["kind"] | undefined): strin
 
 function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCodebase; workspaces: ProjectWorkspace[] }) {
   const hasLocalWorkspace = projectHasLocalWorkspace(workspaces);
-  const usesOrgWorkspaceFallback = !hasLocalWorkspace;
-  const orgWorkspaceRoot = codebase?.managedFolder ?? codebase?.effectiveLocalFolder ?? null;
-  const effectiveCwd = hasLocalWorkspace
-    ? codebase?.effectiveLocalFolder ?? codebase?.localFolder
-    : orgWorkspaceRoot;
+  const hasRepoUrl = projectHasRepoUrl(workspaces, codebase);
+  const hasCodeSource = projectHasCodeSource(workspaces, codebase);
+  const orgWorkspaceRoot = codebase?.managedFolder ?? null;
+  const projectCwd = hasLocalWorkspace ? codebase?.effectiveLocalFolder ?? codebase?.localFolder : null;
+  const executionCwd = projectCwd ?? (hasRepoUrl ? "首次运行会创建受管 checkout" : "未设置");
+  const codeSourceLabel = hasLocalWorkspace ? "本地 cwd" : hasRepoUrl ? "仓库 URL" : "无代码来源";
   return (
-    <section className="project-runtime-section" aria-label="项目运行环境">
+    <section className="project-runtime-section" aria-label="项目代码来源与运行时目录">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">PROJECT RUNTIME</p>
-          <h2>项目运行环境</h2>
-          <p className="muted">代码库、执行目录和任务产物目录会影响智能体运行时读取和写入的位置。</p>
+          <p className="eyebrow">PROJECT WORKSPACE</p>
+          <h2>项目代码来源 / 主工作区</h2>
+          <p className="muted">先配置项目代码来源，再选择共享工作区、独立工作区或操作分支。</p>
         </div>
       </div>
       <div className="project-runtime-grid">
         <article className="project-runtime-card">
           <div className="project-workspace-card-heading">
-            <h3>代码库</h3>
-            {codebase?.configured ? <Badge>已配置</Badge> : <Badge>未配置</Badge>}
+            <h3>代码来源</h3>
+            <Badge>{hasCodeSource ? "已配置" : "未配置"}</Badge>
           </div>
           <dl className="project-workspace-properties project-runtime-properties">
-            <div><dt>来源</dt><dd title={codebase?.origin ?? "未设置"}>{codebase?.origin ?? "未设置"}</dd></div>
+            <div><dt>来源</dt><dd title={codeSourceLabel}>{codeSourceLabel}</dd></div>
             <div><dt>仓库</dt><dd title={nullableText(codebase?.repoUrl)}>{nullableText(codebase?.repoUrl)}</dd></div>
             <div><dt>分支</dt><dd title={nullableText(codebase?.repoRef ?? codebase?.defaultRef)}>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
-            <div><dt>执行目录</dt><dd title={nullableText(effectiveCwd)}>{nullableText(effectiveCwd)}</dd></div>
-            <div><dt>产物目录</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "artifacts")}>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
+            <div><dt>项目主 cwd</dt><dd title={nullableText(projectCwd)}>{nullableText(projectCwd)}</dd></div>
+            <div><dt>执行 cwd</dt><dd title={executionCwd}>{executionCwd}</dd></div>
           </dl>
-          {usesOrgWorkspaceFallback && (
+          {!hasCodeSource && (
+            <div className="project-workspace-fallback compact warning">
+              <strong>未配置项目主工作区</strong>
+              <span>请设置本地 cwd 或仓库 URL，才能启用共享工作区、独立工作区或操作分支。无代码任务仍可使用组织草稿目录。</span>
+            </div>
+          )}
+          {!hasLocalWorkspace && hasRepoUrl && (
             <div className="project-workspace-fallback compact">
-              <strong>将使用组织共享工作区</strong>
-              <span>当前项目没有可用的本地项目工作区；任务运行会 fallback 到组织共享工作区。</span>
+              <strong>首次运行会创建受管 checkout</strong>
+              <span>Octopus 会从仓库 URL 创建一次项目主工作区，后续执行策略会基于这个 checkout 运行。</span>
             </div>
           )}
         </article>
         <article className="project-runtime-card">
           <div className="project-workspace-card-heading">
-            <h3>工作区</h3>
+            <h3>运行时目录</h3>
+            <Badge>非代码目录</Badge>
+          </div>
+          <dl className="project-workspace-properties project-runtime-properties">
+            <div><dt>组织目录</dt><dd title={nullableText(orgWorkspaceRoot)}>{nullableText(orgWorkspaceRoot)}</dd></div>
+            <div><dt>产物目录</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "artifacts")}>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
+            <div><dt>plans</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "plans")}>{joinWorkspacePath(orgWorkspaceRoot, "plans")}</dd></div>
+            <div><dt>skills</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "skills")}>{joinWorkspacePath(orgWorkspaceRoot, "skills")}</dd></div>
+          </dl>
+          <p className="project-workspace-empty">这些目录用于产物、计划和技能，不等同于项目代码工作区。</p>
+        </article>
+        <article className="project-runtime-card project-runtime-card-wide">
+          <div className="project-workspace-card-heading">
+            <h3>主工作区列表</h3>
             <Badge>{workspaces.length}</Badge>
           </div>
           <div className="project-workspace-list compact">
             {workspaces.length === 0 && (
-              <p className="project-workspace-empty">暂无项目工作区。任务运行时会使用组织共享工作区。</p>
+              <p className="project-workspace-empty">暂无项目主工作区。请设置本地 cwd 或仓库 URL。</p>
             )}
             {workspaces.map((workspace) => {
-              const workspaceCwdValue = workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区";
+              const workspaceCwdValue = projectWorkspaceDisplay(workspace);
               return (
                 <div className="project-workspace-item compact" key={workspace.id}>
                   <div>
@@ -220,7 +254,8 @@ function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCode
                   <div className="project-workspace-badges">
                     {workspace.isPrimary && <Badge>主工作区</Badge>}
                     <Badge>{workspace.sourceType}</Badge>
-                    {!workspace.cwd?.trim() && <Badge>组织工作区 fallback</Badge>}
+                    {!workspace.cwd?.trim() && workspace.repoUrl?.trim() && <Badge>managed checkout</Badge>}
+                    {!workspace.cwd?.trim() && !workspace.repoUrl?.trim() && <Badge>无代码来源</Badge>}
                     {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
                   </div>
                 </div>
@@ -505,6 +540,10 @@ export function ProjectPage() {
     }
   }, [project.data]);
   const executionWorkspaceList = Array.isArray(executionWorkspaces.data) ? executionWorkspaces.data : [];
+  const projectWorkspaces = project.data?.workspaces ?? [];
+  const hasProjectCodeSource = projectHasCodeSource(projectWorkspaces, project.data?.codebase);
+  const hasProjectLocalWorkspace = projectHasLocalWorkspace(projectWorkspaces);
+  const hasProjectRepoUrl = projectHasRepoUrl(projectWorkspaces, project.data?.codebase);
   useEffect(() => {
     const firstWorkspaceId = executionWorkspaceList[0]?.id ?? "";
     if (!selectedExecutionWorkspaceId && firstWorkspaceId) setSelectedExecutionWorkspaceId(firstWorkspaceId);
@@ -877,29 +916,33 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 <div className="project-section-heading">
                   <p className="eyebrow">WORKSPACE POLICY</p>
                   <h2>执行工作区策略</h2>
-                  <p className="muted">选择任务执行时使用共享工作区、独立工作区或操作分支。</p>
+                  <p className="muted">只有配置项目主工作区或仓库 URL 后，项目执行策略才有完整语义。</p>
                 </div>
                 <div className="workspace-policy-config">
                   <fieldset className="workspace-policy-options">
-                    <legend>选择任务执行时使用的工作区方式</legend>
-                    {WORKSPACE_POLICY_OPTIONS.map((option) => (
-                      <label
-                        className={`workspace-policy-option ${workspacePolicyMode === option.mode ? "selected" : ""}`}
-                        key={option.mode}
-                      >
-                        <input
-                          checked={workspacePolicyMode === option.mode}
-                          name="workspace-policy-mode"
-                          onChange={() => selectWorkspacePolicyMode(option.mode)}
-                          type="radio"
-                          value={option.mode}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                      </label>
-                    ))}
+                    <legend>选择项目代码任务的执行方式</legend>
+                    {WORKSPACE_POLICY_OPTIONS.map((option) => {
+                      const disabled = !hasProjectCodeSource;
+                      return (
+                        <label
+                          className={`workspace-policy-option ${workspacePolicyMode === option.mode ? "selected" : ""} ${disabled ? "disabled" : ""}`}
+                          key={option.mode}
+                        >
+                          <input
+                            checked={workspacePolicyMode === option.mode}
+                            disabled={disabled}
+                            name="workspace-policy-mode"
+                            onChange={() => selectWorkspacePolicyMode(option.mode)}
+                            type="radio"
+                            value={option.mode}
+                          />
+                          <span>
+                            <strong>{option.label}</strong>
+                            <small>{disabled ? "请先配置项目主工作区或仓库 URL。" : option.description}</small>
+                          </span>
+                        </label>
+                      );
+                    })}
                   </fieldset>
                   <details className="workspace-policy-advanced">
                     <summary>高级配置 JSON</summary>
@@ -915,6 +958,18 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                     </label>
                   </details>
                 </div>
+                {!hasProjectCodeSource && (
+                  <div className="project-workspace-fallback compact warning">
+                    <strong>未配置项目主工作区</strong>
+                    <span>当前仍可运行无代码任务，但它们只会使用组织草稿目录，不会基于项目代码执行。</span>
+                  </div>
+                )}
+                {!hasProjectLocalWorkspace && hasProjectRepoUrl && (
+                  <div className="project-workspace-fallback compact">
+                    <strong>首次运行会创建受管 checkout</strong>
+                    <span>Octopus 会从仓库 URL 创建项目主工作区，后续策略基于该 checkout 运行。</span>
+                  </div>
+                )}
               </section>
               {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
               {!workspacePolicyError && update.error && <ErrorNotice error={update.error} />}
@@ -964,7 +1019,7 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 <div>
                   <p className="eyebrow">PROJECT WORKSPACES</p>
                   <h2>项目工作区</h2>
-                  <p className="muted">项目专属 cwd 会优先用于任务执行；未配置或不可用时 fallback 到组织共享工作区。</p>
+                  <p className="muted">项目主工作区是代码来源。可设置本地 cwd，或设置仓库 URL 让首次运行创建受管 checkout。</p>
                 </div>
               </div>
               <div className="project-workspace-create-grid">
@@ -1025,8 +1080,8 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                           {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
                         </div>
                       </div>
-                      <span title={workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}>
-                        {workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}
+                      <span title={projectWorkspaceDisplay(workspace)}>
+                        {projectWorkspaceDisplay(workspace)}
                       </span>
                       {(workspace.repoUrl || workspace.repoRef || workspace.defaultRef) && (
                         <small

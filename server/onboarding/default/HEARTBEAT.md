@@ -1,4 +1,4 @@
-﻿# HEARTBEAT.md -- Agent Heartbeat Checklist
+# HEARTBEAT.md -- Agent Heartbeat Checklist
 
 Run this checklist on every heartbeat.
 
@@ -27,7 +27,7 @@ If approval context is set, review linked issues and close/comment.
 
 - Always checkout before working.
 - Do the work. Update status and comment when done.
-- For delegated child issues, never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it. The parent issue must wait for delegated child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
+- For delegated child issues, never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it. After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 - Close-out gate: Do not exit an active issue heartbeat until the matching control-plane close-out command has succeeded.
 - If `OCTOPUS_WAKE_REASON=issue_passive_followup`, inspect current issue state first, then execute exactly one close-out command before exiting: `control-plane issue done ...`, `control-plane issue block ...`, or `control-plane issue comment ...`. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage. Do not exit this wake with only a final assistant summary.
 - If you are the reviewer, including for a `blocked` issue, record a structured review decision with `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...`. Use `blocked` only to confirm a human/external blocker, and name the next human action in the comment.
