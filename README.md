@@ -10,18 +10,13 @@ Octopus 是一个本地优先的智能体控制面。当前仓库主要提供 Fa
 - `docs/DESIGN.md`：整体架构设计。
 - `docs/FEATURE.md`：整体开发计划。
 
-## 0. 本地开发完整流程
+## 快速入口：启动和测试
 
-第一次拉取仓库后，先安装后端和 UI 依赖：
+这部分是日常开发最常用的命令。第一次配置看「1. 依赖和环境准备」，数据库、目录、环境变量细节看后面的详细章节。
 
-```powershell
-uv sync
-cd ui
-npm install
-cd ..
-```
+### 启动 server + UI
 
-推荐使用仓库内 `.octopus` 作为本地开发 instance，避免默认写入用户目录后找不到数据：
+从仓库根目录执行：
 
 ```powershell
 $env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
@@ -29,31 +24,21 @@ $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-```
-
-然后用统一脚本启动 server 和 UI：
-
-```powershell
 .\scripts\dev.ps1
 ```
 
-脚本会启动：
+启动后访问：
 
 ```text
-server: http://127.0.0.1:8000
 UI:     http://127.0.0.1:5175
+server: http://127.0.0.1:8000
+health: http://127.0.0.1:8000/api/health
 logs:   .octopus/dev-logs/
 ```
 
-健康检查：
+### 只启动 server
 
-```powershell
-curl.exe http://127.0.0.1:8000/api/health
-```
-
-如果不使用统一脚本，可以开两个终端手动启动。
-
-终端 1，启动 server：
+终端 1：
 
 ```powershell
 $env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
@@ -65,25 +50,65 @@ uv run alembic upgrade head
 .\.venv\Scripts\python.exe -m server
 ```
 
-终端 2，启动 UI：
+### 只启动 UI
+
+终端 2：
 
 ```powershell
 cd ui
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-提交前建议至少运行：
+UI 默认把 `/api` 代理到 `http://127.0.0.1:8000`，所以手动启动时要先有 server。
+
+### 测试命令
+
+后端类型检查：
 
 ```powershell
 uv run pyright .
+```
+
+后端测试：
+
+```powershell
+uv run pytest
+```
+
+只跑一个后端测试文件：
+
+```powershell
+uv run pytest tests\contract\test_step15_workspace_contract.py -q
+```
+
+UI 类型检查和测试：
+
+```powershell
 cd ui
 npm run typecheck
 npm test
 ```
 
-更完整的验证命令见「11. 常用验证命令」。
+只跑一个 UI 测试：
 
-## 1. 环境准备
+```powershell
+cd ui
+npm test -- project-page.test.tsx
+```
+
+提交前完整检查：
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright .
+uv run pytest
+cd ui
+npm run typecheck
+npm test
+```
+
+## 1. 依赖和环境准备
 
 要求：
 
@@ -319,7 +344,7 @@ $env:OCTOPUS_STORAGE_FORCE_PATH_STYLE = "0"
 
 bucket 需要提前创建；当前 server 不负责自动创建 bucket。
 
-## 6. 启动服务
+## 6. 启动细节和端口排查
 
 Windows 本地开发优先使用统一 dev 脚本：
 
@@ -574,7 +599,7 @@ dev      step-29 或正在开发的下一步功能实例
 step28   step-28-bug-fix 等旧分支验证实例
 ```
 
-## 11. 常用验证命令
+## 11. 测试和验证命令（详细）
 
 后端提交前常用验证：
 
