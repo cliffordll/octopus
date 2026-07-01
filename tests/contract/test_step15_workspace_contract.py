@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
@@ -3181,6 +3181,7 @@ async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
                 actor_type="user",
                 actor_id="dev",
             )
+            assert project_workspace is not None
             issue = Issue(
                 org_id=org.id,
                 project_id=project["id"],
@@ -3232,6 +3233,7 @@ async def test_operator_branch_without_cwd_or_repo_fails_preflight() -> None:
                 actor_type="user",
                 actor_id="dev",
             )
+            assert project_workspace is not None
             issue = Issue(
                 org_id=org.id,
                 project_id=project["id"],

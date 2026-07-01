@@ -1976,6 +1976,16 @@ small {
   background: #101827;
 }
 
+.workspace-policy-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.workspace-policy-option.disabled:hover {
+  background: #0b111b;
+  border-color: #202a3b;
+}
+
 .workspace-policy-option input {
   margin-top: 3px;
   width: auto;
@@ -2047,6 +2057,10 @@ small {
   flex-direction: column;
   gap: 12px;
   padding: 14px;
+}
+
+.project-runtime-card-wide {
+  grid-column: 1 / -1;
 }
 
 .project-workspace-card-heading {

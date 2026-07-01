@@ -1,8 +1,8 @@
-﻿# Octopus
+# Octopus
 
-Octopus 是上游控制面 `server` 的 Python 兼容重实现。当前仓库主要提供 FastAPI server、数据库迁移、运行时编排、组织/任务/智能体/对话等服务端能力。
+Octopus 是一个本地优先的智能体控制面。当前仓库主要提供 FastAPI server、数据库迁移、运行时编排、组织/任务/智能体/对话等服务端能力，以及 `ui/` 下的 Vite + React 前端。
 
-本文档只覆盖本地启动项目必须掌握的基础操作：依赖安装、数据库配置和迁移、服务启动、文件存储配置、常用验证与本地数据清理。
+本文档覆盖本地开发必须掌握的完整流程：依赖安装、环境变量、数据库迁移、server/UI 启动、组织初始化、常用验证、运行目录和本地数据清理。
 
 如需理解项目定位和完整开发计划，先看：
 
@@ -10,18 +10,101 @@ Octopus 是上游控制面 `server` 的 Python 兼容重实现。当前仓库主
 - `docs/DESIGN.md`：整体架构设计。
 - `docs/FEATURE.md`：整体开发计划。
 
+## 0. 本地开发完整流程
+
+第一次拉取仓库后，先安装后端和 UI 依赖：
+
+```powershell
+uv sync
+cd ui
+npm install
+cd ..
+```
+
+推荐使用仓库内 `.octopus` 作为本地开发 instance，避免默认写入用户目录后找不到数据：
+
+```powershell
+$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
+$env:OCTOPUS_INSTANCE_ID = "dev"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
+```
+
+然后用统一脚本启动 server 和 UI：
+
+```powershell
+.\scripts\dev.ps1
+```
+
+脚本会启动：
+
+```text
+server: http://127.0.0.1:8000
+UI:     http://127.0.0.1:5175
+logs:   .octopus/dev-logs/
+```
+
+健康检查：
+
+```powershell
+curl.exe http://127.0.0.1:8000/api/health
+```
+
+如果不使用统一脚本，可以开两个终端手动启动。
+
+终端 1，启动 server：
+
+```powershell
+$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
+$env:OCTOPUS_INSTANCE_ID = "dev"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
+uv run alembic upgrade head
+.\.venv\Scripts\python.exe -m server
+```
+
+终端 2，启动 UI：
+
+```powershell
+cd ui
+npm run dev -- --host 127.0.0.1 --port 5175
+```
+
+提交前建议至少运行：
+
+```powershell
+uv run pyright .
+cd ui
+npm run typecheck
+npm test
+```
+
+更完整的验证命令见「11. 常用验证命令」。
+
 ## 1. 环境准备
 
 要求：
 
 - Python `>= 3.12`
 - `uv`
+- Node.js `>= 20`
+- `npm`
 - Windows PowerShell，或 macOS/Linux shell
 
-安装依赖：
+安装后端依赖：
 
 ```powershell
 uv sync
+```
+
+安装 UI 依赖：
+
+```powershell
+cd ui
+npm install
+cd ..
 ```
 
 如果使用 PostgreSQL，需要安装 async driver：
@@ -324,7 +407,7 @@ npm run dev -- --host 127.0.0.1 --port 5175
 http://127.0.0.1:5175
 ```
 
-如果 `5174` 已被上游 upstream reference 或其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
+如果 `5174` 已被其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
 
 ## 7. 创建一个组织
 
@@ -462,7 +545,7 @@ Stop-Process -Id <OwningProcess> -Force
 ```
 
 ```powershell
-$env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
+$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
@@ -493,19 +576,48 @@ step28   step-28-bug-fix 等旧分支验证实例
 
 ## 11. 常用验证命令
 
-提交前执行四步验证：
+后端提交前常用验证：
 
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest
 uv run pyright .
+uv run pytest
 ```
 
 如果 Windows 上 `uv run` 因正在运行的 server 锁定 `.venv\Scripts\server.exe`，先停止 server，或使用已同步环境：
 
 ```powershell
 uv run --no-sync pyright .
+```
+
+只跑某个后端测试文件：
+
+```powershell
+uv run pytest tests\contract\test_step15_workspace_contract.py -q
+```
+
+UI 验证：
+
+```powershell
+cd ui
+npm run typecheck
+npm test
+npm run build
+```
+
+只跑某个 UI 测试：
+
+```powershell
+cd ui
+npm test -- project-page.test.tsx
+```
+
+提交前检查补充：
+
+```powershell
+git diff --check
+# 如需检查历史项目关键词，使用 rg 扫描但不要把旧关键词写回仓库文档。
 ```
 
 ## 12. 清理本地数据
@@ -553,6 +665,13 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 | `OCTOPUS_STORAGE_SECRET_KEY` | 空 | MinIO/S3 secret key |
 | `OCTOPUS_STORAGE_REGION` | `us-east-1` | MinIO/S3 region |
 | `OCTOPUS_STORAGE_FORCE_PATH_STYLE` | MinIO 默认为 `true` | 是否使用 path-style S3 地址 |
+
+环境变量注意事项：
+
+- `$env:OCTOPUS_HOME = ".octopus"` 是相对路径，实际目录取决于启动 server 时的当前工作目录。为了避免混淆，本地开发建议写成绝对路径，例如 `<repo-root>\.octopus`。
+- `OCTOPUS_INSTANCE_ID` 用来隔离同一个 `OCTOPUS_HOME` 下的多套本地数据，例如 `default`、`dev`、`step28`。
+- 不设置 `OCTOPUS_DATABASE_URL` 时，默认 SQLite 会跟随 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID`。显式设置 `OCTOPUS_DATABASE_URL` 后，数据库位置以该变量为准。
+- 本地 API/UI 调试通常需要 `OCTOPUS_LOCAL_TRUSTED=1`，否则没有真实 actor 来源时部分 API 会返回 actor context 未配置错误。
 
 ## 14. 延伸文档
 
