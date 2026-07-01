@@ -1,4 +1,4 @@
-# Step 28: Budget / Governance
+﻿# Step 28: Budget / Governance
 
 状态：已完成
 
@@ -52,13 +52,13 @@ Step 25 已实现 activity query，Step 27 已实现 cost event 和 cost summary
 
 开发前必须对照以下上游文件，不能凭本地偏好重定义治理模型：
 
-- `D:\coding\rudder\packages\db\src\schema\budget_policies.ts`
-- `D:\coding\rudder\packages\db\src\schema\budget_incidents.ts`
-- `D:\coding\rudder\server\src\routes\costs.ts`
-- `D:\coding\rudder\server\src\services\budgets.ts`
-- `D:\coding\rudder\server\src\services\quota-windows.ts`
-- `D:\coding\rudder\packages\shared\src\types\budget.ts`
-- `D:\coding\rudder\packages\shared\src\validators\budget.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\budget_policies.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\budget_incidents.ts`
+- `D:\coding\upstream-reference\server\src\routes\costs.ts`
+- `D:\coding\upstream-reference\server\src\services\budgets.ts`
+- `D:\coding\upstream-reference\server\src\services\quota-windows.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\budget.ts`
+- `D:\coding\upstream-reference\packages\shared\src\validators\budget.ts`
 
 ## 开发计划
 

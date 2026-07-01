@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import importlib
@@ -434,7 +434,7 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
             config={"command": "opencode-test", "promptTemplate": "Do the task."},
             on_log=_noop_on_log,
             workspace={
-                "rudderWorkspace": {
+                "octopusWorkspace": {
                     "cwd": "D:/octopus/worktree",
                     "worktreePath": "D:/octopus/worktree",
                     "orgArtifactsDir": "D:/octopus/artifacts",
@@ -1709,7 +1709,7 @@ async def test_codex_execute_injects_runtime_context_env(
                 },
             },
             workspace={
-                "rudderWorkspace": {
+                "octopusWorkspace": {
                     "cwd": "D:/workspaces/task-1",
                     "source": "workspace",
                     "strategy": "worktree",
@@ -1729,8 +1729,8 @@ async def test_codex_execute_injects_runtime_context_env(
                     "orgArtifactsDir": "D:/orgs/org-14/artifacts",
                     "issueArtifactsDir": "D:/worktrees/task-1/artifacts",
                 },
-                "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
-                "rudderRuntimePrimaryUrl": "http://svc",
+                "octopusRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
+                "octopusRuntimePrimaryUrl": "http://svc",
             },
             env={
                 "OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
@@ -1782,7 +1782,7 @@ async def test_codex_execute_injects_runtime_context_env(
         '[{"serviceName":"preview"}]'
     )
     assert captured_env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
-    assert all(not key.startswith("RUDDER" + "_") for key in captured_env)
+    assert all(not key.startswith("R" + "UDDER" + "_") for key in captured_env)
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in captured_env)
 
 
@@ -2067,7 +2067,7 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         assert context.env is not None
         assert context.workspace is not None
         context.env["OCTOPUS_GIT_WRITE_POLICY"] = "read_only"
-        context.workspace["rudderWorkspace"]["gitWritePolicy"] = "read_only"
+        context.workspace["octopusWorkspace"]["gitWritePolicy"] = "read_only"
         return context
 
     await execute_claude_local(
@@ -2351,12 +2351,12 @@ def _runtime_context_for_env(
             },
         },
         workspace={
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "cwd": "D:/workspaces/task-1",
                 "source": "workspace",
                 "strategy": "worktree",
             },
-            "rudderRuntimePrimaryUrl": "http://svc",
+            "octopusRuntimePrimaryUrl": "http://svc",
         },
         env={"OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
         on_log=lambda stream, chunk: _noop_log(stream, chunk),

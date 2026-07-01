@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
@@ -110,7 +110,7 @@ def build_agent_payload(
     payload["sessionKey"] = resolve_session_key(
         config, run_id=run_id, issue_id=issue_id
     )
-    payload["rudder"] = {
+    payload["octopus"] = {
         "runId": run_id,
         "agentId": agent_id,
         "orgId": org_id,

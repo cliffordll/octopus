@@ -1,6 +1,6 @@
 ﻿# Heartbeat Scheduler Guide
 
-本文说明 Octopus / Rudder 系列实现里的 heartbeat 定时任务逻辑、开关层级和 UI 含义。
+本文说明 Octopus / upstream reference 系列实现里的 heartbeat 定时任务逻辑、开关层级和 UI 含义。
 
 核心结论：
 

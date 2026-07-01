@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -52,7 +52,7 @@ def _runtime_tool_guidance(runtime_type: str) -> str:
 def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     if not isinstance(workspace, dict):
         return ""
-    workspace_context = workspace.get("rudderWorkspace")
+    workspace_context = workspace.get("octopusWorkspace")
     if not isinstance(workspace_context, dict):
         return ""
     worktree = _string(

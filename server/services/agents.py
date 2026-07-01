@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -196,7 +196,7 @@ def _is_hidden_system_agent_metadata(metadata: dict[str, Any] | None) -> bool:
         return False
     return (
         metadata.get("hidden") is True
-        or metadata.get("systemManaged") == "rudder_copilot"
+        or metadata.get("systemManaged") == "octopus_copilot"
     )
 
 

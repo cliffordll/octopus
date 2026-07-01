@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import AsyncIterator
 import asyncio
@@ -285,7 +285,7 @@ async def test_step29_builtin_git_tool_uses_runtime_workspace_cwd(
             plugin["id"],
             "git.status",
             {},
-            context={"workspace": {"rudderWorkspace": {"cwd": str(repo)}}},
+            context={"workspace": {"octopusWorkspace": {"cwd": str(repo)}}},
         )
 
     assert result["ok"] is True
@@ -324,7 +324,7 @@ async def test_step29_builtin_git_tool_requires_confirm_for_mutations(
                 plugin["id"],
                 "git.branch.create",
                 {"branchName": "demo"},
-                context={"workspace": {"rudderWorkspace": {"cwd": str(repo)}}},
+                context={"workspace": {"octopusWorkspace": {"cwd": str(repo)}}},
             )
 
 

@@ -394,7 +394,7 @@ agents/ceo-1-623d0e91/
 
 ### 背景
 
-上游 Rudder 的 run log store 默认挂在 instance root 下：
+上游 upstream reference 的 run log store 默认挂在 instance root 下：
 
 ```text
 <OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/data/run-logs
@@ -431,7 +431,7 @@ D:\coding\octopus\.octopus\instances\default\data\run-logs
 
 ### 背景
 
-上游 Rudder 有两类日志目录：
+上游 upstream reference 有两类日志目录：
 
 ```text
 <OCTOPUS_HOME>/instances/<instance>/logs
@@ -475,7 +475,7 @@ Octopus runtime 有两类路径：
 
 ### 根因
 
-旧逻辑中，heartbeat 执行前会先读取 agent 的 `agent_runtime_config`。如果里面已经有 `cwd`，workspace preflight 解析出的 `rudderWorkspace.cwd` 不会覆盖它：
+旧逻辑中，heartbeat 执行前会先读取 agent 的 `agent_runtime_config`。如果里面已经有 `cwd`，workspace preflight 解析出的 `upstream-referenceWorkspace.cwd` 不会覆盖它：
 
 ```text
 agent_runtime_config.cwd wins over workspace cwd
@@ -487,7 +487,7 @@ agent_runtime_config.cwd wins over workspace cwd
 
 ### 修复
 
-- issue/project run 只要 workspace preflight 解析出 `rudderWorkspace.cwd`，heartbeat 执行时就用该 cwd 覆盖 agent runtime config 中的旧 `cwd`。
+- issue/project run 只要 workspace preflight 解析出 `upstream-referenceWorkspace.cwd`，heartbeat 执行时就用该 cwd 覆盖 agent runtime config 中的旧 `cwd`。
 - 非 issue/project run 仍可继续使用 agent runtime config 中的显式 `cwd`。
 - 闭环验收测试中的 durable output 示例改为写 `OCTOPUS_ORG_ARTIFACTS_DIR`，不再示范把交付物写 cwd。
 
@@ -559,7 +559,7 @@ contextSnapshot.workspace.env.OCTOPUS_ORG_ARTIFACTS_DIR
 
 ### 背景
 
-上游 Rudder 的 chat 可以调用 runtime，但 durable execution 仍应有明确 workspace context。严格对齐上游时，runtime 默认只获得 organization artifacts：
+上游 upstream reference 的 chat 可以调用 runtime，但 durable execution 仍应有明确 workspace context。严格对齐上游时，runtime 默认只获得 organization artifacts：
 
 ```text
 OCTOPUS_ORG_ARTIFACTS_DIR
@@ -614,7 +614,7 @@ Step 23 已把默认 SQLite 路径对齐到 instance db layout：
 <OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db
 ```
 
-但文件侧 layout 仍需要继续收口。上游 Rudder 的 runtime home 和 workspace 不是全局目录，而是挂在 instance 和 organization 下。Octopus 中历史上出现过这些非 canonical 路径：
+但文件侧 layout 仍需要继续收口。上游 upstream reference 的 runtime home 和 workspace 不是全局目录，而是挂在 instance 和 organization 下。Octopus 中历史上出现过这些非 canonical 路径：
 
 ```text
 <OCTOPUS_HOME>/runtime-homes

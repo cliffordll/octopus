@@ -1,4 +1,4 @@
-# Task Execution Lifecycle Guide
+﻿# Task Execution Lifecycle Guide
 
 本文说明 Octopus 当前任务执行逻辑，重点解释 issue/task 被分配、执行、释放执行锁、以及为什么成功 run 后可能出现第二次执行。
 
@@ -14,7 +14,7 @@ docs/guides/task-queue.md
 
 Octopus 的任务执行不是“run 成功就等于 issue 完成”。
 
-核心语义来自上游 Rudder：
+核心语义来自上游 upstream reference：
 
 ```text
 run succeeded 表示一次执行进程成功结束
@@ -225,22 +225,22 @@ heartbeat_runs.status == queued
 
 同一条 run 只能被一个 dispatcher 从 `queued` 改成 `running`。
 
-## 上游 Rudder 行为
+## 上游 upstream reference 行为
 
 上游参考实现位于：
 
 ```text
-D:\coding\rudder
+D:\coding\upstream-reference
 ```
 
 关键文件：
 
 ```text
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.release.ts
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.recovery.ts
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.sessions.ts
-D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts
-D:\coding\rudder\server\src\__tests__\heartbeat-passive-issue-closeout.test.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.release.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.recovery.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.sessions.ts
+D:\coding\upstream-reference\packages\agent-runtime-utils\src\server-utils.prompts.ts
+D:\coding\upstream-reference\server\src\__tests__\heartbeat-passive-issue-closeout.test.ts
 ```
 
 上游主线：
@@ -291,7 +291,7 @@ automation source、wake source、failure reason、attempt metadata、idempotenc
 
 主要差异：
 
-| 维度 | 当前 Octopus | 上游 Rudder |
+| 维度 | 当前 Octopus | 上游 upstream reference |
 | --- | --- | --- |
 | passive follow-up source | `automation` | `automation` |
 | wake source | `passive_issue_followup` | `passive_issue_followup` |

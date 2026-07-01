@@ -70,7 +70,7 @@ Organization
 
 Runtime adapter 在执行时应通过统一 context/env 获取 workspace 信息，例如主 workspace、workspace 列表、worktree path、repo/ref/branch、organization workspace root、artifacts dir 和 runtime services JSON，而不是直接理解数据库表关系。
 
-上游 Rudder 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
+上游 upstream reference 当前约定：新项目不会自动创建独立 workspace root。若 project-linked run 没有可用 project workspace，或 legacy project workspace 只有远程 metadata 但没有本地 `cwd`，运行时 fallback 到组织共享 workspace root，并带可解释 warning。持久交付文件、报告、截图、CSV 和 handoff 文档应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，不要写到临时目录或自造顶层 `projects/` 目录。
 
 Project workspace 支持后，它就是项目对应的本地源码与下载物锚点。项目相关的仓库 checkout、导入或下载的源码包、依赖快照、项目内临时文件、代码修改和 patch 应放在 project workspace / execution workspace 的 `cwd` 下。Runtime 子进程的相对路径读写默认也发生在这个 `cwd` 中。
 

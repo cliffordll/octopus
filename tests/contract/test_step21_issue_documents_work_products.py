@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -72,7 +72,7 @@ async def test_work_product_capture_is_idempotent_on_external_id(
     product = {
         "title": "report.md",
         "type": "document",
-        "provider": "rudder",
+        "provider": "octopus",
         "externalId": "organization_artifacts_scan:org:report.md",
         "content": b"hello world",
         "contentType": "text/markdown",
@@ -111,7 +111,7 @@ async def test_work_product_archive_reuses_asset_for_identical_content(
         return {
             "title": external_id,
             "type": "document",
-            "provider": "rudder",
+            "provider": "octopus",
             "externalId": external_id,
             "content": b"identical deliverable bytes",
             "contentType": "text/markdown",
@@ -159,7 +159,7 @@ async def test_generated_work_product_primary_prefers_run_worktree(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-1",
                 "cwd": str(worktree),
                 "orgArtifactsDir": str(artifacts),
@@ -194,7 +194,7 @@ async def test_generated_work_product_captures_binary_document(
 
     snapshot = {
         "issueId": issue_id,
-        "workspace": {"rudderWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
+        "workspace": {"octopusWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
     }
 
     async with factory() as session:
@@ -222,7 +222,7 @@ async def test_shared_workspace_generated_scan_ignores_unscoped_cwd_files(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-shared",
                 "mode": "shared_workspace",
                 "cwd": str(shared_cwd),
@@ -239,7 +239,7 @@ async def test_shared_workspace_generated_scan_ignores_unscoped_cwd_files(
     assert rows == []
 
 
-async def test_shared_workspace_generated_scan_captures_root_artifacts_from_run(
+async def test_shared_workspace_generated_scan_ignores_root_artifacts(
     app: tuple[FastAPI, async_sessionmaker],
     tmp_path: Path,
 ) -> None:
@@ -258,7 +258,7 @@ async def test_shared_workspace_generated_scan_captures_root_artifacts_from_run(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-shared",
                 "mode": "shared_workspace",
                 "cwd": str(shared_cwd),
@@ -272,11 +272,7 @@ async def test_shared_workspace_generated_scan_captures_root_artifacts_from_run(
         )
         await session.commit()
 
-    assert len(rows) == 1
-    metadata = rows[0]["metadata"]
-    assert metadata is not None
-    assert metadata["source"] == "shared_artifacts_scan"
-    assert metadata["workspacePath"] == "report.md"
+    assert rows == []
 
 
 async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
@@ -296,7 +292,7 @@ async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-shared",
                 "mode": "shared_workspace",
                 "cwd": str(shared_cwd),
@@ -334,7 +330,7 @@ async def test_generated_scan_ignores_organization_artifacts_root(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-1",
                 "mode": "isolated_workspace",
                 "cwd": str(worktree),

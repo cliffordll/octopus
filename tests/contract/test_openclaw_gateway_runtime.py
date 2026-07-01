@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from packages.runtimes.openclaw_gateway.protocol import (
     build_agent_payload,
@@ -125,7 +125,7 @@ def test_openclaw_gateway_builds_agent_payload_from_runtime_context() -> None:
     assert payload["payload"]["custom"] == {"a": 1}
     assert payload["payload"]["idempotencyKey"] == "run-123"
     assert payload["payload"]["sessionKey"] == "octopus:issue:ISSUE-123"
-    assert payload["payload"]["rudder"] == {
+    assert payload["payload"]["octopus"] == {
         "runId": "run-123",
         "agentId": "agent-123",
         "orgId": "org-123",

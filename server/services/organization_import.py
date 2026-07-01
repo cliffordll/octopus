@@ -1,8 +1,8 @@
-"""Import a companies.sh / Rudder directory-style organization package.
+﻿"""Import a companies.sh / Octopus directory-style organization package.
 
 Supports both layouts in one parser:
 - Paperclip-native: COMPANY.md + .paperclip.yaml + agents/<slug>/AGENTS.md
-- Rudder-exported:  ORGANIZATION.md + .rudder.yaml + agents/<slug>/{AGENTS,SOUL,MEMORY,...}.md
+- Octopus-exported:  ORGANIZATION.md + .octopus.yaml + agents/<slug>/{AGENTS,SOUL,MEMORY,...}.md
 
 `teams/` is intentionally ignored (octopus has no team model). The importer
 reuses existing services: OrgService, AgentService, OrganizationSkillService,
@@ -31,7 +31,12 @@ from .orgs import OrgService
 from .projects import ProjectService
 
 _ORG_FILES = ("COMPANY.md", "ORGANIZATION.md")
-_EXTENSION_FILES = (".rudder.yaml", ".rudder.yml", ".paperclip.yaml", ".paperclip.yml")
+_EXTENSION_FILES = (
+    ".octopus.yaml",
+    ".octopus.yml",
+    ".paperclip.yaml",
+    ".paperclip.yml",
+)
 _AGENT_ENTRY = "AGENTS.md"
 _BUNDLE_FILES = (
     "SOUL.md",
@@ -256,7 +261,7 @@ def parse_company_package(root: Path) -> dict[str, Any]:
 
 
 class OrganizationImportService:
-    """Import a companies.sh / Rudder directory-style package into octopus."""
+    """Import a companies.sh / Octopus directory-style package into octopus."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

@@ -78,7 +78,7 @@
   1. 打开 issue 详情侧栏，查看 `documents` 与 `work-products`。
   2. 请求 `GET /api/issues/{issueId}/documents` 或 `GET /api/issues/{issueId}/work-products`。
   3. 观察当前 server 缺少独立 API 或只能从 issue detail 间接读取 `workProducts`。
-- 预期行为：参考上游 `D:\coding\rudder\server\src\routes\issues.ts`：
+- 预期行为：参考上游 `D:\coding\upstream-reference\server\src\routes\issues.ts`：
   - `GET /api/issues/:id/documents`
   - `GET /api/issues/:id/documents/:key`
   - `PUT /api/issues/:id/documents/:key`
@@ -160,9 +160,9 @@
   - Python `AgentInstructionsService.read_file` 仅调用 `_read_file(row, relative_path)`，未执行 reconcile。
   - Python `update_bundle` 在 entry 文件不存在时执行 `entry_path.write_text("", encoding="utf-8")`，会创建空入口文件。
 - 初步根因：
-  - 上游 route 在 `GET /agents/:id/instructions-bundle` 和 `GET /agents/:id/instructions-bundle/file` 前调用 `instructions.reconcileBundle(existing)` 并持久化结果。证据：`D:\coding\rudder\server\src\routes\agents.management-routes.ts:637`、`:704`。
-  - 上游 `reconcileBundle` 会在 managed/no-root/legacy prompt 情况下调用 `ensureWritableBundle`，后者读取 legacy instructions 并写入 entry 文件。证据：`D:\coding\rudder\server\src\services\agent-instructions.ts:490`、`:550`、`:578`。
-  - 上游 `updateBundle` 会先 `exportFiles(agent)`，root 为空或 entry 缺失时写入 exported files。证据：`D:\coding\rudder\server\src\services\agent-instructions.ts:620`-`:628`。
+  - 上游 route 在 `GET /agents/:id/instructions-bundle` 和 `GET /agents/:id/instructions-bundle/file` 前调用 `instructions.reconcileBundle(existing)` 并持久化结果。证据：`D:\coding\upstream-reference\server\src\routes\agents.management-routes.ts:637`、`:704`。
+  - 上游 `reconcileBundle` 会在 managed/no-root/legacy prompt 情况下调用 `ensureWritableBundle`，后者读取 legacy instructions 并写入 entry 文件。证据：`D:\coding\upstream-reference\server\src\services\agent-instructions.ts:490`、`:550`、`:578`。
+  - 上游 `updateBundle` 会先 `exportFiles(agent)`，root 为空或 entry 缺失时写入 exported files。证据：`D:\coding\upstream-reference\server\src\services\agent-instructions.ts:620`-`:628`。
   - Python 对应代码缺少这些分支，证据：`server/services/agent_instructions.py:159`-`:163`、`:195`-`:198`、`:230`-`:236`。
 - 处理归属：Step 21。应先加 contract/workflow 复现测试，再按上游 reconcile/export 语义修复。
 - 修复记录：已补齐 Python `AgentInstructionsService` 的最小 reconcile/export 行为：读取 bundle/file 前对 managed legacy promptTemplate 进行 materialization；`PATCH instructions-bundle` 在 root 为空或 entry 缺失时复用导出内容，而不是直接写空文件。
@@ -193,14 +193,14 @@
 - 影响范围：`CLAUDE.md` 命名规范、步骤文档中的上游证据路径、runtime env/context、organization skill bundled source key/label。
 - 复现步骤：
   1. 阅读 `CLAUDE.md` 中“项目内禁止出现上游项目名”的规范。
-  2. 执行全局搜索 `rg "rudder|RUDDER|Rudder"`。
-  3. 对比命中项：`OCTOPUS_*` env、`rudderWorkspace` context、`D:\coding\rudder` 上游证据路径、旧组织技能 key 和 `Bundled by Rudder` 展示文案。
+  2. 执行全局搜索 `rg "upstream-reference|LEGACY|upstream reference"`。
+  3. 对比命中项：`OCTOPUS_*` env、`upstream-referenceWorkspace` context、`D:\coding\upstream-reference` 上游证据路径、旧组织技能 key 和 `Bundled by upstream reference` 展示文案。
 - 预期行为：文档应区分“禁止在普通说明/命名中泄漏上游项目名”和“为上游兼容必须保留的外部契约字符串”。兼容字段不能被误改。
 - 实际行为：当前规范表述过于绝对，和已实现的上游兼容契约存在冲突；直接批量替换会破坏 runtime/env、workspace context、skill key 或测试契约。
 - 初步根因：项目定位清理后，规范没有把“外部兼容契约名”列为例外。
 - 处理归属：Step 21 文档审查。需要修订规范或补充例外清单，再决定哪些文档描述可以改成“上游参考路径”而不影响证据可追溯。
-- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `OCTOPUS_*`、`rudderWorkspace` 等兼容字符串不得因命名清理擅自改动。组织技能 key 已在 BUG-21-015 中改为项目内置 `skills/<slug>` 语义。
-- 验证证据：全局 `rg "rudder|RUDDER|Rudder"` 命中项经分类，runtime env/context、organization skills key/provider、步骤文档上游证据路径和测试 fixture 属于兼容证据或待单独审查项。
+- 修复记录：已更新 `CLAUDE.md`，把普通文档/命名禁用上游项目名与外部兼容契约字符串区分开，明确 `OCTOPUS_*`、`upstream-referenceWorkspace` 等兼容字符串不得因命名清理擅自改动。组织技能 key 已在 BUG-21-015 中改为项目内置 `skills/<slug>` 语义。
+- 验证证据：全局 `rg "upstream-reference|LEGACY|upstream reference"` 命中项经分类，runtime env/context、organization skills key/provider、步骤文档上游证据路径和测试 fixture 属于兼容证据或待单独审查项。
 
 ### BUG-21-007: `/api/health` 端点未注册，README 验证步骤无法执行
 
@@ -213,7 +213,7 @@
   2. `curl http://127.0.0.1:8000/api/health`。
 - 预期行为：200，返回 `{"status": "ok"}` 或上游 health 响应的子集。
 - 实际行为（修复前）：404 Not Found，无任何 health 路由被注册。
-- 初步根因：上游 `upstream-reference/rudder/server/src/bootstrap/register-api-routes.ts:40` 用 `api.use("/health", healthRoutes(...))` 注册；Octopus `server/routes/__init__.py` 缺等价注册。
+- 初步根因：上游 `upstream-reference/upstream-reference/server/src/bootstrap/register-api-routes.ts:40` 用 `api.use("/health", healthRoutes(...))` 注册；Octopus `server/routes/__init__.py` 缺等价注册。
 - 处理归属：Step 21。
 - 修复记录：新增 `packages/shared/api_paths/health.py` 常量、`server/routes/health.py` 路由、在 `server/routes/__init__.py` 注册。Octopus 范围内最小兼容响应 `{"status": "ok"}`；上游完整字段（version / instanceId / localEnv / runtimeOwnerKind / deploymentMode 等）在 Octopus 尚无对应概念，留到对应 step 实施时再扩展。
 - 验证证据：`uv run pytest tests/contract/test_step21_health.py -q` 2 passed；四步验证 `ruff check / ruff format --check / pyright` 全绿。
@@ -244,7 +244,7 @@
   1. PATCH 一个 issue 到 `status=in_progress`，观察 `startedAt` 字段。
   2. PATCH 到 `status=done`，观察 `completedAt` 字段。
   3. PATCH 到 `status=cancelled`，观察 `cancelledAt` 字段。
-- 预期行为：与上游 `upstream-reference/rudder/server/src/services/issues.helpers.ts:64-80` `applyStatusSideEffects` 对齐：
+- 预期行为：与上游 `upstream-reference/upstream-reference/server/src/services/issues.helpers.ts:64-80` `applyStatusSideEffects` 对齐：
   - 转 `in_progress` 且 patch 没显式 startedAt → 写当前时间到 `started_at`。
   - 转 `done` → 写当前时间到 `completed_at`（无论旧值）。
   - 转 `cancelled` → 写当前时间到 `cancelled_at`（无论旧值）。
@@ -286,7 +286,7 @@
   1. `POST /api/orgs` 建组织。
   2. `POST /api/orgs/{orgId}/issues { title }` 创建 issue。
   3. `GET /api/issues/{id}`，观察 `identifier` 与 `issueNumber`。
-- 预期行为：与上游 `upstream-reference/rudder/server/src/services/issues.ts:797-804` 对齐：
+- 预期行为：与上游 `upstream-reference/upstream-reference/server/src/services/issues.ts:797-804` 对齐：
   - `UPDATE organizations SET issue_counter = issue_counter + 1 WHERE id = :org_id RETURNING issue_counter, issue_prefix` 原子自增。
   - 新 issue 写入 `issue_number = counter` 和 `identifier = f"{prefix}-{counter}"`。
 - 实际行为（修复前）：`server/services/issues.py:187` 直接 `create_issue(session, values)`，values 不含 issue_number/identifier；DB 列 nullable，全部留 null。
@@ -310,7 +310,7 @@
 - 是否阻塞最小闭环：否。但 board actor approve/reject/request-revision 必须显式传字段；与上游契约不一致。
 - 影响范围：`packages/shared/validators/approval.py`、`POST /api/approvals/{id}/{approve,reject,request-revision}` 三个端点；持久化的 `approvals.decided_by_user_id` 列。
 - 复现步骤：`POST /api/approvals/{id}/approve` 传 `{}`，观察响应 `decidedByUserId`。
-- 预期行为：与上游 `resolveApprovalSchema.decidedByUserId.default("board")`、`requestApprovalRevisionSchema.decidedByUserId.default("board")` 对齐（`upstream-reference/rudder/packages/shared/src/validators/approval.ts:15,23`），返回值含 `decidedByUserId="board"`。
+- 预期行为：与上游 `resolveApprovalSchema.decidedByUserId.default("board")`、`requestApprovalRevisionSchema.decidedByUserId.default("board")` 对齐（`upstream-reference/upstream-reference/packages/shared/src/validators/approval.ts:15,23`），返回值含 `decidedByUserId="board"`。
 - 实际行为（修复前）：`validate_resolve_approval`、`validate_request_approval_revision` 仅做类型校验，不 setdefault；响应 `decidedByUserId=null`。
 - 初步根因：Octopus validator 没 port 上游 zod default。
 - 处理归属：Step 21。
@@ -369,7 +369,7 @@
   1. `GET /api/approvals/{id}/issues` → 404 (修复前 router 未注册)
   2. `GET /api/approvals/{id}/comments` → 404
   3. `POST /api/approvals/{id}/comments {body:"hi"}` → 404
-- 预期行为：与上游 `upstream-reference/rudder/server/src/routes/approvals.ts:306,645,657` 三个路由 + `services/approvals.ts:241-278` (`listComments`/`addComment`) + `services/issue-approvals.ts:115-144` (`listIssuesForApproval`) + `packages/db/src/schema/approval_comments.ts` 表对齐。
+- 预期行为：与上游 `upstream-reference/upstream-reference/server/src/routes/approvals.ts:306,645,657` 三个路由 + `services/approvals.ts:241-278` (`listComments`/`addComment`) + `services/issue-approvals.ts:115-144` (`listIssuesForApproval`) + `packages/db/src/schema/approval_comments.ts` 表对齐。
 - 实际行为（修复前）：路由未注册 → 404；service 无对应方法；DB 无 `approval_comments` 表；validator 无 `validate_add_approval_comment`。
 - 处理归属：Step 21。
 - 修复记录：
@@ -398,7 +398,7 @@
   1. 创建 chat + opencode_local 真 agent (`agentRuntimeConfig.model="opencode/big-pickle"`)。
   2. POST 第一条消息 "Reply only OK"，assistant 回 "OK"。
   3. POST 第二条 "What did I ask before?"，观察 assistant 是否记得 turn 1。
-- 预期行为：与上游 `upstream-reference/rudder/server/src/services/chat-assistant.helpers.ts:154-208 buildPrompt` 对齐——adapter 收到的 `promptTemplate` 是 JSON envelope，包含 `conversation` 元信息、`contextLinks`、`recentMessages`（最近 12 条非 superseded message，包含当前 user message）。
+- 预期行为：与上游 `upstream-reference/upstream-reference/server/src/services/chat-assistant.helpers.ts:154-208 buildPrompt` 对齐——adapter 收到的 `promptTemplate` 是 JSON envelope，包含 `conversation` 元信息、`contextLinks`、`recentMessages`（最近 12 条非 superseded message，包含当前 user message）。
 - 实际行为（修复前）：`server/services/chats.py:660` 把 promptTemplate 直接设为 `payload["body"]`，adapter 看到的就是当前 user 一段文本——assistant 回 "No previous user message — this is the start of the conversation"。
 - 初步根因：Python chat service 未 port 上游 buildPrompt 的 JSON envelope 构造逻辑。
 - 处理归属：Step 21。
@@ -469,7 +469,7 @@
   1. 创建分配给 agent 的 issue，观察 server 可以生成 `assignment` wakeup/run。
   2. 请求 `POST /api/issues/{issueId}/checkout`。
   3. 请求 `GET /api/issues/{issueId}/heartbeat-context`。
-- 预期行为：与上游 `D:\coding\rudder\server\src\routes\issues.mutations.ts:613` 和 `D:\coding\rudder\server\src\routes\issues.ts:551` 对齐；`checkout` 应按 `agentId`、`expectedStatuses`、当前 actor/run id 原子领取 issue，并写入 `checkoutRunId/executionRunId`；`heartbeat-context` 应返回 issue、评论、文档、唤醒评论等紧凑上下文，供 heartbeat runtime 执行前读取。
+- 预期行为：与上游 `D:\coding\upstream-reference\server\src\routes\issues.mutations.ts:613` 和 `D:\coding\upstream-reference\server\src\routes\issues.ts:551` 对齐；`checkout` 应按 `agentId`、`expectedStatuses`、当前 actor/run id 原子领取 issue，并写入 `checkoutRunId/executionRunId`；`heartbeat-context` 应返回 issue、评论、文档、唤醒评论等紧凑上下文，供 heartbeat runtime 执行前读取。
 - 必须补齐：
   - `POST /api/issues/{issueId}/checkout`。
   - `GET /api/issues/{issueId}/heartbeat-context`。
@@ -647,10 +647,10 @@
   2. 请求 `GET /api/orgs/{orgId}/skills`。
   3. 查看返回的内置技能 `key`、`sourceBadge`、`sourceLabel`、`editableReason`。
 - 预期行为：开发阶段不保留旧数据库兼容，内置组织技能 key 使用 `skills/<slug>`；UI 展示字段使用 `built-in` / `Built-in skill`，不向用户暴露旧品牌。
-- 实际行为：server seed 内置技能时返回 `rudder/<slug>`、`sourceBadge: rudder`、`sourceLabel: Bundled by Rudder`、`editableReason: Bundled by Rudder`。
+- 实际行为：server seed 内置技能时返回 `upstream-reference/<slug>`、`sourceBadge: upstream-reference`、`sourceLabel: Bundled by upstream reference`、`editableReason: Bundled by upstream reference`。
 - 初步根因：Step 17 实现时把上游 bundled skill source 名称直接固化到 Python server 的组织技能业务 key 和展示字段中。
 - 处理归属：Step 21。
-- 修复记录：已将内置组织技能 key 统一为 `skills/<slug>`；`control-plane`、`create-agent`、`create-plugin` 使用项目语义 slug；展示字段统一为 `built-in` / `Built-in skill`；旧 `rudder/*` key 仅在 seed 时作为开发期迁移查找兼容，不再作为新返回值。
+- 修复记录：已将内置组织技能 key 统一为 `skills/<slug>`；`control-plane`、`create-agent`、`create-plugin` 使用项目语义 slug；展示字段统一为 `built-in` / `Built-in skill`；旧 `upstream-reference/*` key 仅在 seed 时作为开发期迁移查找兼容，不再作为新返回值。
 - 验证证据：`tests/contract/test_step17_organization_skills.py::test_org_skill_list_seeds_bundled_skills` 已更新期望；当前本机 pytest 执行被 Windows 目录权限 `WinError 5` 阻断，需在权限恢复后复跑。
 
 ### BUG-21-016: 组织技能 fileInventory 只返回 SKILL.md，UI 无法展示 references/scripts/templates

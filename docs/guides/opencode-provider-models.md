@@ -1,10 +1,10 @@
-# OpenCode Provider/Model 配置
+﻿# OpenCode Provider/Model 配置
 
 本文说明 OpenCode 上游方案和 Octopus 当前 server 端改造边界。
 
 ## 上游方案
 
-上游 Rudder 没有为 OpenCode provider/model 建专门表。
+上游 upstream reference 没有为 OpenCode provider/model 建专门表。
 
 持久化字段只有：
 
@@ -19,7 +19,7 @@ OpenCode 的 provider、baseURL、认证和模型目录来自 OpenCode 自己的
 用户 OpenCode home
 -> opencode models
 -> agents.agent_runtime_config.model
--> Rudder-managed OpenCode home
+-> upstream reference-managed OpenCode home
 ```
 
 ## Octopus 当前方案

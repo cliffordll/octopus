@@ -1,4 +1,4 @@
-# 三种执行工作区模式优化开发计划
+﻿# 三种执行工作区模式优化开发计划
 
 状态：待实施  
 日期：2026-06-29  
@@ -9,7 +9,7 @@
 
 补齐 `shared_workspace`、`isolated_workspace`、`operator_branch` 三种模式从策略解析、真实目录准备、Git 关联、并发保护、失败恢复到清理审计的完整执行闭环。
 
-本计划以 Octopus 为主要实现项目。`D:\coding\rudder` 只作为只读参考证据，不要求先修改上游，也不照搬上游尚未完成的行为。
+本计划以 Octopus 为主要实现项目。`D:\coding\upstream-reference` 只作为只读参考证据，不要求先修改上游，也不照搬上游尚未完成的行为。
 
 当前实现已经具备模式枚举、execution workspace 数据结构、issue/run/workspace 关联、runtime context/env 注入和 work product 登记能力，但仍存在关键缺口：
 
@@ -473,7 +473,7 @@ UI 文案不得暗示 Octopus 会自动切换项目主分支或自动合并。
 - 不默认自动 merge 或自动删除分支。
 - 不在第一阶段实现任意非 Git 目录的增量复制隔离。
 - 不把正式 artifacts 强制提交到 Git。
-- 不修改 Rudder 上游参考仓库。
+- 不修改 upstream reference 上游参考仓库。
 
 ## 17. 完成定义
 
