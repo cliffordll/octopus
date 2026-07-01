@@ -58,7 +58,7 @@ from packages.shared.types.workspace import (
 )
 from packages.shared.validators.workspace import (
     validate_issue_execution_workspace_settings,
-    validate_project_execution_workspace_policy,
+    validate_project_workspace_execution_policy,
 )
 
 from .logs import (
@@ -211,11 +211,11 @@ def _is_agent_internal_generated_file(rel_parts: tuple[str, ...]) -> bool:
     )
 
 
-def _parse_project_policy(value: Any) -> dict[str, Any] | None:
+def _parse_workspace_policy(value: Any) -> dict[str, Any] | None:
     parsed = _as_record(value)
     if not parsed:
         return None
-    return dict(validate_project_execution_workspace_policy(parsed))
+    return dict(validate_project_workspace_execution_policy(parsed))
 
 
 def _parse_issue_settings(value: Any) -> dict[str, Any] | None:
@@ -227,7 +227,7 @@ def _parse_issue_settings(value: Any) -> dict[str, Any] | None:
 
 def _resolve_mode(
     *,
-    project_policy: dict[str, Any] | None,
+    workspace_policy: dict[str, Any] | None,
     issue_settings: dict[str, Any] | None,
     issue_preference: str | None,
 ) -> str:
@@ -236,8 +236,8 @@ def _resolve_mode(
         issue_mode = issue_preference
     if issue_mode and issue_mode not in {"inherit", "reuse_existing"}:
         return str(issue_mode)
-    if project_policy and project_policy.get("enabled"):
-        default_mode = project_policy.get("defaultMode")
+    if workspace_policy and workspace_policy.get("enabled"):
+        default_mode = workspace_policy.get("defaultMode")
         if default_mode == "isolated_workspace":
             return "isolated_workspace"
         if default_mode == "operator_branch":
@@ -250,15 +250,17 @@ def _resolve_mode(
 
 def _resolve_strategy_type(
     *,
-    project_policy: dict[str, Any] | None,
+    workspace_policy: dict[str, Any] | None,
     issue_settings: dict[str, Any] | None,
     mode: str,
 ) -> str:
     strategy = None
     if issue_settings and isinstance(issue_settings.get("workspaceStrategy"), dict):
         strategy = issue_settings["workspaceStrategy"]
-    elif project_policy and isinstance(project_policy.get("workspaceStrategy"), dict):
-        strategy = project_policy["workspaceStrategy"]
+    elif workspace_policy and isinstance(
+        workspace_policy.get("workspaceStrategy"), dict
+    ):
+        strategy = workspace_policy["workspaceStrategy"]
     strategy_type = strategy.get("type") if isinstance(strategy, dict) else None
     if isinstance(strategy_type, str) and strategy_type:
         return strategy_type
@@ -271,13 +273,13 @@ def _resolve_strategy_type(
 
 def _strategy_record(
     *,
-    project_policy: dict[str, Any] | None,
+    workspace_policy: dict[str, Any] | None,
     issue_settings: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if issue_settings and isinstance(issue_settings.get("workspaceStrategy"), dict):
         return cast(dict[str, Any], issue_settings["workspaceStrategy"])
-    if project_policy and isinstance(project_policy.get("workspaceStrategy"), dict):
-        return cast(dict[str, Any], project_policy["workspaceStrategy"])
+    if workspace_policy and isinstance(workspace_policy.get("workspaceStrategy"), dict):
+        return cast(dict[str, Any], workspace_policy["workspaceStrategy"])
     return {}
 
 
@@ -305,12 +307,12 @@ def _default_workspace_branch(*, issue: Issue) -> str:
 
 
 def _operator_branch_name(
-    *, project_policy: dict[str, Any] | None, strategy: dict[str, Any]
+    *, workspace_policy: dict[str, Any] | None, strategy: dict[str, Any]
 ) -> str:
     branch_policy = cast(
         dict[str, Any],
-        project_policy.get("branchPolicy")
-        if project_policy and isinstance(project_policy.get("branchPolicy"), dict)
+        workspace_policy.get("branchPolicy")
+        if workspace_policy and isinstance(workspace_policy.get("branchPolicy"), dict)
         else {},
     )
     configured = (
@@ -1136,67 +1138,76 @@ class WorkspaceService:
                 cwd=str(org_root),
                 warning=(
                     "Issue has no project configured. Run will start in "
-                    f'shared organization workspace "{org_root}".'
+                    f'organization scratch workspace "{org_root}".'
                 ),
             )
 
         project = await get_project_by_id(self._session, issue.project_id)
         if project is None or project.org_id != issue.org_id:
             return None
-        project_policy = _parse_project_policy(project.execution_workspace_policy)
         issue_settings = _parse_issue_settings(issue.execution_workspace_settings)
+        requested_workspace_id = issue.project_workspace_id
+        if (
+            requested_workspace_id is None
+            and existing is not None
+            and existing.project_id == project.id
+        ):
+            requested_workspace_id = existing.project_workspace_id
+        project_workspace = await self._resolve_project_workspace(
+            project_id=project.id,
+            requested_id=requested_workspace_id,
+        )
+        if issue.project_workspace_id and project_workspace is None:
+            raise ValueError(
+                "Issue project workspace does not exist in the selected project."
+            )
+        if project_workspace is None:
+            org_root = self._org_workspace_root(issue.org_id)
+            return self._organization_workspace_fallback(
+                issue,
+                cwd=str(org_root),
+                warning=(
+                    "Project has no workspace configured. Run will start in "
+                    f'organization scratch workspace "{org_root}".'
+                ),
+            )
+        workspace_policy = _parse_workspace_policy(
+            project_workspace.execution_workspace_policy
+        )
         mode = _resolve_mode(
-            project_policy=project_policy,
+            workspace_policy=workspace_policy,
             issue_settings=issue_settings,
             issue_preference=issue.execution_workspace_preference,
         )
         if mode == "agent_default":
             return None
         strategy_type = _resolve_strategy_type(
-            project_policy=project_policy, issue_settings=issue_settings, mode=mode
+            workspace_policy=workspace_policy,
+            issue_settings=issue_settings,
+            mode=mode,
         )
-        project_workspace = await self._resolve_project_workspace(
-            project_id=project.id,
-            policy=project_policy,
-            requested_id=issue.project_workspace_id,
-        )
-        project_workspace_id = (
-            project_workspace.id if project_workspace is not None else None
-        )
+        project_workspace_id = project_workspace.id
         strategy = _strategy_record(
-            project_policy=project_policy,
+            workspace_policy=workspace_policy,
             issue_settings=issue_settings,
         )
-        fallback_cwd: str | None = None
-        project_had_configured_cwd = bool(
-            _string(project_workspace.cwd) if project_workspace else None
-        )
-        project_cwd = (
-            await self._ensure_project_checkout(
-                org_id=issue.org_id,
-                project_id=project.id,
-                project_workspace=project_workspace,
-            )
-            if project_workspace is not None
-            else None
+        project_had_configured_cwd = bool(_string(project_workspace.cwd))
+        project_cwd = await self._ensure_project_checkout(
+            org_id=issue.org_id,
+            project_id=project.id,
+            project_workspace=project_workspace,
         )
         project_code_source_kind = self._project_code_source_kind(
             org_id=issue.org_id,
             project_id=project.id,
             cwd=project_cwd,
             had_configured_cwd=project_had_configured_cwd,
-            repo_url=_string(project_workspace.repo_url) if project_workspace else None,
+            workspace_id=project_workspace.id,
+            repo_url=_string(project_workspace.repo_url),
         )
-        project_repo_url = (
-            _string(project_workspace.repo_url) if project_workspace else None
-        )
-        project_base_ref = (
-            (
-                _string(project_workspace.default_ref)
-                or _string(project_workspace.repo_ref)
-            )
-            if project_workspace
-            else None
+        project_repo_url = _string(project_workspace.repo_url)
+        project_base_ref = _string(project_workspace.default_ref) or _string(
+            project_workspace.repo_ref
         )
         execution_cwd: str | None = None
         execution_repo_url: str | None = None
@@ -1207,34 +1218,9 @@ class WorkspaceService:
             "resolvedMode": mode,
         }
         warnings: list[str] = []
-        if project_workspace is None:
-            if mode == "operator_branch":
-                raise ValueError(
-                    "Operator branch mode requires a project Git workspace."
-                )
-            if mode == "isolated_workspace":
-                raise ValueError(
-                    "Isolated workspace mode requires a project Git workspace or repo URL."
-                )
-            fallback_cwd = str(self._org_workspace_root(issue.org_id))
-            warnings.append(
-                "Project has no workspace configured. Run will start in "
-                f'shared organization workspace "{fallback_cwd}".'
-            )
-        elif not project_cwd:
-            if mode == "operator_branch":
-                raise ValueError(
-                    "Operator branch mode requires the project workspace to have "
-                    "a local Git cwd or repo URL."
-                )
-            if mode == "isolated_workspace":
-                raise ValueError(
-                    "Isolated workspace mode requires the project workspace to have a local Git cwd or repo URL."
-                )
-            fallback_cwd = str(self._org_workspace_root(issue.org_id))
-            warnings.append(
-                "Project workspace has no local cwd configured. Run will start "
-                f'in shared organization workspace "{fallback_cwd}".'
+        if not project_cwd:
+            raise ValueError(
+                "Project workspace requires a local cwd or repo URL before it can execute tasks."
             )
         elif mode == "shared_workspace":
             execution_cwd = project_cwd
@@ -1244,7 +1230,7 @@ class WorkspaceService:
             branch_template = _string(strategy.get("branchTemplate"))
             if mode == "operator_branch":
                 execution_branch_name = _operator_branch_name(
-                    project_policy=project_policy, strategy=strategy
+                    workspace_policy=workspace_policy, strategy=strategy
                 )
                 execution_metadata["operatorWorkspace"] = True
             else:
@@ -1286,24 +1272,13 @@ class WorkspaceService:
                     "Isolated workspace mode requires the project cwd to be an existing Git repository. "
                     "Octopus will not create a local_fs fallback for isolated workspaces."
                 )
-        if fallback_cwd is not None:
-            execution_cwd = fallback_cwd
-            execution_metadata.update(
-                {
-                    "fallback": "organization_workspace",
-                    "workspaceKind": "organization_scratch",
-                    "codeSourceKind": "none",
-                    "warnings": warnings,
-                }
-            )
-        else:
-            execution_metadata.update(
-                {
-                    "workspaceKind": "project_execution",
-                    "codeSourceKind": project_code_source_kind,
-                    "warnings": warnings,
-                }
-            )
+        execution_metadata.update(
+            {
+                "workspaceKind": "project_execution",
+                "codeSourceKind": project_code_source_kind,
+                "warnings": warnings,
+            }
+        )
         if project_cwd:
             created_from_branch = _current_git_branch(Path(project_cwd))
             created_from_head = _git_commit(Path(project_cwd), "HEAD")
@@ -1326,9 +1301,16 @@ class WorkspaceService:
             mode=mode,
             branch_name=execution_branch_name,
         )
-        if existing is not None:
-            self._validate_existing_execution_workspace(existing)
-        row = existing or reusable
+        bound_existing = (
+            existing
+            if existing is not None
+            and existing.project_id == project.id
+            and existing.project_workspace_id == project_workspace_id
+            else None
+        )
+        if bound_existing is not None:
+            self._validate_existing_execution_workspace(bound_existing)
+        row = bound_existing or reusable
         workspace_fields = {
             "org_id": issue.org_id,
             "project_id": project.id,
@@ -1404,12 +1386,9 @@ class WorkspaceService:
         repo_url = _string(project_workspace.repo_url)
         if not repo_url:
             return None
-        checkout = (
-            self._org_workspace_root(org_id)
-            / "projects"
-            / _safe_branch_suffix(project_id[:8])
-            / "checkout"
-        ).resolve()
+        checkout = self._managed_project_checkout_path(
+            org_id, project_id, project_workspace.id
+        )
         if checkout.exists():
             if _is_git_repository(checkout):
                 await update_project_workspace(
@@ -2273,7 +2252,6 @@ class WorkspaceService:
         self,
         *,
         project_id: str,
-        policy: dict[str, Any] | None,
         requested_id: str | None,
     ) -> Any | None:
         workspaces = await list_project_workspaces(self._session, project_id)
@@ -2282,24 +2260,16 @@ class WorkspaceService:
                 (workspace for workspace in workspaces if workspace.id == requested_id),
                 None,
             )
-        policy_workspace_id = (
-            policy.get("defaultProjectWorkspaceId") if policy is not None else None
-        )
-        if isinstance(policy_workspace_id, str):
-            return next(
-                (
-                    workspace
-                    for workspace in workspaces
-                    if workspace.id == policy_workspace_id
-                ),
-                None,
-            )
         primary = next(
             (workspace for workspace in workspaces if workspace.is_primary), None
         )
         if not workspaces:
             return None
-        return primary or workspaces[0]
+        if primary is None:
+            raise ValueError(
+                "Project has workspaces but no default workspace. Select one before running tasks."
+            )
+        return primary
 
     async def _ensure_managed_workspace_paths(
         self, workspace: ExecutionWorkspaceData
@@ -2337,11 +2307,14 @@ class WorkspaceService:
             return organization_workspace_root(org_id)
         return ensure_organization_workspace_root(org_id)
 
-    def _managed_project_checkout_path(self, org_id: str, project_id: str) -> Path:
+    def _managed_project_checkout_path(
+        self, org_id: str, project_id: str, workspace_id: str
+    ) -> Path:
         return (
             self._org_workspace_root(org_id)
             / "projects"
             / _safe_branch_suffix(project_id[:8])
+            / _safe_branch_suffix(workspace_id[:8])
             / "checkout"
         ).resolve()
 
@@ -2350,6 +2323,7 @@ class WorkspaceService:
         *,
         org_id: str,
         project_id: str,
+        workspace_id: str,
         cwd: str | None,
         had_configured_cwd: bool,
         repo_url: str | None,
@@ -2358,7 +2332,7 @@ class WorkspaceService:
             return "repo_url_pending_checkout" if repo_url else "none"
         try:
             if Path(cwd).resolve() == self._managed_project_checkout_path(
-                org_id, project_id
+                org_id, project_id, workspace_id
             ):
                 return "managed_checkout"
         except OSError:

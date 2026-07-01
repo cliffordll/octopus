@@ -39,7 +39,7 @@ from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
 from packages.shared.validators.workspace import (
     validate_issue_execution_workspace_settings,
-    validate_project_execution_workspace_policy,
+    validate_project_workspace_execution_policy,
 )
 
 
@@ -95,7 +95,7 @@ def test_workspace_contract_modules_are_defined() -> None:
 
 
 def test_workspace_policy_validators_normalize_three_mode_contract() -> None:
-    project_policy = validate_project_execution_workspace_policy(
+    project_policy = validate_project_workspace_execution_policy(
         {
             "enabled": True,
             "defaultMode": "isolated",
@@ -176,19 +176,21 @@ async def test_execution_workspace_status_diff_and_archive_service(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Workspace API Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Workspace API Project"},
                 actor_type="user",
                 actor_id="dev",
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -240,8 +242,16 @@ async def test_execution_workspace_records_branch_guard_metadata(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
+                {"name": "Workspace Guard Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
                 {
-                    "name": "Workspace Guard Project",
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
                     "executionWorkspacePolicy": {
                         "enabled": True,
                         "defaultMode": "isolated_workspace",
@@ -251,12 +261,6 @@ async def test_execution_workspace_records_branch_guard_metadata(
                         },
                     },
                 },
-                actor_type="user",
-                actor_id="dev",
-            )
-            await project_service.create_workspace(
-                project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -301,19 +305,21 @@ async def test_execution_workspace_push_blocks_branch_mismatch(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Branch Guard Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Branch Guard Project"},
                 actor_type="user",
                 actor_id="dev",
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -354,19 +360,21 @@ async def test_execution_workspace_merge_preview_reports_clean_and_conflict(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Merge Preview Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Merge Preview Project"},
                 actor_type="user",
                 actor_id="dev",
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -459,13 +467,7 @@ async def test_execution_workspace_merge_pr_abandon_and_cleanup_flow(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Review Flow Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Review Flow Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -477,6 +479,10 @@ async def test_execution_workspace_merge_pr_abandon_and_cleanup_flow(
                     "cwd": str(project_cwd),
                     "repoUrl": "git@github.com:acme/demo.git",
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -640,13 +646,7 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace(
             projects = ProjectService(session)
             project = await projects.create_project(
                 org.id,
-                {
-                    "name": "Workspace Resolution",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Workspace Resolution"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -654,7 +654,14 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace(
             _init_repo_with_branch(project_cwd, "main")
             project_workspace = await projects.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd)},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -704,13 +711,7 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Shared Project Cwd",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "shared_workspace",
-                    },
-                },
+                {"name": "Shared Project Cwd"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -793,13 +794,7 @@ async def test_shared_workspace_preflight_does_not_switch_project_branch(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Shared Branch Guard",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "shared_workspace",
-                    },
-                },
+                {"name": "Shared Branch Guard"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -844,6 +839,160 @@ async def test_shared_workspace_preflight_does_not_switch_project_branch(
     )
 
 
+async def test_project_workspaces_resolve_independent_execution_modes(
+    tmp_path: Path,
+) -> None:
+    frontend_cwd = tmp_path / "frontend"
+    frontend_cwd.mkdir()
+    backend_cwd = tmp_path / "backend"
+    _init_repo_with_branch(backend_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-multi-workspace-modes",
+                name="Multi Workspace Modes",
+                issue_prefix="MWM",
+            )
+            session.add(org)
+            await session.flush()
+            projects = ProjectService(session)
+            project = await projects.create_project(
+                org.id,
+                {"name": "Commerce"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            frontend = await projects.create_workspace(
+                project["id"],
+                {
+                    "name": "Frontend",
+                    "cwd": str(frontend_cwd),
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            backend = await projects.create_workspace(
+                project["id"],
+                {
+                    "name": "Backend",
+                    "cwd": str(backend_cwd),
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert frontend is not None
+            assert backend is not None
+            frontend_issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=frontend["id"],
+                title="Frontend task",
+            )
+            backend_issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=backend["id"],
+                title="Backend task",
+            )
+            session.add_all([frontend_issue, backend_issue])
+            await session.flush()
+            service = WorkspaceService(session)
+            frontend_execution = await service.resolve_for_issue(frontend_issue)
+            backend_execution = await service.resolve_for_issue(backend_issue)
+    finally:
+        await engine.dispose()
+
+    assert frontend_execution is not None
+    assert frontend_execution["projectWorkspaceId"] == frontend["id"]
+    assert frontend_execution["mode"] == "shared_workspace"
+    assert frontend_execution["cwd"] == str(frontend_cwd)
+    assert backend_execution is not None
+    assert backend_execution["projectWorkspaceId"] == backend["id"]
+    assert backend_execution["mode"] == "isolated_workspace"
+    assert backend_execution["strategyType"] == "git_worktree"
+    assert backend_execution["cwd"] != str(backend_cwd)
+
+
+async def test_existing_execution_workspace_stays_bound_when_default_changes(
+    tmp_path: Path,
+) -> None:
+    frontend_cwd = tmp_path / "frontend"
+    frontend_cwd.mkdir()
+    backend_cwd = tmp_path / "backend"
+    backend_cwd.mkdir()
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-stable-workspace-binding",
+                name="Stable Workspace Binding",
+                issue_prefix="SWB",
+            )
+            session.add(org)
+            await session.flush()
+            projects = ProjectService(session)
+            project = await projects.create_project(
+                org.id,
+                {"name": "Commerce"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            frontend = await projects.create_workspace(
+                project["id"],
+                {"name": "Frontend", "cwd": str(frontend_cwd)},
+                actor_type="user",
+                actor_id="dev",
+            )
+            backend = await projects.create_workspace(
+                project["id"],
+                {"name": "Backend", "cwd": str(backend_cwd)},
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert frontend is not None
+            assert backend is not None
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Continue frontend task",
+            )
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            first_execution = await service.resolve_for_issue(issue)
+            await projects.update_workspace(
+                project["id"],
+                backend["id"],
+                {"isPrimary": True},
+                actor_type="user",
+                actor_id="dev",
+            )
+            resumed_execution = await service.resolve_for_issue(issue)
+    finally:
+        await engine.dispose()
+
+    assert first_execution is not None
+    assert resumed_execution is not None
+    assert resumed_execution["id"] == first_execution["id"]
+    assert resumed_execution["projectWorkspaceId"] == frontend["id"]
+    assert resumed_execution["cwd"] == str(frontend_cwd)
+
+
 async def test_isolated_workspace_directory_is_a_real_git_worktree(
     tmp_path: Path,
 ) -> None:
@@ -865,17 +1014,7 @@ async def test_isolated_workspace_directory_is_a_real_git_worktree(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Real Worktree Contract",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                        "workspaceStrategy": {
-                            "type": "git_worktree",
-                            "baseRef": "main",
-                        },
-                    },
-                },
+                {"name": "Real Worktree Contract"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -885,6 +1024,14 @@ async def test_isolated_workspace_directory_is_a_real_git_worktree(
                     "name": "Primary",
                     "cwd": str(project_cwd),
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                        "workspaceStrategy": {
+                            "type": "git_worktree",
+                            "baseRef": "main",
+                        },
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -955,17 +1102,7 @@ async def test_isolated_workspace_reuses_existing_issue_worktree(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Reuse Worktree",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                        "workspaceStrategy": {
-                            "type": "git_worktree",
-                            "baseRef": "main",
-                        },
-                    },
-                },
+                {"name": "Reuse Worktree"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -975,6 +1112,14 @@ async def test_isolated_workspace_reuses_existing_issue_worktree(
                     "name": "Primary",
                     "cwd": str(project_cwd),
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                        "workspaceStrategy": {
+                            "type": "git_worktree",
+                            "baseRef": "main",
+                        },
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -1052,17 +1197,7 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Operator Branch Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "operator_branch",
-                        "workspaceStrategy": {
-                            "mode": "operator_branch",
-                            "operatorBranch": "feature/full-stack",
-                        },
-                    },
-                },
+                {"name": "Operator Branch Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1074,6 +1209,14 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
                     "cwd": str(project_cwd),
                     "repoUrl": "https://github.com/cliffordll/mytest.git",
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                        "workspaceStrategy": {
+                            "mode": "operator_branch",
+                            "operatorBranch": "feature/full-stack",
+                        },
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -1150,14 +1293,7 @@ async def test_operator_branch_reuses_fixed_project_worktree_for_multiple_issues
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Operator Reuse Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "operator_branch",
-                        "branchPolicy": {"operatorBranch": "feature/full-stack"},
-                    },
-                },
+                {"name": "Operator Reuse Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1168,6 +1304,11 @@ async def test_operator_branch_reuses_fixed_project_worktree_for_multiple_issues
                     "sourceType": "git_repo",
                     "cwd": str(project_cwd),
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                        "branchPolicy": {"operatorBranch": "feature/full-stack"},
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -1253,13 +1394,7 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Managed Shared",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "shared_workspace",
-                    },
-                },
+                {"name": "Managed Shared"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1270,6 +1405,10 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
                     "cwd": None,
                     "repoUrl": str(source_repo),
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -1302,7 +1441,13 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
     assert project_workspace is not None
     assert context is not None
     workspace = context["workspace"]["octopusWorkspace"]
-    expected_checkout = org_root / "projects" / project["id"][:8] / "checkout"
+    expected_checkout = (
+        org_root
+        / "projects"
+        / project["id"][:8]
+        / project_workspace["id"][:8]
+        / "checkout"
+    )
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
     assert workspace["cwd"] == str(expected_checkout)
@@ -1347,23 +1492,21 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Managed Isolated",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Managed Isolated"},
                 actor_type="user",
                 actor_id="dev",
             )
-            await project_service.create_workspace(
+            project_workspace = await project_service.create_workspace(
                 project["id"],
                 {
                     "name": "Remote Only",
                     "cwd": None,
                     "repoUrl": str(source_repo),
                     "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
                 },
                 actor_type="user",
                 actor_id="dev",
@@ -1393,8 +1536,15 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
         await engine.dispose()
 
     assert context is not None
+    assert project_workspace is not None
     workspace = context["workspace"]["octopusWorkspace"]
-    managed_checkout = org_root / "projects" / project["id"][:8] / "checkout"
+    managed_checkout = (
+        org_root
+        / "projects"
+        / project["id"][:8]
+        / project_workspace["id"][:8]
+        / "checkout"
+    )
     assert workspace["providerType"] == "git_worktree"
     assert workspace["workspaceKind"] == "project_execution"
     assert workspace["codeSourceKind"] == "managed_checkout"
@@ -1466,7 +1616,7 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert workspace["projectWorkspaceId"] is None
     assert workspace["metadata"]["fallback"] == "organization_workspace"
     assert workspace["metadata"]["warnings"] == [
-        f'Project has no workspace configured. Run will start in shared organization workspace "{org_root}".'
+        f'Project has no workspace configured. Run will start in organization scratch workspace "{org_root}".'
     ]
     assert workspace["workspaceKind"] == "organization_scratch"
     assert workspace["codeSourceKind"] == "none"
@@ -1550,7 +1700,7 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     assert workspace["projectWorkspaceId"] is None
     assert workspace["metadata"]["fallback"] == "organization_workspace"
     assert workspace["metadata"]["warnings"] == [
-        f'Issue has no project configured. Run will start in shared organization workspace "{org_root}".'
+        f'Issue has no project configured. Run will start in organization scratch workspace "{org_root}".'
     ]
     assert workspace["workspaceKind"] == "organization_scratch"
     assert workspace["codeSourceKind"] == "none"
@@ -1574,7 +1724,7 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     assert "runArtifactsDir" not in workspace
 
 
-async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cwd(
+async def test_run_preflight_rejects_project_workspace_without_code_source(
     tmp_path: Path, monkeypatch
 ) -> None:
     org_root = tmp_path / "org-workspace"
@@ -1634,26 +1784,17 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
             session.add(run)
             await session.flush()
 
-            context = await WorkspaceService(session).prepare_runtime_context_for_run(
-                run.id, run.context_snapshot
-            )
-            await session.commit()
+            with pytest.raises(
+                ValueError,
+                match="requires a local cwd or repo URL",
+            ):
+                await WorkspaceService(session).prepare_runtime_context_for_run(
+                    run.id, run.context_snapshot
+                )
     finally:
         await engine.dispose()
 
     assert project_workspace is not None
-    assert context is not None
-    workspace = context["workspace"]["octopusWorkspace"]
-    assert workspace["cwd"] == str(org_root)
-    assert workspace["projectWorkspaceId"] == project_workspace["id"]
-    assert workspace["metadata"]["fallback"] == "organization_workspace"
-    assert workspace["metadata"]["warnings"] == [
-        "Project workspace has no local cwd configured. Run will start "
-        f'in shared organization workspace "{org_root}".'
-    ]
-    assert workspace["workspaceKind"] == "organization_scratch"
-    assert workspace["codeSourceKind"] == "none"
-    assert workspace["warnings"] == workspace["metadata"]["warnings"]
 
 
 async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
@@ -1789,13 +1930,7 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env(
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Workspace Runtime",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Workspace Runtime"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1803,7 +1938,14 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env(
             _init_repo_with_branch(project_cwd, "main")
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd)},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1979,13 +2121,7 @@ async def test_workspace_operations_do_not_take_workspace_write_lease(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Workspace No Lease Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "shared_workspace",
-                    },
-                },
+                {"name": "Workspace No Lease Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2198,19 +2334,21 @@ async def test_workspace_archive_blocks_running_adapter_operation(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Archive Running Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Archive Running Project"},
                 actor_type="user",
                 actor_id="dev",
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2259,19 +2397,21 @@ async def test_workspace_archive_blocks_dirty_git_worktree(
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Archive Dirty Project",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Archive Dirty Project"},
                 actor_type="user",
                 actor_id="dev",
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": str(project_cwd), "defaultRef": "main"},
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2372,10 +2512,7 @@ async def test_adapter_runtime_services_are_persisted_and_released(
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Runtime Service Project",
-                    "executionWorkspacePolicy": {"enabled": True},
-                },
+                {"name": "Runtime Service Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2537,10 +2674,7 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Generated File Project",
-                    "executionWorkspacePolicy": {"enabled": True},
-                },
+                {"name": "Generated File Project"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2678,10 +2812,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Workspace Operations",
-                    "executionWorkspacePolicy": {"enabled": True},
-                },
+                {"name": "Workspace Operations"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2853,10 +2984,7 @@ async def test_cancel_running_run_marks_workspace_resources_terminal(
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Cancel Cleanup",
-                    "executionWorkspacePolicy": {"enabled": True},
-                },
+                {"name": "Cancel Cleanup"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -2970,10 +3098,7 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal(
             agent_service = AgentService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Recovery Cleanup",
-                    "executionWorkspacePolicy": {"enabled": True},
-                },
+                {"name": "Recovery Cleanup"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3066,7 +3191,7 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal(
     assert operation_metadata["reason"] == "process_lost"
 
 
-async def test_isolated_workspace_without_project_workspace_fails_preflight() -> None:
+async def test_project_without_workspace_uses_organization_scratch() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3082,13 +3207,7 @@ async def test_isolated_workspace_without_project_workspace_fails_preflight() ->
             await session.flush()
             project = await ProjectService(session).create_project(
                 org.id,
-                {
-                    "name": "Isolated No Workspace",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "No Workspace"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3100,15 +3219,15 @@ async def test_isolated_workspace_without_project_workspace_fails_preflight() ->
             session.add(issue)
             await session.flush()
 
-            with pytest.raises(
-                ValueError, match="requires a project Git workspace or repo URL"
-            ):
-                await WorkspaceService(session).resolve_for_issue(issue)
+            workspace = await WorkspaceService(session).resolve_for_issue(issue)
+            assert workspace is not None
+            assert workspace["metadata"]["workspaceKind"] == "organization_scratch"
+            assert workspace["projectWorkspaceId"] is None
     finally:
         await engine.dispose()
 
 
-async def test_operator_branch_without_project_workspace_fails_preflight() -> None:
+async def test_project_without_workspace_does_not_resolve_operator_mode() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3124,13 +3243,7 @@ async def test_operator_branch_without_project_workspace_fails_preflight() -> No
             await session.flush()
             project = await ProjectService(session).create_project(
                 org.id,
-                {
-                    "name": "Operator No Workspace",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "operator_branch",
-                    },
-                },
+                {"name": "Operator No Workspace"},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3142,8 +3255,10 @@ async def test_operator_branch_without_project_workspace_fails_preflight() -> No
             session.add(issue)
             await session.flush()
 
-            with pytest.raises(ValueError, match="requires a project Git workspace"):
-                await WorkspaceService(session).resolve_for_issue(issue)
+            workspace = await WorkspaceService(session).resolve_for_issue(issue)
+            assert workspace is not None
+            assert workspace["metadata"]["workspaceKind"] == "organization_scratch"
+            assert workspace["mode"] == "shared_workspace"
     finally:
         await engine.dispose()
 
@@ -3165,19 +3280,21 @@ async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Isolated Empty Cwd",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "isolated_workspace",
-                    },
-                },
+                {"name": "Isolated Empty Cwd"},
                 actor_type="user",
                 actor_id="dev",
             )
             project_workspace = await project_service.create_workspace(
                 project["id"],
-                {"name": "No Cwd", "cwd": None, "repoUrl": None},
+                {
+                    "name": "No Cwd",
+                    "cwd": None,
+                    "repoUrl": None,
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3193,7 +3310,7 @@ async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
 
             with pytest.raises(
                 ValueError,
-                match="requires the project workspace to have a local Git cwd or repo URL",
+                match="requires a local cwd or repo URL",
             ):
                 await WorkspaceService(session).resolve_for_issue(issue)
     finally:
@@ -3217,19 +3334,21 @@ async def test_operator_branch_without_cwd_or_repo_fails_preflight() -> None:
             project_service = ProjectService(session)
             project = await project_service.create_project(
                 org.id,
-                {
-                    "name": "Operator Empty Cwd",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": "operator_branch",
-                    },
-                },
+                {"name": "Operator Empty Cwd"},
                 actor_type="user",
                 actor_id="dev",
             )
             project_workspace = await project_service.create_workspace(
                 project["id"],
-                {"name": "No Cwd", "cwd": None, "repoUrl": None},
+                {
+                    "name": "No Cwd",
+                    "cwd": None,
+                    "repoUrl": None,
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "operator_branch",
+                    },
+                },
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3243,7 +3362,7 @@ async def test_operator_branch_without_cwd_or_repo_fails_preflight() -> None:
             session.add(issue)
             await session.flush()
 
-            with pytest.raises(ValueError, match="requires the project workspace"):
+            with pytest.raises(ValueError, match="requires a local cwd or repo URL"):
                 await WorkspaceService(session).resolve_for_issue(issue)
     finally:
         await engine.dispose()

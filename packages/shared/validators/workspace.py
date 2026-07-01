@@ -12,7 +12,7 @@ from packages.shared.constants.workspace import (
 )
 from packages.shared.types.workspace import (
     IssueExecutionWorkspaceSettings,
-    ProjectExecutionWorkspacePolicy,
+    ProjectWorkspaceExecutionPolicy,
     UpdateExecutionWorkspacePayload,
 )
 
@@ -22,11 +22,10 @@ _UPDATE_EXECUTION_WORKSPACE_FIELDS = {
     "cleanupReason",
     "metadata",
 }
-_PROJECT_POLICY_FIELDS = {
+_PROJECT_WORKSPACE_POLICY_FIELDS = {
     "enabled",
     "defaultMode",
     "allowIssueOverride",
-    "defaultProjectWorkspaceId",
     "workspaceStrategy",
     "workspaceRuntime",
     "branchPolicy",
@@ -87,10 +86,10 @@ def _nullable_datetime(payload: Mapping[str, Any], field: str) -> None:
         raise ValueError(f"'{field}' must be an ISO datetime or null") from exc
 
 
-def validate_project_execution_workspace_policy(
+def validate_project_workspace_execution_policy(
     payload: Mapping[str, Any],
-) -> ProjectExecutionWorkspacePolicy:
-    _reject_unknown_fields(payload, allowed_fields=_PROJECT_POLICY_FIELDS)
+) -> ProjectWorkspaceExecutionPolicy:
+    _reject_unknown_fields(payload, allowed_fields=_PROJECT_WORKSPACE_POLICY_FIELDS)
     result = dict(payload)
     if "enabled" in result and not isinstance(result["enabled"], bool):
         raise ValueError("'enabled' must be a boolean")
@@ -98,7 +97,6 @@ def validate_project_execution_workspace_policy(
         result["allowIssueOverride"], bool
     ):
         raise ValueError("'allowIssueOverride' must be a boolean")
-    _nullable_string(result, "defaultProjectWorkspaceId")
     if "defaultMode" in result:
         result["defaultMode"] = _normalize_default_mode(result["defaultMode"])
     if result.get("workspaceStrategy") is not None:
@@ -119,7 +117,7 @@ def validate_project_execution_workspace_policy(
             and not isinstance(result[field], dict)
         ):
             raise ValueError(f"'{field}' must be an object or null")
-    return cast(ProjectExecutionWorkspacePolicy, result)
+    return cast(ProjectWorkspaceExecutionPolicy, result)
 
 
 def validate_issue_execution_workspace_settings(

@@ -880,6 +880,7 @@ export interface ProjectWorkspace {
   remoteWorkspaceRef: string | null;
   sharedWorkspaceKey: string | null;
   metadata: Record<string, unknown> | null;
+  executionWorkspacePolicy: Record<string, unknown> | null;
   isPrimary: boolean;
   runtimeServices?: WorkspaceRuntimeService[];
   createdAt: string;
@@ -900,6 +901,7 @@ export interface CreateProjectWorkspacePayload {
   remoteWorkspaceRef?: string | null;
   sharedWorkspaceKey?: string | null;
   metadata?: Record<string, unknown> | null;
+  executionWorkspacePolicy?: Record<string, unknown> | null;
   isPrimary?: boolean;
 }
 
@@ -962,7 +964,6 @@ export interface ProjectDetail {
   color: string | null;
   pauseReason: "manual" | "budget" | "system" | null;
   pausedAt: string | null;
-  executionWorkspacePolicy: Record<string, unknown> | null;
   codebase?: ProjectCodebase;
   resources: ProjectResourceAttachment[];
   workspaces?: ProjectWorkspace[];
@@ -979,7 +980,6 @@ export interface CreateProjectPayload {
   goalIds?: string[];
   leadAgentId?: string | null;
   targetDate?: string | null;
-  executionWorkspacePolicy?: Record<string, unknown> | null;
   resourceAttachments?: ProjectResourceAttachmentInput[];
   newResources?: CreateProjectInlineResourceInput[];
 }

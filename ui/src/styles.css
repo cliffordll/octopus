@@ -1853,6 +1853,16 @@ small {
   gap: 16px;
 }
 
+.project-config-flow > * {
+  order: 90;
+}
+
+.project-config-step-basic { order: 10; }
+.project-config-step-source { order: 20; }
+.project-config-step-save { order: 15; }
+.project-config-step-history { order: 60; }
+.project-config-step-save:empty { display: none; }
+
 .project-config-section,
 .project-runtime-section {
   background: #0f141d;
@@ -1899,7 +1909,7 @@ small {
   align-items: center;
   display: grid;
   gap: 18px;
-  grid-template-columns: 140px minmax(0, 1fr);
+  grid-template-columns: 144px minmax(0, 1fr);
   padding: 8px 0;
 }
 
@@ -1932,6 +1942,18 @@ small {
   justify-content: flex-end;
 }
 
+.project-system-metadata {
+  border-top: 1px solid #202a3b;
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+.project-system-metadata summary {
+  color: #9aa6b8;
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .project-goal-chips {
   align-items: center;
   display: flex;
@@ -1947,7 +1969,8 @@ small {
 .workspace-policy-options {
   border: 0;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   padding: 0;
 }
@@ -1968,6 +1991,7 @@ small {
   gap: 10px;
   grid-template-columns: auto minmax(0, 1fr);
   padding: 10px 12px;
+  min-height: 76px;
 }
 
 .workspace-policy-option:hover,
@@ -1992,8 +2016,9 @@ small {
 }
 
 .workspace-policy-option span {
-  align-items: baseline;
+  align-items: flex-start;
   display: flex;
+  flex-direction: column;
   gap: 10px;
   min-width: 0;
 }
@@ -2009,9 +2034,8 @@ small {
   flex: 1 1 auto;
   font-size: 12px;
   line-height: 1.45;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  white-space: normal;
 }
 
 .workspace-policy-advanced {
@@ -2253,6 +2277,21 @@ button.project-workspace-item:hover,
   white-space: nowrap;
 }
 
+.project-workspace-mode-control {
+  align-items: center;
+  color: #8792a6;
+  display: grid;
+  font-size: 12px;
+  gap: 10px;
+  grid-template-columns: 72px minmax(150px, 240px);
+  margin-top: 8px;
+}
+
+.project-workspace-mode-control select {
+  min-width: 0;
+  width: 100%;
+}
+
 .project-workspace-badges,
 .issue-work-product-meta {
   align-items: center;
@@ -2282,7 +2321,7 @@ button.project-workspace-item:hover,
   display: grid;
   font-size: 12px;
   gap: 18px;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: 144px minmax(0, 1fr);
   min-width: 0;
 }
 
@@ -9706,6 +9745,9 @@ pre {
     grid-template-columns: 1fr;
   }
   .project-workspace-create-grid {
+    grid-template-columns: 1fr;
+  }
+  .workspace-policy-options {
     grid-template-columns: 1fr;
   }
   .project-workspace-item,

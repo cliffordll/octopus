@@ -33,11 +33,10 @@ class ExecutionWorkspaceStrategy(TypedDict, total=False):
     teardownCommand: str | None
 
 
-class ProjectExecutionWorkspacePolicy(TypedDict, total=False):
+class ProjectWorkspaceExecutionPolicy(TypedDict, total=False):
     enabled: bool
     defaultMode: ProjectExecutionWorkspaceDefaultMode
     allowIssueOverride: bool
-    defaultProjectWorkspaceId: str | None
     workspaceStrategy: ExecutionWorkspaceStrategy | None
     workspaceRuntime: dict[str, Any] | None
     branchPolicy: dict[str, Any] | None
@@ -69,6 +68,7 @@ class ProjectWorkspace(TypedDict):
     remoteWorkspaceRef: str | None
     sharedWorkspaceKey: str | None
     metadata: dict[str, Any] | None
+    executionWorkspacePolicy: ProjectWorkspaceExecutionPolicy | None
     isPrimary: bool
     runtimeServices: NotRequired[list[WorkspaceRuntimeService]]
     createdAt: str
@@ -211,4 +211,5 @@ class CreateProjectWorkspacePayload(TypedDict):
     remoteWorkspaceRef: NotRequired[str | None]
     sharedWorkspaceKey: NotRequired[str | None]
     metadata: NotRequired[dict[str, Any] | None]
+    executionWorkspacePolicy: NotRequired[ProjectWorkspaceExecutionPolicy | None]
     isPrimary: NotRequired[bool]

@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +28,13 @@ class ProjectWorkspace(Base):
     __table_args__ = (
         Index("project_workspaces_company_project_idx", "org_id", "project_id"),
         Index("project_workspaces_project_primary_idx", "project_id", "is_primary"),
+        Index(
+            "project_workspaces_one_primary_uq",
+            "project_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+            sqlite_where=text("is_primary = 1"),
+        ),
         Index(
             "project_workspaces_project_source_type_idx", "project_id", "source_type"
         ),
@@ -64,6 +72,9 @@ class ProjectWorkspace(Base):
     shared_workspace_key: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON().with_variant(JSONB(), "postgresql")
+    )
+    execution_workspace_policy: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True
     )
     is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(

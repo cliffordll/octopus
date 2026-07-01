@@ -170,10 +170,7 @@ async def test_step22_closed_loop_acceptance_uses_public_api_and_service_boundar
         application,
         "POST",
         f"/api/orgs/{org['id']}/projects",
-        json_body={
-            "name": "Closed Loop Project",
-            "executionWorkspacePolicy": {"enabled": True},
-        },
+        json_body={"name": "Closed Loop Project"},
     )
     assert project_code == 201
     issue_code, issue = await _request(
