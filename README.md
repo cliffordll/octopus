@@ -76,40 +76,6 @@ cd ui
 npm run typecheck
 npm test
 ```
-
-后端类型检查：
-
-```powershell
-uv run pyright .
-```
-
-后端测试：
-
-```powershell
-uv run pytest
-```
-
-只跑一个后端测试文件：
-
-```powershell
-uv run pytest tests\contract\test_step15_workspace_contract.py -q
-```
-
-UI 类型检查和测试：
-
-```powershell
-cd ui
-npm run typecheck
-npm test
-```
-
-只跑一个 UI 测试：
-
-```powershell
-cd ui
-npm test -- project-page.test.tsx
-```
-
 ### 测试失败时先看这里
 
 先确认依赖是同步过的：
