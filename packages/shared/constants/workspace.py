@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Literal
 
@@ -144,9 +144,9 @@ ISSUE_WORK_PRODUCT_TYPES: tuple[IssueWorkProductType, ...] = (
     "document",
 )
 
-IssueWorkProductProvider = Literal["rudder", "github", "vercel", "s3", "custom"]
+IssueWorkProductProvider = Literal["octopus", "github", "vercel", "s3", "custom"]
 ISSUE_WORK_PRODUCT_PROVIDERS: tuple[IssueWorkProductProvider, ...] = (
-    "rudder",
+    "octopus",
     "github",
     "vercel",
     "s3",

@@ -212,7 +212,7 @@ Issue context 应包含：
 - project resources。
 - project 相关 issue/goal 摘要。
 
-上游 Rudder 的语义是：项目是业务对象，项目工作区是本地 runtime anchor。文件浏览、terminal、git、dev server 和插件等本地工具应优先锚定项目工作区。
+上游 upstream reference 的语义是：项目是业务对象，项目工作区是本地 runtime anchor。文件浏览、terminal、git、dev server 和插件等本地工具应优先锚定项目工作区。
 
 ### 4.3 Resource Context
 

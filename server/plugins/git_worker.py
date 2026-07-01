@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from pathlib import Path
@@ -117,12 +117,12 @@ def _workspace_cwd(context: dict[str, Any]) -> Path:
         _object(context.get("env")).get("OCTOPUS_WORKSPACE_CWD"),
     ]
     workspace = _object(context.get("workspace"))
-    workspace_context = _object(workspace.get("rudderWorkspace"))
+    workspace_context = _object(workspace.get("octopusWorkspace"))
     candidates.extend(
         [
             workspace_context.get("cwd"),
             workspace_context.get("worktreePath"),
-            _object(context.get("rudderWorkspace")).get("cwd"),
+            _object(context.get("octopusWorkspace")).get("cwd"),
         ]
     )
     for candidate in candidates:

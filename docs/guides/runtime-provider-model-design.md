@@ -1,4 +1,4 @@
-# LLM Provider/Model 设计
+﻿# LLM Provider/Model 设计
 
 本文说明 Octopus 如何管理 `opencode_local`、`codex_local`、`claude_local`、`openclaw_local`
 等本地运行时的 provider/model 配置。
@@ -258,8 +258,8 @@ Chat runtime prompt 明确要求：当用户要求创建任务、issue、work it
   "kind": "issue_proposal",
   "structuredPayload": {
     "issueProposal": {
-      "title": "分析 rudder 源码",
-      "description": "分析 rudder 源码并整理核心架构。",
+      "title": "分析 upstream-reference 源码",
+      "description": "分析 upstream-reference 源码并整理核心架构。",
       "priority": "medium"
     }
   }

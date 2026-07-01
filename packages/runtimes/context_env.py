@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -14,7 +14,7 @@ def apply_runtime_context_env(
     if not isinstance(runtime_context, dict):
         runtime_context = {}
     workspace = context.workspace if isinstance(context.workspace, dict) else {}
-    workspace_context = workspace.get("rudderWorkspace")
+    workspace_context = workspace.get("octopusWorkspace")
     if not isinstance(workspace_context, dict):
         workspace_context = {}
 
@@ -132,16 +132,16 @@ def apply_runtime_context_env(
         workspace_context.get("issueArtifactsDir"),
     )
 
-    runtime_services = workspace.get("rudderRuntimeServices")
+    runtime_services = workspace.get("octopusRuntimeServices")
     if isinstance(runtime_services, list) and runtime_services:
         env["OCTOPUS_RUNTIME_SERVICES_JSON"] = json.dumps(runtime_services)
-    runtime_service_intents = workspace.get("rudderRuntimeServiceIntents")
+    runtime_service_intents = workspace.get("octopusRuntimeServiceIntents")
     if isinstance(runtime_service_intents, list) and runtime_service_intents:
         env["OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON"] = json.dumps(
             runtime_service_intents
         )
     _set_env(
-        env, "OCTOPUS_RUNTIME_PRIMARY_URL", workspace.get("rudderRuntimePrimaryUrl")
+        env, "OCTOPUS_RUNTIME_PRIMARY_URL", workspace.get("octopusRuntimePrimaryUrl")
     )
 
 

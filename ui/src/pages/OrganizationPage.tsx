@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
 import { Link, Navigate, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { agentsApi } from "../api/agents";
@@ -710,7 +710,7 @@ function isBuiltInOrganizationSkill(skill: OrganizationSkillListItem): boolean {
   return sourceKind === "built_in"
     || sourceKind === "octopus_bundled"
     || sourceKind === "system_bundled"
-    || sourceKind === "rudder_bundled"
+    || sourceKind === "octopus_bundled"
     || sourceKind.includes("bundled")
     || skill.sourceBadge === "built-in"
     || skill.sourceBadge === "bundled";

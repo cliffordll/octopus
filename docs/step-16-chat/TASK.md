@@ -1,4 +1,4 @@
-# Step 16: Chat / Messenger 扩展
+﻿# Step 16: Chat / Messenger 扩展
 
 状态：已完成
 
@@ -16,23 +16,23 @@ Step 11F 仅提前实现触发 Agent runtime 并保存响应所需的最小 conv
 
 开发前必须对照以下上游文件，不能凭本地偏好重定义 Chat / Messenger 模型：
 
-- `D:\coding\rudder\packages\db\src\schema\chat_conversations.ts`
-- `D:\coding\rudder\packages\db\src\schema\chat_messages.ts`
-- `D:\coding\rudder\packages\db\src\schema\chat_context_links.ts`
-- `D:\coding\rudder\packages\db\src\schema\chat_conversation_user_states.ts`
-- `D:\coding\rudder\packages\db\src\schema\messenger_thread_user_states.ts`
-- `D:\coding\rudder\packages\shared\src\types\chat.ts`
-- `D:\coding\rudder\packages\shared\src\types\messenger.ts`
-- `D:\coding\rudder\packages\shared\src\validators\chat.ts`
-- `D:\coding\rudder\server\src\routes\chats.ts`
-- `D:\coding\rudder\server\src\routes\chats.stream-routes.ts`
-- `D:\coding\rudder\server\src\routes\messenger.ts`
-- `D:\coding\rudder\server\src\services\chats.ts`
-- `D:\coding\rudder\server\src\services\chat-assistant.ts`
-- `D:\coding\rudder\server\src\services\messenger.ts`
-- `D:\coding\rudder\server\src\__tests__\chat-routes.test.ts`
-- `D:\coding\rudder\server\src\__tests__\chat-assistant.test.ts`
-- `D:\coding\rudder\server\src\__tests__\messenger-service.test.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\chat_conversations.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\chat_messages.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\chat_context_links.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\chat_conversation_user_states.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\messenger_thread_user_states.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\chat.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\messenger.ts`
+- `D:\coding\upstream-reference\packages\shared\src\validators\chat.ts`
+- `D:\coding\upstream-reference\server\src\routes\chats.ts`
+- `D:\coding\upstream-reference\server\src\routes\chats.stream-routes.ts`
+- `D:\coding\upstream-reference\server\src\routes\messenger.ts`
+- `D:\coding\upstream-reference\server\src\services\chats.ts`
+- `D:\coding\upstream-reference\server\src\services\chat-assistant.ts`
+- `D:\coding\upstream-reference\server\src\services\messenger.ts`
+- `D:\coding\upstream-reference\server\src\__tests__\chat-routes.test.ts`
+- `D:\coding\upstream-reference\server\src\__tests__\chat-assistant.test.ts`
+- `D:\coding\upstream-reference\server\src\__tests__\messenger-service.test.ts`
 
 ## 开发计划
 

@@ -14,11 +14,11 @@
 
 开发前必须优先核对：
 
-- `D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts`
-- `D:\coding\rudder\server\resources\bundled-skills\para-memory-files\SKILL.md`
-- `D:\coding\rudder\server\src\onboarding-assets\**\MEMORY.md`
-- `D:\coding\rudder\server\src\onboarding-assets\**\HEARTBEAT.md`
-- `D:\coding\rudder\doc\plans\2026-04-30-agent-memory-instructions.md`
+- `D:\coding\upstream-reference\packages\agent-runtime-utils\src\server-utils.prompts.ts`
+- `D:\coding\upstream-reference\server\resources\bundled-skills\para-memory-files\SKILL.md`
+- `D:\coding\upstream-reference\server\src\onboarding-assets\**\MEMORY.md`
+- `D:\coding\upstream-reference\server\src\onboarding-assets\**\HEARTBEAT.md`
+- `D:\coding\upstream-reference\doc\plans\2026-04-30-agent-memory-instructions.md`
 
 ## 范围
 

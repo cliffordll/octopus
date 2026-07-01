@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -1497,10 +1497,10 @@ class WorkspaceService:
             artifacts_dir=artifacts_dir,
         )
         runtime_context = {
-            "rudderWorkspace": workspace,
-            "rudderWorkspaces": [workspace],
-            "rudderRuntimeServiceIntents": [],
-            "rudderRuntimeServices": services,
+            "octopusWorkspace": workspace,
+            "octopusWorkspaces": [workspace],
+            "octopusRuntimeServiceIntents": [],
+            "octopusRuntimeServices": services,
             "env": workspace_env,
         }
         runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = _json_dump(services)
@@ -1587,10 +1587,10 @@ class WorkspaceService:
         )
         workspace_env["OCTOPUS_GIT_WRITE_POLICY"] = "read_only"
         runtime_context = {
-            "rudderWorkspace": workspace,
-            "rudderWorkspaces": [workspace],
-            "rudderRuntimeServiceIntents": [],
-            "rudderRuntimeServices": [],
+            "octopusWorkspace": workspace,
+            "octopusWorkspaces": [workspace],
+            "octopusRuntimeServiceIntents": [],
+            "octopusRuntimeServices": [],
             "env": workspace_env,
         }
         return {
@@ -1662,10 +1662,10 @@ class WorkspaceService:
             artifacts_dir=artifacts_dir,
         )
         runtime_context = {
-            "rudderWorkspace": workspace,
-            "rudderWorkspaces": [workspace],
-            "rudderRuntimeServiceIntents": [],
-            "rudderRuntimeServices": [],
+            "octopusWorkspace": workspace,
+            "octopusWorkspaces": [workspace],
+            "octopusRuntimeServiceIntents": [],
+            "octopusRuntimeServices": [],
             "env": workspace_env,
         }
         runtime_context["env"]["OCTOPUS_RUNTIME_SERVICES_JSON"] = "[]"
@@ -1692,7 +1692,7 @@ class WorkspaceService:
         snapshot = dict(context_snapshot or {})
         workspace_context = snapshot.get("workspace")
         workspace = (
-            workspace_context.get("rudderWorkspace")
+            workspace_context.get("octopusWorkspace")
             if isinstance(workspace_context, dict)
             else None
         )
@@ -1871,7 +1871,7 @@ class WorkspaceService:
             return []
         workspace_context = snapshot.get("workspace")
         workspace = (
-            workspace_context.get("rudderWorkspace")
+            workspace_context.get("octopusWorkspace")
             if isinstance(workspace_context, dict)
             else None
         )
@@ -1883,7 +1883,7 @@ class WorkspaceService:
                 continue
             title = _string(product.get("title"))
             product_type = _string(product.get("type"))
-            provider = _string(product.get("provider")) or "rudder"
+            provider = _string(product.get("provider")) or "octopus"
             if not title or not product_type:
                 continue
             external_id = _string(product.get("externalId"))
@@ -1936,7 +1936,7 @@ class WorkspaceService:
             return []
         workspace_context = snapshot.get("workspace")
         workspace = (
-            workspace_context.get("rudderWorkspace")
+            workspace_context.get("octopusWorkspace")
             if isinstance(workspace_context, dict)
             else None
         )
@@ -2009,7 +2009,7 @@ class WorkspaceService:
                         "type": "document"
                         if path.suffix.lower() in {".md", ".txt"}
                         else "artifact",
-                        "provider": "rudder",
+                        "provider": "octopus",
                         "externalId": f"{source}:{workspace_ref}:{rel_path}",
                         "status": "active",
                         "reviewState": "none",

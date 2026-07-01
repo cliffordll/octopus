@@ -1,4 +1,4 @@
-# Step 27: Cost Events / Cost Summary
+﻿# Step 27: Cost Events / Cost Summary
 
 状态：已完成基础开发
 
@@ -16,11 +16,11 @@
 
 ## 上游证据
 
-- `D:\coding\rudder\packages\db\src\schema\cost_events.ts`
-- `D:\coding\rudder\server\src\routes\costs.ts`
-- `D:\coding\rudder\server\src\services\costs.ts`
-- `D:\coding\rudder\packages\shared\src\types\cost.ts`
-- `D:\coding\rudder\packages\shared\src\validators\cost.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\cost_events.ts`
+- `D:\coding\upstream-reference\server\src\routes\costs.ts`
+- `D:\coding\upstream-reference\server\src\services\costs.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\cost.ts`
+- `D:\coding\upstream-reference\packages\shared\src\validators\cost.ts`
 
 ## 任务
 

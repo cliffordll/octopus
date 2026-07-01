@@ -1,4 +1,4 @@
-# Step 25: Activity Query
+﻿# Step 25: Activity Query
 
 状态：已完成
 
@@ -17,9 +17,9 @@
 
 ## 上游证据
 
-- `D:\coding\rudder\server\src\routes\activity.ts`
-- `D:\coding\rudder\server\src\services\activity.ts`
-- `D:\coding\rudder\packages\shared\src\types\activity.ts`
+- `D:\coding\upstream-reference\server\src\routes\activity.ts`
+- `D:\coding\upstream-reference\server\src\services\activity.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\activity.ts`
 
 ## 任务
 

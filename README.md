@@ -1,4 +1,4 @@
-# Octopus
+﻿# Octopus
 
 Octopus 是上游控制面 `server` 的 Python 兼容重实现。当前仓库主要提供 FastAPI server、数据库迁移、运行时编排、组织/任务/智能体/对话等服务端能力。
 
@@ -324,7 +324,7 @@ npm run dev -- --host 127.0.0.1 --port 5175
 http://127.0.0.1:5175
 ```
 
-如果 `5174` 已被上游 Rudder 或其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
+如果 `5174` 已被上游 upstream reference 或其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
 
 ## 7. 创建一个组织
 

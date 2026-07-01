@@ -1,22 +1,22 @@
-# Claude Local DB Provider 控制设计
+﻿# Claude Local DB Provider 控制设计
 
 ## 目标
 
 本文设计 `claude_local` 在 Octopus 中的 provider/model 控制方式。目标是同时满足：
 
-- 对齐上游 Rudder 的 Claude local runtime 行为。
+- 对齐上游 upstream reference 的 Claude local runtime 行为。
 - 复用 Octopus 已有 DB provider/model 管理能力。
 - 不污染用户真实 Claude 配置、shell 环境变量或系统环境变量。
 - 不把 Claude settings 误建模成 OpenCode 风格的 provider registry。
 
 ## 上游行为基线
 
-上游 Rudder 的 `claude-local` runtime 使用本地 Claude CLI。核心行为如下：
+上游 upstream reference 的 `claude-local` runtime 使用本地 Claude CLI。核心行为如下：
 
-- 准备 Rudder-managed Claude home：
+- 准备 upstream reference-managed Claude home：
 
 ```text
-~/.rudder/instances/<instanceId>/organizations/<orgId>/claude-home
+~/.upstream-reference/instances/<instanceId>/organizations/<orgId>/claude-home
 ```
 
 - 从 operator home 同步或链接 Claude 相关配置和登录态：
@@ -177,7 +177,7 @@ provider -> options/baseURL/apiKey -> models
 
 该方案看起来能让 `claude_local` 和 `opencode_local` 在形式上统一，但会造成三个问题：
 
-- 偏离上游 Rudder 的 Claude local 行为。
+- 偏离上游 upstream reference 的 Claude local 行为。
 - 把 `.claude/settings.json` 扩展成 provider registry，语义不稳。
 - 可能把敏感 provider 信息写入长期文件。
 

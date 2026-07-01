@@ -1,4 +1,4 @@
-# Step 17: Organization Resources、Organization Skills 与 Agent Instructions
+﻿# Step 17: Organization Resources、Organization Skills 与 Agent Instructions
 
 状态：已完成
 
@@ -27,7 +27,7 @@ Step 14 已负责本地 runtime agent 的默认 instructions bundle 初始化、
   - `packages/shared/src/constants.ts` 中 `ORGANIZATION_RESOURCE_KINDS`
   - `server/src/routes/orgs.ts`
   - `server/src/services/resource-catalog.ts`
-  - `server/resources/bundled-skills/rudder/references/api-reference.md`
+  - `server/resources/bundled-skills/upstream-reference/references/api-reference.md`
 - organization skills 相关 schema、routes、services、shared types、validators 和 tests。
 - agent/runtime skills snapshot 对 organization skill entry 的字段要求。
 - agent instructions 相关 route、service、shared type、validator、测试或 materialization 证据，重点核对上游是否提供完整说明文件管理 API，还是仅在创建 agent 时写入默认 instructions bundle。
@@ -36,31 +36,31 @@ Step 14 已负责本地 runtime agent 的默认 instructions bundle 初始化、
 
 已确认的 Step 17A organization resources 上游证据：
 
-- `D:\coding\rudder\packages\db\src\schema\organization_resources.ts`：定义 `organization_resources` 表，字段为 `id`、`orgId`、`name`、`kind`、`locator`、`description`、`metadata`、`createdAt`、`updatedAt`。
-- `D:\coding\rudder\packages\shared\src\constants.ts`：定义 `ORGANIZATION_RESOURCE_KINDS`。
-- `D:\coding\rudder\packages\shared\src\types\resource.ts`：定义 `OrganizationResource`、create/update request 和 project attachment types。
-- `D:\coding\rudder\packages\shared\src\validators\resource.ts`：定义 create/update validator，create 要求 `name/kind/locator`，update strict 且字段可选。
-- `D:\coding\rudder\server\src\services\resource-catalog.ts`：实现 org-scoped list/get/create/update/delete，并对 `name/locator/description/metadata` 做归一化。
-- `D:\coding\rudder\server\src\routes\orgs.ts`：在 org route 下暴露 `/resources` 子资源，并记录 `organization.resource.*` activity。
-- `D:\coding\rudder\server\resources\bundled-skills\control-plane\references\api-reference.md`：作为 API 参考，不作为新增字段的唯一来源。
+- `D:\coding\upstream-reference\packages\db\src\schema\organization_resources.ts`：定义 `organization_resources` 表，字段为 `id`、`orgId`、`name`、`kind`、`locator`、`description`、`metadata`、`createdAt`、`updatedAt`。
+- `D:\coding\upstream-reference\packages\shared\src\constants.ts`：定义 `ORGANIZATION_RESOURCE_KINDS`。
+- `D:\coding\upstream-reference\packages\shared\src\types\resource.ts`：定义 `OrganizationResource`、create/update request 和 project attachment types。
+- `D:\coding\upstream-reference\packages\shared\src\validators\resource.ts`：定义 create/update validator，create 要求 `name/kind/locator`，update strict 且字段可选。
+- `D:\coding\upstream-reference\server\src\services\resource-catalog.ts`：实现 org-scoped list/get/create/update/delete，并对 `name/locator/description/metadata` 做归一化。
+- `D:\coding\upstream-reference\server\src\routes\orgs.ts`：在 org route 下暴露 `/resources` 子资源，并记录 `organization.resource.*` activity。
+- `D:\coding\upstream-reference\server\resources\bundled-skills\control-plane\references\api-reference.md`：作为 API 参考，不作为新增字段的唯一来源。
 
 Step 17B/17C/17D 开发前仍必须先补齐对应上游证据。没有证据时只记录兼容边界，不实现自定义业务模型。
 
 已确认的 Step 17B organization skills 上游证据：
 
-- `D:\coding\rudder\packages\db\src\schema\organization_skills.ts`：定义 `organization_skills` 表，字段为 `id`、`orgId`、`key`、`slug`、`name`、`description`、`markdown`、`sourceType`、`sourceLocator`、`sourceRef`、`trustLevel`、`compatibility`、`fileInventory`、`metadata`、`createdAt`、`updatedAt`。
-- `D:\coding\rudder\packages\shared\src\types\organization-skill.ts`：定义 list/detail/file/update-status/import/scan 相关 response shape。
-- `D:\coding\rudder\packages\shared\src\validators\organization-skill.ts`：定义 create、file update、import、scan-local、scan-projects validators。
-- `D:\coding\rudder\server\src\routes\organization-skills.ts`：暴露 `/api/orgs/:orgId/skills`、`/:skillId`、`/:skillId/files`、`/:skillId/update-status`、`/import`、`/scan-local`、`/scan-projects`、`/:skillId/install-update`。
-- `D:\coding\rudder\server\src\services\knowledge-portability\organization-skills.ts`：实现 organization skill library、agent skill catalog、file read/update、runtime materialization、import/scan/delete。
-- `D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts`：运行时语义包含 shared organization skills 目录。
+- `D:\coding\upstream-reference\packages\db\src\schema\organization_skills.ts`：定义 `organization_skills` 表，字段为 `id`、`orgId`、`key`、`slug`、`name`、`description`、`markdown`、`sourceType`、`sourceLocator`、`sourceRef`、`trustLevel`、`compatibility`、`fileInventory`、`metadata`、`createdAt`、`updatedAt`。
+- `D:\coding\upstream-reference\packages\shared\src\types\organization-skill.ts`：定义 list/detail/file/update-status/import/scan 相关 response shape。
+- `D:\coding\upstream-reference\packages\shared\src\validators\organization-skill.ts`：定义 create、file update、import、scan-local、scan-projects validators。
+- `D:\coding\upstream-reference\server\src\routes\organization-skills.ts`：暴露 `/api/orgs/:orgId/skills`、`/:skillId`、`/:skillId/files`、`/:skillId/update-status`、`/import`、`/scan-local`、`/scan-projects`、`/:skillId/install-update`。
+- `D:\coding\upstream-reference\server\src\services\knowledge-portability\organization-skills.ts`：实现 organization skill library、agent skill catalog、file read/update、runtime materialization、import/scan/delete。
+- `D:\coding\upstream-reference\packages\agent-runtime-utils\src\server-utils.prompts.ts`：运行时语义包含 shared organization skills 目录。
 
 已确认的 Step 17D agent instructions 上游证据：
 
-- `D:\coding\rudder\server\src\routes\agents.management-routes.ts`：暴露 `PATCH /api/agents/:id/instructions-path`、`GET/PATCH /api/agents/:id/instructions-bundle`、`GET/PUT/DELETE /api/agents/:id/instructions-bundle/file`。
-- `D:\coding\rudder\packages\shared\src\validators\agent.ts`：定义 `updateAgentInstructionsPathSchema`、`updateAgentInstructionsBundleSchema`、`upsertAgentInstructionsFileSchema`。
-- `D:\coding\rudder\server\src\services\agent-instructions.ts`：定义 bundle state、managed/external mode、路径归一化、bundle reconcile、file read/write/delete、legacy promptTemplate pseudo-file 和 managed bundle materialization。
-- `D:\coding\rudder\server\src\__tests__\agent-instructions-service.test.ts` 与 `agent-skills-routes.test.ts`：覆盖 managed bundle、路径恢复、文件写入/删除和默认 instructions materialization。
+- `D:\coding\upstream-reference\server\src\routes\agents.management-routes.ts`：暴露 `PATCH /api/agents/:id/instructions-path`、`GET/PATCH /api/agents/:id/instructions-bundle`、`GET/PUT/DELETE /api/agents/:id/instructions-bundle/file`。
+- `D:\coding\upstream-reference\packages\shared\src\validators\agent.ts`：定义 `updateAgentInstructionsPathSchema`、`updateAgentInstructionsBundleSchema`、`upsertAgentInstructionsFileSchema`。
+- `D:\coding\upstream-reference\server\src\services\agent-instructions.ts`：定义 bundle state、managed/external mode、路径归一化、bundle reconcile、file read/write/delete、legacy promptTemplate pseudo-file 和 managed bundle materialization。
+- `D:\coding\upstream-reference\server\src\__tests__\agent-instructions-service.test.ts` 与 `agent-skills-routes.test.ts`：覆盖 managed bundle、路径恢复、文件写入/删除和默认 instructions materialization。
 
 ## 任务拆分
 

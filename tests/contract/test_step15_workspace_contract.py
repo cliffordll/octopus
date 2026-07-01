@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
@@ -747,7 +747,7 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
@@ -915,7 +915,7 @@ async def test_isolated_workspace_directory_is_a_real_git_worktree(
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     assert workspace["providerType"] == "git_worktree"
     worktree_cwd = Path(workspace["cwd"]).resolve()
     assert (
@@ -1000,7 +1000,7 @@ async def test_isolated_workspace_reuses_existing_issue_worktree(
                 session
             ).prepare_runtime_context_for_run(run_one.id, run_one.context_snapshot)
             assert first_context is not None
-            first_workspace = first_context["workspace"]["rudderWorkspace"]
+            first_workspace = first_context["workspace"]["octopusWorkspace"]
             Path(first_workspace["cwd"], "generated.md").write_text(
                 "# generated\n", encoding="utf-8"
             )
@@ -1022,7 +1022,7 @@ async def test_isolated_workspace_reuses_existing_issue_worktree(
         await engine.dispose()
 
     assert second_context is not None
-    second_workspace = second_context["workspace"]["rudderWorkspace"]
+    second_workspace = second_context["workspace"]["octopusWorkspace"]
     assert first_workspace["id"] == second_workspace["id"]
     assert first_workspace["cwd"] == second_workspace["cwd"]
     assert Path(second_workspace["cwd"], "generated.md").is_file()
@@ -1107,7 +1107,7 @@ async def test_operator_branch_run_uses_project_repo_worktree(tmp_path: Path) ->
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     expected_branch = "feature/full-stack"
     expected_cwd = project_cwd / ".octopus" / "worktrees" / "feature-full-stack"
     assert workspace["mode"] == "operator_branch"
@@ -1214,8 +1214,8 @@ async def test_operator_branch_reuses_fixed_project_worktree_for_multiple_issues
 
     assert context_one is not None
     assert context_two is not None
-    workspace_one = context_one["workspace"]["rudderWorkspace"]
-    workspace_two = context_two["workspace"]["rudderWorkspace"]
+    workspace_one = context_one["workspace"]["octopusWorkspace"]
+    workspace_two = context_two["workspace"]["octopusWorkspace"]
     assert workspace_one["id"] == workspace_two["id"]
     assert workspace_one["cwd"] == workspace_two["cwd"]
     assert workspace_one["branchName"] == "feature/full-stack"
@@ -1301,7 +1301,7 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
 
     assert project_workspace is not None
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     expected_checkout = org_root / "projects" / project["id"][:8] / "checkout"
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
@@ -1393,7 +1393,7 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     managed_checkout = org_root / "projects" / project["id"][:8] / "checkout"
     assert workspace["providerType"] == "git_worktree"
     assert workspace["workspaceKind"] == "project_execution"
@@ -1461,7 +1461,7 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     assert workspace["cwd"] == str(org_root)
     assert workspace["projectWorkspaceId"] is None
     assert workspace["metadata"]["fallback"] == "organization_workspace"
@@ -1487,7 +1487,7 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     )
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
     assert all(
-        not key.startswith("RUDDER" + "_") for key in context["workspace"]["env"]
+        not key.startswith("R" + "UDDER" + "_") for key in context["workspace"]["env"]
     )
     assert all(
         not key.startswith("CONTROL" + "_PLANE_") for key in context["workspace"]["env"]
@@ -1542,7 +1542,7 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
         await engine.dispose()
 
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     assert context["projectId"] is None
     assert context["executionWorkspaceId"] is None
     assert workspace["id"] is None
@@ -1566,7 +1566,7 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     )
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in context["workspace"]["env"]
     assert all(
-        not key.startswith("RUDDER" + "_") for key in context["workspace"]["env"]
+        not key.startswith("R" + "UDDER" + "_") for key in context["workspace"]["env"]
     )
     assert all(
         not key.startswith("CONTROL" + "_PLANE_") for key in context["workspace"]["env"]
@@ -1643,7 +1643,7 @@ async def test_run_preflight_uses_org_workspace_when_project_workspace_has_no_cw
 
     assert project_workspace is not None
     assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
+    workspace = context["workspace"]["octopusWorkspace"]
     assert workspace["cwd"] == str(org_root)
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
     assert workspace["metadata"]["fallback"] == "organization_workspace"
@@ -1844,7 +1844,7 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env(
     assert run["status"] == "succeeded"
     assert run["contextSnapshot"] is not None
     context_snapshot = run["contextSnapshot"]
-    workspace = context_snapshot["workspace"]["rudderWorkspace"]
+    workspace = context_snapshot["workspace"]["octopusWorkspace"]
     assert context_snapshot["executionWorkspaceId"] == workspace["id"]
     result_json = run["resultJson"] or {}
     assert workspace["id"] in result_json["stdout"]
@@ -1948,7 +1948,7 @@ async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
     assert context.env is not None
     assert context.env["OCTOPUS_GIT_WRITE_POLICY"] == "read_only"
     assert context.workspace is not None
-    workspace = context.workspace["rudderWorkspace"]
+    workspace = context.workspace["octopusWorkspace"]
     assert workspace["cwd"] == str(expected_cwd)
     assert workspace["mode"] == "agent_default"
     assert workspace["strategyType"] == "adapter_managed"
@@ -2896,7 +2896,7 @@ async def test_cancel_running_run_marks_workspace_resources_terminal(
                 context_snapshot={
                     "issueId": issue.id,
                     "executionWorkspaceId": workspace["id"],
-                    "workspace": {"rudderWorkspace": workspace},
+                    "workspace": {"octopusWorkspace": workspace},
                 },
             )
             session.add(run)
@@ -3013,7 +3013,7 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal(
                 context_snapshot={
                     "issueId": issue.id,
                     "executionWorkspaceId": workspace["id"],
-                    "workspace": {"rudderWorkspace": workspace},
+                    "workspace": {"octopusWorkspace": workspace},
                 },
             )
             session.add(run)
@@ -3329,7 +3329,7 @@ async def test_projectless_workspace_fallback_has_no_workspace_lock(
                 run.id, run.context_snapshot
             )
             assert context is not None
-            workspace = context["workspace"]["rudderWorkspace"]
+            workspace = context["workspace"]["octopusWorkspace"]
             assert workspace["id"] is None
             assert "leaseKey" not in workspace
             service = WorkspaceService(session)

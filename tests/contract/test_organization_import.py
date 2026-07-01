@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import textwrap
@@ -93,8 +93,8 @@ def test_parse_paperclip_package(tmp_path: Path) -> None:
     assert manifest["skillsDir"] is not None
 
 
-def test_parse_rudder_package(tmp_path: Path) -> None:
-    """Rudder-exported: ORGANIZATION.md + .rudder.yaml(role/adapter) + SOUL.md."""
+def test_parse_octopus_package(tmp_path: Path) -> None:
+    """Octopus-exported: ORGANIZATION.md + .octopus.yaml(role/adapter) + SOUL.md."""
     root = tmp_path / "movie"
     _write(
         root / "ORGANIZATION.md",
@@ -107,9 +107,9 @@ def test_parse_rudder_package(tmp_path: Path) -> None:
     """,
     )
     _write(
-        root / ".rudder.yaml",
+        root / ".octopus.yaml",
         """
-        schema: rudder/v1
+        schema: octopus/v1
         agents:
           agent-3:
             role: ceo
@@ -132,7 +132,7 @@ def test_parse_rudder_package(tmp_path: Path) -> None:
 
     agent = manifest["agents"][0]
     assert agent["slug"] == "agent-3"
-    assert agent["role"] == "ceo"  # taken from .rudder.yaml extension
+    assert agent["role"] == "ceo"  # taken from .octopus.yaml extension
     assert agent["runtimeType"] == "opencode_local"
     assert agent["model"] == "deepseek/deepseek-v4-pro"
     # explicit SOUL.md is preferred over the AGENTS.md body

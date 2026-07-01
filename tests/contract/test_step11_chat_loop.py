@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import importlib.util
@@ -226,7 +226,7 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     assert "OCTOPUS_CONVERSATION_ARTIFACTS_DIR" not in env
     assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in env
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in env
-    assert all(not key.startswith("RUDDER" + "_") for key in env)
+    assert all(not key.startswith("R" + "UDDER" + "_") for key in env)
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in env)
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],

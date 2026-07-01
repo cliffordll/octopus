@@ -16,25 +16,25 @@
 
 ## 上游证据
 
-- `D:\coding\rudder\packages\agent-runtimes\opencode-local\`
-- `D:\coding\rudder\packages\agent-runtimes\codex-local\`
-- `D:\coding\rudder\packages\agent-runtimes\claude-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\opencode-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\codex-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\claude-local\`
 - OpenCode CLI 内置 tool schema 与本地 `opencode run --format json` 输出协议。
-- `D:\coding\rudder\server\src\services\workspace-runtime.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.helpers.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.lifecycle.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.services.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.comments.ts`
-- `D:\coding\rudder\server\src\services\workspace-backups.ts`
-- `D:\coding\rudder\server\src\services\managed-workspace-preflight.ts`
-- `D:\coding\rudder\server\src\services\workspace-operation-log-store.ts`
-- `D:\coding\rudder\server\src\services\issue-assignment-wakeup.ts`
-- `D:\coding\rudder\server\src\services\issue-review-wakeup.ts`
-- `D:\coding\rudder\server\src\services\runtime-kernel\`
-- `D:\coding\rudder\server\src\services\chat-generation-locks.ts`
-- `D:\coding\rudder\server\src\services\chat-assistant.helpers.ts`
-- `D:\coding\rudder\server\src\routes\chats.stream-routes.ts`
-- `D:\coding\rudder\server\src\routes\messenger.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.helpers.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.lifecycle.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.services.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.comments.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-backups.ts`
+- `D:\coding\upstream-reference\server\src\services\managed-workspace-preflight.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-operation-log-store.ts`
+- `D:\coding\upstream-reference\server\src\services\issue-assignment-wakeup.ts`
+- `D:\coding\upstream-reference\server\src\services\issue-review-wakeup.ts`
+- `D:\coding\upstream-reference\server\src\services\runtime-kernel\`
+- `D:\coding\upstream-reference\server\src\services\chat-generation-locks.ts`
+- `D:\coding\upstream-reference\server\src\services\chat-assistant.helpers.ts`
+- `D:\coding\upstream-reference\server\src\routes\chats.stream-routes.ts`
+- `D:\coding\upstream-reference\server\src\routes\messenger.ts`
 
 ## 任务
 

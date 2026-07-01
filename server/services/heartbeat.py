@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import contextlib
@@ -1599,7 +1599,7 @@ class HeartbeatService:
                     else None
                 )
                 workspace_data = (
-                    workspace_payload.get("rudderWorkspace")
+                    workspace_payload.get("octopusWorkspace")
                     if isinstance(workspace_payload, dict)
                     else None
                 )
@@ -1967,9 +1967,9 @@ class HeartbeatService:
             ),
             phase="workspace_provision",
             cwd=(
-                workspace_payload.get("rudderWorkspace", {}).get("cwd")
+                workspace_payload.get("octopusWorkspace", {}).get("cwd")
                 if isinstance(workspace_payload, dict)
-                and isinstance(workspace_payload.get("rudderWorkspace"), dict)
+                and isinstance(workspace_payload.get("octopusWorkspace"), dict)
                 else None
             ),
             metadata={
@@ -2005,7 +2005,7 @@ class HeartbeatService:
             return None
         workspace_payload = workspace_context.get("workspace")
         workspace = (
-            workspace_payload.get("rudderWorkspace")
+            workspace_payload.get("octopusWorkspace")
             if isinstance(workspace_payload, dict)
             else None
         )
