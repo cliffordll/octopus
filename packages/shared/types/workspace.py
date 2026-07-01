@@ -92,6 +92,13 @@ class ExecutionWorkspace(TypedDict):
     providerType: ExecutionWorkspaceProviderType
     gitWritePolicy: NotRequired[str]
     issueArtifactsDir: NotRequired[str]
+    workspaceKind: NotRequired[str]
+    codeSourceKind: NotRequired[str]
+    workspaceCwd: NotRequired[str | None]
+    warnings: NotRequired[list[str]]
+    requiresLease: NotRequired[bool]
+    canRun: NotRequired[bool]
+    failureReason: NotRequired[str | None]
     providerRef: str | None
     derivedFromExecutionWorkspaceId: str | None
     lastUsedAt: str
