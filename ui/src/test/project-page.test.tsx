@@ -22,7 +22,6 @@ it("updates a project and manages its resource attachments", async () => {
     color: null,
     pauseReason: null,
     pausedAt: null,
-    executionWorkspacePolicy: { enabled: true, defaultMode: "shared_workspace" },
     codebase: {
       configured: true,
       scope: "project",
@@ -41,7 +40,7 @@ it("updates a project and manages its resource attachments", async () => {
         id: "workspace-1",
         orgId: "org-1",
         projectId: "project-1",
-        name: "主工作区",
+        name: "默认代码来源",
         sourceType: "git",
         cwd: "D:/coding/octopus",
         repoUrl: "https://example.com/octopus.git",
@@ -54,6 +53,11 @@ it("updates a project and manages its resource attachments", async () => {
         remoteWorkspaceRef: null,
         sharedWorkspaceKey: "console-main",
         metadata: null,
+        executionWorkspacePolicy: {
+          enabled: true,
+          defaultMode: "shared_workspace",
+          branchPolicy: { baseRef: "develop" },
+        },
         isPrimary: true,
         createdAt: "2026-05-28T09:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
@@ -191,10 +195,8 @@ it("updates a project and manages its resource attachments", async () => {
     "href",
     "/orgs/org-1/projects/project-1/budget",
   );
-  expect(screen.getByText("代码来源")).toBeInTheDocument();
-  expect(screen.getByText("https://example.com/octopus.git")).toBeInTheDocument();
-  expect(screen.getAllByText("工作区").length).toBeGreaterThanOrEqual(1);
-  expect(screen.getAllByText("主工作区").length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
+  expect(screen.getByTitle("https://example.com/octopus.git · main")).toBeInTheDocument();
   expect(screen.getAllByText("console-main").length).toBeGreaterThanOrEqual(1);
 
   await userEvent.clear(screen.getByLabelText("描述"));
@@ -206,8 +208,21 @@ it("updates a project and manages its resource attachments", async () => {
     screen.getByLabelText("目标 ID"),
     "11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222",
   );
-  await userEvent.click(screen.getByLabelText(/独立工作区/));
-  expect(screen.getByLabelText(/独立工作区/)).toBeChecked();
+  await userEvent.selectOptions(screen.getByLabelText("默认代码来源 执行模式"), "isolated_workspace");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/projects/project-1/workspaces/workspace-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({
+          executionWorkspacePolicy: {
+            enabled: true,
+            defaultMode: "isolated_workspace",
+            branchPolicy: { baseRef: "develop" },
+            workspaceStrategy: { mode: "isolated_workspace" },
+          },
+      }),
+    }),
+  );
   await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
@@ -220,11 +235,6 @@ it("updates a project and manages its resource attachments", async () => {
         leadAgentId: "agent-1",
         targetDate: "2026-06-01",
         goalIds: ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"],
-        executionWorkspacePolicy: {
-          enabled: true,
-          defaultMode: "isolated_workspace",
-          workspaceStrategy: { mode: "isolated_workspace" },
-        },
       }),
     }),
   );
@@ -311,7 +321,7 @@ it("updates a project and manages its resource attachments", async () => {
   );
 }, 10_000);
 
-it("saves the selected workspace policy when the project has no existing policy", async () => {
+it("uses organization scratch when the project has no workspace", async () => {
   const project = {
     id: "project-1",
     orgId: "org-1",
@@ -327,7 +337,6 @@ it("saves the selected workspace policy when the project has no existing policy"
     color: null,
     pauseReason: null,
     pausedAt: null,
-    executionWorkspacePolicy: null,
     codebase: { configured: false, scope: "none", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "organizations/org-1/workspaces", origin: "managed_checkout" },
     workspaces: [],
     primaryWorkspace: null,
@@ -344,43 +353,10 @@ it("saves the selected workspace policy when the project has no existing policy"
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects/project-1/configuration");
-  expect(await screen.findByLabelText(/共享工作区/)).toBeChecked();
-  expect(screen.queryByText("shared_workspace")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByText("高级配置 JSON"));
-  expect(screen.getByLabelText("execution_workspace_policy JSON")).toHaveValue(
-    JSON.stringify({
-      enabled: true,
-      defaultMode: "shared_workspace",
-      workspaceStrategy: { mode: "shared_workspace" },
-    }, null, 2),
-  );
-  expect(screen.getAllByText("未配置项目主工作区").length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByText("organizations/org-1/workspaces")).toBeInTheDocument();
-  expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
-  expect(screen.getByText("暂无项目主工作区。请设置本地 cwd 或仓库 URL。")).toBeInTheDocument();
-  expect(screen.getAllByText(/组织草稿目录/).length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByLabelText(/共享工作区/)).toBeDisabled();
-  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
-
-  expect(fetchMock).toHaveBeenCalledWith(
-    "/api/projects/project-1",
-    expect.objectContaining({
-      method: "PATCH",
-      body: JSON.stringify({
-        description: null,
-        name: "控制台",
-        status: "planned",
-        leadAgentId: null,
-        targetDate: null,
-        goalIds: [],
-        executionWorkspacePolicy: {
-          enabled: true,
-          defaultMode: "shared_workspace",
-          workspaceStrategy: { mode: "shared_workspace" },
-        },
-      }),
-    }),
-  );
+  expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
+  expect(screen.getByText("使用组织草稿目录")).toBeInTheDocument();
+  expect(screen.getByText(/不会进入共享、独立或操作分支模式/)).toBeInTheDocument();
+  expect(screen.queryByLabelText("控制台 执行模式")).not.toBeInTheDocument();
 });
 
 it("blocks project configuration save when goal IDs are not UUIDs", async () => {
@@ -399,7 +375,6 @@ it("blocks project configuration save when goal IDs are not UUIDs", async () => 
     color: null,
     pauseReason: null,
     pausedAt: null,
-    executionWorkspacePolicy: null,
     codebase: { configured: false, scope: "none", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "organizations/org-1/workspaces", origin: "managed_checkout" },
     workspaces: [],
     primaryWorkspace: null,
@@ -443,7 +418,6 @@ it("manages project workspaces from the configuration tab", async () => {
     color: null,
     pauseReason: null,
     pausedAt: null,
-    executionWorkspacePolicy: null,
     codebase: { configured: true, scope: "project", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "D:/coding/old", localFolder: "D:/coding/old", origin: "local_folder" },
     workspaces: [
       {
@@ -463,6 +437,7 @@ it("manages project workspaces from the configuration tab", async () => {
         remoteWorkspaceRef: null,
         sharedWorkspaceKey: null,
         metadata: null,
+        executionWorkspacePolicy: { enabled: true, defaultMode: "shared_workspace" },
         isPrimary: true,
         createdAt: "",
         updatedAt: "",
@@ -484,6 +459,7 @@ it("manages project workspaces from the configuration tab", async () => {
         remoteWorkspaceRef: null,
         sharedWorkspaceKey: null,
         metadata: null,
+        executionWorkspacePolicy: { enabled: true, defaultMode: "isolated_workspace" },
         isPrimary: false,
         createdAt: "",
         updatedAt: "",
@@ -515,11 +491,18 @@ it("manages project workspaces from the configuration tab", async () => {
   renderApp("/orgs/org-1/projects/project-1/configuration");
 
   expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
-  await userEvent.type(screen.getByLabelText("项目工作区名称"), "新工作区");
-  await userEvent.type(screen.getByLabelText("项目工作区本地 cwd"), "D:/coding/new");
-  await userEvent.type(screen.getByLabelText("项目工作区仓库 URL"), "https://example.com/new.git");
-  await userEvent.type(screen.getByLabelText("项目工作区分支"), "main");
-  await userEvent.click(screen.getByRole("button", { name: "新增主工作区" }));
+  await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
+  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
+  expect(screen.getByText("请先填写代码来源名称。")).toBeInTheDocument();
+  await userEvent.clear(screen.getByLabelText("代码来源本地 cwd"));
+  await userEvent.type(screen.getByLabelText("代码来源名称"), "新工作区");
+  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
+  expect(screen.getByText("本地 cwd 和仓库 URL 至少填写一项。")).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
+  await userEvent.type(screen.getByLabelText("代码来源仓库 URL"), "https://example.com/new.git");
+  await userEvent.type(screen.getByLabelText("代码来源分支"), "main");
+  await userEvent.selectOptions(screen.getByLabelText("新工作区执行模式"), "operator_branch");
+  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project-1/workspaces",
@@ -532,13 +515,17 @@ it("manages project workspaces from the configuration tab", async () => {
           repoUrl: "https://example.com/new.git",
           repoRef: "main",
           defaultRef: "main",
-          isPrimary: true,
+          executionWorkspacePolicy: {
+            enabled: true,
+            defaultMode: "operator_branch",
+            workspaceStrategy: { mode: "operator_branch" },
+          },
         }),
       }),
     );
   });
 
-  await userEvent.click(screen.getAllByRole("button", { name: "设为主工作区" })[1]);
+  await userEvent.click(screen.getAllByRole("button", { name: "设为默认" })[1]);
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project-1/workspaces/workspace-2",
@@ -549,10 +536,13 @@ it("manages project workspaces from the configuration tab", async () => {
     );
   });
 
-  await userEvent.click(screen.getAllByRole("button", { name: "删除工作区" })[0]);
+  const deleteButtons = screen.getAllByRole("button", { name: "删除代码来源" });
+  expect(deleteButtons[0]).toBeDisabled();
+  expect(deleteButtons[0]).toHaveAttribute("title", "请先将另一个工作区设为默认");
+  await userEvent.click(deleteButtons[1]);
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/projects/project-1/workspaces/workspace-1",
+      "/api/projects/project-1/workspaces/workspace-2",
       expect.objectContaining({ method: "DELETE" }),
     );
   });

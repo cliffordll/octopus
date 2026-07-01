@@ -102,10 +102,10 @@ Project: Commerce
 ```text
 issue mode override
   -> selected project workspace policy
-  -> shared_workspace（旧数据兼容默认）
+  -> shared_workspace（workspace 默认）
 ```
 
-项目级 `projects.execution_workspace_policy` 是旧模型兼容字段，不再作为目标设计的配置入口。迁移完成前，只有当所选项目工作区尚无 policy 时，才允许读取旧项目策略作为 fallback，并返回迁移 warning。
+项目级 `projects.execution_workspace_policy` 已删除。workspace policy 为空时只使用 workspace 默认 shared，不读取项目级兼容字段。
 
 | 执行策略 | 需要的前置条件 | 执行 cwd | Git 语义 | 写并发规则 | 典型用途 |
 | --- | --- | --- | --- | --- | --- |
@@ -655,16 +655,16 @@ UI 规则：
 - 项目没有工作区时，不展示三模式选择器，只展示 organization scratch 状态和添加入口。
 - “当前生效配置”不是独立全局卡片；每个工作区直接展示自己的来源、模式和可用状态。
 
-### 10.4 旧数据迁移
+### 10.4 数据库迁移
 
-当前实现把 policy 存在 `projects.execution_workspace_policy`。迁移到目标模型时：
+当前没有需要兼容的旧项目，直接迁移到目标模型，不保留双写或 legacy fallback：
 
 1. 为 `project_workspaces` 增加 nullable `execution_workspace_policy`。
-2. 对已有项目，将旧项目 policy 复制到该项目的每个现有 project workspace，以保持旧行为。
-3. 项目没有 workspace 时不创建虚假记录；旧 policy 标记为无实际作用。
-4. 运行时在过渡期按“issue override -> workspace policy -> legacy project policy -> shared default”解析，并输出 legacy fallback warning。
-5. UI 和写 API 切换到 workspace policy 后，停止写 `projects.execution_workspace_policy`。
-6. 兼容窗口结束并确认没有 legacy fallback 后，再删除项目表字段。
+2. 增加“每个项目最多一个 `is_primary=true`”的数据库唯一约束。
+3. 直接删除 `projects.execution_workspace_policy`，不复制、不回填。
+4. 新建 project workspace 时写入明确的默认 shared policy；已有空值只按 workspace 默认 shared 解析。
+5. 运行时只按“issue override -> workspace policy -> workspace 默认 shared”解析。
+6. 项目没有 workspace 时进入 organization scratch，不创建虚假 workspace，也不读取三模式策略。
 
 ### 10.5 非目标
 
@@ -675,4 +675,4 @@ UI 规则：
 
 ## 11. 后续开发计划
 
-开发顺序、清理项、UI 调整和三种模式后续实现计划见 [WORKSPACE-PLAN.md](./WORKSPACE-PLAN.md)。该计划早于本文的多工作区归属修订；后续实施前必须同步更新其中的项目级 policy、单一主工作区和 UI 顺序，不得用旧计划覆盖本文定义。
+开发顺序、清理项、UI 调整和三种模式后续实现计划见 [WORKSPACE-PLAN.md](./WORKSPACE-PLAN.md)。两份文档都以“模式跟随 project workspace、issue 选择 workspace、无 workspace 使用 organization scratch”为准。

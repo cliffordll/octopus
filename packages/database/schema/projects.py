@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
-
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Date, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ._base import Base, new_uuid
@@ -28,9 +25,6 @@ class Project(Base):
     pause_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
-    )
-    execution_workspace_policy: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON().with_variant(JSONB(), "postgresql"), nullable=True
     )
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

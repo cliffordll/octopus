@@ -249,12 +249,17 @@ async def delete_project_workspace_route(
         id, request=request, service=service, org_id=orgId
     )
     actor = require_actor_identity(request)
-    workspace = await service.remove_workspace(
-        detail["id"],
-        workspaceId,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-    )
+    try:
+        workspace = await service.remove_workspace(
+            detail["id"],
+            workspaceId,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     if workspace is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
