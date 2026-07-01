@@ -14,31 +14,9 @@ Octopus 是一个本地优先的智能体控制面。当前仓库主要提供 Fa
 
 这部分是日常开发最常用的命令。第一次配置看「1. 依赖和环境准备」，数据库、目录、环境变量细节看后面的详细章节。
 
-### 启动 server + UI
+### 启动 server
 
-从仓库根目录执行：
-
-```powershell
-$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
-$env:OCTOPUS_INSTANCE_ID = "dev"
-$env:OCTOPUS_LOCAL_TRUSTED = "1"
-$env:OCTOPUS_AUTO_MIGRATE = "1"
-$env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
-.\scripts\dev.ps1
-```
-
-启动后访问：
-
-```text
-UI:     http://127.0.0.1:5175
-server: http://127.0.0.1:8000
-health: http://127.0.0.1:8000/api/health
-logs:   .octopus/dev-logs/
-```
-
-### 只启动 server
-
-终端 1：
+终端 1，在仓库根目录执行：
 
 ```powershell
 $env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
@@ -50,7 +28,13 @@ uv run alembic upgrade head
 .\.venv\Scripts\python.exe -m server
 ```
 
-### 只启动 UI
+启动后检查：
+
+```powershell
+curl.exe http://127.0.0.1:8000/api/health
+```
+
+### 启动 UI
 
 终端 2：
 
@@ -59,7 +43,25 @@ cd ui
 npm run dev -- --host 127.0.0.1 --port 5175
 ```
 
-UI 默认把 `/api` 代理到 `http://127.0.0.1:8000`，所以手动启动时要先有 server。
+UI 默认把 `/api` 代理到 `http://127.0.0.1:8000`，所以要先启动 server。
+
+访问：
+
+```text
+UI:     http://127.0.0.1:5175
+server: http://127.0.0.1:8000
+health: http://127.0.0.1:8000/api/health
+```
+
+### 可选：统一 dev 脚本
+
+如果你想用一个命令同时拉起 server 和 UI，可以从仓库根目录执行：
+
+```powershell
+.\scripts\dev.ps1
+```
+
+这个脚本会检查端口占用，并把输出写到 `.octopus/dev-logs/`。
 
 ### 测试命令
 
@@ -346,7 +348,7 @@ bucket 需要提前创建；当前 server 不负责自动创建 bucket。
 
 ## 6. 启动细节和端口排查
 
-Windows 本地开发优先使用统一 dev 脚本：
+Windows 本地开发也可以使用统一 dev 脚本：
 
 ```powershell
 .\scripts\dev.ps1
