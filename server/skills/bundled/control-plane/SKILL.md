@@ -1,4 +1,4 @@
-﻿---
+---
 name: control-plane
 description: Interact with the control plane through the `control-plane` CLI to manage tasks, approvals, comments, issue documents, and organization skills during heartbeats. Use for control plane coordination only, not for the domain work itself.
 ---
@@ -53,7 +53,7 @@ Important files and conventions:
 - If a run or chat is linked to a project, control plane injects only that project's attached resources into the runtime context.
 - If you need broader org-wide resources, query the org resource catalog explicitly instead of assuming it is already in the prompt.
 - Use Workspaces for disk-backed shared files, plans, and skill packages.
-- When you need to place durable generated output on disk, use `$OCTOPUS_ISSUE_ARTIFACTS_DIR`. In a shared workspace, files created directly under the workspace's `artifacts/` directory are also captured for compatibility while your run owns the write lease. Do not rely on files written to the organization artifacts root being auto-registered as work products. Use `/tmp` only for transient scratch files and temporary verification artifacts.
+- When you need to place durable generated output on disk, use `$OCTOPUS_ISSUE_ARTIFACTS_DIR`. Do not rely on files written to the organization artifacts root being auto-registered as work products. Use `/tmp` only for transient scratch files and temporary verification artifacts.
 - For other shared output, prefer the managed workspace paths control plane injected for this run such as `$OCTOPUS_ORG_PLANS_DIR`, `$OCTOPUS_ORG_SKILLS_DIR`, and the active `$OCTOPUS_WORKSPACE_CWD` or `$OCTOPUS_ORG_WORKSPACE_ROOT`. Do not invent new top-level `projects/` folders.
 - If a `resources.md` file exists, treat it like a normal workspace file rather than a reserved control plane surface.
 - Agent-specific files live under `workspaces/agents/<workspace-key>/...`.
@@ -270,7 +270,7 @@ control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or
 
 When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.
 
-After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the shared workspace lease, runs the children, and wakes the parent after the children settle. Do not poll for children inside the current runtime process. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
+After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent after the children settle. Do not poll for children inside the current runtime process. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 
 Do not mark the parent issue done while child issues are still open. Wait for child issues to finish, or explicitly close/cancel them with a reason.
 

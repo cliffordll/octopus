@@ -78,7 +78,7 @@ from .logs import (
 )
 from .runtime_providers import inject_runtime_provider_config
 from .workspace_paths import ensure_octopus_run_log_dir
-from .workspaces import WorkspaceLeaseUnavailable, WorkspaceService
+from .workspaces import WorkspaceService
 
 LOCAL_CHILD_PROCESS_RUNTIMES = {
     "process",
@@ -96,7 +96,6 @@ ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
 ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
 ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV = "OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS"
 ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
-WORKSPACE_LEASE_RETRY_DELAY_SECONDS = 2
 HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
 WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
 
@@ -1740,13 +1739,6 @@ class HeartbeatService:
                 result=result,
                 sequence=sequence,
             )
-        except WorkspaceLeaseUnavailable as exc:
-            return await self._defer_run_for_workspace_lease(
-                agent=agent,
-                running=running,
-                sequence=sequence,
-                lease=exc,
-            )
         except Exception as exc:
             if cancellation.is_set():
                 return running
@@ -1802,59 +1794,6 @@ class HeartbeatService:
             return failed
         finally:
             self._cancel_events.pop(running.id, None)
-
-    async def _defer_run_for_workspace_lease(
-        self,
-        *,
-        agent: AgentRow,
-        running: HeartbeatRunRow,
-        sequence: int,
-        lease: WorkspaceLeaseUnavailable,
-    ) -> HeartbeatRunRow:
-        retry_at = datetime.now(UTC) + timedelta(
-            seconds=WORKSPACE_LEASE_RETRY_DELAY_SECONDS
-        )
-        message = "Waiting for execution workspace lease" + (
-            f" held by run {lease.run_id}" if lease.run_id else ""
-        )
-        queued = await update_run(
-            self._session,
-            running.id,
-            {
-                "status": "queued",
-                "started_at": None,
-                "finished_at": None,
-                "error": message,
-                "error_code": "workspace_lease_wait",
-            },
-        )
-        assert queued is not None
-        await update_wakeup_request(
-            self._session,
-            running.wakeup_request_id or "",
-            {
-                "status": "queued",
-                "requested_at": retry_at,
-                "claimed_at": None,
-                "finished_at": None,
-                "error": message,
-            },
-        )
-        await update_agent(self._session, agent.id, {"status": "idle"})
-        await self._append_event(
-            queued,
-            sequence,
-            "workspace.lease_wait",
-            message=message,
-            level="info",
-            payload={
-                "workspaceId": lease.workspace_id,
-                "leaseOperationId": lease.operation_id,
-                "leaseRunId": lease.run_id,
-                "retryAt": retry_at.isoformat(),
-            },
-        )
-        return queued
 
     async def _complete_finalized_run(
         self,
@@ -2081,9 +2020,6 @@ class HeartbeatService:
             cwd=workspace.get("cwd") if isinstance(workspace, dict) else None,
             metadata={
                 "adapterExecution": True,
-                "workspaceLeaseKey": workspace.get("leaseKey")
-                if isinstance(workspace, dict)
-                else None,
             },
         )
 

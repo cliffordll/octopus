@@ -36,7 +36,7 @@ from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService
 from server.services.issues import IssueService
 from server.services.projects import ProjectService
-from server.services.workspaces import WorkspaceLeaseUnavailable, WorkspaceService
+from server.services.workspaces import WorkspaceService
 from packages.shared.validators.workspace import (
     validate_issue_execution_workspace_settings,
     validate_project_execution_workspace_policy,
@@ -651,7 +651,7 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace(
                 actor_id="dev",
             )
             project_cwd = tmp_path / "primary"
-            project_cwd.mkdir()
+            _init_repo_with_branch(project_cwd, "main")
             project_workspace = await projects.create_workspace(
                 project["id"],
                 {"name": "Primary", "cwd": str(project_cwd)},
@@ -678,10 +678,11 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace(
     assert workspace["projectWorkspaceId"] == project_workspace["id"]
     assert workspace["sourceIssueId"] == issue.id
     assert workspace["mode"] == "isolated_workspace"
-    assert workspace["strategyType"] == "local_fs"
-    assert workspace["providerType"] == "local_fs"
+    assert workspace["strategyType"] == "git_worktree"
+    assert workspace["providerType"] == "git_worktree"
+    assert workspace["branchName"] is not None
     assert workspace["metadata"] is not None
-    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
+    assert workspace["metadata"]["sourceWorkspaceCwd"] == str(project_cwd)
 
 
 async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -> None:
@@ -1731,7 +1732,7 @@ async def test_issue_run_workspace_cwd_overrides_agent_runtime_cwd(
     assert (run["resultJson"] or {})["cwd"] == str(org_root)
 
 
-async def test_run_preflight_injects_workspace_context_into_runtime_env() -> None:
+async def test_run_preflight_injects_workspace_context_into_runtime_env(tmp_path: Path) -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -1759,9 +1760,11 @@ async def test_run_preflight_injects_workspace_context_into_runtime_env() -> Non
                 actor_type="user",
                 actor_id="dev",
             )
+            project_cwd = tmp_path / "runtime-primary"
+            _init_repo_with_branch(project_cwd, "main")
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/runtime-primary"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -1916,7 +1919,7 @@ async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
     assert run["contextSnapshot"]["workspaceFallback"] == "agent_heartbeat_workspace"
 
 
-async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
+async def test_workspace_operations_do_not_take_workspace_write_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project_cwd = tmp_path / "project-repo"
@@ -1928,9 +1931,9 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
     try:
         async with factory() as session:
             org = Organization(
-                url_key="step15-workspace-lease",
-                name="Step 15 Workspace Lease",
-                issue_prefix="LSE",
+                url_key="step15-workspace-no-lease",
+                name="Step 15 Workspace No Lease",
+                issue_prefix="NLS",
             )
             session.add(org)
             await session.flush()
@@ -1938,11 +1941,10 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
             project = await project_service.create_project(
                 org.id,
                 {
-                    "name": "Workspace Lease Project",
+                    "name": "Workspace No Lease Project",
                     "executionWorkspacePolicy": {
                         "enabled": True,
-                        "defaultMode": "operator_branch",
-                        "branchPolicy": {"operatorBranch": "feature/full-stack"},
+                        "defaultMode": "shared_workspace",
                     },
                 },
                 actor_type="user",
@@ -1973,36 +1975,6 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
                 cwd=workspace_one["cwd"],
                 metadata={"adapterExecution": True},
             )
-            with pytest.raises(ValueError, match="already leased"):
-                await service.begin_operation(
-                    org_id=org.id,
-                    run_id="run-two",
-                    execution_workspace_id=workspace_two["id"],
-                    phase="workspace_provision",
-                    command="runtime_adapter.execute",
-                    cwd=workspace_two["cwd"],
-                    metadata={"adapterExecution": True},
-                )
-
-            async def skip_lease_precheck(*args, **kwargs) -> None:
-                return None
-
-            monkeypatch.setattr(
-                WorkspaceService,
-                "_ensure_workspace_write_lease_available",
-                skip_lease_precheck,
-            )
-            with pytest.raises(WorkspaceLeaseUnavailable):
-                await service.begin_operation(
-                    org_id=org.id,
-                    run_id="run-two",
-                    execution_workspace_id=workspace_two["id"],
-                    phase="workspace_provision",
-                    command="runtime_adapter.execute",
-                    cwd=workspace_two["cwd"],
-                    metadata={"adapterExecution": True},
-                )
-            await service.finish_operation(first_operation["id"], status="succeeded")
             second_operation = await service.begin_operation(
                 org_id=org.id,
                 run_id="run-two",
@@ -2012,85 +1984,9 @@ async def test_workspace_write_lease_blocks_concurrent_adapter_operation(
                 cwd=workspace_two["cwd"],
                 metadata={"adapterExecution": True},
             )
+            assert first_operation["status"] == "running"
             assert second_operation["status"] == "running"
-            await service.mark_run_workspace_interrupted(
-                "run-two", reason="process_lost", message="process exited"
-            )
-            third_operation = await service.begin_operation(
-                org_id=org.id,
-                run_id="run-three",
-                execution_workspace_id=workspace_two["id"],
-                phase="workspace_provision",
-                command="runtime_adapter.execute",
-                cwd=workspace_two["cwd"],
-                metadata={"adapterExecution": True},
-            )
-            assert third_operation["status"] == "running"
             await session.commit()
-    finally:
-        await engine.dispose()
-
-
-async def test_workspace_lease_conflict_requeues_run_instead_of_failing() -> None:
-    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory: async_sessionmaker = create_session_factory(engine)
-    try:
-        async with factory() as session:
-            org = Organization(
-                url_key="step15-workspace-wait",
-                name="Step 15 Workspace Wait",
-                issue_prefix="LSW",
-            )
-            session.add(org)
-            await session.flush()
-            agent = Agent(org_id=org.id, name="Waiting Agent", status="running")
-            session.add(agent)
-            await session.flush()
-            wakeup = AgentWakeupRequest(
-                org_id=org.id,
-                agent_id=agent.id,
-                source="assignment",
-                trigger_detail="system",
-                status="claimed",
-            )
-            session.add(wakeup)
-            await session.flush()
-            run = HeartbeatRun(
-                org_id=org.id,
-                agent_id=agent.id,
-                invocation_source="assignment",
-                trigger_detail="system",
-                status="running",
-                started_at=datetime.now(UTC),
-                wakeup_request_id=wakeup.id,
-            )
-            session.add(run)
-            await session.flush()
-            wakeup.run_id = run.id
-
-            queued = await HeartbeatService(session)._defer_run_for_workspace_lease(
-                agent=agent,
-                running=run,
-                sequence=1,
-                lease=WorkspaceLeaseUnavailable(
-                    "workspace-1",
-                    operation_id="operation-1",
-                    run_id="owner-run",
-                ),
-            )
-            await session.flush()
-            await session.refresh(wakeup)
-            await session.refresh(agent)
-
-            assert queued.status == "queued"
-            assert queued.error_code == "workspace_lease_wait"
-            assert queued.finished_at is None
-            assert wakeup.status == "queued"
-            assert wakeup.claimed_at is None
-            assert wakeup.requested_at > wakeup.created_at
-            assert agent.status == "idle"
     finally:
         await engine.dispose()
 
@@ -3131,14 +3027,7 @@ async def test_orphaned_running_run_marks_workspace_resources_terminal(
     assert operation_metadata["reason"] == "process_lost"
 
 
-async def test_isolated_workspace_without_project_workspace_uses_managed_local_fs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    org_root = tmp_path / "org-workspace"
-    monkeypatch.setattr(
-        "server.services.workspaces.organization_workspace_root",
-        lambda org_id: org_root,
-    )
+async def test_isolated_workspace_without_project_workspace_fails_preflight() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3167,39 +3056,15 @@ async def test_isolated_workspace_without_project_workspace_uses_managed_local_f
             issue = Issue(
                 org_id=org.id,
                 project_id=project["id"],
-                title="Use managed local fs",
+                title="Needs git source",
             )
             session.add(issue)
             await session.flush()
-            run = HeartbeatRun(
-                org_id=org.id,
-                agent_id="agent-isolated-no-workspace",
-                invocation_source="on_demand",
-                trigger_detail="manual",
-                status="queued",
-                context_snapshot={"issueId": issue.id},
-            )
-            session.add(run)
-            await session.flush()
 
-            context = await WorkspaceService(session).prepare_runtime_context_for_run(
-                run.id, run.context_snapshot
-            )
-            await session.commit()
+            with pytest.raises(ValueError, match="requires a project Git workspace or repo URL"):
+                await WorkspaceService(session).resolve_for_issue(issue)
     finally:
         await engine.dispose()
-
-    assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
-    assert workspace["mode"] == "isolated_workspace"
-    assert workspace["strategyType"] == "local_fs"
-    assert workspace["providerType"] == "local_fs"
-    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
-    assert workspace["cwd"] == str(
-        org_root / "executions" / workspace["id"] / "worktree"
-    )
-    assert workspace["cwd"] != str(org_root)
-    assert Path(workspace["cwd"]).is_dir()
 
 
 async def test_operator_branch_without_project_workspace_fails_preflight() -> None:
@@ -3242,14 +3107,7 @@ async def test_operator_branch_without_project_workspace_fails_preflight() -> No
         await engine.dispose()
 
 
-async def test_isolated_workspace_without_cwd_or_repo_uses_managed_local_fs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    org_root = tmp_path / "org-workspace"
-    monkeypatch.setattr(
-        "server.services.workspaces.organization_workspace_root",
-        lambda org_id: org_root,
-    )
+async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3286,34 +3144,15 @@ async def test_isolated_workspace_without_cwd_or_repo_uses_managed_local_fs(
                 org_id=org.id,
                 project_id=project["id"],
                 project_workspace_id=project_workspace["id"],
-                title="Use local fs fallback",
+                title="Needs git source",
             )
             session.add(issue)
             await session.flush()
-            run = HeartbeatRun(
-                org_id=org.id,
-                agent_id="agent-isolated-empty-cwd",
-                invocation_source="on_demand",
-                trigger_detail="manual",
-                status="queued",
-                context_snapshot={"issueId": issue.id},
-            )
-            session.add(run)
-            await session.flush()
 
-            context = await WorkspaceService(session).prepare_runtime_context_for_run(
-                run.id, run.context_snapshot
-            )
-            await session.commit()
+            with pytest.raises(ValueError, match="requires the project workspace to have a local Git cwd or repo URL"):
+                await WorkspaceService(session).resolve_for_issue(issue)
     finally:
         await engine.dispose()
-
-    assert context is not None
-    workspace = context["workspace"]["rudderWorkspace"]
-    assert workspace["mode"] == "isolated_workspace"
-    assert workspace["providerType"] == "local_fs"
-    assert workspace["metadata"]["fallback"] == "local_fs_execution_workspace"
-    assert workspace["cwd"] != str(org_root)
 
 
 async def test_operator_branch_without_cwd_or_repo_fails_preflight() -> None:
@@ -3408,7 +3247,7 @@ async def test_configured_missing_project_workspace_cwd_fails_preflight(
         await engine.dispose()
 
 
-async def test_projectless_workspace_fallback_uses_org_lease_key(
+async def test_projectless_workspace_fallback_has_no_workspace_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     org_root = tmp_path / "org-workspace"
@@ -3423,18 +3262,18 @@ async def test_projectless_workspace_fallback_uses_org_lease_key(
     try:
         async with factory() as session:
             org = Organization(
-                url_key="step15-projectless-lease",
-                name="Step 15 Projectless Lease",
-                issue_prefix="PLL",
+                url_key="step15-projectless-no-lease",
+                name="Step 15 Projectless No Lease",
+                issue_prefix="PNL",
             )
             session.add(org)
             await session.flush()
-            issue = Issue(org_id=org.id, title="Projectless lease")
+            issue = Issue(org_id=org.id, title="Projectless no lease")
             session.add(issue)
             await session.flush()
             run = HeartbeatRun(
                 org_id=org.id,
-                agent_id="agent-projectless-lease",
+                agent_id="agent-projectless-no-lease",
                 invocation_source="on_demand",
                 trigger_detail="manual",
                 status="queued",
@@ -3448,7 +3287,7 @@ async def test_projectless_workspace_fallback_uses_org_lease_key(
             assert context is not None
             workspace = context["workspace"]["rudderWorkspace"]
             assert workspace["id"] is None
-            assert workspace["leaseKey"] == org.id
+            assert "leaseKey" not in workspace
             service = WorkspaceService(session)
             first = await service.begin_operation(
                 org_id=org.id,
@@ -3457,19 +3296,8 @@ async def test_projectless_workspace_fallback_uses_org_lease_key(
                 phase="workspace_provision",
                 command="runtime_adapter.execute",
                 cwd=workspace["cwd"],
-                metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
+                metadata={"adapterExecution": True},
             )
-            with pytest.raises(WorkspaceLeaseUnavailable):
-                await service.begin_operation(
-                    org_id=org.id,
-                    run_id="run-two",
-                    execution_workspace_id=None,
-                    phase="workspace_provision",
-                    command="runtime_adapter.execute",
-                    cwd=workspace["cwd"],
-                    metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
-                )
-            await service.finish_operation(first["id"], status="succeeded")
             second = await service.begin_operation(
                 org_id=org.id,
                 run_id="run-two",
@@ -3477,8 +3305,9 @@ async def test_projectless_workspace_fallback_uses_org_lease_key(
                 phase="workspace_provision",
                 command="runtime_adapter.execute",
                 cwd=workspace["cwd"],
-                metadata={"adapterExecution": True, "workspaceLeaseKey": org.id},
+                metadata={"adapterExecution": True},
             )
+            assert first["status"] == "running"
             assert second["status"] == "running"
     finally:
         await engine.dispose()

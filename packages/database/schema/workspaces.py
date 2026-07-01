@@ -251,11 +251,6 @@ class WorkspaceOperation(Base):
             "execution_workspace_id",
             "started_at",
         ),
-        Index(
-            "workspace_operations_active_lease_key_uq",
-            "lease_key",
-            unique=True,
-        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
@@ -265,7 +260,6 @@ class WorkspaceOperation(Base):
     execution_workspace_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("execution_workspaces.id", ondelete="SET NULL")
     )
-    lease_key: Mapped[str | None] = mapped_column(String(36))
     heartbeat_run_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("heartbeat_runs.id", ondelete="SET NULL")
     )

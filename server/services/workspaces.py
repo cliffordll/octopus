@@ -11,7 +11,6 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from sqlalchemy import update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.projects import get_project_by_id
@@ -29,7 +28,6 @@ from packages.database.queries.workspaces import (
     list_project_workspaces,
     list_running_workspace_operations_for_run,
     list_workspace_operations_for_execution_workspace,
-    list_workspace_operations_for_lease_key,
     list_workspace_operations_for_run,
     list_workspace_runtime_services_for_workspace,
     update_execution_workspace,
@@ -173,27 +171,6 @@ _GENERATED_FILE_MAX_COUNT = 20
 class _IssueWorkspaceFallback:
     org_id: str
     id: str
-
-
-class WorkspaceLeaseUnavailable(ValueError):
-    def __init__(
-        self,
-        workspace_id: str,
-        *,
-        operation_id: str | None = None,
-        run_id: str | None = None,
-    ) -> None:
-        self.workspace_id = workspace_id
-        self.operation_id = operation_id
-        self.run_id = run_id
-        owner = (
-            f" by operation {operation_id} for run {run_id}"
-            if operation_id or run_id
-            else ""
-        )
-        super().__init__(
-            f"Execution workspace {workspace_id} is already leased{owner}."
-        )
 
 
 def _aware_utc(value: datetime) -> datetime:
@@ -1192,22 +1169,14 @@ class WorkspaceService:
                     "Operator branch mode requires a project Git workspace."
                 )
             if mode == "isolated_workspace":
-                strategy_type = "local_fs"
-                execution_metadata.update(
-                    {
-                        "fallback": "local_fs_execution_workspace",
-                        "warnings": [
-                            "Project has no workspace configured. Run will use "
-                            "an issue-scoped local_fs execution workspace."
-                        ],
-                    }
+                raise ValueError(
+                    "Isolated workspace mode requires a project Git workspace or repo URL."
                 )
-            else:
-                fallback_cwd = str(self._org_workspace_root(issue.org_id))
-                warnings.append(
-                    "Project has no workspace configured. Run will start in "
-                    f'shared organization workspace "{fallback_cwd}".'
-                )
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project has no workspace configured. Run will start in "
+                f'shared organization workspace "{fallback_cwd}".'
+            )
         elif not project_cwd:
             if mode == "operator_branch":
                 raise ValueError(
@@ -1215,22 +1184,14 @@ class WorkspaceService:
                     "a local Git cwd or repo URL."
                 )
             if mode == "isolated_workspace":
-                strategy_type = "local_fs"
-                execution_metadata.update(
-                    {
-                        "fallback": "local_fs_execution_workspace",
-                        "warnings": [
-                            "Project workspace has no local cwd configured. Run "
-                            "will use an issue-scoped local_fs execution workspace."
-                        ],
-                    }
+                raise ValueError(
+                    "Isolated workspace mode requires the project workspace to have a local Git cwd or repo URL."
                 )
-            else:
-                fallback_cwd = str(self._org_workspace_root(issue.org_id))
-                warnings.append(
-                    "Project workspace has no local cwd configured. Run will start "
-                    f'in shared organization workspace "{fallback_cwd}".'
-                )
+            fallback_cwd = str(self._org_workspace_root(issue.org_id))
+            warnings.append(
+                "Project workspace has no local cwd configured. Run will start "
+                f'in shared organization workspace "{fallback_cwd}".'
+            )
         elif mode == "shared_workspace":
             execution_cwd = project_cwd
             execution_repo_url = project_repo_url
@@ -1277,18 +1238,9 @@ class WorkspaceService:
                         "Git worktree mode requires the project cwd to be an existing Git repository. "
                         "Octopus will not create a fake git_worktree directory."
                     )
-                strategy_type = "local_fs"
-                execution_repo_url = None
-                execution_base_ref = None
-                execution_branch_name = None
-                execution_metadata.update(
-                    {
-                        "fallback": "local_fs_execution_workspace",
-                        "warnings": [
-                            "Project workspace is not a Git repository. "
-                            "Run will use a local_fs execution workspace instead of a fake git_worktree."
-                        ],
-                    }
+                raise ValueError(
+                    "Isolated workspace mode requires the project cwd to be an existing Git repository. "
+                    "Octopus will not create a local_fs fallback for isolated workspaces."
                 )
         if fallback_cwd is not None:
             execution_cwd = fallback_cwd
@@ -1777,7 +1729,6 @@ class WorkspaceService:
                 row.id,
                 {
                     "status": "failed",
-                    "lease_key": None,
                     "stderr_excerpt": message,
                     "metadata_json": metadata,
                     "finished_at": datetime.now(UTC),
@@ -1970,8 +1921,6 @@ class WorkspaceService:
             "organization_workspace",
         }
         if shared_workspace:
-            if artifacts_root is not None and artifacts_root.is_dir():
-                scan_roots.append(("shared_artifacts_scan", artifacts_root))
             issue_artifacts_dir = _string(workspace.get("issueArtifactsDir"))
             issue_artifacts_root = (
                 Path(issue_artifacts_dir).resolve()
@@ -1989,10 +1938,6 @@ class WorkspaceService:
             for path in _iter_generated_workspace_files(root, threshold):
                 if len(products) >= _GENERATED_FILE_MAX_COUNT:
                     break
-                if source == "shared_artifacts_scan" and path.relative_to(root).parts[
-                    :1
-                ] == ("issues",):
-                    continue
                 resolved_path = path.resolve()
                 if resolved_path in seen_paths:
                     continue
@@ -2123,39 +2068,19 @@ class WorkspaceService:
         cwd: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> WorkspaceOperationData:
-        lease_key = self._operation_lease_key(
-            execution_workspace_id=execution_workspace_id,
-            phase=phase,
-            command=command,
-            metadata=metadata,
+        row = await create_workspace_operation(
+            self._session,
+            {
+                "org_id": org_id,
+                "execution_workspace_id": execution_workspace_id,
+                "heartbeat_run_id": run_id,
+                "phase": phase,
+                "command": command,
+                "cwd": cwd,
+                "status": "running",
+                "metadata_json": metadata,
+            },
         )
-        await self._ensure_workspace_write_lease_available(
-            lease_key=lease_key,
-            run_id=run_id,
-            phase=phase,
-            command=command,
-            metadata=metadata,
-        )
-        try:
-            async with self._session.begin_nested():
-                row = await create_workspace_operation(
-                    self._session,
-                    {
-                        "org_id": org_id,
-                        "execution_workspace_id": execution_workspace_id,
-                        "lease_key": lease_key,
-                        "heartbeat_run_id": run_id,
-                        "phase": phase,
-                        "command": command,
-                        "cwd": cwd,
-                        "status": "running",
-                        "metadata_json": metadata,
-                    },
-                )
-        except IntegrityError as exc:
-            if lease_key is None:
-                raise
-            raise WorkspaceLeaseUnavailable(lease_key) from exc
         log_ref = f"{org_id}/{row.id}.ndjson"
         append_local_file_log(
             _operation_log_dir(),
@@ -2207,50 +2132,6 @@ class WorkspaceService:
                         "Execution workspace cannot be archived because the Git worktree has uncommitted changes."
                     )
 
-    def _operation_lease_key(
-        self,
-        *,
-        execution_workspace_id: str | None,
-        phase: str,
-        command: str | None,
-        metadata: dict[str, Any] | None,
-    ) -> str | None:
-        if phase != "workspace_provision" or command != "runtime_adapter.execute":
-            return None
-        metadata = metadata if isinstance(metadata, dict) else {}
-        metadata_lease_key = _string(metadata.get("workspaceLeaseKey"))
-        return metadata_lease_key or execution_workspace_id
-
-    async def _ensure_workspace_write_lease_available(
-        self,
-        *,
-        lease_key: str | None,
-        run_id: str | None,
-        phase: str,
-        command: str | None,
-        metadata: dict[str, Any] | None,
-    ) -> None:
-        if (
-            lease_key is None
-            or phase != "workspace_provision"
-            or command != "runtime_adapter.execute"
-        ):
-            return
-        rows = await list_workspace_operations_for_lease_key(self._session, lease_key)
-        for row in rows:
-            if row.status != "running" or row.heartbeat_run_id == run_id:
-                continue
-            row_metadata = row.metadata_json or {}
-            if not isinstance(row_metadata, dict) or not row_metadata.get(
-                "adapterExecution"
-            ):
-                continue
-            raise WorkspaceLeaseUnavailable(
-                lease_key,
-                operation_id=row.id,
-                run_id=row.heartbeat_run_id,
-            )
-
     async def append_operation_log(
         self,
         operation_id: str,
@@ -2292,7 +2173,6 @@ class WorkspaceService:
             operation_id,
             {
                 "status": status,
-                "lease_key": None,
                 "exit_code": exit_code,
                 "stdout_excerpt": stdout_excerpt,
                 "stderr_excerpt": stderr_excerpt,
@@ -2414,13 +2294,11 @@ class WorkspaceService:
         artifacts_dir: Path,
     ) -> ExecutionWorkspaceData:
         enriched = dict(workspace)
-        lease_key = _string(workspace.get("id")) or workspace["orgId"]
         enriched.update(
             {
                 "source": workspace["providerType"],
                 "strategy": workspace["strategyType"],
                 "workspaceId": workspace["id"],
-                "leaseKey": lease_key,
                 "orgWorkspaceRoot": str(org_root),
                 "orgAgentsDir": str(agents_dir),
                 "orgSkillsDir": str(skills_dir),
