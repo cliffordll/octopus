@@ -54,6 +54,28 @@ def test_closeout_governance_instructions_are_hard_gated() -> None:
         assert "Do not exit" in content
 
 
+def test_control_plane_instructions_are_runtime_env_and_shell_safe() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    control_plane_skill = (
+        repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    cli_reference = (
+        repo_root
+        / "server"
+        / "skills"
+        / "bundled"
+        / "control-plane"
+        / "references"
+        / "cli-reference.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Do not read or create workspace `.env` files" in control_plane_skill
+    assert "do not hard-code the managed `.octopus/bin` shim path" in control_plane_skill
+    assert "$env:OCTOPUS_AGENT_ID" in control_plane_skill
+    assert "control-plane agent me" in control_plane_skill
+    assert "defaults `--expected-status` to `todo` and `in_progress`" in cli_reference
+
+
 def test_subtask_coordination_instructions_require_child_execution() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     control_plane_skill = (

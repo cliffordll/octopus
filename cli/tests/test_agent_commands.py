@@ -77,6 +77,40 @@ def test_agent_inbox_uses_me_route_by_default_and_agent_route_when_requested() -
     assert requests[1].url.path == "/api/agents/agent-1/inbox-lite"
 
 
+def test_agent_me_uses_injected_runtime_agent_id(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_AGENT_ID", "agent-env")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "agent-env", "name": "Builder"})
+
+    output = io.StringIO()
+    assert (
+        main(
+            ["agent", "me", "--json"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/agents/agent-env"
+    assert '"agent-env"' in output.getvalue()
+
+
+def test_agent_capabilities_outputs_static_supported_commands() -> None:
+    output = io.StringIO()
+    assert main(["agent", "capabilities", "--json"], stdout=output) == 0
+
+    body = output.getvalue()
+    assert "control-plane agent me" in body
+    assert "control-plane issue checkout" in body
+    assert "checkoutExpectedStatuses" in body
+
+
 def test_agent_hire_posts_to_agent_hires() -> None:
     requests: list[httpx.Request] = []
 

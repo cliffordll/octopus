@@ -10,6 +10,7 @@ def runtime_prompt_from_config(config: dict[str, Any]) -> str:
             _base_prompt_from_config(config),
             _tacit_memory_prompt(config),
             _agent_memory_guidance(config),
+            _runtime_context_guidance(config),
             _heartbeat_prompt(config),
         ]
     )
@@ -74,6 +75,27 @@ def _agent_memory_guidance(config: dict[str, Any]) -> str:
             "- Use the `para-memory-files` skill for memory file operations when it is available.",
             "- Do not store secrets, credentials, or transient task logs in long-term memory.",
             "- Do not assume `$HOME` is long-term memory; local runtimes may use it for CLI credentials and caches.",
+        ]
+    )
+
+
+def _runtime_context_guidance(config: dict[str, Any]) -> str:
+    octopus = config.get("_octopus")
+    if not isinstance(octopus, dict):
+        return ""
+    context = octopus.get("context")
+    if not isinstance(context, dict) or not isinstance(context.get("issue"), dict):
+        return ""
+    return "\n".join(
+        [
+            "## Runtime Context Contract",
+            "",
+            "Octopus injects runtime context directly into the process environment.",
+            "- Use `control-plane ... --json` from `PATH`; do not hard-code the `.octopus/bin` shim path.",
+            "- Do not read or create workspace `.env` files to recover `OCTOPUS_*` values.",
+            "- On Windows PowerShell, read variables as `$env:OCTOPUS_AGENT_ID`, `$env:OCTOPUS_ORG_ID`, and `$env:OCTOPUS_RUN_ID`.",
+            "- In POSIX shells, read variables as `$OCTOPUS_AGENT_ID`, `$OCTOPUS_ORG_ID`, and `$OCTOPUS_RUN_ID`.",
+            "- Prefer CLI commands that use injected defaults, such as `control-plane agent me --json`, `control-plane agent inbox --json`, and `control-plane issue checkout <issue> --json`.",
         ]
     )
 

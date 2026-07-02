@@ -27,6 +27,10 @@ def test_runtime_prompt_appends_issue_context_to_agent_instructions() -> None:
     assert "You have been assigned to work on an issue" in prompt
     assert "创建 hello world 输出脚本" in prompt
     assert "输出 hello world" in prompt
+    assert "## Runtime Context Contract" in prompt
+    assert "do not hard-code the `.octopus/bin` shim path" in prompt
+    assert "Do not read or create workspace `.env` files" in prompt
+    assert "$env:OCTOPUS_AGENT_ID" in prompt
     assert "## Close-out Gate" in prompt
     assert "Every issue run must leave a durable close-out signal" in prompt
     assert 'control-plane issue done "issue-hello"' in prompt

@@ -374,3 +374,141 @@ activity_log 写 issue.closure_needs_operator_review
 8. 自动收口为什么等待期不应该报错？
 
 如果这些问题回答不清楚，说明实现或文档还没有把职责边界讲清楚。
+
+## 12. scheduler 的真实扫描模型
+
+当前 scheduler 不是“所有业务表一个个无脑扫”。它分两类扫描。
+
+### 12.1 timer 巡检扫描
+
+这部分会按组织和 agent 扫：
+
+```text
+list_organizations()
+for each org:
+  list_org_agents(org.id)
+  for each agent:
+    读取 runtime_config.heartbeat
+    对比 last_heartbeat_at / created_at 和 intervalSec
+    检查是否已有 timer queued/running run
+    到期则创建 timer wakeup / queued run
+```
+
+涉及表：
+
+```text
+organizations
+agents
+heartbeat_runs
+agent_wakeup_requests
+```
+
+这就是 timer 巡检，也就是“定时巡检/低频诊断”路径。
+
+### 12.2 scheduled / queued 推进扫描
+
+这部分不是按组织 agent 全扫，而是直接查调度状态：
+
+```text
+agent_wakeup_requests
+  where status = scheduled
+  and requested_at <= now
+```
+
+到期后 materialize 成：
+
+```text
+heartbeat_runs.status = queued
+```
+
+然后查：
+
+```text
+heartbeat_runs
+  where status = queued
+select distinct agent_id
+```
+
+再对这些 agent 调 dispatcher。
+
+所以准确表述是：
+
+```text
+timer 巡检：按 org -> agent 扫
+任务推进：按 scheduled / queued 状态查
+```
+
+## 13. scheduler、dispatcher、inbox 的职责边界
+
+这三个概念不能混用。
+
+| 概念 | 职责 | 不做什么 |
+| --- | --- | --- |
+| scheduler | 周期性恢复、scheduled materialize、queued dispatch 兜底、timer 巡检 | 不作为 issue 业务规则判断中心 |
+| dispatcher | 把 queued run claim 成 running，并启动 runtime | 不决定哪个 issue 业务上该执行 |
+| inbox | 展示 agent 相关待办事项 | 不是执行队列，不是调度入口 |
+
+`inbox` 查的是待办视图，例如：
+
+```text
+assignee_agent_id = 当前 agent 且 status in todo/in_progress/blocked
+reviewer_agent_id = 当前 agent 且 status in in_review/blocked
+相关 comment wakeup
+```
+
+它不能替代 queued run。
+
+常规任务执行不应该是：
+
+```text
+scheduler 到点唤醒 agent
+agent 查 inbox
+agent 自己决定执行哪个任务
+```
+
+更合理的是：
+
+```text
+server 侧 issue 事件创建 queued run
+dispatcher 启动对应 agent run
+agent 执行明确的 issue context
+```
+
+## 14. Agent 级手动运行和 issue 级执行的区别
+
+Agent 页面上的手动运行不是任务执行入口。
+
+| 操作 | 有没有 issue context | 业务含义 | cwd |
+| --- | --- | --- | --- |
+| Run heartbeat / 运行诊断 | 默认没有 | 手动启动一次 agent runtime，用于诊断/健康检查 | heartbeat sandbox workspace |
+| issue execute / 执行任务 | 有 | 执行具体 issue | issue workspace |
+| assignment wakeup | 有 | 被分配任务后执行 | issue workspace |
+| review wakeup | 有 | 执行评审 | issue workspace |
+| closeout followup | 有 | 针对具体 issue 做收口补偿 | issue workspace |
+
+所以 UI 不应该同时暴露“唤醒”和“运行心跳”两个 agent 级按钮。建议只保留一个：
+
+```text
+运行诊断
+```
+
+说明：
+
+```text
+启动一次无任务 agent run，用于验证 runtime、provider、control-plane 和 agent 配置是否正常；不会执行具体 issue。
+```
+
+## 15. scheduler 巡检唤醒的定位
+
+scheduler 巡检唤醒不是任务主链路。
+
+它可以保留为：
+
+- 低频兜底。
+- runtime 健康检查。
+- 开发/诊断入口。
+- 兼容尚未事件化的边缘检查。
+
+但不应该依赖它完成普通任务调度。
+
+如果所有任务来源都能事件化为 queued run，那么 timer 巡检可以弱化，甚至默认关闭。至少它的 UI 文案应该从“心跳”改为更清楚的“定时巡检”。
