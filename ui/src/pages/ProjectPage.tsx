@@ -271,120 +271,61 @@ function ExecutionWorkspacePanel({
         </div>
       </div>
       {Boolean(error) && <ErrorNotice error={error} />}
-      <div className="project-workspace-list">
+      <div className="project-workspace-list execution-workspace-list">
         {workspaces.length === 0 && <p className="project-workspace-empty">暂无任务运行记录。代码任务开始运行后会创建记录。</p>}
-        {workspaces.map((workspace) => (
-          <button
-            className={`project-workspace-item ${workspace.id === selectedId ? "selected" : ""}`}
-            key={workspace.id}
-            onClick={() => onSelect(workspace.id)}
-            type="button"
-          >
-            <div className="project-workspace-main">
-              <div className="project-workspace-name-row">
-                <strong>{workspace.name}</strong>
-                <div className="project-workspace-badges">
-                  <Badge>{workspace.mode}</Badge>
-                  <Badge>{workspace.status}</Badge>
-                  {workspace.branchName && <Badge>{workspace.branchName}</Badge>}
+        {workspaces.map((workspace) => {
+          const isSelected = workspace.id === selectedId;
+          return (
+            <div className={`project-workspace-item execution-workspace-row ${isSelected ? "selected" : ""}`} key={workspace.id}>
+              <button
+                className="execution-workspace-row-main"
+                onClick={() => onSelect(workspace.id)}
+                type="button"
+              >
+                <div className="execution-workspace-summary">
+                  <strong className="execution-workspace-name">{workspace.name}</strong>
+                  <div className="project-workspace-badges execution-workspace-badges">
+                    <Badge>{workspace.mode}</Badge>
+                    <Badge>{workspace.status}</Badge>
+                    {workspace.branchName && <Badge>{workspace.branchName}</Badge>}
+                  </div>
+                  <span className="execution-workspace-path" title={nullableText(workspace.cwd)}>{nullableText(workspace.cwd)}</span>
                 </div>
-              </div>
-              <span title={nullableText(workspace.cwd)}>{nullableText(workspace.cwd)}</span>
+              </button>
+              {isSelected && selected && (
+                <div className="execution-workspace-row-detail">
+                  <div className="execution-workspace-status-line">
+                    <span>分支：{status?.git?.branch ?? selected.branchName ?? "未识别"}</span>
+                    <span>Git：{statusPending ? "检查中..." : status?.git?.available ? (status.git.dirty ? "有未提交改动" : "干净") : status?.git?.error ?? "不可用"}</span>
+                    <span>租约：{status?.lease.locked ? `运行中 ${status.lease.operationId ?? ""}` : "空闲"}</span>
+                  </div>
+                  <div className="project-workspace-actions">
+                    <button className="secondary small-button" disabled={diffPending} onClick={() => onLoadDiff(selected.id)} type="button">查看 diff</button>
+                    <button className="secondary small-button" disabled={mergePreviewPending || selected.mode === "shared_workspace"} onClick={() => onMergePreview(selected.id)} type="button">检查 merge</button>
+                    <button className="secondary small-button" disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)} onClick={() => onMerge(selected.id)} type="button">merge 到目标分支</button>
+                    <button className="secondary small-button" disabled={preparePrPending || !selected.branchName} onClick={() => onPreparePr(selected.id)} type="button">准备 PR</button>
+                    <button className="secondary small-button" disabled={createPrPending || !selected.branchName} onClick={() => onCreatePr(selected.id)} type="button">创建 PR</button>
+                    <button className="secondary small-button" disabled={pushPending || !selected.branchName} onClick={() => onPush(selected.id)} type="button">push 分支</button>
+                    <button className="danger small-button" disabled={abandonPending || Boolean(status?.lease.locked)} onClick={() => onAbandon(selected.id)} type="button">放弃结果</button>
+                    <div className="workspace-cleanup-action">
+                      {selectedDirty && (
+                        <label className="workspace-danger-confirm" title="清理目录会丢弃该运行目录的未提交改动">
+                          <input checked={cleanupDiscardConfirmed} onChange={(event) => onCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
+                          <span>丢弃改动</span>
+                        </label>
+                      )}
+                      <button className="danger small-button workspace-cleanup-button" disabled={cleanupPending || !canCleanup} onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)} type="button">清理目录</button>
+                    </div>
+                    <button className="danger small-button" disabled={archivePending || !status?.canArchive} onClick={() => onArchive(selected.id)} type="button">归档旧流程</button>
+                  </div>
+                  {mergePreview && <pre className="workspace-diff-preview">{mergePreview}</pre>}
+                  {diffPreview && <pre className="workspace-diff-preview">{diffPreview}</pre>}
+                </div>
+              )}
             </div>
-          </button>
-        ))}
+          );
+        })}
       </div>
-      {selected && (
-        <div className="project-workspace-fallback">
-          <strong>{selected.name}</strong>
-          <span>目录：{nullableText(selected.cwd)}</span>
-          <span>分支：{status?.git?.branch ?? selected.branchName ?? "未识别"}</span>
-          <span>Git：{statusPending ? "检查中..." : status?.git?.available ? (status.git.dirty ? "有未提交改动" : "干净") : status?.git?.error ?? "不可用"}</span>
-          <span>租约：{status?.lease.locked ? `运行中 ${status.lease.operationId ?? ""}` : "空闲"}</span>
-          {selectedDirty && (
-            <label className="workspace-danger-confirm">
-              <input checked={cleanupDiscardConfirmed} onChange={(event) => onCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
-              确认清理时丢弃该运行目录的未提交改动
-            </label>
-          )}
-          <div className="project-workspace-actions">
-            <button
-              className="secondary small-button"
-              disabled={diffPending}
-              onClick={() => onLoadDiff(selected.id)}
-              type="button"
-            >
-              查看 diff
-            </button>
-            <button
-              className="secondary small-button"
-              disabled={mergePreviewPending || selected.mode === "shared_workspace"}
-              onClick={() => onMergePreview(selected.id)}
-              type="button"
-            >
-              检查 merge
-            </button>
-            <button
-              className="secondary small-button"
-              disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)}
-              onClick={() => onMerge(selected.id)}
-              type="button"
-            >
-              merge 到目标分支
-            </button>
-            <button
-              className="secondary small-button"
-              disabled={preparePrPending || !selected.branchName}
-              onClick={() => onPreparePr(selected.id)}
-              type="button"
-            >
-              准备 PR
-            </button>
-            <button
-              className="secondary small-button"
-              disabled={createPrPending || !selected.branchName}
-              onClick={() => onCreatePr(selected.id)}
-              type="button"
-            >
-              创建 PR
-            </button>
-            <button
-              className="secondary small-button"
-              disabled={pushPending || !selected.branchName}
-              onClick={() => onPush(selected.id)}
-              type="button"
-            >
-              push 分支
-            </button>
-            <button
-              className="danger small-button"
-              disabled={abandonPending || Boolean(status?.lease.locked)}
-              onClick={() => onAbandon(selected.id)}
-              type="button"
-            >
-              放弃结果
-            </button>
-            <button
-              className="danger small-button"
-              disabled={cleanupPending || !canCleanup}
-              onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)}
-              type="button"
-            >
-              清理目录
-            </button>
-            <button
-              className="danger small-button"
-              disabled={archivePending || !status?.canArchive}
-              onClick={() => onArchive(selected.id)}
-              type="button"
-            >
-              归档旧流程
-            </button>
-          </div>
-          {mergePreview && <pre className="workspace-diff-preview">{mergePreview}</pre>}
-          {diffPreview && <pre className="workspace-diff-preview">{diffPreview}</pre>}
-        </div>
-      )}
     </section>
   );
 }
