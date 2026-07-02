@@ -1063,7 +1063,16 @@ async def test_isolated_workspace_directory_is_a_real_git_worktree(
 
     assert context is not None
     workspace = context["workspace"]["octopusWorkspace"]
+    assert workspace["mode"] == "isolated_workspace"
+    assert workspace["strategyType"] == "git_worktree"
     assert workspace["providerType"] == "git_worktree"
+    assert workspace["workspaceKind"] == "project_execution"
+    assert workspace["codeSourceKind"] == "local_cwd"
+    assert workspace["metadata"]["sourceWorkspaceCwd"] == str(project_cwd)
+    assert workspace["warnings"] == []
+    assert workspace["requiresLease"] is False
+    assert workspace["canRun"] is True
+    assert workspace["failureReason"] is None
     worktree_cwd = Path(workspace["cwd"]).resolve()
     assert (
         _git(worktree_cwd, "rev-parse", "--is-inside-work-tree").stdout.strip()
@@ -1553,16 +1562,39 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
             )
             session.add(run)
             await session.flush()
-            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+            workspace_service = WorkspaceService(session)
+            context = await workspace_service.prepare_runtime_context_for_run(
                 run.id, run.context_snapshot
+            )
+            issue_two = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Use a second managed checkout worktree",
+            )
+            session.add(issue_two)
+            await session.flush()
+            run_two = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-managed-isolated-two",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue_two.id},
+            )
+            session.add(run_two)
+            await session.flush()
+            context_two = await workspace_service.prepare_runtime_context_for_run(
+                run_two.id, run_two.context_snapshot
             )
             await session.commit()
     finally:
         await engine.dispose()
 
     assert context is not None
+    assert context_two is not None
     assert project_workspace is not None
     workspace = context["workspace"]["octopusWorkspace"]
+    workspace_two = context_two["workspace"]["octopusWorkspace"]
     managed_checkout = (
         org_root
         / "projects"
@@ -1574,12 +1606,18 @@ async def test_repo_url_only_isolated_workspace_creates_worktree_from_managed_ch
     assert workspace["workspaceKind"] == "project_execution"
     assert workspace["codeSourceKind"] == "managed_checkout"
     assert workspace["metadata"]["sourceWorkspaceCwd"] == str(managed_checkout)
-    assert (
-        _git(
-            Path(workspace["cwd"]), "rev-parse", "--is-inside-work-tree"
-        ).stdout.strip()
-        == "true"
-    )
+    assert workspace_two["metadata"]["sourceWorkspaceCwd"] == str(managed_checkout)
+    assert workspace_two["id"] != workspace["id"]
+    assert workspace_two["cwd"] != workspace["cwd"]
+    assert workspace_two["branchName"] != workspace["branchName"]
+    worktree_listing = _git(managed_checkout, "worktree", "list", "--porcelain").stdout
+    for current_workspace in (workspace, workspace_two):
+        current_cwd = Path(current_workspace["cwd"])
+        assert (
+            _git(current_cwd, "rev-parse", "--is-inside-work-tree").stdout.strip()
+            == "true"
+        )
+        assert _git_path_text(current_cwd) in worktree_listing
     assert _git(managed_checkout, "branch", "--show-current").stdout.strip() == "main"
 
 
@@ -3299,6 +3337,65 @@ async def test_project_without_workspace_does_not_resolve_operator_mode() -> Non
             assert workspace["mode"] == "organization_scratch"
     finally:
         await engine.dispose()
+
+
+async def test_isolated_workspace_rejects_non_git_project_cwd(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "plain-directory"
+    project_cwd.mkdir()
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-isolated-non-git",
+                name="Step 15 Isolated Non Git",
+                issue_prefix="ING",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Isolated Non Git"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            project_workspace = await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Plain Directory",
+                    "cwd": str(project_cwd),
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "isolated_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            assert project_workspace is not None
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                project_workspace_id=project_workspace["id"],
+                title="Reject non Git isolated source",
+            )
+            session.add(issue)
+            await session.flush()
+
+            with pytest.raises(
+                ValueError,
+                match="existing Git repository",
+            ):
+                await WorkspaceService(session).resolve_for_issue(issue)
+    finally:
+        await engine.dispose()
+
+    assert not (project_cwd / ".octopus" / "worktrees").exists()
 
 
 async def test_isolated_workspace_without_cwd_or_repo_fails_preflight() -> None:
