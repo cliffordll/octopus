@@ -223,7 +223,7 @@ it("updates a project and manages its resource attachments", async () => {
       }),
     }),
   );
-  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存基础信息" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/projects/project-1",
     expect.objectContaining({
@@ -352,10 +352,13 @@ it("uses organization scratch when the project has no workspace", async () => {
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  renderApp("/orgs/org-1/projects/project-1/configuration");
+  const { container } = renderApp("/orgs/org-1/projects/project-1/configuration");
   expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
-  expect(screen.getByText("使用组织草稿目录")).toBeInTheDocument();
-  expect(screen.getByText(/不会进入共享、独立或操作分支模式/)).toBeInTheDocument();
+  const flowHeadings = Array.from(container.querySelectorAll(".project-config-section h2"), (heading) => heading.textContent);
+  expect(flowHeadings).toEqual(["基础信息", "项目工作区", "组织草稿与产物", "任务运行记录"]);
+  expect(screen.getByText("organizations/org-1/workspaces/artifacts")).toBeInTheDocument();
+  expect(screen.getByText("尚未配置项目工作区")).toBeInTheDocument();
+  expect(screen.getByText(/代码任务需先添加代码来源并选择执行模式/)).toBeInTheDocument();
   expect(screen.queryByLabelText("控制台 执行模式")).not.toBeInTheDocument();
 });
 
@@ -393,7 +396,7 @@ it("blocks project configuration save when goal IDs are not UUIDs", async () => 
   renderApp("/orgs/org-1/projects/project-1/configuration");
   expect(await screen.findByRole("heading", { name: "基础信息" })).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("目标 ID"), "goal-1");
-  await userEvent.click(screen.getByRole("button", { name: "保存项目" }));
+  await userEvent.click(screen.getByRole("button", { name: "保存基础信息" }));
 
   expect(await screen.findByText("目标 ID 必须是 UUID，多个目标请用逗号分隔。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
@@ -492,17 +495,17 @@ it("manages project workspaces from the configuration tab", async () => {
 
   expect(await screen.findByRole("heading", { name: "项目工作区" })).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
-  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
+  await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
   expect(screen.getByText("请先填写代码来源名称。")).toBeInTheDocument();
   await userEvent.clear(screen.getByLabelText("代码来源本地 cwd"));
   await userEvent.type(screen.getByLabelText("代码来源名称"), "新工作区");
-  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
+  await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
   expect(screen.getByText("本地 cwd 和仓库 URL 至少填写一项。")).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("代码来源本地 cwd"), "D:/coding/new");
   await userEvent.type(screen.getByLabelText("代码来源仓库 URL"), "https://example.com/new.git");
   await userEvent.type(screen.getByLabelText("代码来源分支"), "main");
   await userEvent.selectOptions(screen.getByLabelText("新工作区执行模式"), "operator_branch");
-  await userEvent.click(screen.getByRole("button", { name: "添加项目工作区" }));
+  await userEvent.click(screen.getByRole("button", { name: "添加工作区" }));
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project-1/workspaces",

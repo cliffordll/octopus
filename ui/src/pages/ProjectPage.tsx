@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type {
   ExecutionWorkspace,
   OrganizationResource,
+  ProjectCodebase,
   ProjectResourceRole,
   ProjectStatus,
   ProjectWorkspace,
@@ -109,6 +110,10 @@ function workspacePolicyModeFromPolicy(value: Record<string, unknown> | null | u
   return normalizeWorkspacePolicyMode(value.defaultMode ?? strategy?.mode);
 }
 
+function workspacePolicyDescription(mode: WorkspacePolicyMode): string {
+  return WORKSPACE_POLICY_OPTIONS.find((option) => option.mode === mode)?.description ?? "";
+}
+
 function workspacePolicyForMode(currentJson: string, mode: WorkspacePolicyMode): string {
   let current: Record<string, unknown> = {};
   try {
@@ -157,6 +162,37 @@ function resourceKindMark(kind: OrganizationResource["kind"] | undefined): strin
     default:
       return "U";
   }
+}
+
+function ProjectOutputLocations({ codebase }: { codebase: ProjectCodebase | undefined }) {
+  const workspaceRoot = codebase?.managedFolder;
+  const artifactsPath = workspaceRoot ? `${workspaceRoot}/artifacts` : "未设置";
+  const plansAndSkillsPath = workspaceRoot ? `${workspaceRoot}/plans · ${workspaceRoot}/skills` : "未设置";
+  return (
+    <section className="project-config-section project-config-step-output" aria-label="组织草稿与产物">
+      <div className="project-section-heading">
+        <div>
+          <p className="eyebrow">OUTPUTS</p>
+          <h2>组织草稿与产物</h2>
+          <p className="muted">无代码任务在组织草稿目录中执行；所有任务的持久产物统一保存在组织目录下。</p>
+        </div>
+      </div>
+      <div className="project-property-list">
+        <div className="project-property-row">
+          <span>组织草稿目录</span>
+          <strong title={workspaceRoot ?? "未设置"}>{workspaceRoot ?? "未设置"}</strong>
+        </div>
+        <div className="project-property-row">
+          <span>任务产物</span>
+          <strong title={artifactsPath}>{artifactsPath}</strong>
+        </div>
+        <div className="project-property-row">
+          <span>计划与技能</span>
+          <strong title={plansAndSkillsPath}>{plansAndSkillsPath}</strong>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function ExecutionWorkspacePanel({
@@ -738,9 +774,9 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
               </div>
             </section>
           )}
-          {activeTab === "configuration" && <form className="project-properties-card project-tab-panel" onSubmit={save}>
+          {activeTab === "configuration" && <div className="project-properties-card project-tab-panel">
             <div className="project-config-sections project-config-flow">
-              <section className="project-config-section project-config-step-basic">
+              <form className="project-config-section project-config-step-basic" onSubmit={save}>
                 <div className="project-section-heading">
                   <p className="eyebrow">BASIC INFORMATION</p>
                   <h2>基础信息</h2>
@@ -804,62 +840,25 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                     </div>
                   </details>
                 </div>
-              </section>
-              <div className="project-config-step-save">
                 {update.error && <ErrorNotice error={update.error} />}
-              </div>
-              <div className="project-property-actions project-config-step-save">
-                <button disabled={update.isPending} type="submit">
-                  {update.isPending ? "保存中..." : "保存项目"}
-                </button>
-              </div>
-              <ExecutionWorkspacePanel
-                abandonPending={abandonExecutionWorkspace.isPending}
-                archivePending={archiveExecutionWorkspace.isPending}
-                cleanupDiscardConfirmed={cleanupDiscardConfirmed}
-                cleanupPending={cleanupExecutionWorkspace.isPending}
-                createPrPending={createExecutionWorkspacePr.isPending}
-                diffPending={loadWorkspaceDiff.isPending}
-                diffPreview={workspaceDiffPreview}
-                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
-                mergePending={mergeExecutionWorkspace.isPending}
-                mergePreview={workspaceMergePreview}
-                mergePreviewPending={previewExecutionWorkspaceMerge.isPending}
-                onAbandon={(workspaceId) => abandonExecutionWorkspace.mutate(workspaceId)}
-                onArchive={(workspaceId) => archiveExecutionWorkspace.mutate(workspaceId)}
-                onCleanup={(workspaceId, discardDirty) => cleanupExecutionWorkspace.mutate({ workspaceId, discardDirty })}
-                onCleanupDiscardConfirmed={setCleanupDiscardConfirmed}
-                onCreatePr={(workspaceId) => createExecutionWorkspacePr.mutate(workspaceId)}
-                onLoadDiff={(workspaceId) => loadWorkspaceDiff.mutate(workspaceId)}
-                onMerge={(workspaceId) => mergeExecutionWorkspace.mutate(workspaceId)}
-                onMergePreview={(workspaceId) => previewExecutionWorkspaceMerge.mutate(workspaceId)}
-                onPreparePr={(workspaceId) => prepareExecutionWorkspacePr.mutate(workspaceId)}
-                onPush={(workspaceId) => pushExecutionWorkspace.mutate(workspaceId)}
-                preparePrPending={prepareExecutionWorkspacePr.isPending}
-                onSelect={(workspaceId) => {
-                  setSelectedExecutionWorkspaceId(workspaceId);
-                  setWorkspaceDiffPreview("");
-                  setWorkspaceMergePreview("");
-                  setCleanupDiscardConfirmed(false);
-                }}
-                pushPending={pushExecutionWorkspace.isPending}
-                selectedId={selectedExecutionWorkspaceId}
-                status={executionWorkspaceStatus.data}
-                statusPending={executionWorkspaceStatus.isFetching}
-                workspaces={executionWorkspaceList}
-              />
-              <section className="project-config-section project-workspace-manager project-config-step-source" aria-label="代码来源管理">
+                <div className="project-property-actions">
+                  <button disabled={update.isPending} type="submit">
+                    {update.isPending ? "保存中..." : "保存基础信息"}
+                  </button>
+                </div>
+              </form>
+              <section className="project-config-section project-workspace-manager project-config-step-source" aria-label="项目工作区配置">
               <div className="project-section-heading">
                 <div>
-                  <p className="eyebrow">CODE SOURCE</p>
+                  <p className="eyebrow">CODE SOURCE + EXECUTION MODE</p>
                   <h2>项目工作区</h2>
-                  <p className="muted">每个代码来源独立配置执行模式；任务使用显式选择的工作区，未选择时使用默认工作区。</p>
+                  <p className="muted">每个项目工作区由代码来源和执行模式组成。任务显式选择工作区；未选择时使用默认工作区。</p>
                 </div>
               </div>
               {projectWorkspaces.length === 0 && (
                 <div className="project-workspace-fallback compact">
-                  <strong>使用组织草稿目录</strong>
-                  <span>当前没有项目工作区，任务不会进入共享、独立或操作分支模式。</span>
+                  <strong>尚未配置项目工作区</strong>
+                  <span>无代码任务仍可使用组织草稿目录；代码任务需先添加代码来源并选择执行模式。</span>
                 </div>
               )}
               <div className="project-workspace-create-grid">
@@ -901,15 +900,18 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 </label>
                 <label>
                   执行模式
-                  <select
-                    aria-label="新工作区执行模式"
-                    value={workspacePolicyMode}
-                    onChange={(event) => setWorkspacePolicyMode(event.target.value as WorkspacePolicyMode)}
-                  >
-                    {WORKSPACE_POLICY_OPTIONS.map((option) => (
-                      <option key={option.mode} value={option.mode}>{option.label}</option>
-                    ))}
-                  </select>
+                  <span className="project-workspace-mode-field">
+                    <select
+                      aria-label="新工作区执行模式"
+                      value={workspacePolicyMode}
+                      onChange={(event) => setWorkspacePolicyMode(event.target.value as WorkspacePolicyMode)}
+                    >
+                      {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                        <option key={option.mode} value={option.mode}>{option.label}</option>
+                      ))}
+                    </select>
+                    <small>{workspacePolicyDescription(workspacePolicyMode)}</small>
+                  </span>
                 </label>
                 <button
                   className="project-workspace-create-button"
@@ -917,7 +919,7 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                   onClick={submitWorkspace}
                   type="button"
                 >
-                  {createWorkspace.isPending ? "添加中..." : "添加项目工作区"}
+                  {createWorkspace.isPending ? "添加中..." : "添加工作区"}
                 </button>
               </div>
               {workspaceSourceError && <p className="error-notice">{workspaceSourceError}</p>}
@@ -946,20 +948,23 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                       )}
                       <label className="project-workspace-mode-control">
                         <span>执行模式</span>
-                        <select
-                          aria-label={`${workspace.name} 执行模式`}
-                          disabled={updateWorkspacePolicy.isPending}
-                          value={workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy)}
-                          onChange={(event) => updateWorkspacePolicy.mutate({
-                            workspaceId: workspace.id,
-                            mode: event.target.value as WorkspacePolicyMode,
-                            currentPolicy: workspace.executionWorkspacePolicy,
-                          })}
-                        >
-                          {WORKSPACE_POLICY_OPTIONS.map((option) => (
-                            <option key={option.mode} value={option.mode}>{option.label}</option>
-                          ))}
-                        </select>
+                        <span className="project-workspace-mode-field">
+                          <select
+                            aria-label={`${workspace.name} 执行模式`}
+                            disabled={updateWorkspacePolicy.isPending}
+                            value={workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy)}
+                            onChange={(event) => updateWorkspacePolicy.mutate({
+                              workspaceId: workspace.id,
+                              mode: event.target.value as WorkspacePolicyMode,
+                              currentPolicy: workspace.executionWorkspacePolicy,
+                            })}
+                          >
+                            {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                              <option key={option.mode} value={option.mode}>{option.label}</option>
+                            ))}
+                          </select>
+                          <small>{workspacePolicyDescription(workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy))}</small>
+                        </span>
                       </label>
                     </div>
                     <div className="project-workspace-actions">
@@ -992,13 +997,49 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 ))}
               </div>
             </section>
+              <ProjectOutputLocations codebase={project.data.codebase} />
+              <ExecutionWorkspacePanel
+                abandonPending={abandonExecutionWorkspace.isPending}
+                archivePending={archiveExecutionWorkspace.isPending}
+                cleanupDiscardConfirmed={cleanupDiscardConfirmed}
+                cleanupPending={cleanupExecutionWorkspace.isPending}
+                createPrPending={createExecutionWorkspacePr.isPending}
+                diffPending={loadWorkspaceDiff.isPending}
+                diffPreview={workspaceDiffPreview}
+                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
+                mergePending={mergeExecutionWorkspace.isPending}
+                mergePreview={workspaceMergePreview}
+                mergePreviewPending={previewExecutionWorkspaceMerge.isPending}
+                onAbandon={(workspaceId) => abandonExecutionWorkspace.mutate(workspaceId)}
+                onArchive={(workspaceId) => archiveExecutionWorkspace.mutate(workspaceId)}
+                onCleanup={(workspaceId, discardDirty) => cleanupExecutionWorkspace.mutate({ workspaceId, discardDirty })}
+                onCleanupDiscardConfirmed={setCleanupDiscardConfirmed}
+                onCreatePr={(workspaceId) => createExecutionWorkspacePr.mutate(workspaceId)}
+                onLoadDiff={(workspaceId) => loadWorkspaceDiff.mutate(workspaceId)}
+                onMerge={(workspaceId) => mergeExecutionWorkspace.mutate(workspaceId)}
+                onMergePreview={(workspaceId) => previewExecutionWorkspaceMerge.mutate(workspaceId)}
+                onPreparePr={(workspaceId) => prepareExecutionWorkspacePr.mutate(workspaceId)}
+                onPush={(workspaceId) => pushExecutionWorkspace.mutate(workspaceId)}
+                preparePrPending={prepareExecutionWorkspacePr.isPending}
+                onSelect={(workspaceId) => {
+                  setSelectedExecutionWorkspaceId(workspaceId);
+                  setWorkspaceDiffPreview("");
+                  setWorkspaceMergePreview("");
+                  setCleanupDiscardConfirmed(false);
+                }}
+                pushPending={pushExecutionWorkspace.isPending}
+                selectedId={selectedExecutionWorkspaceId}
+                status={executionWorkspaceStatus.data}
+                statusPending={executionWorkspaceStatus.isFetching}
+                workspaces={executionWorkspaceList}
+              />
             </div>
             {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
             {updateWorkspacePolicy.error && <ErrorNotice error={updateWorkspacePolicy.error} />}
             {setPrimaryWorkspace.error && <ErrorNotice error={setPrimaryWorkspace.error} />}
             {removeWorkspace.error && <ErrorNotice error={removeWorkspace.error} />}
             {removeProject.error && <ErrorNotice error={removeProject.error} />}
-          </form>}
+          </div>}
           {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
             <div className="project-resource-hero-card">
               <div className="project-resource-hero-top">
