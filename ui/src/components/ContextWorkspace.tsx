@@ -45,7 +45,7 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const chats = useQuery({ queryKey: ["chats", orgId], queryFn: () => chatsApi.list(orgId) });
-  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId), refetchInterval: 5000 });
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
@@ -323,7 +323,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
 }
 
 export function AgentsWorkspace({ contentClassName = "", orgId, children }: PropsWithChildren<{ contentClassName?: string; orgId: string }>) {
-  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId), refetchInterval: 5000 });
   const agentList = Array.isArray(agents.data) ? agents.data : [];
   return (
     <ContextWorkspace

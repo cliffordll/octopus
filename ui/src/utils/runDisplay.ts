@@ -16,7 +16,7 @@ function fallbackReasonLabel(value: unknown): string | null {
   return normalized ? sourceLabel(normalized) : null;
 }
 
-function runContextSnapshot(run: Pick<HeartbeatRun, "contextSnapshot"> | null | undefined): Record<string, unknown> | null {
+export function runContextSnapshot(run: Pick<HeartbeatRun, "contextSnapshot"> | null | undefined): Record<string, unknown> | null {
   const snapshot = run?.contextSnapshot;
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   return snapshot as Record<string, unknown>;
@@ -60,12 +60,24 @@ export function runPurpose(run: Pick<HeartbeatRun, "runPurpose" | "invocationSou
   return "task_execution";
 }
 
-export function runPurposeLabel(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail"> | null | undefined): string {
+export function hasIssueContext(run: Pick<HeartbeatRun, "issueId" | "contextSnapshot"> | null | undefined): boolean {
+  if (!run) return false;
+  if (normalize(run.issueId)) return true;
+  const snapshot = runContextSnapshot(run);
+  return Boolean(normalize(snapshot?.issueId as string | null | undefined) || normalize(snapshot?.primaryIssueId as string | null | undefined));
+}
+
+export function runPurposeLabel(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail" | "issueId"> | null | undefined): string {
   const purpose = runPurpose(run);
-  if (purpose === "closeout_followup") return "收尾跟进";
-  if (purpose === "review") return "评审";
-  if (purpose === "heartbeat") return "心跳";
-  return "任务执行";
+  const issueScoped = hasIssueContext(run);
+  if (purpose === "closeout_followup") return "自动收口";
+  if (purpose === "review") return "评审运行";
+  if (purpose === "heartbeat") {
+    if (run?.invocationSource === "timer") return "定时诊断";
+    if (run?.invocationSource === "on_demand") return "运行诊断";
+    return issueScoped ? "任务运行" : "无任务运行";
+  }
+  return issueScoped ? "任务执行" : "运行诊断";
 }
 
 export function isTaskExecutionRun(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail"> | null | undefined): boolean {

@@ -1343,6 +1343,8 @@ class HeartbeatService:
                 or checked_at - baseline < timedelta(seconds=policy["intervalSec"])
             ):
                 continue
+            if not policy.get("runDiagnosticsOnTimer", False):
+                continue
             if await has_active_timer_run(self._session, agent.id):
                 continue
             run = await self.wakeup(
@@ -2969,6 +2971,11 @@ class HeartbeatService:
             else float(HEARTBEAT_INTERVAL_DEFAULT_SEC),
             "wakeOnDemand": (
                 wake_on_demand if isinstance(wake_on_demand, bool) else True
+            ),
+            "runDiagnosticsOnTimer": (
+                config.get("runDiagnosticsOnTimer")
+                if isinstance(config.get("runDiagnosticsOnTimer"), bool)
+                else False
             ),
         }
 

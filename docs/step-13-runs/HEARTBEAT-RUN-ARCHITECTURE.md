@@ -530,7 +530,7 @@ AgentActionsMenu -> Run heartbeat
 
 ```text
 唤醒
-运行心跳
+运行诊断
 ```
 
 这两个按钮在产品语义上高度重叠。当前实现中：
@@ -538,7 +538,7 @@ AgentActionsMenu -> Run heartbeat
 | 按钮 | 接口 | 实际效果 |
 | --- | --- | --- |
 | 唤醒 | `POST /api/agents/{id}/wakeup` | 创建一次 agent wakeup / heartbeat run，可接受 payload |
-| 运行心跳 | `POST /api/agents/{id}/heartbeat/invoke` | 创建一次 on-demand heartbeat run，body 为空 |
+| 运行诊断 | `POST /api/agents/{id}/heartbeat/invoke` | 创建一次 on-demand diagnostic run，body 为空 |
 
 两者都不是“执行某个 issue”。
 

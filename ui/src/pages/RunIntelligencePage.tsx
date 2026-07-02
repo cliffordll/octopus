@@ -49,7 +49,7 @@ export function RunIntelligencePage() {
             <p className="eyebrow">Run Intelligence</p>
             <h1>运行分析</h1>
           </div>
-          <Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回心跳</Link>
+          <Link className="button secondary small-button" to={`/orgs/${orgId}/heartbeat-runs`}>返回运行记录</Link>
         </div>
         <label>
           Run ID 前缀

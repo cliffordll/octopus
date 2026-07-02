@@ -7,7 +7,7 @@ import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { roleLabel, statusLabel } from "../utils/display";
-import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
+import { runDescriptor, runIssueLabel, runPurposeLabel } from "../utils/runDisplay";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
@@ -115,10 +115,10 @@ function buildHeartbeatIntervalPatch(agent: Agent, intervalSec: number): { runti
 
 function schedulerState(agent: Agent): { className: string; label: string } {
   if (heartbeatEnabled(agent) && heartbeatIntervalSec(agent) > 0) {
-    return { className: "heartbeat-state-success", label: "已调度" };
+    return { className: "heartbeat-state-success", label: "检测中" };
   }
   if (heartbeatEnabled(agent)) {
-    return { className: "heartbeat-state-warning", label: "已配置未启用" };
+    return { className: "heartbeat-state-warning", label: "已配置未激活" };
   }
   return { className: "heartbeat-state-muted", label: "未启用" };
 }
@@ -139,11 +139,11 @@ export function HeartbeatRunsPage() {
   const { orgId = "" } = useParams();
   const queryClient = useQueryClient();
   const [intervalDrafts, setIntervalDrafts] = useState<Record<string, string>>({});
-  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId), refetchInterval: 5000 });
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId],
     queryFn: () => heartbeatApi.list(orgId),
-    refetchInterval: 15000,
+    refetchInterval: 3000,
   });
   const setHeartbeatEnabled = useMutation({
     mutationFn: ({ agent, enabled }: { agent: Agent; enabled: boolean }) =>
@@ -211,14 +211,14 @@ export function HeartbeatRunsPage() {
         <section className="panel heartbeat-upstream-card">
           <div className="heartbeat-card-header">
             <div>
-              <p className="eyebrow">Timer Heartbeats</p>
-              <h1>智能体</h1>
-              <p>每个智能体一行。这里用于控制定时心跳策略，并在需要深入检查时跳转到最近运行。</p>
+              <p className="eyebrow">Heartbeat Monitor</p>
+              <h1>心跳</h1>
+              <p>这里汇总智能体状态检测、运行记录和手动诊断。状态检测默认每 300s 执行一次，不等于执行任务。</p>
             </div>
             <Link className="button org-primary-action" to={`/orgs/${orgId}/run-intelligence`}>运行分析</Link>
           </div>
           {rows.length === 0 ? (
-            <div className="heartbeat-empty-state">暂无活跃智能体。创建智能体后再管理组织心跳。</div>
+            <div className="heartbeat-empty-state">暂无活跃智能体。创建智能体后再管理心跳。</div>
           ) : (
             <div className="heartbeat-upstream-list">
               {rows.map((agent) => {
@@ -244,7 +244,7 @@ export function HeartbeatRunsPage() {
                     <div className="heartbeat-scheduler-cell">
                       <strong className={scheduler.className}>{scheduler.label}</strong>
                       <p>{formatInterval(heartbeatIntervalSec(agent))}</p>
-                      <p title={formatDateTime(agent.lastHeartbeatAt)}>最近心跳 {relativeTime(agent.lastHeartbeatAt)}</p>
+                      <p title={formatDateTime(agent.lastHeartbeatAt)}>最近运行 {relativeTime(agent.lastHeartbeatAt)}</p>
                     </div>
                     <div className="heartbeat-run-cell">
                       {latestRun ? <StatusPill status={latestRun.status}>{runState}</StatusPill> : <strong className="heartbeat-state-muted">{runState}</strong>}
@@ -255,7 +255,7 @@ export function HeartbeatRunsPage() {
                       </div>
                     </div>
                     <div className="heartbeat-row-actions">
-                      <div className="heartbeat-toggle-actions" aria-label={`定时心跳状态 ${agent.name}`}>
+                      <div className="heartbeat-toggle-actions" aria-label={`状态检测 ${agent.name}`}>
                         <button
                           className={toggleOn ? "active" : ""}
                           disabled={saving}
@@ -276,7 +276,7 @@ export function HeartbeatRunsPage() {
                       <label className="heartbeat-interval-control">
                         <span>间隔</span>
                         <input
-                          aria-label={`${agent.name} 心跳间隔秒数`}
+                          aria-label={`${agent.name} 状态检测间隔秒数`}
                           min="1"
                           type="number"
                           value={intervalValue}
@@ -292,7 +292,7 @@ export function HeartbeatRunsPage() {
                         保存间隔
                       </button>
                       <button className="secondary" disabled={starting} onClick={() => invokeRun.mutate(agent)} type="button">
-                        {starting ? "启动中..." : "立即运行"}
+                        {starting ? "诊断启动中..." : "运行诊断"}
                       </button>
                     </div>
                   </article>
@@ -306,8 +306,8 @@ export function HeartbeatRunsPage() {
           <div className="heartbeat-card-header">
             <div>
               <p className="eyebrow">Recent Activity</p>
-              <h2>最近活动</h2>
-              <p>这里保持摘要优先。需要 transcript、日志和工作区操作时，打开关联运行。</p>
+              <h2>运行记录</h2>
+              <p>这里只记录真实 agent run：任务执行、自动收口、评审运行、运行诊断或显式开启的定时诊断。</p>
             </div>
           </div>
           {sortedRuns.length === 0 ? (
@@ -327,7 +327,7 @@ export function HeartbeatRunsPage() {
                       <StatusPill status={run.status}>{humanize(run.status)}</StatusPill>
                       <small>{agentNameById.get(run.agentId) ?? "未知智能体"}</small>
                     </div>
-                    <p className="heartbeat-activity-meta" title={runDescriptor(run)}>{runDescriptor(run)}</p>
+                    <p className="heartbeat-activity-meta" title={runDescriptor(run)}>{runPurposeLabel(run)} · {runDescriptor(run)}</p>
                     {issueLabel && <p className="heartbeat-activity-meta" title={issueLabel}>{issueLabel}</p>}
                     {summary && <p>{summary}</p>}
                     <time title={formatDateTime(run.createdAt)}>{relativeTime(run.createdAt)}</time>

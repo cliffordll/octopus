@@ -145,7 +145,7 @@ const SOURCE_LABELS: Record<string, string> = {
   review: "评审",
   system: "系统",
   system_bundled: "内置",
-  timer: "定时心跳",
+  timer: "定时诊断",
 };
 
 const EN_SOURCE_LABELS: Record<string, string> = {

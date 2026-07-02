@@ -115,7 +115,7 @@ it("shows existing run records without collapsing the section by default", async
 
   const runRecordsRegion = await screen.findByRole("region", { name: "运行记录" });
   expect((await within(runRecordsRegion).findAllByText("run-visible")).length).toBeGreaterThan(0);
-  expect(within(runRecordsRegion).getByRole("region", { name: "心跳上下文" })).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("region", { name: "运行上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "折叠运行记录" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: "展开运行记录" })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("来源 assignment")).toBeInTheDocument();
@@ -123,7 +123,7 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(runRecordsRegion).getByText("任务执行")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
-  expect(screen.getByText("最新运行：运行中")).toBeInTheDocument();
+  expect(screen.getByText("最新运行结果：运行中")).toBeInTheDocument();
   const runRecordGroup = within(runRecordsRegion).getByText("run-visible").closest(".issue-run-record-group") as HTMLElement;
   const runRecordMainRow = runRecordGroup.querySelector(".issue-run-record-main-row") as HTMLElement;
   expect(within(runRecordMainRow).queryByRole("button", { name: "取消运行 run-visible" })).not.toBeInTheDocument();
@@ -148,13 +148,13 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(costPanel).getByText("900")).toBeInTheDocument();
 
   await ensureRunExpanded(runRecordsRegion, "run-visible");
-  expect(await within(runRecordsRegion).findByRole("heading", { name: "心跳上下文" })).toBeInTheDocument();
+  expect(await within(runRecordsRegion).findByRole("heading", { name: "运行上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*运行中/ })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*成功/ })).not.toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*来源 automation.*触发原因 issue_passive_followup.*失败/ })).toBeInTheDocument();
   expect(runRecordsRegion).not.toHaveTextContent("未知来源");
   await ensureRunExpanded(runRecordsRegion, "run-second");
-  expect((await within(runRecordsRegion).findAllByRole("heading", { name: "心跳上下文" })).length).toBeGreaterThanOrEqual(2);
+  expect((await within(runRecordsRegion).findAllByRole("heading", { name: "运行上下文" })).length).toBeGreaterThanOrEqual(2);
 });
 
 it("shows an issue and records comments and review decisions", async () => {
@@ -1668,8 +1668,8 @@ it("refreshes issue status after a reviewer run completes", async () => {
 
   renderApp("/orgs/org-1/issues/issue-1");
 
-  expect(await screen.findByText("任务状态：评审中")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText("任务状态：已完成")).toBeInTheDocument());
+  expect(await screen.findByText("任务阶段：评审中")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText("任务阶段：已完成")).toBeInTheDocument());
 });
 
 it("labels cancelled passive follow-up runs explicitly", async () => {
@@ -1752,7 +1752,7 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   await screen.findByRole("heading", { name: "需要收尾的任务" });
-  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
+  expect(screen.getByText("最新运行结果：成功")).toBeInTheDocument();
   const runRecords = await screen.findByRole("region", { name: "运行记录" });
   expect(within(runRecords).getByText("收尾跟进")).toBeInTheDocument();
   expect(within(runRecords).getByText("任务执行")).toBeInTheDocument();
@@ -1824,7 +1824,7 @@ it("does not show user cancelled task runs as page errors", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   await screen.findByRole("heading", { name: "取消后的任务" });
-  expect(screen.getByText("最新运行：已取消")).toBeInTheDocument();
+  expect(screen.getByText("最新运行结果：已取消")).toBeInTheDocument();
   expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
 
@@ -2289,7 +2289,7 @@ it("shows repeat execution after the latest run succeeded", async () => {
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   const runRecordsRegion = await expandRunRecords();
   expect(runRecordsRegion).toHaveTextContent("run-succeeded");
-  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
+  expect(screen.getByText("最新运行结果：成功")).toBeInTheDocument();
   await ensureRunExpanded(runRecordsRegion, "run-succeeded");
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 0" }));
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
@@ -2365,7 +2365,7 @@ it("ignores stale selected runs that do not belong to the issue", async () => {
   renderApp("/orgs/org-1/issues/issue-1");
 
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
-  expect(screen.getByText("最新运行：成功")).toBeInTheDocument();
+  expect(screen.getByText("最新运行结果：成功")).toBeInTheDocument();
   expect(screen.queryByText("运行：运行中")).not.toBeInTheDocument();
 });
 
@@ -2543,7 +2543,7 @@ it("explains queued issue runs from the assignee active queue", async () => {
   const queueRegion = await screen.findByRole("region", { name: "运行队列状态" });
   expect(queueRegion).toHaveTextContent("Builder 正在处理 3 个活跃运行");
   expect(queueRegion).toHaveTextContent("当前任务前面还有 2 个运行");
-  expect(queueRegion).toHaveTextContent("定时心跳");
+  expect(queueRegion).toHaveTextContent("定时诊断");
   expect(queueRegion).toHaveTextContent("assignment");
   expect(queueRegion).toHaveTextContent("issue_assigned");
   expect(queueRegion).toHaveTextContent("OCT-1");

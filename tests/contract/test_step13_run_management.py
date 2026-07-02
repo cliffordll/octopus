@@ -328,7 +328,7 @@ def test_lifespan_scheduler_executes_timer_wakeup(
             f"/api/orgs/{org['id']}/agents",
             json={
                 "name": "Timer Runner",
-                "runtimeConfig": {"heartbeat": {"enabled": True, "intervalSec": 0.1}},
+                "runtimeConfig": {"heartbeat": {"enabled": True, "intervalSec": 0.1, "runDiagnosticsOnTimer": True}},
                 "agentRuntimeConfig": {
                     "command": sys.executable,
                     "args": ["-c", "print('timer-ok')"],

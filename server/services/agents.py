@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import hashlib
@@ -123,6 +123,7 @@ _DEFAULT_HEARTBEAT_INTERVAL_SEC = HEARTBEAT_INTERVAL_DEFAULT_SEC
 _DEFAULT_HEARTBEAT_POLICY: dict[str, Any] = {
     "enabled": True,
     "intervalSec": _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    "runDiagnosticsOnTimer": False,
     "wakeOnDemand": True,
     "preflightEnabled": True,
     "maxConcurrentRuns": AGENT_RUN_CONCURRENCY_DEFAULT,

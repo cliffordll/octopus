@@ -36,8 +36,8 @@ function formatDateTime(value?: string | null): string | undefined {
 }
 
 function schedulerState(agent: InstanceSchedulerHeartbeatAgent): { className: string; label: string } {
-  if (agent.schedulerActive) return { className: "heartbeat-state-success", label: "已调度" };
-  if (agent.heartbeatEnabled) return { className: "heartbeat-state-warning", label: "已配置未启用" };
+  if (agent.schedulerActive) return { className: "heartbeat-state-success", label: "检测中" };
+  if (agent.heartbeatEnabled) return { className: "heartbeat-state-warning", label: "已配置未激活" };
   return { className: "heartbeat-state-muted", label: "未启用" };
 }
 
@@ -91,7 +91,7 @@ export function InstanceHeartbeatsPanel() {
   const heartbeats = useQuery({
     queryKey: ["instance", "scheduler-heartbeats"],
     queryFn: heartbeatApi.listInstanceSchedulerAgents,
-    refetchInterval: 15000,
+    refetchInterval: 5000,
   });
   const setHeartbeatEnabledMutation = useMutation({
     mutationFn: ({ agent, enabled }: { agent: InstanceSchedulerHeartbeatAgent; enabled: boolean }) =>
@@ -135,10 +135,10 @@ export function InstanceHeartbeatsPanel() {
 
       <div className="panel-heading runtime-provider-heading">
         <div className="settings-section-heading-copy">
-          <p className="eyebrow">Timer Heartbeats</p>
+          <p className="eyebrow">Heartbeat Monitor</p>
           <div className="runtime-provider-title-line">
-            <h3>定时心跳</h3>
-            <p className="muted">控制实例内所有组织的智能体定时心跳。</p>
+            <h3>心跳</h3>
+            <p className="muted">控制实例内所有组织的智能体状态检测；不会默认启动真实 agent run。</p>
           </div>
         </div>
       </div>
@@ -147,8 +147,8 @@ export function InstanceHeartbeatsPanel() {
         <section className="runtime-settings-column heartbeat-scheduler-section">
           <div className="runtime-settings-title">
             <h4>Scheduler</h4>
-            <div className="runtime-settings-title-actions heartbeat-instance-summary" aria-label="定时心跳汇总">
-              <span><strong>{scheduledCount}</strong> 已调度</span>
+            <div className="runtime-settings-title-actions heartbeat-instance-summary" aria-label="心跳汇总">
+              <span><strong>{scheduledCount}</strong> 检测中</span>
               <span><strong>{inactiveCount}</strong> 未激活</span>
               <span><strong>{disabledCount}</strong> 关闭</span>
               <span><strong>{grouped.length}</strong> 组织</span>
@@ -187,10 +187,10 @@ export function InstanceHeartbeatsPanel() {
                         <div className="heartbeat-scheduler-cell">
                           <strong className={state.className}>{state.label}</strong>
                           <p>{formatInterval(agent.intervalSec)}</p>
-                          <p title={formatDateTime(agent.lastHeartbeatAt)}>最近心跳 {relativeTime(agent.lastHeartbeatAt)}</p>
+                          <p title={formatDateTime(agent.lastHeartbeatAt)}>最近运行 {relativeTime(agent.lastHeartbeatAt)}</p>
                         </div>
                         <div className="heartbeat-row-actions">
-                          <div className="heartbeat-toggle-actions" aria-label={`定时心跳状态 ${agent.agentName}`}>
+                          <div className="heartbeat-toggle-actions" aria-label={`状态检测 ${agent.agentName}`}>
                             <button
                               className={agent.heartbeatEnabled ? "active" : ""}
                               disabled={saving}
@@ -217,7 +217,7 @@ export function InstanceHeartbeatsPanel() {
                           <label className="heartbeat-interval-control">
                             <span>间隔</span>
                             <input
-                              aria-label={`${agent.agentName} 心跳间隔秒数`}
+                              aria-label={`${agent.agentName} 状态检测间隔秒数`}
                               min="1"
                               type="number"
                               value={intervalValue}

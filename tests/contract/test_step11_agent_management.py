@@ -998,6 +998,7 @@ async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
     assert created["runtimeConfig"]["heartbeat"] == {
         "enabled": True,
         "intervalSec": 300,
+        "runDiagnosticsOnTimer": False,
         "wakeOnDemand": True,
         "preflightEnabled": True,
         "maxConcurrentRuns": 3,

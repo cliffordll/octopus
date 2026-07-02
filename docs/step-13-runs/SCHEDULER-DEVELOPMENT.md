@@ -240,7 +240,7 @@ errorCode
 | scheduled automation follow-up 未到期 | 已安排自动收尾，不是错误 |
 | follow-up 可提前触发 | 显示“立即收尾跟进” |
 | follow-up 尝试用尽 | 需要人工确认收口 |
-| timer heartbeat disabled | 定时心跳关闭，不代表任务执行关闭 |
+| 状态检测 disabled | 状态检测关闭，不代表任务执行关闭 |
 
 ## 9. 测试清单
 
