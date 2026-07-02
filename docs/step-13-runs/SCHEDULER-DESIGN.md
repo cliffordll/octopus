@@ -486,7 +486,7 @@ Agent 页面上的手动运行不是任务执行入口。
 | review wakeup | 有 | 执行评审 | issue workspace |
 | closeout followup | 有 | 针对具体 issue 做收口补偿 | issue workspace |
 
-所以 UI 不应该同时暴露“唤醒”和“运行心跳”两个 agent 级按钮。建议只保留一个：
+所以 UI 不应该同时暴露“唤醒”和“运行诊断”两个 agent 级按钮。建议只保留一个：
 
 ```text
 运行诊断

@@ -333,7 +333,8 @@ function activityTitle(event: ActivityEvent): string {
     case "issue.convergence_review_requested":
       return "需要收敛评审";
     case "heartbeat.invoked":
-      return "唤醒智能体";
+      return "启动运行";
+
     case "heartbeat.retried":
       return "重试运行";
     default:
@@ -2121,26 +2122,31 @@ function IssueRunDetailsPanel({
         streamLog={streamLog}
       />
 
-      <section aria-label="心跳上下文" className="issue-run-output-block">
+      <section aria-label="运行上下文" className="issue-run-output-block">
+
         <div className="issue-run-output-heading">
           <div>
-            <h3>心跳上下文</h3>
+            <h3>运行上下文</h3>
+
           </div>
           <div className="issue-run-operation-actions">
-            <button aria-label={heartbeatContextExpanded ? "折叠心跳上下文" : "展开心跳上下文"} className="secondary small-button" type="button" onClick={() => setHeartbeatContextExpanded((value) => !value)}>
+            <button aria-label={heartbeatContextExpanded ? "折叠运行上下文" : "展开运行上下文"} className="secondary small-button" type="button" onClick={() => setHeartbeatContextExpanded((value) => !value)}>
+
               {heartbeatContextExpanded ? "折叠" : "展开"}
             </button>
           </div>
         </div>
         {!heartbeatContextExpanded ? (
-          <p className="muted">心跳上下文已折叠。</p>
+          <p className="muted">运行上下文已折叠。</p>
+
         ) : (
           <>
         {heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
         {heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
         {heartbeatContext.data && (
           <details className="issue-run-inline-details">
-            <summary>心跳上下文详情</summary>
+            <summary>运行上下文详情</summary>
+
             <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
           </details>
         )}

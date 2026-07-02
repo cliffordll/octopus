@@ -552,6 +552,7 @@ async def test_wake_on_demand_false_skips_non_timer_wakeup(
             "heartbeat": {
                 "enabled": True,
                 "intervalSec": 1,
+                "runDiagnosticsOnTimer": True,
                 "wakeOnDemand": False,
             }
         },
@@ -585,6 +586,7 @@ async def test_wake_on_demand_false_does_not_block_timer_wakeup(
             "heartbeat": {
                 "enabled": True,
                 "intervalSec": 1,
+                "runDiagnosticsOnTimer": True,
                 "wakeOnDemand": False,
             }
         },
@@ -610,7 +612,7 @@ async def test_timer_wakeup_does_not_stack_when_timer_run_is_active(
     agent = await _seed_agent(
         session,
         name="TimerCoalesces",
-        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1, "runDiagnosticsOnTimer": True}},
     )
     heartbeat = HeartbeatService(session)
 
@@ -743,7 +745,7 @@ async def test_cancel_retry_and_timer_preserve_recovery_context(
     agent = await _seed_agent(
         session,
         name="Recover",
-        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1, "runDiagnosticsOnTimer": True}},
     )
     heartbeat = HeartbeatService(session)
 

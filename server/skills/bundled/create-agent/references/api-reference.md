@@ -59,6 +59,7 @@ Representative shape:
     "heartbeat": {
       "enabled": true,
       "intervalSec": 300,
+      "runDiagnosticsOnTimer": false,
       "wakeOnDemand": true,
       "maxConcurrentRuns": 3
     }
@@ -93,6 +94,7 @@ Request body:
     "heartbeat": {
       "enabled": true,
       "intervalSec": 300,
+      "runDiagnosticsOnTimer": false,
       "wakeOnDemand": true,
       "maxConcurrentRuns": 3
     }

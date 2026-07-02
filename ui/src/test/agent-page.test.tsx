@@ -186,7 +186,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "归档" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "唤醒" })).toBeInTheDocument();
-  expect(within(header!).getByRole("button", { name: "运行心跳" })).toBeInTheDocument();
+  expect(within(header!).getByRole("button", { name: "运行诊断" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
   const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
   expect(within(tabs).getByRole("link", { name: "说明" })).toHaveAttribute(
@@ -288,7 +288,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
 
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
   await userEvent.click(screen.getByRole("button", { name: "唤醒" }));
-  await userEvent.click(screen.getByRole("button", { name: "运行心跳" }));
+  await userEvent.click(screen.getByRole("button", { name: "运行诊断" }));
   await userEvent.click(screen.getByRole("button", { name: "归档" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/pause",
@@ -337,7 +337,7 @@ it("disables runtime actions for agents pending approval", async () => {
   expect(screen.getByRole("button", { name: "聊天" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "唤醒" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "运行心跳" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "运行诊断" })).toBeDisabled();
 });
 
 it("assigns a task to the current agent from a modal", async () => {
@@ -550,7 +550,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
   expect(await screen.findByRole("heading", { name: "身份" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "运行策略" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "权限" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "API 密钥" })).toBeInTheDocument();
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
@@ -580,10 +580,10 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
     }),
   );
 
-  await userEvent.click(screen.getByRole("link", { name: "运行" }));
+  await userEvent.click(screen.getByRole("link", { name: "运行记录" }));
   const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
   expect(queueRegion).toHaveTextContent("3 个活跃运行");
-  expect(within(queueRegion).getByText("定时心跳")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("定时诊断")).toBeInTheDocument();
   expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
   expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
@@ -602,12 +602,12 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
   const rail = screen.getByTestId("agent-runs-list-pane");
   expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
-  expect(within(rail).getAllByText("定时心跳").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("定时诊断").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getByText(/issue_passive_followup/)).toBeInTheDocument();
   expect(within(rail).getByText("OCT-1")).toBeInTheDocument();
-  expect(within(rail).getByText("定时心跳到点触发，用来检查智能体是否需要继续工作。")).toBeInTheDocument();
+  expect(within(rail).getByText("定时运行诊断到点触发；这是显式开启后的真实 agent run，不作为任务调度主链路。")).toBeInTheDocument();
   expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
   expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
   expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
@@ -654,7 +654,7 @@ it("saves heartbeat policy from the agent configuration form", async () => {
 
   expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
-  const interval = screen.getByLabelText("心跳间隔秒数");
+  const interval = screen.getByLabelText("状态检测间隔秒数");
   expect(interval).toHaveValue(120);
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
   const maxConcurrentRuns = screen.getByLabelText("最大并发运行数");
@@ -670,7 +670,7 @@ it("saves heartbeat policy from the agent configuration form", async () => {
     "/api/agents/agent-1",
     expect.objectContaining({
       method: "PATCH",
-      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":450,"wakeOnDemand":true,"preflightEnabled":false,"maxConcurrentRuns":3}'),
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":450,"runDiagnosticsOnTimer":false,"wakeOnDemand":true,"preflightEnabled":false,"maxConcurrentRuns":3}'),
     }),
   );
 });
@@ -700,15 +700,17 @@ it("materializes the default heartbeat policy from the agent configuration form"
 
   expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
-  expect(screen.getByLabelText("定时心跳")).toHaveValue("enabled");
-  expect(screen.getByLabelText("心跳间隔秒数")).toHaveValue(300);
-  expect(screen.getByLabelText("按需唤醒")).toHaveValue("enabled");
+  expect(screen.getByLabelText("状态检测")).toHaveValue("enabled");
+  expect(screen.getByLabelText("定时运行诊断")).toHaveValue("disabled");
+  expect(screen.getByLabelText("状态检测间隔秒数")).toHaveValue(300);
+  expect(screen.getByLabelText("允许手动诊断")).toHaveValue("enabled");
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
   expect(screen.getByLabelText("最大并发运行数")).toHaveValue(3);
   await userEvent.click(screen.getByText("高级 JSON"));
   const runtimeConfigJson = String((screen.getByLabelText("Runtime config") as HTMLTextAreaElement).value);
   expect(runtimeConfigJson).toContain('"enabled": true');
   expect(runtimeConfigJson).toContain('"intervalSec": 300');
+  expect(runtimeConfigJson).toContain('"runDiagnosticsOnTimer": false');
   expect(runtimeConfigJson).toContain('"wakeOnDemand": true');
 
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -717,7 +719,7 @@ it("materializes the default heartbeat policy from the agent configuration form"
     "/api/agents/agent-1",
     expect.objectContaining({
       method: "PATCH",
-      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":300,"wakeOnDemand":true,"preflightEnabled":true,"maxConcurrentRuns":3}'),
+      body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":300,"runDiagnosticsOnTimer":false,"wakeOnDemand":true,"preflightEnabled":true,"maxConcurrentRuns":3}'),
     }),
   );
 });

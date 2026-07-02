@@ -53,15 +53,15 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
 
   renderApp("/orgs/org-1/heartbeat-runs");
 
-  expect(await screen.findByRole("heading", { name: "智能体" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
   const row = await screen.findByTestId("org-heartbeat-row");
   expect(within(row).getByRole("link", { name: "Builder" })).toBeInTheDocument();
-  expect(within(row).getByText("已调度")).toBeInTheDocument();
+  expect(within(row).getByText("检测中")).toBeInTheDocument();
   expect(within(row).getByText("运行中")).toBeInTheDocument();
   expect(within(row).getByText("检查运行状态")).toBeInTheDocument();
-  expect(screen.getByText("automation · issue_passive_followup")).toBeInTheDocument();
+  expect(screen.getByText(/automation · issue_passive_followup/)).toBeInTheDocument();
   expect(screen.getByText("OCT-1")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "最近活动" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "运行记录" })).toBeInTheDocument();
 
   await userEvent.click(within(row).getByRole("button", { name: "关闭" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -72,7 +72,7 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
     }),
   ));
 
-  await userEvent.click(within(row).getByRole("button", { name: "立即运行" }));
+  await userEvent.click(within(row).getByRole("button", { name: "运行诊断" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
     "/api/agents/agent-1/heartbeat/invoke",
     expect.objectContaining({ method: "POST" }),
@@ -111,7 +111,7 @@ it("enabling an organization heartbeat with no interval writes a default interva
   expect(within(row).getByText("每 300s")).toBeInTheDocument();
   expect(within(row).queryByText("未设置间隔")).not.toBeInTheDocument();
   expect(within(row).queryByText("每 0s")).not.toBeInTheDocument();
-  expect(within(row).getByLabelText("Builder 心跳间隔秒数")).toHaveValue(300);
+  expect(within(row).getByLabelText("Builder 状态检测间隔秒数")).toHaveValue(300);
 
   await userEvent.click(within(row).getByRole("button", { name: "启用" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -154,7 +154,7 @@ it("updates the organization heartbeat interval inline", async () => {
   renderApp("/orgs/org-1/heartbeat-runs");
 
   const row = await screen.findByTestId("org-heartbeat-row");
-  const interval = within(row).getByLabelText("Builder 心跳间隔秒数");
+  const interval = within(row).getByLabelText("Builder 状态检测间隔秒数");
   await userEvent.clear(interval);
   await userEvent.type(interval, "180");
   await userEvent.click(within(row).getByRole("button", { name: "保存间隔" }));
@@ -197,7 +197,7 @@ it("renders the heartbeat controls from the instance settings path", async () =>
 
   renderApp("/instance/settings/heartbeats");
 
-  expect(await screen.findByRole("heading", { name: "定时心跳" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
   expect(await screen.findByTestId("instance-heartbeat-row")).toBeInTheDocument();
 });
 
@@ -244,7 +244,7 @@ it("enabling an instance heartbeat with no interval writes a default interval an
   expect(within(row).getByText("每 300s")).toBeInTheDocument();
   expect(within(row).queryByText("未设置间隔")).not.toBeInTheDocument();
   expect(within(row).queryByText("每 0s")).not.toBeInTheDocument();
-  expect(within(row).getByLabelText("Builder 心跳间隔秒数")).toHaveValue(300);
+  expect(within(row).getByLabelText("Builder 状态检测间隔秒数")).toHaveValue(300);
 
   await userEvent.click(within(row).getByRole("button", { name: "启用" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -298,7 +298,7 @@ it("updates the instance heartbeat interval inline", async () => {
   renderApp("/instance/settings/heartbeats");
 
   const row = await screen.findByTestId("instance-heartbeat-row");
-  const interval = within(row).getByLabelText("Builder 心跳间隔秒数");
+  const interval = within(row).getByLabelText("Builder 状态检测间隔秒数");
   await userEvent.clear(interval);
   await userEvent.type(interval, "240");
   await userEvent.click(within(row).getByRole("button", { name: "保存间隔" }));
@@ -347,7 +347,7 @@ it("shows instance heartbeat controls inside settings", async () => {
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   await userEvent.click(dialog.getByRole("button", { name: /心跳/ }));
-  expect(dialog.getByRole("heading", { name: "定时心跳" })).toBeInTheDocument();
+  expect(dialog.getByRole("heading", { name: "心跳" })).toBeInTheDocument();
   expect(dialog.getByLabelText("心跳设置")).toHaveClass("runtime-settings");
   expect(dialog.getByText("Scheduler")).toBeInTheDocument();
   expect(await dialog.findByTestId("instance-heartbeat-row")).toBeInTheDocument();
@@ -364,6 +364,6 @@ it("shows empty states when an organization has no heartbeat data", async () => 
 
   renderApp("/orgs/org-empty/heartbeat-runs");
 
-  expect(await screen.findByText("暂无活跃智能体。创建智能体后再管理组织心跳。")).toBeInTheDocument();
+  expect(await screen.findByText("暂无活跃智能体。创建智能体后再管理心跳。")).toBeInTheDocument();
   expect(await screen.findByText("暂无运行记录。")).toBeInTheDocument();
 });

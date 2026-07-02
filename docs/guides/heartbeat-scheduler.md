@@ -5,22 +5,22 @@
 核心结论：
 
 ```text
-/instance/settings/heartbeats 管的是 timer heartbeat
+/instance/settings/heartbeats 管的是 agent 状态检测
 不是所有 wakeup 的总开关
 ```
 
-也就是说，关闭该页面中的某个 agent heartbeat，只会关闭该 agent 的定时心跳；如果其他唤醒来源仍然开启，例如任务分配、审批通过、评论 mention、手动 invoke、retry 或 automation，该 agent 仍可能被唤醒。
+也就是说，关闭该页面中的某个 agent heartbeat，只会关闭该 agent 的状态检测；如果其他唤醒来源仍然开启，例如任务分配、审批通过、评论 mention、手动 invoke、retry 或 automation，该 agent 仍可能被唤醒。
 
 ## 核心概念
 
 | 概念 | 作用 |
 | --- | --- |
-| scheduler | server 后台周期任务，按固定间隔扫描 agent timer heartbeat |
-| timer heartbeat | 按 agent 配置的 interval 自动触发的 heartbeat |
+| scheduler | server 后台周期任务，按固定间隔扫描 agent 状态检测配置 |
+| 状态检测 | 按 agent 配置的 interval 记录/更新 agent 健康状态；默认不创建真实 agent run |
 | wakeup request | 一次唤醒请求，来源可能是 timer、assignment、review、manual、automation 等 |
 | heartbeat run | 真正进入执行队列的 run，通常由 wakeup 创建 |
 | agent heartbeat policy | agent runtimeConfig 中的 heartbeat 配置 |
-| preflight | timer 触发前检查 agent 是否确实有可执行任务 |
+| 定时运行诊断 | 显式开启后，timer 到点才创建真实 agent run；默认关闭 |
 
 ## 全局 scheduler 开关
 
