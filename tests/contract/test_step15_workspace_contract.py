@@ -1430,8 +1430,29 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
             )
             session.add(run)
             await session.flush()
-            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+            workspace_service = WorkspaceService(session)
+            context = await workspace_service.prepare_runtime_context_for_run(
                 run.id, run.context_snapshot
+            )
+            issue_two = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Reuse managed checkout",
+            )
+            session.add(issue_two)
+            await session.flush()
+            run_two = HeartbeatRun(
+                org_id=org.id,
+                agent_id="agent-managed-shared-two",
+                invocation_source="on_demand",
+                trigger_detail="manual",
+                status="queued",
+                context_snapshot={"issueId": issue_two.id},
+            )
+            session.add(run_two)
+            await session.flush()
+            context_two = await workspace_service.prepare_runtime_context_for_run(
+                run_two.id, run_two.context_snapshot
             )
             detail = await project_service.get_by_id(project["id"])
             await session.commit()
@@ -1440,7 +1461,9 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
 
     assert project_workspace is not None
     assert context is not None
+    assert context_two is not None
     workspace = context["workspace"]["octopusWorkspace"]
+    workspace_two = context_two["workspace"]["octopusWorkspace"]
     expected_checkout = (
         org_root
         / "projects"
@@ -1451,6 +1474,8 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
     assert workspace["cwd"] == str(expected_checkout)
+    assert workspace_two["id"] == workspace["id"]
+    assert workspace_two["cwd"] == str(expected_checkout)
     assert workspace["workspaceKind"] == "project_execution"
     assert workspace["codeSourceKind"] == "managed_checkout"
     assert (
@@ -1613,7 +1638,9 @@ async def test_run_preflight_uses_org_workspace_when_project_has_no_workspace(
     assert context is not None
     workspace = context["workspace"]["octopusWorkspace"]
     assert workspace["cwd"] == str(org_root)
+    assert workspace["mode"] == "organization_scratch"
     assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["resolvedMode"] == "organization_scratch"
     assert workspace["metadata"]["fallback"] == "organization_workspace"
     assert workspace["metadata"]["warnings"] == [
         f'Project has no workspace configured. Run will start in organization scratch workspace "{org_root}".'
@@ -1697,7 +1724,9 @@ async def test_run_preflight_uses_org_workspace_when_issue_has_no_project(
     assert context["executionWorkspaceId"] is None
     assert workspace["id"] is None
     assert workspace["cwd"] == str(org_root)
+    assert workspace["mode"] == "organization_scratch"
     assert workspace["projectWorkspaceId"] is None
+    assert workspace["metadata"]["resolvedMode"] == "organization_scratch"
     assert workspace["metadata"]["fallback"] == "organization_workspace"
     assert workspace["metadata"]["warnings"] == [
         f'Issue has no project configured. Run will start in organization scratch workspace "{org_root}".'
@@ -2093,6 +2122,8 @@ async def test_unassigned_heartbeat_uses_read_only_agent_workspace(
     workspace = context.workspace["octopusWorkspace"]
     assert workspace["cwd"] == str(expected_cwd)
     assert workspace["mode"] == "agent_default"
+    assert workspace["workspaceKind"] == "agent_scratch"
+    assert workspace["metadata"]["resolvedMode"] == "agent_default"
     assert workspace["strategyType"] == "adapter_managed"
     assert workspace["gitWritePolicy"] == "read_only"
     assert expected_cwd.is_dir()
@@ -3221,7 +3252,11 @@ async def test_project_without_workspace_uses_organization_scratch() -> None:
 
             workspace = await WorkspaceService(session).resolve_for_issue(issue)
             assert workspace is not None
-            assert workspace["metadata"]["workspaceKind"] == "organization_scratch"
+            metadata = workspace["metadata"]
+            assert metadata is not None
+            assert metadata["workspaceKind"] == "organization_scratch"
+            assert metadata["resolvedMode"] == "organization_scratch"
+            assert workspace["mode"] == "organization_scratch"
             assert workspace["projectWorkspaceId"] is None
     finally:
         await engine.dispose()
@@ -3257,8 +3292,11 @@ async def test_project_without_workspace_does_not_resolve_operator_mode() -> Non
 
             workspace = await WorkspaceService(session).resolve_for_issue(issue)
             assert workspace is not None
-            assert workspace["metadata"]["workspaceKind"] == "organization_scratch"
-            assert workspace["mode"] == "shared_workspace"
+            metadata = workspace["metadata"]
+            assert metadata is not None
+            assert metadata["workspaceKind"] == "organization_scratch"
+            assert metadata["resolvedMode"] == "organization_scratch"
+            assert workspace["mode"] == "organization_scratch"
     finally:
         await engine.dispose()
 
