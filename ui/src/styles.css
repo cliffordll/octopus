@@ -1859,9 +1859,8 @@ small {
 
 .project-config-step-basic { order: 10; }
 .project-config-step-source { order: 20; }
-.project-config-step-save { order: 15; }
+.project-config-step-output { order: 40; }
 .project-config-step-history { order: 60; }
-.project-config-step-save:empty { display: none; }
 
 .project-config-section,
 .project-runtime-section {
@@ -2290,6 +2289,17 @@ button.project-workspace-item:hover,
 .project-workspace-mode-control select {
   min-width: 0;
   width: 100%;
+}
+.project-workspace-mode-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.project-workspace-mode-field small {
+  color: #6f7b8e;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .project-workspace-badges,
