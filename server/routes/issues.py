@@ -285,6 +285,9 @@ async def create_issue_route(
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
     )
+    assignee_agent_id = issue.get("assigneeAgentId")
+    if assignee_agent_id and issue["status"] != "backlog":
+        _schedule_dispatch(request, assignee_agent_id)
     await queue_issue_review_wakeup(
         heartbeat,
         issue,
@@ -835,6 +838,8 @@ async def create_issue_comment_route(
             extra_payload={"commentId": comment.id},
             extra_context={"commentId": comment.id, "commentBody": comment.body},
         )
+        if assignee_agent_id:
+            _schedule_dispatch(request, assignee_agent_id)
     for mentioned in mentioned_agents:
         mentioned_agent_id = mentioned["id"]
         if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
@@ -850,6 +855,7 @@ async def create_issue_comment_route(
             actor_type="agent" if actor.actor_type == "agent" else "user",
             actor_id=actor.actor_id,
         )
+        _schedule_dispatch(request, mentioned_agent_id)
     return {
         "id": comment.id,
         "issueId": comment.issue_id,

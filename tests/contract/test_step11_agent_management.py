@@ -1566,6 +1566,197 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state["lastRunStatus"] == "succeeded"
 
 
+async def test_create_assigned_issue_dispatches_assignee_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="create-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Create Dispatch Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('created issue dispatched')"],
+            },
+        },
+    )
+
+    create_code, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Dispatch on create",
+            "status": "todo",
+            "assigneeAgentId": agent["id"],
+        },
+    )
+
+    assert create_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun)
+                    .where(HeartbeatRun.agent_id == agent["id"])
+                    .order_by(HeartbeatRun.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest)
+                    .where(AgentWakeupRequest.agent_id == agent["id"])
+                    .order_by(AgentWakeupRequest.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    task_runs = [
+        run
+        for run in runs
+        if run.run_purpose == "task_execution"
+        and run.context_snapshot
+        and run.context_snapshot.get("issueId") == issue["id"]
+    ]
+    assert len(task_runs) == 1
+    assert task_runs[0].status == "succeeded"
+    assert task_runs[0].invocation_source == "assignment"
+    assert task_runs[0].context_snapshot["wakeReason"] == "issue_assigned"
+    assert wakeups[0].source == "assignment"
+    assert wakeups[0].reason == "issue_assigned"
+
+
+async def test_issue_comment_dispatches_assignee_wakeup_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="comment-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Comment Dispatch Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('comment dispatched')"],
+            },
+        },
+    )
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                identifier="COM-1",
+                title="Dispatch on comment",
+                status="todo",
+                priority="medium",
+                assignee_agent_id=agent["id"],
+            )
+        )
+        await session.commit()
+
+    comment_code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "Please continue."},
+    )
+
+    assert comment_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        run = (
+            await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.agent_id == agent["id"],
+                    HeartbeatRun.invocation_source == "assignment",
+                )
+            )
+        ).scalar_one()
+
+    assert run.status == "succeeded"
+    assert run.run_purpose == "task_execution"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["wakeReason"] == "issue_comment_added"
+
+
+async def test_issue_comment_mention_dispatches_mentioned_agent_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="mention-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "MentionHelper",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('mention dispatched')"],
+            },
+        },
+    )
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                identifier="MEN-1",
+                title="Dispatch on mention",
+                status="todo",
+                priority="medium",
+            )
+        )
+        await session.commit()
+
+    comment_code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@MentionHelper please take a look."},
+    )
+
+    assert comment_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        run = (
+            await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.agent_id == agent["id"],
+                    HeartbeatRun.invocation_source == "on_demand",
+                )
+            )
+        ).scalar_one()
+
+    assert run.status == "succeeded"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["wakeReason"] == "issue_comment_mentioned"
+
+
 async def test_successful_issue_run_without_closeout_queues_passive_followup(
     app: FastAPI,
     session_factory: async_sessionmaker,
@@ -1623,8 +1814,8 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     await _wait_for_dispatch(app)
 
     _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
-    assert detail["status"] == "failed"
-    assert detail["errorCode"] == "closeout_missing"
+    assert detail["status"] == "succeeded"
+    assert detail["errorCode"] is None
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
     assert issue_after["status"] == "in_progress"
@@ -1668,11 +1859,20 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
             )
         ).scalar_one_or_none()
         issue_row = await session.get(Issue, issue["id"])
+        premature_activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue["id"],
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one_or_none()
         assert issue_row is not None
         assert issue_row.execution_run_id is None
         assert issue_row.checkout_run_id is None
 
     assert followup_run is None
+    assert premature_activity is None
 
     await dispatch_queued_agent(app.state.session_factory, agent["id"])
 
@@ -1703,8 +1903,8 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         assert issue_row is not None
         assert followup_run.invocation_source == "automation"
         assert followup_run.run_purpose == "closeout_followup"
-        assert followup_run.status == "failed"
-        assert followup_run.error_code == "closeout_missing"
+        assert followup_run.status == "succeeded"
+        assert followup_run.error_code is None
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -1714,6 +1914,28 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
             followup_run.context_snapshot["passiveFollowup"]["reason"]
             == "missing_closure"
         )
+        second_followup = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent["id"],
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                    AgentWakeupRequest.id != rows[0].id,
+                )
+            )
+        ).scalar_one()
+        premature_activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue["id"],
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one_or_none()
+        assert second_followup.payload["originRunId"] == run["id"]
+        assert second_followup.payload["previousRunId"] == followup_run.id
+        assert second_followup.payload["attempt"] == 2
+        assert second_followup.status == "scheduled"
+        assert premature_activity is None
         assert issue_row.execution_run_id is None
         assert issue_row.checkout_run_id is None
 
@@ -2013,7 +2235,7 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
     assert rows == []
 
 
-async def test_successful_issue_run_without_closeout_is_failed_and_records_event(
+async def test_successful_issue_run_without_closeout_waits_for_passive_followup(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -2068,14 +2290,12 @@ async def test_successful_issue_run_without_closeout_is_failed_and_records_event
                     ActivityLog.action == "issue.closure_needs_operator_review",
                 )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
 
-    assert final.status == "failed"
-    assert final.error_code == "closeout_missing"
-    assert "control-plane issue done" in (final.error or "")
-    assert activity.run_id == run_id
-    assert activity.details["originRunId"] == run_id
-    assert activity.details["attempts"] == 1
+    assert final.status == "succeeded"
+    assert final.error_code is None
+    assert final.error is None
+    assert activity is None
 
 
 async def test_user_comment_after_successful_issue_run_skips_passive_followup(
@@ -2825,7 +3045,7 @@ async def test_passive_followup_exhaustion_with_reviewer_queues_convergence_revi
     assert activity.details["previousRunId"] == run_id
 
 
-async def test_successful_passive_followup_without_closeout_is_failed_and_escalated(
+async def test_successful_passive_followup_without_closeout_waits_before_final_attempt(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -2889,15 +3109,13 @@ async def test_successful_passive_followup_without_closeout_is_failed_and_escala
                     ActivityLog.action == "issue.closure_needs_operator_review",
                 )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
 
-    assert final.status == "failed"
-    assert final.error_code == "closeout_missing"
-    assert "control-plane issue done" in (final.error or "")
+    assert final.status == "succeeded"
+    assert final.error_code is None
+    assert final.error is None
     assert issue.status == "in_progress"
-    assert activity.run_id == run_id
-    assert activity.details["originRunId"] == origin_run_id
-    assert activity.details["attempts"] == 1
+    assert activity is None
 
 
 async def test_successful_reviewer_run_without_decision_queues_review_closeout(

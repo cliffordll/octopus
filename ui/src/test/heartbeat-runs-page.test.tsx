@@ -197,7 +197,7 @@ it("renders the heartbeat controls from the instance settings path", async () =>
 
   renderApp("/instance/settings/heartbeats");
 
-  expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "定时心跳" })).toBeInTheDocument();
   expect(await screen.findByTestId("instance-heartbeat-row")).toBeInTheDocument();
 });
 
@@ -347,7 +347,7 @@ it("shows instance heartbeat controls inside settings", async () => {
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   await userEvent.click(dialog.getByRole("button", { name: /心跳/ }));
-  expect(dialog.getByRole("heading", { name: "心跳" })).toBeInTheDocument();
+  expect(dialog.getByRole("heading", { name: "定时心跳" })).toBeInTheDocument();
   expect(dialog.getByLabelText("心跳设置")).toHaveClass("runtime-settings");
   expect(dialog.getByText("Scheduler")).toBeInTheDocument();
   expect(await dialog.findByTestId("instance-heartbeat-row")).toBeInTheDocument();
@@ -365,5 +365,5 @@ it("shows empty states when an organization has no heartbeat data", async () => 
   renderApp("/orgs/org-empty/heartbeat-runs");
 
   expect(await screen.findByText("暂无活跃智能体。创建智能体后再管理组织心跳。")).toBeInTheDocument();
-  expect(await screen.findByText("暂无心跳运行记录。")).toBeInTheDocument();
+  expect(await screen.findByText("暂无运行记录。")).toBeInTheDocument();
 });
