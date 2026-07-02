@@ -1543,7 +1543,9 @@ class WorkspaceService:
                 "gitWritePolicy": "read_only",
                 "metadata": {
                     **(fallback.get("metadata") or {}),
+                    "resolvedMode": "agent_default",
                     "fallback": "agent_heartbeat_workspace",
+                    "workspaceKind": "agent_scratch",
                     "gitWritePolicy": "read_only",
                 },
             }
@@ -1618,7 +1620,7 @@ class WorkspaceService:
             cwd=str(org_root),
             warning=(
                 "Chat has no primary issue workspace. Run will start in "
-                f'shared organization workspace "{org_root}".'
+                f'organization scratch workspace "{org_root}".'
             ),
         )
         workspace = dict(
@@ -2486,9 +2488,9 @@ class WorkspaceService:
                 "projectId": None,
                 "projectWorkspaceId": None,
                 "sourceIssueId": issue.id,
-                "mode": "shared_workspace",
+                "mode": "organization_scratch",
                 "strategyType": "organization_workspace",
-                "name": "Organization workspace",
+                "name": "Organization scratch",
                 "status": "active",
                 "cwd": cwd,
                 "repoUrl": None,
@@ -2504,7 +2506,7 @@ class WorkspaceService:
                 "cleanupReason": None,
                 "metadata": {
                     "resolvedForIssueId": issue.id,
-                    "resolvedMode": "shared_workspace",
+                    "resolvedMode": "organization_scratch",
                     "fallback": "organization_workspace",
                     "workspaceKind": "organization_scratch",
                     "codeSourceKind": "none",
