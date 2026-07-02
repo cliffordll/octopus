@@ -283,6 +283,30 @@ def test_issue_checkout_and_heartbeat_context_commands() -> None:
     assert requests[1].url.path == "/api/issues/issue-1/heartbeat-context"
 
 
+def test_issue_checkout_defaults_agent_and_statuses_from_runtime_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCTOPUS_AGENT_ID", "agent-env")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "assigneeAgentId": "agent-env"})
+
+    assert (
+        main(
+            ["issue", "checkout", "issue-1"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/issue-1/checkout"
+    assert requests[0].read() == (
+        b'{"agentId":"agent-env","expectedStatuses":["todo","in_progress"]}'
+    )
+
+
 def test_issue_get_json_outputs_work_products() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/issues/issue-1"

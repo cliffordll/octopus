@@ -39,6 +39,9 @@ description: 通过 `control-plane` CLI 与控制平面交互，在 heartbeat �
 
 - 不要在正常 heartbeat 中向用户索要 `OCTOPUS_API_KEY`。
 - 不要硬编码 API URL。
+- 不要读取或创建 workspace `.env` 文件来恢复 `OCTOPUS_*`；这些值由 runtime 直接注入进程环境。
+- 本地 adapter 和 packaged desktop 会把 `control-plane` 放到 `PATH`；不要硬编码 managed `.octopus/bin` shim 路径。
+- 手工检查环境变量时使用当前 shell 的正确语法：PowerShell 使用 `$env:OCTOPUS_AGENT_ID`，POSIX shell 使用 `$OCTOPUS_AGENT_ID`。
 - 优先读取注入的上下文并使用 CLI 完成控制平面协作。
 
 ## Close-out gate（关闭门禁）

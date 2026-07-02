@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import mimetypes
+import os
 from pathlib import Path
 from typing import Any
 
@@ -53,9 +54,9 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "checkout", help="Checkout an issue for an agent"
     )
     checkout_parser.add_argument("issue_id")
-    checkout_parser.add_argument("--agent-id", required=True)
+    checkout_parser.add_argument("--agent-id")
     checkout_parser.add_argument(
-        "--expected-status", action="append", required=True, dest="expected_statuses"
+        "--expected-status", action="append", dest="expected_statuses"
     )
     checkout_parser.set_defaults(handler=checkout_issue)
 
@@ -182,12 +183,16 @@ def list_issue_runs(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def checkout_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    agent_id = args.agent_id or os.environ.get("OCTOPUS_AGENT_ID")
+    if not agent_id:
+        raise ValueError("--agent-id is required when OCTOPUS_AGENT_ID is not set.")
+    expected_statuses = args.expected_statuses or ["todo", "in_progress"]
     return client.request(
         "POST",
         f"/api/issues/{args.issue_id}/checkout",
         json={
-            "agentId": args.agent_id,
-            "expectedStatuses": args.expected_statuses,
+            "agentId": agent_id,
+            "expectedStatuses": expected_statuses,
         },
     )
 

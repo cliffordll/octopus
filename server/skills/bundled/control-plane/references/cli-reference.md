@@ -7,7 +7,7 @@ Stable CLI contract for agents using the bundled `control-plane` skill. Prefer t
 - All commands support `--json`.
 - `--org-id` defaults to `OCTOPUS_ORG_ID` when relevant.
 - `--run-id` defaults to `OCTOPUS_RUN_ID` and is attached to mutating requests when available.
-- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID`.
+- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID` and defaults `--expected-status` to `todo` and `in_progress`.
 
 ## JSON Output Contract
 

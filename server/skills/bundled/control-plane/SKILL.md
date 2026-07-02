@@ -38,7 +38,9 @@ Rules:
 
 - Never ask for `OCTOPUS_API_KEY` inside a normal heartbeat.
 - Never hard-code the API URL.
-- For local adapters and packaged desktop, `control-plane` is expected to already be on `PATH`.
+- Do not read or create workspace `.env` files to recover `OCTOPUS_*` values. These values are injected into the process environment by the runtime.
+- For local adapters and packaged desktop, `control-plane` is expected to already be on `PATH`; do not hard-code the managed `.octopus/bin` shim path.
+- Use shell-correct environment syntax when you must inspect variables manually: PowerShell uses `$env:OCTOPUS_AGENT_ID`; POSIX shells use `$OCTOPUS_AGENT_ID`.
 - In manual local CLI mode outside heartbeats, use `control-plane agent local-cli <agent-ref> --org-id <org-id>` to mint an agent key, optionally install bundled control-plane skills locally, and print the required `OCTOPUS_*` exports.
 
 ## Shared Workspace
@@ -119,7 +121,7 @@ control-plane issue checkout "<issue-id-or-identifier>" --json
 
 Rules:
 
-- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID`
+- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID` and defaults `--expected-status` to `todo` and `in_progress`
 - mutating CLI commands automatically attach `OCTOPUS_RUN_ID` when present
 - a `409` means another agent owns the task; do not retry it
 
