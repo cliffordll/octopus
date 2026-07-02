@@ -284,6 +284,13 @@ class HeartbeatService:
         if issue_id is None:
             return False
         if (
+            payload.get("source") == "review"
+            or payload.get("reason") == "issue_review_requested"
+            or context.get("wakeReason") == "issue_review_requested"
+            or context.get("role") == "reviewer"
+        ):
+            return False
+        if (
             payload.get("reason") == "issue_comment_mentioned"
             or context.get("wakeReason") == "issue_comment_mentioned"
         ):
@@ -294,21 +301,28 @@ class HeartbeatService:
         run_ids = [
             value for value in (issue.execution_run_id, issue.checkout_run_id) if value
         ]
-        if not run_ids:
-            return False
-        active_run_ids = {
-            row.id
-            for row in (
-                await self._session.execute(
-                    select(HeartbeatRunRow).where(
-                        HeartbeatRunRow.id.in_(run_ids),
-                        HeartbeatRunRow.status.in_(("queued", "running")),
+        active_run_ids: set[str] = set()
+        if run_ids:
+            active_run_ids.update(
+                row.id
+                for row in (
+                    await self._session.execute(
+                        select(HeartbeatRunRow).where(
+                            HeartbeatRunRow.id.in_(run_ids),
+                            HeartbeatRunRow.status.in_(("queued", "running")),
+                        )
                     )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
-        }
+        if not active_run_ids:
+            active_run_ids.update(
+                row.id
+                for row in await list_runs(self._session, issue.org_id, agent.id)
+                if row.status in {"queued", "running"}
+                and _issue_id_from_context(row.context_snapshot) == issue_id
+            )
         if not active_run_ids:
             return False
 
@@ -1553,7 +1567,8 @@ class HeartbeatService:
 
         try:
             adapter = get_runtime_adapter(agent.agent_runtime_type)
-            workspace_context = await self._prepare_workspace_context(running)
+            workspace_context = await self._prepare_workspace_context(agent, running)
+            sequence = await self._next_event_sequence(running.id)
             adapter_operation = await self._begin_adapter_workspace_operation(
                 running, workspace_context
             )
@@ -1584,7 +1599,7 @@ class HeartbeatService:
                     else None
                 )
                 workspace_data = (
-                    workspace_payload.get("rudderWorkspace")
+                    workspace_payload.get("octopusWorkspace")
                     if isinstance(workspace_payload, dict)
                     else None
                 )
@@ -1814,7 +1829,7 @@ class HeartbeatService:
                 running.wakeup_request_id or "",
                 {
                     "status": "completed"
-                    if final_status == "succeeded"
+                    if final_status in {"succeeded", "waiting_for_children"}
                     else final_status,
                     "finished_at": datetime.now(UTC),
                     "error": final.error or result.error_message,
@@ -1824,7 +1839,11 @@ class HeartbeatService:
             await update_agent(
                 self._session,
                 agent.id,
-                {"status": "idle" if final_status == "succeeded" else "error"},
+                {
+                    "status": "idle"
+                    if final_status in {"succeeded", "waiting_for_children"}
+                    else "error"
+                },
             )
             await self._release_issue_execution(final)
             context_after_final = (
@@ -1847,7 +1866,11 @@ class HeartbeatService:
                 sequence,
                 "lifecycle",
                 message=f"run {final_status}",
-                level="info" if final_status == "succeeded" else "error",
+                level=(
+                    "info"
+                    if final_status in {"succeeded", "waiting_for_children"}
+                    else "error"
+                ),
             )
             await WorkspaceService(self._session).release_runtime_services_for_run(
                 final.id
@@ -1915,13 +1938,16 @@ class HeartbeatService:
         return sequence + 2
 
     async def _prepare_workspace_context(
-        self, running: HeartbeatRunRow
+        self, agent: AgentRow, running: HeartbeatRunRow
     ) -> dict[str, Any] | None:
         workspace_context = await WorkspaceService(
             self._session
-        ).prepare_runtime_context_for_run(running.id, running.context_snapshot)
-        if workspace_context is None:
-            return None
+        ).prepare_runtime_context_for_heartbeat(
+            running.id,
+            running.context_snapshot,
+            org_id=agent.org_id,
+            agent_workspace_key=(agent.workspace_key or f"agent--{str(agent.id)[:8]}"),
+        )
         next_snapshot = dict(running.context_snapshot or {})
         next_snapshot.update(workspace_context)
         updated = await update_run(
@@ -1941,9 +1967,9 @@ class HeartbeatService:
             ),
             phase="workspace_provision",
             cwd=(
-                workspace_payload.get("rudderWorkspace", {}).get("cwd")
+                workspace_payload.get("octopusWorkspace", {}).get("cwd")
                 if isinstance(workspace_payload, dict)
-                and isinstance(workspace_payload.get("rudderWorkspace"), dict)
+                and isinstance(workspace_payload.get("octopusWorkspace"), dict)
                 else None
             ),
             metadata={
@@ -1979,7 +2005,7 @@ class HeartbeatService:
             return None
         workspace_payload = workspace_context.get("workspace")
         workspace = (
-            workspace_payload.get("rudderWorkspace")
+            workspace_payload.get("octopusWorkspace")
             if isinstance(workspace_payload, dict)
             else None
         )
@@ -1992,7 +2018,9 @@ class HeartbeatService:
             phase="workspace_provision",
             command="runtime_adapter.execute",
             cwd=workspace.get("cwd") if isinstance(workspace, dict) else None,
-            metadata={"adapterExecution": True},
+            metadata={
+                "adapterExecution": True,
+            },
         )
 
     async def _finish_adapter_workspace_operation(
@@ -2044,6 +2072,8 @@ class HeartbeatService:
             "todo",
             "in_progress",
         }:
+            return
+        if await self._issue_has_active_children(issue.id):
             return
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
         if await self._run_has_issue_closeout_signal(
@@ -2146,6 +2176,30 @@ class HeartbeatService:
             "in_progress",
         }:
             return final
+        if await self._issue_has_active_children(issue.id):
+            await insert_activity_log(
+                self._session,
+                org_id=issue.org_id,
+                actor_type="system",
+                actor_id="heartbeat_child_coordination",
+                action="issue.waiting_for_children",
+                entity_type="issue",
+                entity_id=issue.id,
+                agent_id=final.agent_id,
+                run_id=final.id,
+                details={"runId": final.id},
+            )
+            waiting = await update_run(
+                self._session,
+                final.id,
+                {
+                    "status": "waiting_for_children",
+                    "error": None,
+                    "error_code": None,
+                },
+            )
+            assert waiting is not None
+            return waiting
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
         if await self._run_has_issue_closeout_signal(
             final, issue.id, issue_has_reviewer=issue_has_reviewer
@@ -2480,6 +2534,11 @@ class HeartbeatService:
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
         issue = await self._session.get(IssueRow, issue_id) if issue_id else None
+        has_active_children = (
+            await self._issue_has_active_children(issue.id)
+            if issue is not None
+            else False
+        )
         should_request_review = (
             final.status == "succeeded"
             and final.invocation_source == "assignment"
@@ -2487,6 +2546,7 @@ class HeartbeatService:
             and issue.org_id == final.org_id
             and issue.status == "in_progress"
             and bool(issue.reviewer_agent_id)
+            and not has_active_children
         )
         should_block_failed_issue = (
             final.status in {"failed", "timed_out"}
@@ -2506,7 +2566,13 @@ class HeartbeatService:
         values: dict[str, Any] = {
             "updated_at": datetime.now(UTC),
         }
-        if final.status in {"failed", "timed_out", "cancelled", "succeeded"}:
+        if final.status in {
+            "failed",
+            "timed_out",
+            "cancelled",
+            "succeeded",
+            "waiting_for_children",
+        }:
             values.update(
                 {
                     "execution_run_id": None,
@@ -2569,8 +2635,87 @@ class HeartbeatService:
             "timed_out",
             "cancelled",
             "succeeded",
+            "waiting_for_children",
         }:
             await self._promote_deferred_issue_wakeup(final.org_id, issue_id)
+        if issue is not None:
+            await self._wake_parent_after_child_settled(final, issue)
+
+    async def _issue_has_active_children(self, issue_id: str) -> bool:
+        result = await self._session.execute(
+            select(IssueRow.id)
+            .where(
+                IssueRow.parent_id == issue_id,
+                IssueRow.status.in_(("backlog", "todo", "in_progress", "in_review")),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _wake_parent_after_child_settled(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> None:
+        await self.queue_parent_continuation_for_settled_child(
+            issue.id, expected_org_id=final.org_id
+        )
+
+    async def queue_parent_continuation_for_settled_child(
+        self, child_issue_id: str, *, expected_org_id: str | None = None
+    ) -> str | None:
+        issue = await self._session.get(IssueRow, child_issue_id)
+        if issue is None or (
+            expected_org_id is not None and issue.org_id != expected_org_id
+        ):
+            return None
+        if issue.parent_id is None or issue.status not in {
+            "done",
+            "cancelled",
+            "blocked",
+        }:
+            return None
+        if await self._issue_has_active_children(issue.parent_id):
+            return None
+        parent = await self._session.get(IssueRow, issue.parent_id)
+        if (
+            parent is None
+            or parent.org_id != issue.org_id
+            or parent.status not in {"todo", "in_progress"}
+            or not parent.assignee_agent_id
+        ):
+            return None
+        await self.wakeup(
+            parent.assignee_agent_id,
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "reason": "issue_children_settled",
+                "idempotencyKey": f"issue:{parent.id}:children_settled:{issue.id}",
+                "payload": {
+                    "issueId": parent.id,
+                    "mutation": "children_settled",
+                    "completedChildIssueId": issue.id,
+                },
+                "contextSnapshot": {
+                    "issueId": parent.id,
+                    "source": "issue.children_settled",
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_children_settled",
+                    "completedChildIssueId": issue.id,
+                    "issue": {
+                        "id": parent.id,
+                        "identifier": parent.identifier,
+                        "title": parent.title,
+                        "description": parent.description,
+                        "status": parent.status,
+                        "priority": parent.priority,
+                    },
+                },
+            },
+            actor_type="system",
+            actor_id="heartbeat_child_coordination",
+            execute_immediately=False,
+        )
+        return parent.assignee_agent_id
 
     async def _queue_issue_review_wakeup_after_success(
         self, final: HeartbeatRunRow, issue: IssueRow

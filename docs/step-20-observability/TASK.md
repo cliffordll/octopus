@@ -1,4 +1,4 @@
-# Step 20: Basic Observability / Debug Visibility
+﻿# Step 20: Basic Observability / Debug Visibility
 
 状态：已完成
 
@@ -12,14 +12,14 @@
 
 本步骤按上游已有 route/service 实施，不新增自定义 `/debug` 聚合 API。
 
-- `D:\coding\rudder\server\src\routes\agents.management-routes.ts`
-- `D:\coding\rudder\server\src\routes\run-intelligence.ts`
-- `D:\coding\rudder\server\src\services\run-intelligence.ts`
-- `D:\coding\rudder\server\src\services\run-log-store.ts`
-- `D:\coding\rudder\server\src\services\workspace-operations.ts`
-- `D:\coding\rudder\server\src\services\workspace-operation-log-store.ts`
-- `D:\coding\rudder\packages\run-intelligence-core\src\types.ts`
-- `D:\coding\rudder\packages\shared\src\types\workspace-operation.ts`
+- `D:\coding\upstream-reference\server\src\routes\agents.management-routes.ts`
+- `D:\coding\upstream-reference\server\src\routes\run-intelligence.ts`
+- `D:\coding\upstream-reference\server\src\services\run-intelligence.ts`
+- `D:\coding\upstream-reference\server\src\services\run-log-store.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-operations.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-operation-log-store.ts`
+- `D:\coding\upstream-reference\packages\run-intelligence-core\src\types.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\workspace-operation.ts`
 
 ## 任务
 

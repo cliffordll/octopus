@@ -72,7 +72,6 @@ PROJECT_CREATE_TO_COLUMN: dict[str, str] = {
     "leadAgentId": "lead_agent_id",
     "targetDate": "target_date",
     "color": "color",
-    "executionWorkspacePolicy": "execution_workspace_policy",
     "archivedAt": "archived_at",
 }
 PROJECT_UPDATE_TO_COLUMN = PROJECT_CREATE_TO_COLUMN
@@ -156,6 +155,7 @@ def _workspace_payload_to_columns(payload: Mapping[str, Any]) -> dict[str, Any]:
         "remoteWorkspaceRef": "remote_workspace_ref",
         "sharedWorkspaceKey": "shared_workspace_key",
         "metadata": "metadata_json",
+        "executionWorkspacePolicy": "execution_workspace_policy",
         "isPrimary": "is_primary",
     }
     for payload_key, column_key in field_map.items():
@@ -366,6 +366,15 @@ class ProjectService:
             await clear_primary_project_workspace(
                 self._session, org_id=project.org_id, project_id=project.id
             )
+        workspace_values = _workspace_payload_to_columns(payload)
+        workspace_values.setdefault(
+            "execution_workspace_policy",
+            {
+                "enabled": True,
+                "defaultMode": "shared_workspace",
+                "workspaceStrategy": {"mode": "shared_workspace"},
+            },
+        )
         row = await create_project_workspace(
             self._session,
             {
@@ -375,7 +384,7 @@ class ProjectService:
                 "source_type": str(payload.get("sourceType") or "local_path"),
                 "visibility": payload.get("visibility") or "default",
                 "is_primary": is_primary,
-                **_workspace_payload_to_columns(payload),
+                **workspace_values,
                 "default_ref": payload.get("defaultRef") or payload.get("repoRef"),
             },
         )
@@ -435,19 +444,16 @@ class ProjectService:
         existing = await get_project_workspace(self._session, project_id, workspace_id)
         if existing is None:
             return None
+        if existing.is_primary:
+            workspaces = await list_project_workspaces(self._session, project_id)
+            if len(workspaces) > 1:
+                raise ValueError(
+                    "Set another project workspace as default before deleting the current default."
+                )
         detail = self._to_workspace(existing)
         row = await delete_project_workspace(self._session, workspace_id)
         if row is None:
             return None
-        if row.is_primary:
-            remaining = await list_project_workspaces(self._session, project_id)
-            if remaining:
-                await clear_primary_project_workspace(
-                    self._session, org_id=row.org_id, project_id=project_id
-                )
-                await update_project_workspace(
-                    self._session, remaining[0].id, {"is_primary": True}
-                )
         await insert_activity_log(
             self._session,
             org_id=row.org_id,
@@ -692,6 +698,7 @@ class ProjectService:
             "remoteWorkspaceRef": row.remote_workspace_ref,
             "sharedWorkspaceKey": row.shared_workspace_key,
             "metadata": row.metadata_json,
+            "executionWorkspacePolicy": cast(Any, row.execution_workspace_policy),
             "isPrimary": row.is_primary,
             "runtimeServices": [],
             "createdAt": row.created_at.isoformat(),
@@ -722,7 +729,6 @@ class ProjectService:
             "color": row.color,
             "pauseReason": cast(PauseReason | None, row.pause_reason),
             "pausedAt": _iso(row.paused_at),
-            "executionWorkspacePolicy": cast(Any, row.execution_workspace_policy),
             "codebase": cast(
                 Any, _derive_project_codebase(row.org_id, primary_workspace)
             ),

@@ -52,15 +52,19 @@ def _runtime_tool_guidance(runtime_type: str) -> str:
 def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     if not isinstance(workspace, dict):
         return ""
-    workspace_context = workspace.get("rudderWorkspace")
+    workspace_context = workspace.get("octopusWorkspace")
     if not isinstance(workspace_context, dict):
         return ""
     worktree = _string(
         workspace_context.get("worktreePath") or workspace_context.get("cwd")
     )
     artifacts_dir = _string(workspace_context.get("orgArtifactsDir"))
+    git_write_policy = _string(workspace_context.get("gitWritePolicy"))
     workspace_artifacts_dir = (
         f"{worktree.rstrip('/\\\\')}/artifacts" if worktree else None
+    )
+    workspace_artifacts_dir = (
+        _string(workspace_context.get("issueArtifactsDir")) or workspace_artifacts_dir
     )
     preferred_artifacts_label = (
         "workspace artifacts directory"
@@ -76,6 +80,14 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     ]
     if worktree:
         lines.append(f"- Workspace worktree: `{worktree}`")
+    if git_write_policy == "read_only":
+        lines.extend(
+            [
+                "- Git write policy: `read_only`.",
+                "- Do not run Git commands that change branches, refs, the index, the working tree, or remotes.",
+                "- Do not bypass this policy by invoking Git through an absolute executable path or another process.",
+            ]
+        )
     if workspace_artifacts_dir:
         lines.append(f"- Workspace artifacts directory: `{workspace_artifacts_dir}`")
     elif artifacts_dir:
@@ -85,6 +97,7 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
             "- Treat the workspace worktree as the project source/download directory for this run.",
             "- Put project-specific checkouts, downloaded source bundles, dependency snapshots, and code edits under the workspace worktree.",
             f"- Prefer the {preferred_artifacts_label} for durable deliverables produced by this run, such as reports, screenshots, CSV files, mockups, logs, and handoff documents.",
+            "- Use `OCTOPUS_ISSUE_ARTIFACTS_DIR` for issue deliverables; this path is captured for compatibility with issue documents and work products.",
             "- Use relative paths under the workspace worktree for source changes, patches, temporary project files, and project-local generated files.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",
         ]

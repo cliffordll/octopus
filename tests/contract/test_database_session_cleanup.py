@@ -287,7 +287,9 @@ async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
     stop_event = asyncio.Event()
     task = asyncio.create_task(
         _heartbeat_scheduler(
-            _make_session_factory, 30, stop_event  # type: ignore[arg-type]
+            _make_session_factory,  # type: ignore[arg-type]
+            30,
+            stop_event,  # type: ignore[arg-type]
         )
     )
     await asyncio.wait_for(tick_started.wait(), timeout=1)

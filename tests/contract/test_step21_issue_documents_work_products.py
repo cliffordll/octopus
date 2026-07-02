@@ -72,7 +72,7 @@ async def test_work_product_capture_is_idempotent_on_external_id(
     product = {
         "title": "report.md",
         "type": "document",
-        "provider": "rudder",
+        "provider": "octopus",
         "externalId": "organization_artifacts_scan:org:report.md",
         "content": b"hello world",
         "contentType": "text/markdown",
@@ -91,9 +91,7 @@ async def test_work_product_capture_is_idempotent_on_external_id(
         )
         await session.commit()
     async with factory() as session:
-        listed = await WorkspaceService(session).list_work_products_for_issue(
-            issue_id
-        )
+        listed = await WorkspaceService(session).list_work_products_for_issue(issue_id)
 
     assert len(first) == 1
     assert len(second) == 0  # deduped on externalId
@@ -113,7 +111,7 @@ async def test_work_product_archive_reuses_asset_for_identical_content(
         return {
             "title": external_id,
             "type": "document",
-            "provider": "rudder",
+            "provider": "octopus",
             "externalId": external_id,
             "content": b"identical deliverable bytes",
             "contentType": "text/markdown",
@@ -129,7 +127,7 @@ async def test_work_product_archive_reuses_asset_for_identical_content(
         await session.commit()
 
     assert len(rows) == 2  # distinct external ids -> two work products
-    asset_ids = {row["assetId"] for row in rows}
+    asset_ids = {row.get("assetId") for row in rows}
     urls = {row["url"] for row in rows}
     assert len(asset_ids) == 1  # ...but one shared asset for identical content
     assert len(urls) == 1
@@ -161,7 +159,7 @@ async def test_generated_work_product_primary_prefers_run_worktree(
     snapshot = {
         "issueId": issue_id,
         "workspace": {
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "id": "ws-1",
                 "cwd": str(worktree),
                 "orgArtifactsDir": str(artifacts),
@@ -196,7 +194,7 @@ async def test_generated_work_product_captures_binary_document(
 
     snapshot = {
         "issueId": issue_id,
-        "workspace": {"rudderWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
+        "workspace": {"octopusWorkspace": {"id": "ws-1", "cwd": str(worktree)}},
     }
 
     async with factory() as session:
@@ -207,6 +205,147 @@ async def test_generated_work_product_captures_binary_document(
 
     titles = [row["title"] for row in rows]
     assert any(title.endswith(".docx") for title in titles)
+
+
+async def test_shared_workspace_generated_scan_ignores_unscoped_cwd_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    shared_cwd.mkdir()
+    (shared_cwd / "other-task.md").write_text("belongs to another task")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert rows == []
+
+
+async def test_shared_workspace_generated_scan_ignores_root_artifacts(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    artifacts = shared_cwd / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "report.md").write_text("belongs to this run")
+    other_issue_artifacts = artifacts / "issues" / "other-issue"
+    other_issue_artifacts.mkdir(parents=True)
+    (other_issue_artifacts / "other.md").write_text("belongs to another issue")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert rows == []
+
+
+async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    issue_artifacts = shared_cwd / "artifacts" / "issues" / issue_id
+    issue_artifacts.mkdir(parents=True)
+    (shared_cwd / "other-task.md").write_text("belongs to another task")
+    (issue_artifacts / "deliverable.md").write_text("belongs to this issue")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert len(rows) == 1
+    md = rows[0]["metadata"]
+    assert md
+    assert md["workspacePath"] == "deliverable.md"
+    assert md["source"] == "issue_artifacts_scan"
+
+
+async def test_generated_scan_ignores_organization_artifacts_root(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    artifacts = tmp_path / "org-artifacts"
+    artifacts.mkdir()
+    (artifacts / "other-task.md").write_text("belongs to another task")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-1",
+                "mode": "isolated_workspace",
+                "cwd": str(worktree),
+                "orgArtifactsDir": str(artifacts),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=None
+        )
+        await session.commit()
+
+    assert rows == []
 
 
 async def test_issue_documents_are_versioned_and_listed_on_detail(

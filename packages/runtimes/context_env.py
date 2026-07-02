@@ -14,7 +14,7 @@ def apply_runtime_context_env(
     if not isinstance(runtime_context, dict):
         runtime_context = {}
     workspace = context.workspace if isinstance(context.workspace, dict) else {}
-    workspace_context = workspace.get("rudderWorkspace")
+    workspace_context = workspace.get("octopusWorkspace")
     if not isinstance(workspace_context, dict):
         workspace_context = {}
 
@@ -55,10 +55,27 @@ def apply_runtime_context_env(
     _set_env(env, "OCTOPUS_WORKSPACE_CWD", workspace_context.get("cwd"))
     _set_env(env, "OCTOPUS_WORKSPACE_SOURCE", workspace_context.get("source"))
     _set_env(env, "OCTOPUS_WORKSPACE_STRATEGY", workspace_context.get("strategy"))
+    _set_env(env, "OCTOPUS_WORKSPACE_KIND", workspace_context.get("workspaceKind"))
+    _set_env(
+        env,
+        "OCTOPUS_WORKSPACE_CODE_SOURCE",
+        workspace_context.get("codeSourceKind"),
+    )
+    warnings = workspace_context.get("warnings")
+    if isinstance(warnings, list):
+        env["OCTOPUS_WORKSPACE_WARNINGS_JSON"] = json.dumps(warnings)
+    requires_lease = workspace_context.get("requiresLease")
+    if isinstance(requires_lease, bool):
+        env["OCTOPUS_WORKSPACE_REQUIRES_LEASE"] = "true" if requires_lease else "false"
     _set_env(env, "OCTOPUS_WORKSPACE_ID", workspace_context.get("workspaceId"))
     _set_env(env, "OCTOPUS_WORKSPACE_REPO_URL", workspace_context.get("repoUrl"))
     _set_env(env, "OCTOPUS_WORKSPACE_REPO_REF", workspace_context.get("repoRef"))
     _set_env(env, "OCTOPUS_WORKSPACE_BRANCH", workspace_context.get("branchName"))
+    _set_env(
+        env,
+        "OCTOPUS_GIT_WRITE_POLICY",
+        workspace_context.get("gitWritePolicy"),
+    )
     _set_env(
         env,
         "OCTOPUS_WORKSPACE_WORKTREE_PATH",
@@ -109,17 +126,22 @@ def apply_runtime_context_env(
     _set_env(env, "OCTOPUS_ORG_SKILLS_DIR", workspace_context.get("orgSkillsDir"))
     _set_env(env, "OCTOPUS_ORG_PLANS_DIR", workspace_context.get("orgPlansDir"))
     _set_env(env, "OCTOPUS_ORG_ARTIFACTS_DIR", workspace_context.get("orgArtifactsDir"))
+    _set_env(
+        env,
+        "OCTOPUS_ISSUE_ARTIFACTS_DIR",
+        workspace_context.get("issueArtifactsDir"),
+    )
 
-    runtime_services = workspace.get("rudderRuntimeServices")
+    runtime_services = workspace.get("octopusRuntimeServices")
     if isinstance(runtime_services, list) and runtime_services:
         env["OCTOPUS_RUNTIME_SERVICES_JSON"] = json.dumps(runtime_services)
-    runtime_service_intents = workspace.get("rudderRuntimeServiceIntents")
+    runtime_service_intents = workspace.get("octopusRuntimeServiceIntents")
     if isinstance(runtime_service_intents, list) and runtime_service_intents:
         env["OCTOPUS_RUNTIME_SERVICE_INTENTS_JSON"] = json.dumps(
             runtime_service_intents
         )
     _set_env(
-        env, "OCTOPUS_RUNTIME_PRIMARY_URL", workspace.get("rudderRuntimePrimaryUrl")
+        env, "OCTOPUS_RUNTIME_PRIMARY_URL", workspace.get("octopusRuntimePrimaryUrl")
     )
 
 

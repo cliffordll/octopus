@@ -1,0 +1,72 @@
+{
+  "id": "github.connector",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "GitHub",
+  "description": "Integration contract fixture for repository, pull request, issue, webhook, and agent tool workflows.",
+  "author": "Octopus",
+  "categories": ["connector", "source-control"],
+  "capabilities": [
+    "http.outbound",
+    "secrets.read-ref",
+    "plugin.state.read",
+    "plugin.state.write",
+    "issues.read",
+    "issues.update",
+    "project.workspaces.read",
+    "agent.tools.register",
+    "webhooks.receive",
+    "ui.detailTab.register",
+    "activity.log.write"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "instanceConfigSchema": {
+    "type": "object",
+    "required": ["credentialSecretRef"],
+    "properties": {
+      "credentialSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      }
+    }
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "detailTab",
+        "id": "github-issue-tab",
+        "displayName": "GitHub",
+        "exportName": "GitHubIssueTab",
+        "entityTypes": ["issue"]
+      }
+    ]
+  },
+  "webhooks": [
+    {
+      "endpointKey": "pull-request",
+      "displayName": "Pull Request"
+    },
+    {
+      "endpointKey": "issue",
+      "displayName": "Issue"
+    }
+  ],
+  "tools": [
+    {
+      "name": "github.search",
+      "displayName": "Search GitHub",
+      "description": "Search GitHub repositories, issues, or pull requests.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

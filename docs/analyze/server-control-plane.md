@@ -1,4 +1,4 @@
-# Octopus Server 控制面与智能体协调分析报告
+﻿# Octopus Server 控制面与智能体协调分析报告
 
 ## 1. 目标
 
@@ -53,7 +53,7 @@ Organization 是最高业务隔离边界。它拥有：
 
 ### 3.2 Project
 
-参考上游 Rudder，Project 的作用是围绕一个明确 deliverable 组织 issues。
+参考上游 upstream reference，Project 的作用是围绕一个明确 deliverable 组织 issues。
 
 Project 不是目录。它是业务对象，承载：
 
@@ -460,4 +460,3 @@ server 控制面应支持以下闭环：
 15. review/closeout/followup 状态可解释。
 
 如果这条链路中任何一步需要 UI 伪造或人工查数据库，说明 server 控制面还没有闭环。
-

@@ -16,7 +16,13 @@ WakeupRequestStatus = Literal[
     "cancelled",
 ]
 HeartbeatRunStatus = Literal[
-    "queued", "running", "succeeded", "failed", "cancelled", "timed_out"
+    "queued",
+    "running",
+    "waiting_for_children",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "timed_out",
 ]
 HeartbeatRunPurpose = Literal[
     "task_execution", "closeout_followup", "review", "heartbeat"
@@ -54,6 +60,7 @@ WAKEUP_REQUEST_STATUSES: tuple[WakeupRequestStatus, ...] = (
 HEARTBEAT_RUN_STATUSES: tuple[HeartbeatRunStatus, ...] = (
     "queued",
     "running",
+    "waiting_for_children",
     "succeeded",
     "failed",
     "cancelled",

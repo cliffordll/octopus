@@ -761,7 +761,7 @@ class ChatService:
                 if isinstance(env_payload, dict)
                 else None
             )
-            workspace_data = workspace_payload.get("rudderWorkspace")
+            workspace_data = workspace_payload.get("octopusWorkspace")
         if isinstance(workspace_data, dict) and isinstance(
             workspace_data.get("cwd"), str
         ):

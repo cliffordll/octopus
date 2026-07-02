@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -65,13 +65,19 @@ async def session(
 
 
 @pytest.fixture
-def app(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[FastAPI]:
+async def app(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[FastAPI]:
     original_settings = fastapi_app.state.settings
     fastapi_app.state.session_factory = session_factory
     fastapi_app.state.settings = replace(original_settings, local_trusted=True)
     try:
         yield fastapi_app
     finally:
+        tasks = list(getattr(fastapi_app.state, "heartbeat_dispatch_tasks", set()))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        fastapi_app.state.heartbeat_dispatch_tasks = set()
         fastapi_app.state.settings = original_settings
 
 

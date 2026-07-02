@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
@@ -15,6 +17,7 @@ def test_app_registers_orgs_route() -> None:
 
 
 def test_orgs_route_requires_actor_context() -> None:
+    app.state.settings = replace(app.state.settings, local_trusted=False)
     client = TestClient(app)
 
     response = client.get("/api/orgs")

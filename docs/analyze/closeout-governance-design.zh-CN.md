@@ -1,4 +1,4 @@
-# Close-Out Governance 整体设计
+﻿# Close-Out Governance 整体设计
 
 ## 目标
 
@@ -25,17 +25,17 @@ run 没有留下可识别 close-out signal
 
 这在无人值守自动化里是合理的，但在本地用户工作流里会显得过于主动，尤其当 control-plane 已经在当前 run 内写了评论、done 或 block 时，继续补跑 passive follow-up 就是多余的。
 
-## 上游 Rudder 参考结论
+## 上游 upstream reference 参考结论
 
 参考的上游文件：
 
 ```text
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.recovery.ts
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.release.ts
-D:\coding\rudder\server\src\services\runtime-kernel\heartbeat.core.ts
-D:\coding\rudder\packages\agent-runtime-utils\src\server-utils.prompts.ts
-D:\coding\rudder\server\src\__tests__\heartbeat-passive-issue-closeout.test.ts
-D:\coding\rudder\server\src\__tests__\issue-lifecycle-routes.test.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.recovery.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.release.ts
+D:\coding\upstream-reference\server\src\services\runtime-kernel\heartbeat.core.ts
+D:\coding\upstream-reference\packages\agent-runtime-utils\src\server-utils.prompts.ts
+D:\coding\upstream-reference\server\src\__tests__\heartbeat-passive-issue-closeout.test.ts
+D:\coding\upstream-reference\server\src\__tests__\issue-lifecycle-routes.test.ts
 ```
 
 上游关键规则：
@@ -117,4 +117,3 @@ Octopus 应该像上游一样，把显式 close-out 当成第一优先级：
 1. 当前 run 里已经发出 `issue done` / `issue block` / `issue comment` 时，立刻结束 close-out。
 2. reviewer 继续只认结构化 decision。
 3. 只有当前 run 没有留下任何明确 close-out 时，才保留 `issue_passive_followup`。
-

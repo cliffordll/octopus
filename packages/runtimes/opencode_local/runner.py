@@ -302,15 +302,14 @@ async def _execute_with_communicate(
     communication = asyncio.create_task(process.communicate(prompt.encode()))
     try:
         if timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(communication, timeout=timeout_sec)
+            stdout, stderr = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=timeout_sec
+            )
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        communication.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await communication
         process.kill()
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await communication
         return _result(
             getattr(process, "returncode", None),
             stdout.decode(errors="replace"),

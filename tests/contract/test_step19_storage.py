@@ -389,7 +389,7 @@ async def test_runtime_work_product_content_is_archived_as_asset(
                 {
                     "title": "Runtime report",
                     "type": "artifact",
-                    "provider": "rudder",
+                    "provider": "octopus",
                     "content": "runtime report body",
                     "contentType": "text/plain",
                     "filename": "runtime-report.txt",

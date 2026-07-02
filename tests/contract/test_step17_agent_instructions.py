@@ -54,6 +54,30 @@ def test_closeout_governance_instructions_are_hard_gated() -> None:
         assert "Do not exit" in content
 
 
+def test_subtask_coordination_instructions_require_child_execution() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    control_plane_skill = (
+        repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    default_heartbeat = (
+        repo_root / "server" / "onboarding" / "default" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+    ceo_heartbeat = (
+        repo_root / "server" / "onboarding" / "ceo" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+
+    for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
+        assert (
+            "must wait for those child issues to run and report back" in content
+            or "must wait for delegated child issues to run and report back" in content
+        )
+        assert (
+            "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
+            in content
+        )
+        assert "Use `blocked` only for a real blocker" in content
+
+
 def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> None:
     modules = (
         "packages.shared.api_paths.agents",

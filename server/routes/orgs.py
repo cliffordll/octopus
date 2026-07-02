@@ -113,7 +113,7 @@ async def import_org(
     _: None = Depends(require_board_access),
     service: OrganizationImportService = Depends(get_organization_import_service),
 ) -> dict[str, Any]:
-    """Import a companies.sh / Rudder organization package from an uploaded zip.
+    """Import a companies.sh / Octopus organization package from an uploaded zip.
 
     ``dryRun=true`` returns the parsed plan without writing anything.
     """

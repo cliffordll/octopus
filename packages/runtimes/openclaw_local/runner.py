@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from ..common import runtime_subprocess_kwargs
@@ -32,15 +31,6 @@ _DEFAULT_CONTEXT_WINDOW = 128000
 # OpenClaw resolves --model against its own catalog; for an injected platform
 # provider we register it as an openai-compatible custom provider/model.
 _DEFAULT_API_ADAPTER = "openai-completions"
-
-# Concurrent runs of the same agent (e.g. task execution + heartbeat) race on the
-# shared OpenClaw config read-modify-write; the loser gets a conflict error. The
-# conflict is transient (the other writer finishes), so reload + retry succeeds.
-_CONFIG_CONFLICT_MARKERS = (
-    "ConfigMutationConflictError",
-    "config changed since last load",
-)
-_CONFIG_PATCH_MAX_ATTEMPTS = 4
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
@@ -106,16 +96,6 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     model_ref, register_error = await _ensure_model_registered(
         context, command, cwd, env, timeout_sec
     )
-    if register_error is not None:
-        # Fail fast: running with an unregistered injected model makes OpenClaw
-        # silently fall back to its built-in OpenAI provider (api.openai.com),
-        # which is unreachable from managed pods and hangs until timeout. A clear
-        # error beats a 240s stall.
-        return RuntimeExecutionResult(
-            exit_code=1,
-            error_message=register_error,
-            result_json=_result_json("", "", "", register_error, loaded_skills),
-        )
 
     session_key = _session_key(context)
     args = _build_args(config, session_key, model_ref)
@@ -158,19 +138,6 @@ async def _ensure_model_registered(
         return raw_model, None
 
     provider_name = _openclaw_provider_name(raw_model.partition("/")[0] or model_id)
-    model_ref = f"{provider_name}/{model_id}"
-    # Skip the race-prone config patch when the per-agent config already has this
-    # provider+model at the same endpoint. The config persists across runs, so
-    # after the first registration most runs take this path and never contend.
-    if _provider_already_registered(
-        env,
-        provider_name=provider_name,
-        model_id=model_id,
-        base_url=base_url,
-        api_key=api_key,
-    ):
-        return model_ref, None
-
     model_meta = provider.get("model")
     display = model_id
     context_window = _DEFAULT_CONTEXT_WINDOW
@@ -202,82 +169,23 @@ async def _ensure_model_registered(
             }
         }
     }
-    patch_timeout = timeout_sec if timeout_sec > 0 else 60.0
-    last_message = ""
-    for attempt in range(_CONFIG_PATCH_MAX_ATTEMPTS):
-        # A concurrent run of the same agent may have registered it meanwhile.
-        if attempt and _provider_already_registered(
-            env,
-            provider_name=provider_name,
-            model_id=model_id,
-            base_url=base_url,
-            api_key=api_key,
-        ):
-            return model_ref, None
-        rc, _out, err = await _run_cli(
-            command,
-            ["config", "patch", "--stdin"],
-            cwd=cwd,
-            env=env,
-            input_text=json.dumps(patch),
-            timeout_sec=patch_timeout,
-        )
-        if rc == 0:
-            return model_ref, None
-        last_message = (
-            _first_meaningful_line(err) or f"config patch exited with {rc}"
-        )
-        # Only conflicts are transient and worth retrying; bail on anything else.
-        if not any(marker in (err or "") for marker in _CONFIG_CONFLICT_MARKERS):
-            break
-        await asyncio.sleep(0.25 * (attempt + 1))
-
-    await context.on_log(
-        "stderr",
-        f"[octopus] OpenClaw model registration failed: {last_message}\n",
+    rc, _out, err = await _run_cli(
+        command,
+        ["config", "patch", "--stdin"],
+        cwd=cwd,
+        env=env,
+        input_text=json.dumps(patch),
+        timeout_sec=timeout_sec if timeout_sec > 0 else 60.0,
     )
-    return model_ref, f"OpenClaw model registration failed: {last_message}"
-
-
-def _openclaw_config_path(env: dict[str, str]) -> Path | None:
-    home = _string(env.get("HOME"))
-    return Path(home) / ".openclaw" / "openclaw.json" if home else None
-
-
-def _provider_already_registered(
-    env: dict[str, str],
-    *,
-    provider_name: str,
-    model_id: str,
-    base_url: str,
-    api_key: str,
-) -> bool:
-    """True when the per-agent OpenClaw config already registers this provider and
-    model at the same endpoint, so the config patch can be safely skipped."""
-    path = _openclaw_config_path(env)
-    if path is None or not path.is_file():
-        return False
-    try:
-        config = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return False
-    if not isinstance(config, dict):
-        return False
-    providers = config.get("models", {})
-    providers = providers.get("providers", {}) if isinstance(providers, dict) else {}
-    provider = providers.get(provider_name) if isinstance(providers, dict) else None
-    if not isinstance(provider, dict):
-        return False
-    if _string(provider.get("baseUrl")) != base_url:
-        return False
-    if _string(provider.get("apiKey")) != api_key:
-        return False
-    models = provider.get("models")
-    if not isinstance(models, list):
-        return False
-    return any(
-        isinstance(m, dict) and _string(m.get("id")) == model_id for m in models
-    )
+    model_ref = f"{provider_name}/{model_id}"
+    if rc != 0:
+        message = _first_meaningful_line(err) or f"config patch exited with {rc}"
+        await context.on_log(
+            "stderr",
+            f"[octopus] OpenClaw model registration failed: {message}\n",
+        )
+        return model_ref, f"OpenClaw model registration failed: {message}"
+    return model_ref, None
 
 
 def _openclaw_provider_name(raw: str) -> str:

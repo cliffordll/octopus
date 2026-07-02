@@ -81,7 +81,7 @@ export function ProjectsPage() {
         <div>
           <p className="eyebrow">Projects</p>
           <h1>项目</h1>
-          <p className="muted">当前组织下的项目工作区。</p>
+          <p className="muted">当前组织下的项目。</p>
         </div>
       </header>
       {projects.error && <ErrorNotice error={projects.error} />}

@@ -5,7 +5,14 @@ import { agentsApi } from "../api/agents";
 import { issuesApi } from "../api/issues";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { OrganizationResource, ProjectCodebase, ProjectResourceRole, ProjectStatus, ProjectWorkspace } from "../api/types";
+import type {
+  ExecutionWorkspace,
+  OrganizationResource,
+  ProjectCodebase,
+  ProjectResourceRole,
+  ProjectStatus,
+  ProjectWorkspace,
+} from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
@@ -47,17 +54,17 @@ const WORKSPACE_POLICY_OPTIONS: Array<{
   {
     mode: "shared_workspace",
     label: "共享工作区",
-    description: "多个任务复用项目主工作区，适合常规项目协作。",
+    description: "直接使用项目代码目录，不创建任务级执行目录。",
   },
   {
     mode: "isolated_workspace",
     label: "独立工作区",
-    description: "每个任务准备独立执行目录，适合需要隔离改动的任务。",
+    description: "从项目代码创建独立 Git worktree，适合隔离改动。",
   },
   {
     mode: "operator_branch",
     label: "操作分支",
-    description: "按任务派生分支或工作区，适合需要保留任务分支痕迹的场景。",
+    description: "在操作分支上推进代码改动，需先具备 Git 代码来源。",
   },
 ];
 
@@ -73,7 +80,7 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   if (!value.trim()) return null;
   const parsed: unknown = JSON.parse(value);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("执行工作区策略必须是 JSON 对象。");
+    throw new Error("代码任务执行方式必须是 JSON 对象。");
   }
   return parsed as Record<string, unknown>;
 }
@@ -103,6 +110,10 @@ function workspacePolicyModeFromPolicy(value: Record<string, unknown> | null | u
   return normalizeWorkspacePolicyMode(value.defaultMode ?? strategy?.mode);
 }
 
+function workspacePolicyDescription(mode: WorkspacePolicyMode): string {
+  return WORKSPACE_POLICY_OPTIONS.find((option) => option.mode === mode)?.description ?? "";
+}
+
 function workspacePolicyForMode(currentJson: string, mode: WorkspacePolicyMode): string {
   let current: Record<string, unknown> = {};
   try {
@@ -126,14 +137,10 @@ function nullableText(value: string | null | undefined): string {
   return value && value.trim() ? value : "未设置";
 }
 
-function joinWorkspacePath(root: string | null | undefined, child: string): string {
-  const base = root?.trim();
-  if (!base) return "未设置";
-  return `${base.replace(/[\\/]+$/, "")}/${child}`;
-}
-
-function projectHasLocalWorkspace(workspaces: ProjectWorkspace[]): boolean {
-  return workspaces.some((workspace) => Boolean(workspace.cwd?.trim()));
+function projectWorkspaceDisplay(workspace: ProjectWorkspace): string {
+  if (workspace.cwd?.trim()) return workspace.cwd;
+  if (workspace.repoUrl?.trim()) return "首次运行会创建受管 checkout";
+  return "未设置本地 cwd 或仓库 URL";
 }
 
 function roleCount(
@@ -157,71 +164,227 @@ function resourceKindMark(kind: OrganizationResource["kind"] | undefined): strin
   }
 }
 
-function ProjectCodebasePanel({ codebase, workspaces }: { codebase?: ProjectCodebase; workspaces: ProjectWorkspace[] }) {
-  const hasLocalWorkspace = projectHasLocalWorkspace(workspaces);
-  const usesOrgWorkspaceFallback = !hasLocalWorkspace;
-  const orgWorkspaceRoot = codebase?.managedFolder ?? codebase?.effectiveLocalFolder ?? null;
-  const effectiveCwd = hasLocalWorkspace
-    ? codebase?.effectiveLocalFolder ?? codebase?.localFolder
-    : orgWorkspaceRoot;
+function ProjectOutputLocations({ codebase }: { codebase: ProjectCodebase | undefined }) {
+  const workspaceRoot = codebase?.managedFolder;
+  const artifactsPath = workspaceRoot ? `${workspaceRoot}/artifacts` : "未设置";
+  const plansAndSkillsPath = workspaceRoot ? `${workspaceRoot}/plans · ${workspaceRoot}/skills` : "未设置";
   return (
-    <section className="project-runtime-section" aria-label="项目运行环境">
+    <section className="project-config-section project-config-step-output" aria-label="组织草稿与产物">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">PROJECT RUNTIME</p>
-          <h2>项目运行环境</h2>
-          <p className="muted">代码库、执行目录和任务产物目录会影响智能体运行时读取和写入的位置。</p>
+          <p className="eyebrow">OUTPUTS</p>
+          <h2>组织草稿与产物</h2>
+          <p className="muted">无代码任务在组织草稿目录中执行；所有任务的持久产物统一保存在组织目录下。</p>
         </div>
       </div>
-      <div className="project-runtime-grid">
-        <article className="project-runtime-card">
-          <div className="project-workspace-card-heading">
-            <h3>代码库</h3>
-            {codebase?.configured ? <Badge>已配置</Badge> : <Badge>未配置</Badge>}
-          </div>
-          <dl className="project-workspace-properties project-runtime-properties">
-            <div><dt>来源</dt><dd title={codebase?.origin ?? "未设置"}>{codebase?.origin ?? "未设置"}</dd></div>
-            <div><dt>仓库</dt><dd title={nullableText(codebase?.repoUrl)}>{nullableText(codebase?.repoUrl)}</dd></div>
-            <div><dt>分支</dt><dd title={nullableText(codebase?.repoRef ?? codebase?.defaultRef)}>{nullableText(codebase?.repoRef ?? codebase?.defaultRef)}</dd></div>
-            <div><dt>执行目录</dt><dd title={nullableText(effectiveCwd)}>{nullableText(effectiveCwd)}</dd></div>
-            <div><dt>产物目录</dt><dd title={joinWorkspacePath(orgWorkspaceRoot, "artifacts")}>{joinWorkspacePath(orgWorkspaceRoot, "artifacts")}</dd></div>
-          </dl>
-          {usesOrgWorkspaceFallback && (
-            <div className="project-workspace-fallback compact">
-              <strong>将使用组织共享工作区</strong>
-              <span>当前项目没有可用的本地项目工作区；任务运行会 fallback 到组织共享工作区。</span>
-            </div>
-          )}
-        </article>
-        <article className="project-runtime-card">
-          <div className="project-workspace-card-heading">
-            <h3>工作区</h3>
-            <Badge>{workspaces.length}</Badge>
-          </div>
-          <div className="project-workspace-list compact">
-            {workspaces.length === 0 && (
-              <p className="project-workspace-empty">暂无项目工作区。任务运行时会使用组织共享工作区。</p>
-            )}
-            {workspaces.map((workspace) => {
-              const workspaceCwdValue = workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区";
-              return (
-                <div className="project-workspace-item compact" key={workspace.id}>
-                  <div>
-                    <strong>{workspace.name}</strong>
-                    <span title={workspaceCwdValue}>{workspaceCwdValue}</span>
-                  </div>
-                  <div className="project-workspace-badges">
-                    {workspace.isPrimary && <Badge>主工作区</Badge>}
-                    <Badge>{workspace.sourceType}</Badge>
-                    {!workspace.cwd?.trim() && <Badge>组织工作区 fallback</Badge>}
-                    {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </article>
+      <div className="project-property-list">
+        <div className="project-property-row">
+          <span>组织草稿目录</span>
+          <strong title={workspaceRoot ?? "未设置"}>{workspaceRoot ?? "未设置"}</strong>
+        </div>
+        <div className="project-property-row">
+          <span>任务产物</span>
+          <strong title={artifactsPath}>{artifactsPath}</strong>
+        </div>
+        <div className="project-property-row">
+          <span>计划与技能</span>
+          <strong title={plansAndSkillsPath}>{plansAndSkillsPath}</strong>
+        </div>
       </div>
+    </section>
+  );
+}
+
+function ExecutionWorkspacePanel({
+  abandonPending,
+  archivePending,
+  cleanupDiscardConfirmed,
+  cleanupPending,
+  createPrPending,
+  diffPending,
+  diffPreview,
+  error,
+  onAbandon,
+  onArchive,
+  onCleanup,
+  onCleanupDiscardConfirmed,
+  onCreatePr,
+  onLoadDiff,
+  onMerge,
+  onMergePreview,
+  onPreparePr,
+  onPush,
+  onSelect,
+  mergePending,
+  mergePreview,
+  mergePreviewPending,
+  preparePrPending,
+  pushPending,
+  selectedId,
+  status,
+  statusPending,
+  workspaces,
+}: {
+  abandonPending: boolean;
+  archivePending: boolean;
+  cleanupDiscardConfirmed: boolean;
+  cleanupPending: boolean;
+  createPrPending: boolean;
+  diffPending: boolean;
+  diffPreview: string;
+  error: unknown;
+  onAbandon: (workspaceId: string) => void;
+  onArchive: (workspaceId: string) => void;
+  onCleanup: (workspaceId: string, discardDirty: boolean) => void;
+  onCleanupDiscardConfirmed: (confirmed: boolean) => void;
+  onCreatePr: (workspaceId: string) => void;
+  onLoadDiff: (workspaceId: string) => void;
+  onMerge: (workspaceId: string) => void;
+  onMergePreview: (workspaceId: string) => void;
+  onPreparePr: (workspaceId: string) => void;
+  onPush: (workspaceId: string) => void;
+  onSelect: (workspaceId: string) => void;
+  mergePending: boolean;
+  mergePreview: string;
+  mergePreviewPending: boolean;
+  preparePrPending: boolean;
+  pushPending: boolean;
+  selectedId: string;
+  status: {
+    git: { available: boolean; branch?: string | null; dirty?: boolean; entries?: string[]; summary?: string | null; error?: string | null } | null;
+    lease: { locked: boolean; operationId: string | null; runId: string | null };
+    canArchive: boolean;
+  } | undefined;
+  statusPending: boolean;
+  workspaces: ExecutionWorkspace[];
+}) {
+  const selected = workspaces.find((workspace) => workspace.id === selectedId);
+  const selectedDirty = Boolean(status?.git?.dirty);
+  const canCleanup = Boolean(status?.canArchive) || (selectedDirty && cleanupDiscardConfirmed && !status?.lease.locked);
+  return (
+    <section className="project-config-section project-workspace-manager project-config-step-history" aria-label="任务运行记录">
+      <div className="project-section-heading">
+        <div>
+          <p className="eyebrow">RUN HISTORY</p>
+          <h2>任务运行记录</h2>
+          <p className="muted">查看每个任务实际执行目录的 Git 状态，并在审核后执行 diff、push 或归档。</p>
+        </div>
+      </div>
+      {Boolean(error) && <ErrorNotice error={error} />}
+      <div className="project-workspace-list">
+        {workspaces.length === 0 && <p className="project-workspace-empty">暂无任务运行记录。代码任务开始运行后会创建记录。</p>}
+        {workspaces.map((workspace) => (
+          <button
+            className={`project-workspace-item ${workspace.id === selectedId ? "selected" : ""}`}
+            key={workspace.id}
+            onClick={() => onSelect(workspace.id)}
+            type="button"
+          >
+            <div className="project-workspace-main">
+              <div className="project-workspace-name-row">
+                <strong>{workspace.name}</strong>
+                <div className="project-workspace-badges">
+                  <Badge>{workspace.mode}</Badge>
+                  <Badge>{workspace.status}</Badge>
+                  {workspace.branchName && <Badge>{workspace.branchName}</Badge>}
+                </div>
+              </div>
+              <span title={nullableText(workspace.cwd)}>{nullableText(workspace.cwd)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+      {selected && (
+        <div className="project-workspace-fallback">
+          <strong>{selected.name}</strong>
+          <span>目录：{nullableText(selected.cwd)}</span>
+          <span>分支：{status?.git?.branch ?? selected.branchName ?? "未识别"}</span>
+          <span>Git：{statusPending ? "检查中..." : status?.git?.available ? (status.git.dirty ? "有未提交改动" : "干净") : status?.git?.error ?? "不可用"}</span>
+          <span>租约：{status?.lease.locked ? `运行中 ${status.lease.operationId ?? ""}` : "空闲"}</span>
+          {selectedDirty && (
+            <label className="workspace-danger-confirm">
+              <input checked={cleanupDiscardConfirmed} onChange={(event) => onCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
+              确认清理时丢弃该运行目录的未提交改动
+            </label>
+          )}
+          <div className="project-workspace-actions">
+            <button
+              className="secondary small-button"
+              disabled={diffPending}
+              onClick={() => onLoadDiff(selected.id)}
+              type="button"
+            >
+              查看 diff
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={mergePreviewPending || selected.mode === "shared_workspace"}
+              onClick={() => onMergePreview(selected.id)}
+              type="button"
+            >
+              检查 merge
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)}
+              onClick={() => onMerge(selected.id)}
+              type="button"
+            >
+              merge 到目标分支
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={preparePrPending || !selected.branchName}
+              onClick={() => onPreparePr(selected.id)}
+              type="button"
+            >
+              准备 PR
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={createPrPending || !selected.branchName}
+              onClick={() => onCreatePr(selected.id)}
+              type="button"
+            >
+              创建 PR
+            </button>
+            <button
+              className="secondary small-button"
+              disabled={pushPending || !selected.branchName}
+              onClick={() => onPush(selected.id)}
+              type="button"
+            >
+              push 分支
+            </button>
+            <button
+              className="danger small-button"
+              disabled={abandonPending || Boolean(status?.lease.locked)}
+              onClick={() => onAbandon(selected.id)}
+              type="button"
+            >
+              放弃结果
+            </button>
+            <button
+              className="danger small-button"
+              disabled={cleanupPending || !canCleanup}
+              onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)}
+              type="button"
+            >
+              清理目录
+            </button>
+            <button
+              className="danger small-button"
+              disabled={archivePending || !status?.canArchive}
+              onClick={() => onArchive(selected.id)}
+              type="button"
+            >
+              归档旧流程
+            </button>
+          </div>
+          {mergePreview && <pre className="workspace-diff-preview">{mergePreview}</pre>}
+          {diffPreview && <pre className="workspace-diff-preview">{diffPreview}</pre>}
+        </div>
+      )}
     </section>
   );
 }
@@ -234,13 +397,12 @@ export function ProjectPage() {
   const [leadAgentId, setLeadAgentId] = useState("");
   const [targetDate, setTargetDate] = useState("");
   const [goalIds, setGoalIds] = useState("");
-  const [workspacePolicy, setWorkspacePolicy] = useState("");
   const [workspacePolicyMode, setWorkspacePolicyMode] = useState<WorkspacePolicyMode>("shared_workspace");
-  const [workspacePolicyError, setWorkspacePolicyError] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceCwd, setWorkspaceCwd] = useState("");
   const [workspaceRepoUrl, setWorkspaceRepoUrl] = useState("");
   const [workspaceRepoRef, setWorkspaceRepoRef] = useState("");
+  const [workspaceSourceError, setWorkspaceSourceError] = useState("");
   const [attachCatalogOpen, setAttachCatalogOpen] = useState(false);
   const [createResourceOpen, setCreateResourceOpen] = useState(false);
   const [newResourceName, setNewResourceName] = useState("");
@@ -249,6 +411,10 @@ export function ProjectPage() {
   const [newResourceDescription, setNewResourceDescription] = useState("");
   const [newResourceRole, setNewResourceRole] = useState<ProjectResourceRole>("reference");
   const [newResourceNote, setNewResourceNote] = useState("");
+  const [selectedExecutionWorkspaceId, setSelectedExecutionWorkspaceId] = useState("");
+  const [workspaceDiffPreview, setWorkspaceDiffPreview] = useState("");
+  const [workspaceMergePreview, setWorkspaceMergePreview] = useState("");
+  const [cleanupDiscardConfirmed, setCleanupDiscardConfirmed] = useState(false);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const project = useQuery({
@@ -275,6 +441,16 @@ export function ProjectPage() {
     queryFn: () => agentsApi.list(orgId),
     enabled: activeTab === "configuration" || activeTab === "issues",
   });
+  const executionWorkspaces = useQuery({
+    queryKey: ["execution-workspaces", orgId, projectId],
+    queryFn: () => projectsApi.listExecutionWorkspaces(orgId, projectId),
+    enabled: activeTab === "configuration" && Boolean(orgId && projectId),
+  });
+  const executionWorkspaceStatus = useQuery({
+    queryKey: ["execution-workspace-status", selectedExecutionWorkspaceId],
+    queryFn: () => projectsApi.executionWorkspaceStatus(selectedExecutionWorkspaceId),
+    enabled: activeTab === "configuration" && Boolean(selectedExecutionWorkspaceId),
+  });
   useEffect(() => {
     if (project.data) {
       setProjectName(project.data.name);
@@ -283,15 +459,16 @@ export function ProjectPage() {
       setLeadAgentId(project.data.leadAgentId ?? "");
       setTargetDate(project.data.targetDate ?? "");
       setGoalIds((project.data.goalIds ?? (project.data.goalId ? [project.data.goalId] : [])).join(","));
-      const policyMode = workspacePolicyModeFromPolicy(project.data.executionWorkspacePolicy);
-      setWorkspacePolicyMode(policyMode);
-      setWorkspacePolicy(formatJson(project.data.executionWorkspacePolicy) || workspacePolicyForMode("", policyMode));
-      setWorkspacePolicyError("");
     }
   }, [project.data]);
+  const executionWorkspaceList = Array.isArray(executionWorkspaces.data) ? executionWorkspaces.data : [];
+  const projectWorkspaces = project.data?.workspaces ?? [];
+  useEffect(() => {
+    const firstWorkspaceId = executionWorkspaceList[0]?.id ?? "";
+    if (!selectedExecutionWorkspaceId && firstWorkspaceId) setSelectedExecutionWorkspaceId(firstWorkspaceId);
+  }, [executionWorkspaceList, selectedExecutionWorkspaceId]);
   const update = useMutation({
     mutationFn: () => {
-      const executionWorkspacePolicy = parseJsonObject(workspacePolicy || workspacePolicyForMode("", workspacePolicyMode));
       const parsedGoalIds = parseGoalIds(goalIds);
       return projectsApi.update(projectId, {
         description: description.trim() || null,
@@ -300,12 +477,11 @@ export function ProjectPage() {
         leadAgentId: leadAgentId || null,
         targetDate: targetDate || null,
         goalIds: parsedGoalIds,
-        executionWorkspacePolicy,
       });
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["project", projectId] }),
-    onError: (error) => {
-      if (error instanceof Error) setWorkspacePolicyError(error.message);
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      void queryClient.invalidateQueries({ queryKey: ["projects", orgId] });
     },
   });
   const invalidateProjectResources = () => {
@@ -325,15 +501,34 @@ export function ProjectPage() {
       repoUrl: workspaceRepoUrl.trim() || null,
       repoRef: workspaceRepoRef.trim() || null,
       defaultRef: workspaceRepoRef.trim() || null,
-      isPrimary: true,
+      executionWorkspacePolicy: parseJsonObject(workspacePolicyForMode("", workspacePolicyMode)),
     }),
     onSuccess: () => {
       setWorkspaceName("");
       setWorkspaceCwd("");
       setWorkspaceRepoUrl("");
       setWorkspaceRepoRef("");
+      setWorkspacePolicyMode("shared_workspace");
+      setWorkspaceSourceError("");
       invalidateProject();
     },
+  });
+  const updateWorkspacePolicy = useMutation({
+    mutationFn: ({
+      workspaceId,
+      mode,
+      currentPolicy,
+    }: {
+      workspaceId: string;
+      mode: WorkspacePolicyMode;
+      currentPolicy: Record<string, unknown> | null;
+    }) =>
+      projectsApi.updateWorkspace(projectId, workspaceId, {
+        executionWorkspacePolicy: parseJsonObject(
+          workspacePolicyForMode(formatJson(currentPolicy ?? {}), mode),
+        ),
+      }),
+    onSuccess: invalidateProject,
   });
   const setPrimaryWorkspace = useMutation({
     mutationFn: (workspaceId: string) => projectsApi.updateWorkspace(projectId, workspaceId, { isPrimary: true }),
@@ -342,6 +537,81 @@ export function ProjectPage() {
   const removeWorkspace = useMutation({
     mutationFn: (workspaceId: string) => projectsApi.removeWorkspace(projectId, workspaceId),
     onSuccess: invalidateProject,
+  });
+  const refreshExecutionWorkspaces = () => {
+    void queryClient.invalidateQueries({ queryKey: ["execution-workspaces", orgId, projectId] });
+    if (selectedExecutionWorkspaceId) {
+      void queryClient.invalidateQueries({ queryKey: ["execution-workspace-status", selectedExecutionWorkspaceId] });
+    }
+  };
+  const loadWorkspaceDiff = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.executionWorkspaceDiff(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceDiffPreview(payload.diff || payload.stat || payload.error || "无 diff");
+    },
+  });
+  const previewExecutionWorkspaceMerge = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.executionWorkspaceMergePreview(workspaceId),
+    onSuccess: (payload) => {
+      const title = payload.canMerge ? "可以 clean merge" : payload.conflict ? "存在 merge 冲突" : "不能 merge";
+      const files = payload.conflictFiles.length > 0 ? `
+冲突文件：${payload.conflictFiles.join(", ")}` : "";
+      setWorkspaceMergePreview(`${title}
+目标：${payload.targetRef ?? "未设置"}
+来源：${payload.sourceBranch ?? "未识别"}${files}
+
+${payload.preview || payload.error || "无详细输出"}`);
+    },
+  });
+  const mergeExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.mergeExecutionWorkspace(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`已 merge 到 ${payload.targetRef}
+merge commit: ${payload.mergedCommit ?? "未识别"}`);
+      refreshExecutionWorkspaces();
+    },
+  });
+  const prepareExecutionWorkspacePr = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.prepareExecutionWorkspacePr(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`PR 准备信息
+源分支：${payload.sourceBranch}
+目标：${payload.targetRef}
+命令：${payload.command}
+${payload.compareUrl ?? "未识别远端 compare URL"}`);
+    },
+  });
+  const createExecutionWorkspacePr = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.createExecutionWorkspacePr(workspaceId),
+    onSuccess: (payload) => {
+      setWorkspaceMergePreview(`已创建 PR：${payload.url ?? (payload.stdout || "未返回 URL")}`);
+      refreshExecutionWorkspaces();
+    },
+  });
+  const pushExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.pushExecutionWorkspace(workspaceId),
+    onSuccess: refreshExecutionWorkspaces,
+  });
+  const archiveExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.archiveExecutionWorkspace(workspaceId),
+    onSuccess: () => {
+      setWorkspaceDiffPreview("");
+      setWorkspaceMergePreview("");
+      refreshExecutionWorkspaces();
+    },
+  });
+  const abandonExecutionWorkspace = useMutation({
+    mutationFn: (workspaceId: string) => projectsApi.abandonExecutionWorkspace(workspaceId),
+    onSuccess: refreshExecutionWorkspaces,
+  });
+  const cleanupExecutionWorkspace = useMutation({
+    mutationFn: ({ workspaceId, discardDirty }: { workspaceId: string; discardDirty: boolean }) => projectsApi.cleanupExecutionWorkspace(workspaceId, discardDirty),
+    onSuccess: () => {
+      setWorkspaceDiffPreview("");
+      setWorkspaceMergePreview("");
+      setCleanupDiscardConfirmed(false);
+      refreshExecutionWorkspaces();
+    },
   });
   const addResource = useMutation({
     mutationFn: (payload: { resourceId: string; role?: ProjectResourceRole; note?: string | null; sortOrder?: number }) =>
@@ -408,29 +678,23 @@ export function ProjectPage() {
   });
   function save(event: FormEvent) {
     event.preventDefault();
-    setWorkspacePolicyError("");
     update.mutate();
   }
-  function selectWorkspacePolicyMode(mode: WorkspacePolicyMode) {
-    setWorkspacePolicyMode(mode);
-    setWorkspacePolicy(workspacePolicyForMode(workspacePolicy, mode));
-    setWorkspacePolicyError("");
-  }
-  function editWorkspacePolicy(value: string) {
-    setWorkspacePolicy(value);
-    try {
-      setWorkspacePolicyMode(workspacePolicyModeFromPolicy(parseJsonObject(value)));
-      setWorkspacePolicyError("");
-    } catch {
-      setWorkspacePolicyError("执行工作区策略必须是 JSON 对象。");
+  function submitWorkspace() {
+    setWorkspaceSourceError("");
+    if (!workspaceName.trim()) {
+      setWorkspaceSourceError("请先填写代码来源名称。");
+      return;
     }
+    if (!workspaceCwd.trim() && !workspaceRepoUrl.trim()) {
+      setWorkspaceSourceError("本地 cwd 和仓库 URL 至少填写一项。");
+      return;
+    }
+    createWorkspace.mutate();
   }
   function submitInlineResource(event: FormEvent) {
     event.preventDefault();
     if (newResourceName.trim() && newResourceLocator.trim()) createAndAttachResource.mutate();
-  }
-  function submitWorkspace() {
-    if (workspaceName.trim()) createWorkspace.mutate();
   }
   const projectIssues = issues.data ?? [];
   const agentList = Array.isArray(agents.data) ? agents.data : [];
@@ -510,9 +774,9 @@ export function ProjectPage() {
               </div>
             </section>
           )}
-          {activeTab === "configuration" && <form className="project-properties-card project-tab-panel" onSubmit={save}>
-            <div className="project-config-sections">
-              <section className="project-config-section">
+          {activeTab === "configuration" && <div className="project-properties-card project-tab-panel">
+            <div className="project-config-sections project-config-flow">
+              <form className="project-config-section project-config-step-basic" onSubmit={save}>
                 <div className="project-section-heading">
                   <p className="eyebrow">BASIC INFORMATION</p>
                   <h2>基础信息</h2>
@@ -552,98 +816,65 @@ export function ProjectPage() {
                     <span>目标 ID</span>
                     <input value={goalIds} onChange={(event) => setGoalIds(event.target.value)} />
                   </label>
-                  <div className="project-property-row project-property-row-readonly-start">
-                    <span>URL 标识</span>
-                    <strong>{project.data.urlKey}</strong>
-                  </div>
-                  <div className="project-property-row">
-                    <span>当前负责人</span>
-                    <strong>{project.data.leadAgentId ?? "未设置"}</strong>
-                  </div>
-                  <div className="project-property-row">
-                    <span>目标</span>
-                    <div className="project-goal-chips">
-                      {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
-                      {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
-                      {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">暂无关联目标</span>}
+                  <details className="project-system-metadata">
+                    <summary>系统信息与关联目标</summary>
+                    <div className="project-property-row">
+                      <span>URL 标识</span>
+                      <strong>{project.data.urlKey}</strong>
                     </div>
-                  </div>
-                  <div className="project-property-row">
-                    <span>创建时间</span>
-                    <strong>{formatDateTime(project.data.createdAt)}</strong>
-                  </div>
-                  <div className="project-property-row">
-                    <span>更新时间</span>
-                    <strong>{formatDateTime(project.data.updatedAt)}</strong>
-                  </div>
-                </div>
-              </section>
-              <section className="project-config-section">
-                <div className="project-section-heading">
-                  <p className="eyebrow">WORKSPACE POLICY</p>
-                  <h2>执行工作区策略</h2>
-                  <p className="muted">选择任务执行时使用共享工作区、独立工作区或操作分支。</p>
-                </div>
-                <div className="workspace-policy-config">
-                  <fieldset className="workspace-policy-options">
-                    <legend>选择任务执行时使用的工作区方式</legend>
-                    {WORKSPACE_POLICY_OPTIONS.map((option) => (
-                      <label
-                        className={`workspace-policy-option ${workspacePolicyMode === option.mode ? "selected" : ""}`}
-                        key={option.mode}
-                      >
-                        <input
-                          checked={workspacePolicyMode === option.mode}
-                          name="workspace-policy-mode"
-                          onChange={() => selectWorkspacePolicyMode(option.mode)}
-                          type="radio"
-                          value={option.mode}
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </fieldset>
-                  <details className="workspace-policy-advanced">
-                    <summary>高级配置 JSON</summary>
-                    <label>
-                      execution_workspace_policy
-                      <textarea
-                        aria-label="execution_workspace_policy JSON"
-                        className="config-editor"
-                        value={workspacePolicy}
-                        onChange={(event) => editWorkspacePolicy(event.target.value)}
-                        placeholder='{"enabled":true,"defaultMode":"shared_workspace"}'
-                      />
-                    </label>
+                    <div className="project-property-row">
+                      <span>关联目标</span>
+                      <div className="project-goal-chips">
+                        {(project.data.goals ?? []).map((goal) => <Badge key={goal.id}>{goal.title}</Badge>)}
+                        {(project.data.goals ?? []).length === 0 && project.data.goalId && <Badge>{project.data.goalId}</Badge>}
+                        {(project.data.goals ?? []).length === 0 && !project.data.goalId && <span className="muted">暂无关联目标</span>}
+                      </div>
+                    </div>
+                    <div className="project-property-row">
+                      <span>创建时间</span>
+                      <strong>{formatDateTime(project.data.createdAt)}</strong>
+                    </div>
+                    <div className="project-property-row">
+                      <span>更新时间</span>
+                      <strong>{formatDateTime(project.data.updatedAt)}</strong>
+                    </div>
                   </details>
                 </div>
-              </section>
-              <ProjectCodebasePanel codebase={project.data.codebase} workspaces={project.data.workspaces ?? []} />
-              <section className="project-config-section project-workspace-manager" aria-label="项目工作区管理">
+                {update.error && <ErrorNotice error={update.error} />}
+                <div className="project-property-actions">
+                  <button disabled={update.isPending} type="submit">
+                    {update.isPending ? "保存中..." : "保存基础信息"}
+                  </button>
+                </div>
+              </form>
+              <section className="project-config-section project-workspace-manager project-config-step-source" aria-label="项目工作区配置">
               <div className="project-section-heading">
                 <div>
-                  <p className="eyebrow">PROJECT WORKSPACES</p>
+                  <p className="eyebrow">CODE SOURCE + EXECUTION MODE</p>
                   <h2>项目工作区</h2>
-                  <p className="muted">项目专属 cwd 会优先用于任务执行；未配置或不可用时 fallback 到组织共享工作区。</p>
+                  <p className="muted">每个项目工作区由代码来源和执行模式组成。任务显式选择工作区；未选择时使用默认工作区。</p>
                 </div>
               </div>
+              {projectWorkspaces.length === 0 && (
+                <div className="project-workspace-fallback compact">
+                  <strong>尚未配置项目工作区</strong>
+                  <span>无代码任务仍可使用组织草稿目录；代码任务需先添加代码来源并选择执行模式。</span>
+                </div>
+              )}
               <div className="project-workspace-create-grid">
                 <label>
                   名称
                   <input
-                    aria-label="项目工作区名称"
+                    aria-label="代码来源名称"
                     value={workspaceName}
                     onChange={(event) => setWorkspaceName(event.target.value)}
-                    placeholder="主工作区"
+                    placeholder="默认代码来源"
                   />
                 </label>
                 <label>
                   本地 cwd
                   <input
-                    aria-label="项目工作区本地 cwd"
+                    aria-label="代码来源本地 cwd"
                     value={workspaceCwd}
                     onChange={(event) => setWorkspaceCwd(event.target.value)}
                     placeholder="D:/coding/project"
@@ -652,7 +883,7 @@ export function ProjectPage() {
                 <label>
                   仓库 URL
                   <input
-                    aria-label="项目工作区仓库 URL"
+                    aria-label="代码来源仓库 URL"
                     value={workspaceRepoUrl}
                     onChange={(event) => setWorkspaceRepoUrl(event.target.value)}
                     placeholder="https://github.com/acme/project.git"
@@ -661,21 +892,37 @@ export function ProjectPage() {
                 <label>
                   分支
                   <input
-                    aria-label="项目工作区分支"
+                    aria-label="代码来源分支"
                     value={workspaceRepoRef}
                     onChange={(event) => setWorkspaceRepoRef(event.target.value)}
                     placeholder="main"
                   />
                 </label>
+                <label>
+                  执行模式
+                  <span className="project-workspace-mode-field">
+                    <select
+                      aria-label="新工作区执行模式"
+                      value={workspacePolicyMode}
+                      onChange={(event) => setWorkspacePolicyMode(event.target.value as WorkspacePolicyMode)}
+                    >
+                      {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                        <option key={option.mode} value={option.mode}>{option.label}</option>
+                      ))}
+                    </select>
+                    <small>{workspacePolicyDescription(workspacePolicyMode)}</small>
+                  </span>
+                </label>
                 <button
                   className="project-workspace-create-button"
-                  disabled={!workspaceName.trim() || createWorkspace.isPending}
+                  disabled={createWorkspace.isPending}
                   onClick={submitWorkspace}
                   type="button"
                 >
-                  新增主工作区
+                  {createWorkspace.isPending ? "添加中..." : "添加工作区"}
                 </button>
               </div>
+              {workspaceSourceError && <p className="error-notice">{workspaceSourceError}</p>}
               <div className="project-workspace-list">
                 {(project.data.workspaces ?? []).map((workspace) => (
                   <div className="project-workspace-item" key={workspace.id}>
@@ -683,13 +930,13 @@ export function ProjectPage() {
                       <div className="project-workspace-name-row">
                         <strong>{workspace.name}</strong>
                         <div className="project-workspace-badges">
-                          {workspace.isPrimary && <Badge>主工作区</Badge>}
+                          {workspace.isPrimary && <Badge>默认</Badge>}
                           <Badge>{workspace.sourceType}</Badge>
                           {workspace.sharedWorkspaceKey && <Badge>{workspace.sharedWorkspaceKey}</Badge>}
                         </div>
                       </div>
-                      <span title={workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}>
-                        {workspace.cwd?.trim() ? workspace.cwd : "未设置本地 cwd，运行时使用组织共享工作区"}
+                      <span title={projectWorkspaceDisplay(workspace)}>
+                        {projectWorkspaceDisplay(workspace)}
                       </span>
                       {(workspace.repoUrl || workspace.repoRef || workspace.defaultRef) && (
                         <small
@@ -699,6 +946,26 @@ export function ProjectPage() {
                           {[workspace.repoUrl, workspace.repoRef ?? workspace.defaultRef].filter(Boolean).join(" · ")}
                         </small>
                       )}
+                      <label className="project-workspace-mode-control">
+                        <span>执行模式</span>
+                        <span className="project-workspace-mode-field">
+                          <select
+                            aria-label={`${workspace.name} 执行模式`}
+                            disabled={updateWorkspacePolicy.isPending}
+                            value={workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy)}
+                            onChange={(event) => updateWorkspacePolicy.mutate({
+                              workspaceId: workspace.id,
+                              mode: event.target.value as WorkspacePolicyMode,
+                              currentPolicy: workspace.executionWorkspacePolicy,
+                            })}
+                          >
+                            {WORKSPACE_POLICY_OPTIONS.map((option) => (
+                              <option key={option.mode} value={option.mode}>{option.label}</option>
+                            ))}
+                          </select>
+                          <small>{workspacePolicyDescription(workspacePolicyModeFromPolicy(workspace.executionWorkspacePolicy))}</small>
+                        </span>
+                      </label>
                     </div>
                     <div className="project-workspace-actions">
                       <button
@@ -707,32 +974,72 @@ export function ProjectPage() {
                         onClick={() => setPrimaryWorkspace.mutate(workspace.id)}
                         type="button"
                       >
-                        设为主工作区
+                        设为默认
                       </button>
                       <button
                         className="danger small-button"
-                        disabled={removeWorkspace.isPending}
+                        disabled={
+                          removeWorkspace.isPending
+                          || (workspace.isPrimary && projectWorkspaces.length > 1)
+                        }
                         onClick={() => removeWorkspace.mutate(workspace.id)}
+                        title={
+                          workspace.isPrimary && projectWorkspaces.length > 1
+                            ? "请先将另一个工作区设为默认"
+                            : undefined
+                        }
                         type="button"
                       >
-                        删除工作区
+                        删除代码来源
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
             </section>
+              <ProjectOutputLocations codebase={project.data.codebase} />
+              <ExecutionWorkspacePanel
+                abandonPending={abandonExecutionWorkspace.isPending}
+                archivePending={archiveExecutionWorkspace.isPending}
+                cleanupDiscardConfirmed={cleanupDiscardConfirmed}
+                cleanupPending={cleanupExecutionWorkspace.isPending}
+                createPrPending={createExecutionWorkspacePr.isPending}
+                diffPending={loadWorkspaceDiff.isPending}
+                diffPreview={workspaceDiffPreview}
+                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
+                mergePending={mergeExecutionWorkspace.isPending}
+                mergePreview={workspaceMergePreview}
+                mergePreviewPending={previewExecutionWorkspaceMerge.isPending}
+                onAbandon={(workspaceId) => abandonExecutionWorkspace.mutate(workspaceId)}
+                onArchive={(workspaceId) => archiveExecutionWorkspace.mutate(workspaceId)}
+                onCleanup={(workspaceId, discardDirty) => cleanupExecutionWorkspace.mutate({ workspaceId, discardDirty })}
+                onCleanupDiscardConfirmed={setCleanupDiscardConfirmed}
+                onCreatePr={(workspaceId) => createExecutionWorkspacePr.mutate(workspaceId)}
+                onLoadDiff={(workspaceId) => loadWorkspaceDiff.mutate(workspaceId)}
+                onMerge={(workspaceId) => mergeExecutionWorkspace.mutate(workspaceId)}
+                onMergePreview={(workspaceId) => previewExecutionWorkspaceMerge.mutate(workspaceId)}
+                onPreparePr={(workspaceId) => prepareExecutionWorkspacePr.mutate(workspaceId)}
+                onPush={(workspaceId) => pushExecutionWorkspace.mutate(workspaceId)}
+                preparePrPending={prepareExecutionWorkspacePr.isPending}
+                onSelect={(workspaceId) => {
+                  setSelectedExecutionWorkspaceId(workspaceId);
+                  setWorkspaceDiffPreview("");
+                  setWorkspaceMergePreview("");
+                  setCleanupDiscardConfirmed(false);
+                }}
+                pushPending={pushExecutionWorkspace.isPending}
+                selectedId={selectedExecutionWorkspaceId}
+                status={executionWorkspaceStatus.data}
+                statusPending={executionWorkspaceStatus.isFetching}
+                workspaces={executionWorkspaceList}
+              />
             </div>
-            {workspacePolicyError && <p className="error-notice">{workspacePolicyError}</p>}
-            {!workspacePolicyError && update.error && <ErrorNotice error={update.error} />}
             {createWorkspace.error && <ErrorNotice error={createWorkspace.error} />}
+            {updateWorkspacePolicy.error && <ErrorNotice error={updateWorkspacePolicy.error} />}
             {setPrimaryWorkspace.error && <ErrorNotice error={setPrimaryWorkspace.error} />}
             {removeWorkspace.error && <ErrorNotice error={removeWorkspace.error} />}
             {removeProject.error && <ErrorNotice error={removeProject.error} />}
-            <div className="project-property-actions">
-              <button type="submit">保存项目</button>
-            </div>
-          </form>}
+          </div>}
           {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
             <div className="project-resource-hero-card">
               <div className="project-resource-hero-top">

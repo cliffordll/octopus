@@ -32,7 +32,9 @@ def test_infer_role() -> None:
 def test_parse_paperclip_package(tmp_path: Path) -> None:
     """Paperclip-native: COMPANY.md + .paperclip.yaml + agents/<slug>/AGENTS.md."""
     root = tmp_path / "redoak"
-    _write(root / "COMPANY.md", """
+    _write(
+        root / "COMPANY.md",
+        """
         ---
         name: RedOak Review
         slug: redoak-review
@@ -40,9 +42,15 @@ def test_parse_paperclip_package(tmp_path: Path) -> None:
         schema: agentcompanies/v1
         ---
         Body text.
-    """)
-    _write(root / ".paperclip.yaml", "schema: paperclip/v1\nagents:\n  ci:\n    inputs: {}\n")
-    _write(root / "agents/ceo/AGENTS.md", """
+    """,
+    )
+    _write(
+        root / ".paperclip.yaml",
+        "schema: paperclip/v1\nagents:\n  ci:\n    inputs: {}\n",
+    )
+    _write(
+        root / "agents/ceo/AGENTS.md",
+        """
         ---
         name: CEO
         title: CEO / Lead Reviewer
@@ -50,8 +58,11 @@ def test_parse_paperclip_package(tmp_path: Path) -> None:
         skills: []
         ---
         You are the CEO.
-    """)
-    _write(root / "agents/code-reviewer/AGENTS.md", """
+    """,
+    )
+    _write(
+        root / "agents/code-reviewer/AGENTS.md",
+        """
         ---
         name: Code Reviewer
         title: Senior Code Reviewer
@@ -60,8 +71,12 @@ def test_parse_paperclip_package(tmp_path: Path) -> None:
           - pragmatic-code-review
         ---
         You review code.
-    """)
-    _write(root / "skills/pragmatic-code-review/SKILL.md", "---\nname: Pragmatic Code Review\n---\nReview.\n")
+    """,
+    )
+    _write(
+        root / "skills/pragmatic-code-review/SKILL.md",
+        "---\nname: Pragmatic Code Review\n---\nReview.\n",
+    )
 
     manifest = parse_company_package(root)
 
@@ -78,18 +93,23 @@ def test_parse_paperclip_package(tmp_path: Path) -> None:
     assert manifest["skillsDir"] is not None
 
 
-def test_parse_rudder_package(tmp_path: Path) -> None:
-    """Rudder-exported: ORGANIZATION.md + .rudder.yaml(role/adapter) + SOUL.md."""
+def test_parse_octopus_package(tmp_path: Path) -> None:
+    """Octopus-exported: ORGANIZATION.md + .octopus.yaml(role/adapter) + SOUL.md."""
     root = tmp_path / "movie"
-    _write(root / "ORGANIZATION.md", """
+    _write(
+        root / "ORGANIZATION.md",
+        """
         ---
         name: 电影策划
         slug: movie
         ---
         Body.
-    """)
-    _write(root / ".rudder.yaml", """
-        schema: rudder/v1
+    """,
+    )
+    _write(
+        root / ".octopus.yaml",
+        """
+        schema: octopus/v1
         agents:
           agent-3:
             role: ceo
@@ -97,15 +117,22 @@ def test_parse_rudder_package(tmp_path: Path) -> None:
               type: opencode_local
               config:
                 model: deepseek/deepseek-v4-pro
-    """)
-    _write(root / "agents/agent-3/AGENTS.md", "---\nname: 创意总监\nreportsTo: null\n---\nAgents body.\n")
-    _write(root / "agents/agent-3/SOUL.md", "# Creative Director\nYou are the creative director.\n")
+    """,
+    )
+    _write(
+        root / "agents/agent-3/AGENTS.md",
+        "---\nname: 创意总监\nreportsTo: null\n---\nAgents body.\n",
+    )
+    _write(
+        root / "agents/agent-3/SOUL.md",
+        "# Creative Director\nYou are the creative director.\n",
+    )
 
     manifest = parse_company_package(root)
 
     agent = manifest["agents"][0]
     assert agent["slug"] == "agent-3"
-    assert agent["role"] == "ceo"  # taken from .rudder.yaml extension
+    assert agent["role"] == "ceo"  # taken from .octopus.yaml extension
     assert agent["runtimeType"] == "opencode_local"
     assert agent["model"] == "deepseek/deepseek-v4-pro"
     # explicit SOUL.md is preferred over the AGENTS.md body
