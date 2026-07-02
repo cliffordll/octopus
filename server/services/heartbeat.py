@@ -2216,6 +2216,25 @@ class HeartbeatService:
         origin_run_id = (
             raw_origin_run_id if isinstance(raw_origin_run_id, str) else final.id
         )
+        if wake_reason == ISSUE_PASSIVE_FOLLOWUP_REASON:
+            if attempts < ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+                return final
+            await self._record_issue_closure_convergence_needed(
+                final,
+                issue,
+                origin_run_id=origin_run_id,
+                attempts=attempts,
+            )
+            return await self._mark_closeout_governance_failed(
+                final,
+                (
+                    "Issue close-out follow-up exited without "
+                    "`control-plane issue done`, `control-plane issue block`, "
+                    "or `control-plane issue comment`."
+                ),
+            )
+        if attempts < ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+            return final
         await self._record_issue_closure_convergence_needed(
             final,
             issue,
@@ -3241,6 +3260,17 @@ def _run_summary(result_json: dict[str, Any] | None) -> str | None:
     return None
 
 
+
+async def _shielded_session_close(session: AsyncSession) -> None:
+    with contextlib.suppress(BaseException):
+        await asyncio.shield(session.close())
+
+
+async def _shielded_session_rollback(session: AsyncSession) -> None:
+    with contextlib.suppress(BaseException):
+        await asyncio.shield(session.rollback())
+
+
 def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
     return {
         "id": row.id,
@@ -3261,39 +3291,44 @@ def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
 async def dispatch_queued_agent(
     session_factory: async_sessionmaker[AsyncSession], agent_id: str
 ) -> None:
-    async with session_factory() as session:
+    session = session_factory()
+    try:
         async with session.begin():
             run_ids = await HeartbeatService(session).claim_queued_for_dispatch(
                 agent_id
             )
+    finally:
+        await _shielded_session_close(session)
     if not run_ids:
         return
 
     async def execute(run_id: str) -> str | None:
-        async with session_factory() as session:
-            service = HeartbeatService(session, commit_process_metadata=True)
-            try:
-                final = await service.execute_claimed_run(run_id)
-                reviewer_agent_id: str | None = None
+        session = session_factory()
+        service = HeartbeatService(session, commit_process_metadata=True)
+        try:
+            final = await service.execute_claimed_run(run_id)
+            reviewer_agent_id: str | None = None
+            if (
+                final is not None
+                and final["status"] == "succeeded"
+                and final["invocationSource"] == "assignment"
+            ):
+                issue_id = _issue_id_from_context(final.get("contextSnapshot"))
+                issue = await session.get(IssueRow, issue_id) if issue_id else None
                 if (
-                    final is not None
-                    and final["status"] == "succeeded"
-                    and final["invocationSource"] == "assignment"
+                    issue is not None
+                    and issue.status == "in_review"
+                    and issue.reviewer_agent_id
+                    and issue.reviewer_agent_id != agent_id
                 ):
-                    issue_id = _issue_id_from_context(final.get("contextSnapshot"))
-                    issue = await session.get(IssueRow, issue_id) if issue_id else None
-                    if (
-                        issue is not None
-                        and issue.status == "in_review"
-                        and issue.reviewer_agent_id
-                        and issue.reviewer_agent_id != agent_id
-                    ):
-                        reviewer_agent_id = issue.reviewer_agent_id
-                await session.commit()
-                return reviewer_agent_id
-            except Exception:
-                await session.rollback()
-                raise
+                    reviewer_agent_id = issue.reviewer_agent_id
+            await asyncio.shield(session.commit())
+            return reviewer_agent_id
+        except BaseException:
+            await _shielded_session_rollback(session)
+            raise
+        finally:
+            await _shielded_session_close(session)
 
     next_agent_ids = {
         reviewer_agent_id
@@ -3314,11 +3349,14 @@ async def dispatch_queued_agent(
 async def dispatch_all_queued_runs(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with session_factory() as session:
+    session = session_factory()
+    try:
         async with session.begin():
             heartbeat = HeartbeatService(session)
             scheduled_agent_ids = await heartbeat.materialize_due_scheduled_wakeups()
             agent_ids = scheduled_agent_ids | await list_queued_agent_ids(session)
+    finally:
+        await _shielded_session_close(session)
     await asyncio.gather(
         *(dispatch_queued_agent(session_factory, agent_id) for agent_id in agent_ids)
     )

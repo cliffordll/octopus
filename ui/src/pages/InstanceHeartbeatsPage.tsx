@@ -137,7 +137,7 @@ export function InstanceHeartbeatsPanel() {
         <div className="settings-section-heading-copy">
           <p className="eyebrow">Timer Heartbeats</p>
           <div className="runtime-provider-title-line">
-            <h3>心跳</h3>
+            <h3>定时心跳</h3>
             <p className="muted">控制实例内所有组织的智能体定时心跳。</p>
           </div>
         </div>

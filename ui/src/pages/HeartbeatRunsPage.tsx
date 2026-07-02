@@ -311,7 +311,7 @@ export function HeartbeatRunsPage() {
             </div>
           </div>
           {sortedRuns.length === 0 ? (
-            <div className="heartbeat-empty-activity">暂无心跳运行记录。</div>
+            <div className="heartbeat-empty-activity">暂无运行记录。</div>
           ) : (
             <div className="heartbeat-activity-grid">
               {sortedRuns.slice(0, 6).map((run) => {
