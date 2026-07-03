@@ -362,6 +362,92 @@ it("uses organization scratch when the project has no workspace", async () => {
   expect(screen.queryByLabelText("控制台 执行模式")).not.toBeInTheDocument();
 });
 
+it("shows the shared workspace overwrite notice in run history", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    goals: [],
+    name: "控制台",
+    description: null,
+    status: "planned",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    codebase: { configured: true, scope: "project", workspaceId: "workspace-1", managedFolder: "organizations/org-1/workspaces", effectiveLocalFolder: "D:/coding/octopus", localFolder: "D:/coding/octopus", origin: "local_folder" },
+    workspaces: [
+      {
+        id: "workspace-1",
+        orgId: "org-1",
+        projectId: "project-1",
+        name: "默认代码来源",
+        sourceType: "local_path",
+        cwd: "D:/coding/octopus",
+        repoUrl: null,
+        repoRef: null,
+        defaultRef: null,
+        visibility: "shared",
+        setupCommand: null,
+        cleanupCommand: null,
+        remoteProvider: null,
+        remoteWorkspaceRef: null,
+        sharedWorkspaceKey: "console-main",
+        metadata: null,
+        executionWorkspacePolicy: { enabled: true, defaultMode: "shared_workspace" },
+        isPrimary: true,
+        createdAt: "",
+        updatedAt: "",
+      },
+    ],
+    primaryWorkspace: null,
+    resources: [],
+    archivedAt: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const workspace = {
+    id: "exec-1",
+    orgId: "org-1",
+    projectId: "project-1",
+    projectWorkspaceId: "workspace-1",
+    sourceIssueId: "issue-1",
+    mode: "shared_workspace",
+    strategyType: "shared_workspace",
+    name: "共享运行",
+    status: "active",
+    cwd: "D:/coding/octopus",
+    repoUrl: null,
+    baseRef: null,
+    branchName: null,
+    providerType: "local",
+    providerRef: null,
+    metadata: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
+    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([workspace]);
+    if (path === "/api/execution-workspaces/exec-1/status" && init?.method === "GET") {
+      return respond({ workspace, git: { available: true, branch: "main", dirty: true, entries: ["M ui/src/App.tsx"] }, lease: { locked: false, operationId: null, runId: null }, canArchive: false, operations: [] });
+    }
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/configuration");
+  const runHistory = await screen.findByRole("region", { name: "任务运行记录" });
+  expect(await within(runHistory).findByText("共享运行")).toBeInTheDocument();
+  expect(runHistory).toHaveTextContent("共享工作区不会隔离文件");
+  expect(within(runHistory).getByRole("button", { name: "检查 merge" })).toBeDisabled();
+});
+
 it("blocks project configuration save when goal IDs are not UUIDs", async () => {
   const project = {
     id: "project-1",

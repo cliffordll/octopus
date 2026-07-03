@@ -114,6 +114,11 @@ function workspacePolicyDescription(mode: WorkspacePolicyMode): string {
   return WORKSPACE_POLICY_OPTIONS.find((option) => option.mode === mode)?.description ?? "";
 }
 
+function workspaceModeNotice(mode: string | null | undefined): string {
+  if (mode !== "shared_workspace") return "";
+  return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
+}
+
 function workspacePolicyForMode(currentJson: string, mode: WorkspacePolicyMode): string {
   let current: Record<string, unknown> = {};
   try {
@@ -299,6 +304,7 @@ function ExecutionWorkspacePanel({
                     <span>Git：{statusPending ? "检查中..." : status?.git?.available ? (status.git.dirty ? "有未提交改动" : "干净") : status?.git?.error ?? "不可用"}</span>
                     <span>租约：{status?.lease.locked ? `运行中 ${status.lease.operationId ?? ""}` : "空闲"}</span>
                   </div>
+                  {workspaceModeNotice(selected.mode) && <p className="issue-action-notice" role="note">{workspaceModeNotice(selected.mode)}</p>}
                   <div className="project-workspace-actions">
                     <button className="secondary small-button" disabled={diffPending} onClick={() => onLoadDiff(selected.id)} type="button">查看 diff</button>
                     <button className="secondary small-button" disabled={mergePreviewPending || selected.mode === "shared_workspace"} onClick={() => onMergePreview(selected.id)} type="button">检查 merge</button>
