@@ -289,16 +289,25 @@ function workProductDisplayName(product: IssueWorkProduct): string {
   );
 }
 
-function workProductSourceLabel(product: IssueWorkProduct): string {
-  const source = metadataString(product.metadata, "source") ?? "";
-  const workspacePath = metadataString(product.metadata, "workspacePath") ?? "";
-  const browserPath = metadataString(product.metadata, "workspaceBrowserPath") ?? "";
-  const combinedPath = `${workspacePath}/${browserPath}`;
-  if (source.includes("run") || combinedPath.includes("/runs/") || combinedPath.includes("\\runs\\")) return "运行产物";
-  if (source.includes("execution_workspace")) return "工作区产物";
-  if (source.includes("organization_artifacts")) return "任务产物";
-  if (product.createdByRunId) return "运行产物";
-  return "任务产物";
+function workProductSourceLabel(product: IssueWorkProduct): string {
+  const source = metadataString(product.metadata, "source") ?? "";
+  const workspacePath = metadataString(product.metadata, "workspacePath") ?? "";
+  const browserPath = metadataString(product.metadata, "workspaceBrowserPath") ?? "";
+  const combinedPath = `${workspacePath}/${browserPath}`;
+  if (source === "shared_workspace_scan") return "共享工作区";
+  if (source === "organization_artifacts_scan") return "组织 artifacts";
+  if (source === "issue_artifacts_scan") return "任务 artifacts";
+  if (source === "execution_workspace_scan") return "执行工作区";
+  if (source.includes("run") || combinedPath.includes("/runs/") || combinedPath.includes("\\runs\\")) return "运行产物";
+  if (source.includes("execution_workspace")) return "执行工作区";
+  if (source.includes("organization_artifacts")) return "组织 artifacts";
+  if (product.createdByRunId) return "运行产物";
+  return "任务产物";
+}
+
+function workspaceModeNotice(mode: string | null | undefined): string {
+  if (mode !== "shared_workspace") return "";
+  return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
 }
 
 function activitySummary(event: ActivityEvent): string {
@@ -1032,7 +1041,8 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
                   <div><dt>工作区</dt><dd>{product.executionWorkspaceId ?? "-"}</dd></div>
                   <div><dt>工作区路径</dt><dd>{metadataText(product.metadata, "workspacePath")}</dd></div>
                   <div><dt>浏览路径</dt><dd>{metadataText(product.metadata, "workspaceBrowserPath")}</dd></div>
-                  <div><dt>来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
+                  <div><dt>来源</dt><dd>{workProductSourceLabel(product)}</dd></div>
+                  <div><dt>原始来源</dt><dd>{metadataText(product.metadata, "source")}</dd></div>
                   <div><dt>运行</dt><dd>{product.createdByRunId ?? "-"}</dd></div>
                   {product.assetId && <div><dt>资产</dt><dd>{product.assetId}</dd></div>}
                   <div><dt>provider</dt><dd>{product.provider}</dd></div>
@@ -1195,6 +1205,7 @@ function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
               确认清理时丢弃该执行工作区的未提交改动
             </label>
           )}
+          {workspaceModeNotice(selected.mode) && <p className="issue-action-notice" role="note">{workspaceModeNotice(selected.mode)}</p>}
           <div className="issue-work-product-actions">
             <button className="secondary small-button" disabled={loadDiff.isPending} onClick={() => loadDiff.mutate(selected.id)} type="button">查看 diff</button>
             <button className="secondary small-button" disabled={mergePreview.isPending || selected.mode === "shared_workspace"} onClick={() => mergePreview.mutate(selected.id)} type="button">检查 merge</button>

@@ -204,8 +204,8 @@ it("shows an issue and records comments and review decisions", async () => {
         healthStatus: "healthy",
         summary: "实现登录流程并等待 review",
         metadata: {
-          source: "execution_workspace_scan",
-          workspacePath: "docs/login-flow.md",
+          source: "shared_workspace_scan",
+          workspacePath: "src/login-flow.md",
           workspaceBrowserPath: "artifacts/issues/issue-1/runs/run-1/login.md",
         },
         createdByRunId: "run-1",
@@ -464,7 +464,8 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(workProductsRegion).toHaveTextContent("登录流程 PR");
   expect(workProductsRegion).toHaveTextContent("运行摘要");
   expect(workProductsRegion).toHaveTextContent("pull_request");
-  expect(workProductsRegion).toHaveTextContent("运行产物");
+  expect(workProductsRegion).toHaveTextContent("运行产物");
+  expect(workProductsRegion).toHaveTextContent("共享工作区");
   expect(workProductsRegion).toHaveTextContent("技术详情");
   expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
