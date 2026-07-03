@@ -22,6 +22,7 @@ from packages.database.queries.agent_state import (
     get_runtime_state,
     update_runtime_state,
 )
+from packages.database.queries.issues import update_issue
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.heartbeat import (
     append_run_event,
@@ -49,6 +50,7 @@ from packages.database.schema import (
     HeartbeatRun as HeartbeatRunRow,
     HeartbeatRunEvent as HeartbeatRunEventRow,
     Issue as IssueRow,
+    IssueWorkProduct,
     ActivityLog,
 )
 from packages.runtimes import RuntimeExecutionContext, get_runtime_adapter
@@ -78,7 +80,7 @@ from .logs import (
 )
 from .runtime_providers import inject_runtime_provider_config
 from .workspace_paths import ensure_octopus_run_log_dir
-from .workspaces import WorkspaceService
+from .workspaces import WorkspaceService, _expected_work_product_paths
 
 LOCAL_CHILD_PROCESS_RUNTIMES = {
     "process",
@@ -921,10 +923,7 @@ class HeartbeatService:
             else set()
         )
         for run in await list_runs_by_status(self._session, "running"):
-            if run.id in active_ids:
-                continue
-            if await self._cancel_orphaned_run_if_issue_closed(run):
-                continue
+            is_marked_active = run.id in active_ids
             agent = await get_agent_by_id(self._session, run.agent_id)
             tracks_local_child = (
                 agent is not None
@@ -937,6 +936,12 @@ class HeartbeatService:
                 assert run.process_pid is not None
                 if _is_process_alive(run.process_pid):
                     continue
+            elif is_marked_active:
+                continue
+            if await self._cancel_orphaned_run_if_issue_closed(run):
+                continue
+            if is_marked_active:
+                self._active_run_ids.get(run.agent_id, set()).discard(run.id)
             detached_message: str | None = None
             if tracks_local_child:
                 detached_message = (
@@ -974,7 +979,14 @@ class HeartbeatService:
                 "lifecycle",
                 message="run interrupted before server recovery",
                 level="error",
-                payload={"processPid": run.process_pid} if run.process_pid else None,
+                payload=(
+                    {
+                        "processPid": run.process_pid,
+                        "wasMarkedActive": is_marked_active,
+                    }
+                    if run.process_pid
+                    else {"wasMarkedActive": is_marked_active}
+                ),
             )
             await WorkspaceService(self._session).mark_run_workspace_interrupted(
                 run.id,
@@ -1785,6 +1797,7 @@ class HeartbeatService:
             )
             await self._update_runtime_state(agent, failed)
             await update_agent(self._session, agent.id, {"status": "error"})
+            await self._reconcile_failed_done_issue(agent, failed)
             with contextlib.suppress(Exception):
                 await self._release_issue_execution(failed)
             await self._append_event(
@@ -2077,6 +2090,7 @@ class HeartbeatService:
             return
         if await self._issue_has_active_children(issue.id):
             return
+
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
         if await self._run_has_issue_closeout_signal(
             final, issue.id, issue_has_reviewer=issue_has_reviewer
@@ -2153,6 +2167,31 @@ class HeartbeatService:
         issue = await self._session.get(IssueRow, issue_id)
         if issue is None or issue.org_id != final.org_id:
             return final
+        if issue.assignee_agent_id == agent.id and issue.status == "done":
+            has_unresolved_blocked_child = await self._record_parent_blocked_child_unresolved_if_needed(
+                final, issue
+            )
+            if has_unresolved_blocked_child:
+                return await self._mark_closeout_governance_failed(
+                    final,
+                    "Parent issue was marked done while child issues are blocked or cancelled.",
+                )
+            missing_expected = await self._record_done_missing_expected_work_product_if_needed(
+                final, issue
+            )
+            if missing_expected:
+                return await self._mark_closeout_governance_failed(
+                    final,
+                    "Issue was marked done without the required work product.",
+                )
+            if await self._record_parent_deliverable_convergence_warning_if_needed(
+                final, issue
+            ):
+                return await self._mark_closeout_governance_failed(
+                    final,
+                    "Parent issue was marked done without a parent-owned final deliverable or child-output evidence.",
+                )
+            return final
         if self._is_reviewer_issue_run(agent, final, issue, context):
             if await self._run_has_issue_activity(
                 final, issue.id, ("issue.review_decision_recorded",)
@@ -2161,7 +2200,7 @@ class HeartbeatService:
             await self._record_issue_review_closeout_missing(final, issue, context)
             return await self._mark_closeout_governance_failed(
                 final,
-                "Reviewer issue run exited without `control-plane issue review`.",
+                "Reviewer issue run exited without `octopus issue review`.",
             )
         if wake_reason == "issue_review_closeout_missing":
             if await self._run_has_issue_activity(
@@ -2171,7 +2210,7 @@ class HeartbeatService:
             await self._record_issue_review_closeout_missing(final, issue, context)
             return await self._mark_closeout_governance_failed(
                 final,
-                "Reviewer close-out run exited without `control-plane issue review`.",
+                "Reviewer close-out run exited without `octopus issue review`.",
             )
         if issue.assignee_agent_id != agent.id or issue.status not in {
             "todo",
@@ -2202,10 +2241,21 @@ class HeartbeatService:
             )
             assert waiting is not None
             return waiting
+        if wake_reason == "issue_children_settled" and await self._block_parent_for_unresolved_blocked_children(
+            final, issue
+        ):
+            return final
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
         if await self._run_has_issue_closeout_signal(
             final, issue.id, issue_has_reviewer=issue_has_reviewer
         ):
+            if await self._record_parent_deliverable_convergence_warning_if_needed(
+                final, issue
+            ):
+                return await self._mark_closeout_governance_failed(
+                    final,
+                    "Parent issue was marked done without a parent-owned final deliverable or child-output evidence.",
+                )
             return final
         passive_followup = _passive_followup_context(context)
         raw_attempt = passive_followup.get("attempt")
@@ -2230,8 +2280,8 @@ class HeartbeatService:
                 final,
                 (
                     "Issue close-out follow-up exited without "
-                    "`control-plane issue done`, `control-plane issue block`, "
-                    "or `control-plane issue comment`."
+                    "`octopus issue done`, `octopus issue block`, "
+                    "or `octopus issue comment`."
                 ),
             )
         if attempts >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
@@ -2244,8 +2294,8 @@ class HeartbeatService:
         return await self._mark_closeout_governance_failed(
             final,
             (
-                "Issue run exited without `control-plane issue done`, "
-                "`control-plane issue block`, or `control-plane issue comment`."
+                "Issue run exited without `octopus issue done`, "
+                "`octopus issue block`, or `octopus issue comment`."
             ),
         )
 
@@ -2405,7 +2455,7 @@ class HeartbeatService:
                     "reviewInstructions": (
                         "Your previous reviewer run ended without a structured "
                         "decision. Inspect the current issue state and record "
-                        "exactly one outcome with `control-plane issue review "
+                        "exactly one outcome with `octopus issue review "
                         "--decision approve|request_changes|needs_followup|blocked "
                         "--comment ...`."
                     ),
@@ -2466,6 +2516,309 @@ class HeartbeatService:
                 "reason": "review_outcome_missing",
             },
         )
+
+    async def _reconcile_failed_done_issue(
+        self, agent: AgentRow, final: HeartbeatRunRow
+    ) -> None:
+        context = (
+            final.context_snapshot if isinstance(final.context_snapshot, dict) else {}
+        )
+        issue_id = _issue_id_from_context(context)
+        if issue_id is None:
+            return
+        issue = await self._session.get(IssueRow, issue_id)
+        if (
+            issue is None
+            or issue.org_id != final.org_id
+            or issue.assignee_agent_id != agent.id
+            or issue.status != "done"
+        ):
+            return
+        missing_expected = await self._record_done_missing_expected_work_product_if_needed(
+            final, issue
+        )
+        if not missing_expected:
+            return
+        await update_issue(
+            self._session,
+            issue.id,
+            {
+                "status": "blocked",
+                "completed_at": None,
+            },
+        )
+
+    async def _record_done_missing_expected_work_product_if_needed(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> bool:
+        expected_paths = _expected_work_product_paths(issue)
+        if not expected_paths:
+            return False
+        result = await self._session.execute(
+            select(IssueWorkProduct).where(
+                and_(
+                    IssueWorkProduct.org_id == issue.org_id,
+                    IssueWorkProduct.issue_id == issue.id,
+                    IssueWorkProduct.is_primary.is_(True),
+                )
+            )
+        )
+        for product in result.scalars().all():
+            metadata = product.metadata_json if isinstance(product.metadata_json, dict) else {}
+            workspace_path = metadata.get("workspacePath")
+            candidates = {product.title}
+            if isinstance(workspace_path, str):
+                candidates.add(workspace_path)
+            if any(candidate in expected_paths for candidate in candidates):
+                return False
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="work_product_governance",
+            action="issue.done_missing_work_product",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "runId": final.id,
+                "reason": "done_without_expected_work_product",
+                "expectedPaths": sorted(expected_paths),
+            },
+        )
+        return True
+
+    async def _block_parent_for_unresolved_blocked_children(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> bool:
+        children = await self._direct_children(issue)
+        blocked_children = [
+            child for child in children if child.status in {"blocked", "cancelled"}
+        ]
+        if not blocked_children:
+            return False
+        from_status = issue.status
+        await update_issue(
+            self._session,
+            issue.id,
+            {
+                "status": "blocked",
+                "completed_at": None,
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="parent_child_governance",
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "status": "blocked",
+                "fromStatus": from_status,
+                "reason": "blocked_child_unresolved",
+                "runId": final.id,
+                "childIssues": [
+                    {
+                        "id": child.id,
+                        "identifier": child.identifier,
+                        "title": child.title,
+                        "status": child.status,
+                    }
+                    for child in blocked_children
+                ],
+            },
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="parent_child_governance",
+            action="issue.parent_blocked_child_unresolved",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "runId": final.id,
+                "reason": "parent_blocked_due_to_blocked_children",
+                "childIssues": [
+                    {
+                        "id": child.id,
+                        "identifier": child.identifier,
+                        "title": child.title,
+                        "status": child.status,
+                    }
+                    for child in blocked_children
+                ],
+                "nextActions": ["retry_child", "reassign_child", "create_replacement_child", "accept_incomplete"],
+            },
+        )
+        return True
+
+    async def _record_parent_blocked_child_unresolved_if_needed(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> bool:
+        children = await self._direct_children(issue)
+        blocked_children = [
+            child for child in children if child.status in {"blocked", "cancelled"}
+        ]
+        if not blocked_children:
+            return False
+        if await self._run_has_issue_activity(
+            final, issue.id, ("issue.parent_blocked_child_unresolved",)
+        ):
+            return True
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="parent_child_governance",
+            action="issue.parent_blocked_child_unresolved",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "runId": final.id,
+                "reason": "parent_done_with_blocked_children",
+                "childIssues": [
+                    {
+                        "id": child.id,
+                        "identifier": child.identifier,
+                        "title": child.title,
+                        "status": child.status,
+                    }
+                    for child in blocked_children
+                ],
+                "allowedCloseout": "block_parent_or_create_replacement_child",
+            },
+        )
+        return True
+
+    async def _record_parent_deliverable_convergence_warning_if_needed(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> bool:
+        children = await self._direct_children(issue)
+        if not children:
+            return False
+        active_statuses = {"backlog", "todo", "in_progress", "in_review"}
+        if any(child.status in active_statuses for child in children):
+            return False
+        if await self._run_has_issue_activity(
+            final, issue.id, ("issue.parent_deliverable_convergence_warning",)
+        ):
+            return True
+        if await self._parent_closeout_has_child_evidence(final, issue, children):
+            return False
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="parent_deliverable_governance",
+            action="issue.parent_deliverable_convergence_warning",
+            entity_type="issue",
+            entity_id=issue.id,
+            agent_id=final.agent_id,
+            run_id=final.id,
+            details={
+                "issueId": issue.id,
+                "runId": final.id,
+                "reason": "parent_done_without_child_output_evidence",
+                "childIssues": [
+                    {
+                        "id": child.id,
+                        "identifier": child.identifier,
+                        "title": child.title,
+                        "status": child.status,
+                    }
+                    for child in children
+                ],
+                "expectedEvidence": [
+                    "parent_primary_work_product_after_children_settled",
+                    "closeout_comment_mentions_child_identifier_or_title",
+                ],
+            },
+        )
+        return True
+
+    async def _direct_children(self, issue: IssueRow) -> list[IssueRow]:
+        result = await self._session.execute(
+            select(IssueRow).where(
+                and_(IssueRow.org_id == issue.org_id, IssueRow.parent_id == issue.id)
+            )
+        )
+        return list(result.scalars().all())
+
+    async def _parent_closeout_has_child_evidence(
+        self, final: HeartbeatRunRow, issue: IssueRow, children: list[IssueRow]
+    ) -> bool:
+        child_settled_at = max(
+            (child.completed_at or child.updated_at or child.created_at)
+            for child in children
+        )
+        if child_settled_at.tzinfo is None:
+            child_settled_at = child_settled_at.replace(tzinfo=UTC)
+        product_created_at = await self._latest_parent_primary_work_product_created_at(
+            issue
+        )
+        if product_created_at is not None:
+            if product_created_at.tzinfo is None:
+                product_created_at = product_created_at.replace(tzinfo=UTC)
+            if product_created_at >= child_settled_at:
+                return True
+        return await self._run_closeout_mentions_children(final, issue, children)
+
+    async def _latest_parent_primary_work_product_created_at(
+        self, issue: IssueRow
+    ) -> datetime | None:
+        result = await self._session.execute(
+            select(IssueWorkProduct.created_at)
+            .where(
+                and_(
+                    IssueWorkProduct.org_id == issue.org_id,
+                    IssueWorkProduct.issue_id == issue.id,
+                    IssueWorkProduct.is_primary.is_(True),
+                )
+            )
+            .order_by(IssueWorkProduct.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _run_closeout_mentions_children(
+        self, final: HeartbeatRunRow, issue: IssueRow, children: list[IssueRow]
+    ) -> bool:
+        result = await self._session.execute(
+            select(ActivityLog.details).where(
+                and_(
+                    ActivityLog.org_id == issue.org_id,
+                    ActivityLog.run_id == final.id,
+                    ActivityLog.entity_type == "issue",
+                    ActivityLog.entity_id == issue.id,
+                    ActivityLog.action.in_(("issue.comment_added", "issue.updated")),
+                )
+            )
+        )
+        haystack = "\n".join(
+            _activity_details_text(details)
+            for details in result.scalars().all()
+            if isinstance(details, dict)
+        ).casefold()
+        if not haystack:
+            return False
+        for child in children:
+            needles = [child.identifier, child.title]
+            if any(needle and needle.casefold() in haystack for needle in needles):
+                return True
+        return False
 
     async def _run_has_issue_closeout_signal(
         self,
@@ -2702,7 +3055,7 @@ class HeartbeatService:
             or not parent.assignee_agent_id
         ):
             return None
-        await self.wakeup(
+        continuation = await self.wakeup(
             parent.assignee_agent_id,
             {
                 "source": "assignment",
@@ -2734,6 +3087,24 @@ class HeartbeatService:
             actor_id="heartbeat_child_coordination",
             execute_immediately=False,
         )
+        if continuation is not None:
+            await insert_activity_log(
+                self._session,
+                org_id=parent.org_id,
+                actor_type="system",
+                actor_id="heartbeat_child_coordination",
+                action="issue.children_settled",
+                entity_type="issue",
+                entity_id=parent.id,
+                run_id=None,
+                details={
+                    "parentIssueId": parent.id,
+                    "completedChildIssueId": issue.id,
+                    "completedChildIdentifier": issue.identifier,
+                    "completedChildTitle": issue.title,
+                    "reason": "issue_children_settled",
+                },
+            )
         return parent.assignee_agent_id
 
     async def _queue_issue_review_wakeup_after_success(
@@ -2771,7 +3142,7 @@ class HeartbeatService:
                         "The assigned run succeeded and the issue is ready for "
                         "review. Record one structured reviewer decision before "
                         "exiting: approve, request_changes, needs_followup, or "
-                        "blocked. Use `control-plane issue review`."
+                        "blocked. Use `octopus issue review`."
                     ),
                 },
             },
@@ -3264,6 +3635,14 @@ def _run_summary(result_json: dict[str, Any] | None) -> str | None:
             return value
     return None
 
+
+def _activity_details_text(details: dict[str, Any]) -> str:
+    values: list[str] = []
+    for key in ("body", "comment", "note", "summary", "message", "status"):
+        value = details.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value)
+    return "\n".join(values)
 
 
 async def _shielded_session_close(session: AsyncSession) -> None:

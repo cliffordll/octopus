@@ -1,4 +1,4 @@
-﻿# 智能体运行时执行链路分析报告
+# 智能体运行时执行链路分析报告
 
 ## 1. 目标
 
@@ -477,7 +477,7 @@ runtime 会通过 env 获得产物目录：
 OCTOPUS_ORG_ARTIFACTS_DIR
 ```
 
-本地 control-plane skill 也会提供同语义变量：
+本地 octopus skill 也会提供同语义变量：
 
 ```text
 OCTOPUS_ORG_ARTIFACTS_DIR

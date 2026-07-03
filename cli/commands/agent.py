@@ -337,15 +337,15 @@ def get_current_agent(args: argparse.Namespace, client: ApiClient) -> Any:
 def get_capabilities(args: argparse.Namespace, client: ApiClient) -> Any:
     return {
         "commands": [
-            "control-plane agent me",
-            "control-plane agent inbox",
-            "control-plane agent capabilities",
-            "control-plane issue checkout",
-            "control-plane issue heartbeat-context",
-            "control-plane issue comment",
-            "control-plane issue done",
-            "control-plane issue block",
-            "control-plane issue review",
+            "octopus agent me",
+            "octopus agent inbox",
+            "octopus agent capabilities",
+            "octopus issue checkout",
+            "octopus issue heartbeat-context",
+            "octopus issue comment",
+            "octopus issue done",
+            "octopus issue block",
+            "octopus issue review",
         ],
         "defaults": {
             "agentId": "OCTOPUS_AGENT_ID",

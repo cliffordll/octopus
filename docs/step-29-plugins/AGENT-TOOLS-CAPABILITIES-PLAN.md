@@ -13,7 +13,7 @@
 - `PluginToolDispatcher` 能发现 ready plugin 的 tools，并通过 worker 或内置 worker 执行。
 - `plugin-git` 已作为 bundled plugin 暴露 `git.status`、`git.diff`、`git.commit`、`git.push` 等 RPC 工具。
 - local runtime 当前还硬编码准备了两个 agent home shim：
-  - `control-plane` / `control-plane.cmd`
+  - `control-plane` / `octopus.cmd`
   - `git` / `git.cmd` Git 写策略包装器
 
 这里的问题不是“缺一套新的 Tool Registry”，而是工具能力被拆成了两套：
@@ -85,7 +85,7 @@ Tool Capability = Plugin 暴露给 agent/runtime 的一种能力
 
 ```text
 agent_home/.octopus/bin/git.cmd
-agent_home/.octopus/bin/control-plane.cmd
+agent_home/.octopus/bin/octopus.cmd
 agent_home/.octopus/bin/my-tool.cmd
 ```
 
@@ -253,7 +253,7 @@ builtin.control-plane
     control-plane
 ```
 
-这不要求把 control-plane skill 立即迁移成 plugin，但 runtime tool 的安装、prompt 注入和审计应走同一 manifest/capability 模型。
+这不要求把 octopus skill 立即迁移成 plugin，但 runtime tool 的安装、prompt 注入和审计应走同一 manifest/capability 模型。
 
 ## 8. 服务端解析流程
 
@@ -478,7 +478,7 @@ plugin_runtime_tool_events
 验收：
 
 - 现有 local runtime tests 继续通过。
-- `git` / `git.cmd` 和 `control-plane` / `control-plane.cmd` 仍被生成。
+- `git` / `git.cmd` 和 `control-plane` / `octopus.cmd` 仍被生成。
 - 新增 script/system_command runtime tool 能被准备或明确失败。
 
 ### 阶段 D：Prompt 注入与策略

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -38,6 +39,7 @@ from packages.database.queries.workspaces import (
 )
 from packages.database.queries.assets import create_asset, get_asset_by_sha256
 from packages.database.schema import (
+    ActivityLog,
     ExecutionWorkspace,
     Issue,
     IssueWorkProduct,
@@ -1894,6 +1896,12 @@ class WorkspaceService:
         )
         existing = await list_issue_work_products(self._session, issue.id)
         seen_external_ids = {row.external_id for row in existing if row.external_id}
+        seen_workspace_paths = {
+            path
+            for row in existing
+            for path in (_work_product_workspace_paths(row),)
+            if path
+        }
         stored: list[IssueWorkProductData] = []
         for product in products:
             if not isinstance(product, dict):
@@ -1904,9 +1912,12 @@ class WorkspaceService:
             if not title or not product_type:
                 continue
             external_id = _string(product.get("externalId"))
+            product_workspace_path = _payload_workspace_path(product)
             # Idempotent capture: a re-scan (backfill after a transient failure)
             # must not duplicate an already-registered artifact for this issue.
             if external_id and external_id in seen_external_ids:
+                continue
+            if product_workspace_path and product_workspace_path in seen_workspace_paths:
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
@@ -1934,6 +1945,8 @@ class WorkspaceService:
             )
             if external_id:
                 seen_external_ids.add(external_id)
+            if product_workspace_path:
+                seen_workspace_paths.add(product_workspace_path)
             stored.append(self._to_work_product(row))
         return stored
 
@@ -1991,7 +2004,18 @@ class WorkspaceService:
             "project_primary",
             "organization_workspace",
         }
+        expected_shared_paths = (
+            _expected_work_product_paths(issue) if shared_workspace else set()
+        )
+        declared_primary_paths: set[str] = set()
         if shared_workspace:
+            expected_shared_paths.update(
+                await self._run_declared_work_product_paths(run_id, issue.id)
+            )
+            declared_primary_paths = await self._run_primary_work_product_paths(
+                run_id, issue.id
+            )
+
             issue_artifacts_dir = _string(workspace.get("issueArtifactsDir"))
             issue_artifacts_root = (
                 Path(issue_artifacts_dir).resolve()
@@ -2022,16 +2046,19 @@ class WorkspaceService:
                     continue
                 seen_paths.add(resolved_path)
                 rel_path = path.relative_to(root).as_posix()
-                if (
-                    source == "shared_workspace_scan"
-                    and artifacts_root is not None
-                    and _is_other_issue_artifact(
-                        path=path,
-                        artifacts_root=artifacts_root,
-                        issue_id=issue.id,
-                    )
-                ):
-                    continue
+                if source in {"shared_workspace_scan", "organization_artifacts_scan"}:
+                    if rel_path not in expected_shared_paths:
+                        continue
+                    if (
+                        source == "shared_workspace_scan"
+                        and artifacts_root is not None
+                        and _is_other_issue_artifact(
+                            path=path,
+                            artifacts_root=artifacts_root,
+                            issue_id=issue.id,
+                        )
+                    ):
+                        continue
                 workspace_browser_path = _workspace_browser_path(
                     path=path,
                     artifacts_root=artifacts_root,
@@ -2072,11 +2099,20 @@ class WorkspaceService:
         primary_idx = next(
             (
                 i
-                for i in range(len(products) - 1, -1, -1)
-                if products[i]["metadata"].get("source") == "execution_workspace_scan"
+                for i, product in enumerate(products)
+                if product["metadata"].get("workspacePath") in declared_primary_paths
             ),
-            len(products) - 1,
+            None,
         )
+        if primary_idx is None:
+            primary_idx = next(
+                (
+                    i
+                    for i in range(len(products) - 1, -1, -1)
+                    if products[i]["metadata"].get("source") == "execution_workspace_scan"
+                ),
+                len(products) - 1,
+            )
         products[primary_idx]["isPrimary"] = True
         return await self.persist_run_work_products(
             run_id=run_id,
@@ -2084,6 +2120,58 @@ class WorkspaceService:
             products=products,
         )
 
+    async def _run_declared_work_product_paths(
+        self, run_id: str, issue_id: str
+    ) -> set[str]:
+        result = await self._session.execute(
+            select(ActivityLog.details).where(
+                ActivityLog.run_id == run_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == issue_id,
+            )
+        )
+        paths: set[str] = set()
+        for details in result.scalars().all():
+            if not isinstance(details, dict):
+                continue
+            declarations = details.get("workProductDeclarations")
+            if isinstance(declarations, list):
+                for item in declarations:
+                    if not isinstance(item, dict):
+                        continue
+                    value = item.get("path")
+                    if isinstance(value, str) and value.strip():
+                        paths.add(value.replace("\\", "/").strip())
+            for key in ("body", "comment", "note", "summary", "message"):
+                value = details.get(key)
+                if isinstance(value, str):
+                    paths.update(_declared_work_product_paths_from_text(value))
+        return paths
+
+    async def _run_primary_work_product_paths(
+        self, run_id: str, issue_id: str
+    ) -> set[str]:
+        result = await self._session.execute(
+            select(ActivityLog.details).where(
+                ActivityLog.run_id == run_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == issue_id,
+            )
+        )
+        paths: set[str] = set()
+        for details in result.scalars().all():
+            if not isinstance(details, dict):
+                continue
+            declarations = details.get("workProductDeclarations")
+            if not isinstance(declarations, list):
+                continue
+            for item in declarations:
+                if not isinstance(item, dict) or item.get("isPrimary") is not True:
+                    continue
+                value = item.get("path")
+                if isinstance(value, str) and value.strip():
+                    paths.add(value.replace("\\", "/").strip())
+        return paths
     async def _archive_work_product_content(
         self, org_id: str, product: dict[str, Any]
     ) -> dict[str, Any]:
@@ -2668,6 +2756,22 @@ def _parse_datetime(value: object) -> datetime | None:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
+def _payload_workspace_path(product: Mapping[str, Any]) -> str | None:
+    metadata = product.get("metadata")
+    if isinstance(metadata, dict):
+        value = _string(metadata.get("workspacePath"))
+        if value:
+            return value.replace("\\", "/")
+    title = _string(product.get("title"))
+    return title.replace("\\", "/") if title else None
+
+
+def _work_product_workspace_paths(row: IssueWorkProduct) -> str | None:
+    metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+    value = _string(metadata.get("workspacePath"))
+    if value:
+        return value.replace("\\", "/")
+    return row.title.replace("\\", "/") if row.title else None
 def _json_dump(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
@@ -2675,6 +2779,46 @@ def _json_dump(value: Any) -> str:
 def _string(value: Any) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
+
+_WORK_PRODUCT_EXTENSIONS_RE = r"md|txt|docx|pdf|csv|json|html?"
+_WORK_PRODUCT_TOKEN_RE = r"[^\s`'\"<>|:*?]+"
+_EXPECTED_WORK_PRODUCT_FILENAME_RE = re.compile(
+    rf"(?<![\w./-])({_WORK_PRODUCT_TOKEN_RE}\.(?:{_WORK_PRODUCT_EXTENSIONS_RE}))",
+    re.IGNORECASE,
+)
+_EXPECTED_WORK_PRODUCT_PATH_RE = re.compile(
+    rf"(?<![\w.-])((?:{_WORK_PRODUCT_TOKEN_RE}/)+{_WORK_PRODUCT_TOKEN_RE}\.(?:{_WORK_PRODUCT_EXTENSIONS_RE}))",
+    re.IGNORECASE,
+)
+_WORK_PRODUCT_PATH_STRIP_CHARS = "`'\".,;:()[]{}，。；：（）【】《》"
+
+
+def _declared_work_product_paths_from_text(text: str) -> set[str]:
+    if not text.strip():
+        return set()
+    paths = {
+        match.group(1).replace("\\", "/")
+        for match in _EXPECTED_WORK_PRODUCT_PATH_RE.finditer(text)
+    }
+    filenames = {
+        match.group(1)
+        for match in _EXPECTED_WORK_PRODUCT_FILENAME_RE.finditer(text)
+    }
+    paths.update(filenames)
+    if "reports/" in text or "reports\\" in text:
+        paths.update(f"reports/{filename}" for filename in filenames)
+    return {
+        path.strip(_WORK_PRODUCT_PATH_STRIP_CHARS)
+        for path in paths
+        if path.strip(_WORK_PRODUCT_PATH_STRIP_CHARS)
+    }
+
+
+def _expected_work_product_paths(issue: Issue) -> set[str]:
+    text = "\n".join(
+        part for part in (issue.title, issue.description) if isinstance(part, str)
+    )
+    return _declared_work_product_paths_from_text(text)
 
 def _workspace_browser_path(*, path: Path, artifacts_root: Path | None) -> str | None:
     if artifacts_root is None:

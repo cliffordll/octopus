@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 ISSUE_LIST_MISSING_ORG_PATH = "/api/issues"
 ORG_ISSUE_LIST_MISSING_ORG_PATH = "/api/orgs/issues"
@@ -8,6 +8,10 @@ ISSUE_CHECKOUT_PATH = "/api/issues/{id}/checkout"
 ISSUE_EXECUTE_PATH = "/api/issues/{id}/execute"
 ISSUE_PASSIVE_FOLLOWUP_PATH = "/api/issues/{id}/passive-followup"
 ISSUE_HEARTBEAT_CONTEXT_PATH = "/api/issues/{id}/heartbeat-context"
+ISSUE_CHILDREN_PATH = "/api/issues/{id}/children"
+ISSUE_RETRY_CHILD_PATH = "/api/issues/{id}/retry-child"
+ISSUE_REPLACE_CHILD_PATH = "/api/issues/{id}/replace-child"
+ISSUE_ACCEPT_INCOMPLETE_PATH = "/api/issues/{id}/accept-incomplete"
 ISSUE_COMMENT_LIST_PATH = "/api/issues/{id}/comments"
 ISSUE_REVIEW_DECISION_PATH = "/api/issues/{id}/review-decision"
 ISSUE_WORK_PRODUCTS_PATH = "/api/issues/{id}/work-products"

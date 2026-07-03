@@ -15,7 +15,7 @@ from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_ex
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -77,7 +77,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
     openclaw_agent_id = _normalize_openclaw_agent_id(context.agent_id)
     openclaw_workspace = _openclaw_workspace_path(managed_home, openclaw_agent_id)
-    ensure_control_plane_cli_shim(env, managed_home)
+    ensure_octopus_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="openclaw_local",

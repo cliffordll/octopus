@@ -91,11 +91,11 @@ def _runtime_context_guidance(config: dict[str, Any]) -> str:
             "## Runtime Context Contract",
             "",
             "Octopus injects runtime context directly into the process environment.",
-            "- Use `control-plane ... --json` from `PATH`; do not hard-code the `.octopus/bin` shim path.",
+            "- Use `octopus ... --json` from `PATH`; do not hard-code the `.octopus/bin` shim path.",
             "- Do not read or create workspace `.env` files to recover `OCTOPUS_*` values.",
             "- On Windows PowerShell, read variables as `$env:OCTOPUS_AGENT_ID`, `$env:OCTOPUS_ORG_ID`, and `$env:OCTOPUS_RUN_ID`.",
             "- In POSIX shells, read variables as `$OCTOPUS_AGENT_ID`, `$OCTOPUS_ORG_ID`, and `$OCTOPUS_RUN_ID`.",
-            "- Prefer CLI commands that use injected defaults, such as `control-plane agent me --json`, `control-plane agent inbox --json`, and `control-plane issue checkout <issue> --json`.",
+            "- Prefer CLI commands that use injected defaults, such as `octopus agent me --json`, `octopus agent inbox --json`, and `octopus issue checkout <issue> --json`.",
         ]
     )
 
@@ -143,6 +143,7 @@ def _heartbeat_prompt(config: dict[str, Any]) -> str:
         agent_id=_string(octopus.get("agentId")) or "",
         agent_name=_string(octopus.get("agentName")) or "",
         issue=issue,
+        context=context,
     )
 
 
@@ -167,9 +168,9 @@ def _passive_followup_issue_prompt(
                     "Do not start new implementation work. Inspect the current issue state only enough to choose the correct close-out command.",
                     "",
                     "Before exiting, execute exactly one of these commands and confirm it succeeded:",
-                    f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
-                    f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
-                    f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    f'- work is complete: `octopus issue done "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work is blocked: `octopus issue block "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work remains open but has a clear next step: `octopus issue comment "{issue_ref}" --body "<markdown>" --json`',
                     "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
                     "",
                     "A final assistant message is not a close-out signal. Do not exit until one command above succeeds.",
@@ -200,9 +201,9 @@ def _review_closeout_issue_prompt(
                     "Do not start new implementation work. Inspect the current issue state only enough to choose the review outcome.",
                     "",
                     "Before exiting, execute exactly one reviewer decision command and confirm it succeeded:",
-                    f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
+                    f'`octopus issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
                     "",
-                    "Do not use `control-plane issue comment` as a substitute for reviewer close-out. Do not exit until `control-plane issue review` succeeds.",
+                    "Do not use `octopus issue comment` as a substitute for reviewer close-out. Do not exit until `octopus issue review` succeeds.",
                 ]
             ),
         ]
@@ -229,10 +230,10 @@ def _requested_issue_review_prompt(
                     "## Review Gate",
                     "",
                     "Before exiting, execute exactly one reviewer decision command and confirm it succeeded:",
-                    f'`control-plane issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
+                    f'`octopus issue review "{issue_ref}" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`',
                     "",
-                    "Do not use `control-plane issue comment` as a substitute for the structured reviewer decision.",
-                    "A final assistant message is not a review decision. Do not exit until `control-plane issue review` succeeds.",
+                    "Do not use `octopus issue comment` as a substitute for the structured reviewer decision.",
+                    "A final assistant message is not a review decision. Do not exit until `octopus issue review` succeeds.",
                 ]
             ),
         ]
@@ -240,7 +241,7 @@ def _requested_issue_review_prompt(
 
 
 def _assignment_issue_prompt(
-    *, agent_id: str, agent_name: str, issue: dict[str, Any]
+    *, agent_id: str, agent_name: str, issue: dict[str, Any], context: dict[str, Any]
 ) -> str:
     issue_ref = _issue_ref(issue)
     return _join_prompt_sections(
@@ -256,7 +257,9 @@ def _assignment_issue_prompt(
                 "Use the available tools to explore the codebase, understand "
                 "the requirements, and implement a solution."
             ),
+            _rerun_reconcile_prompt(issue_ref, context),
             _subtask_coordination_prompt(issue_ref, issue),
+            _child_deliverable_convergence_prompt(issue_ref, context),
             "\n".join(
                 [
                     "## Close-out Gate",
@@ -265,9 +268,9 @@ def _assignment_issue_prompt(
                     "A final assistant message is not a close-out signal.",
                     "",
                     "Before exiting, execute exactly one of these commands and confirm it succeeded:",
-                    f'- work is complete: `control-plane issue done "{issue_ref}" --comment "<markdown>" --json`',
-                    f'- work is blocked: `control-plane issue block "{issue_ref}" --comment "<markdown>" --json`',
-                    f'- work remains open but has a clear next step: `control-plane issue comment "{issue_ref}" --body "<markdown>" --json`',
+                    f'- work is complete: `octopus issue done "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work is blocked: `octopus issue block "{issue_ref}" --comment "<markdown>" --json`',
+                    f'- work remains open but has a clear next step: `octopus issue comment "{issue_ref}" --body "<markdown>" --json`',
                     "If the issue has a reviewer, `issue done` submits the work for review and the control plane moves the issue to `in_review`; only a reviewer decision can mark it done.",
                     "",
                     "Do not exit until one command above succeeds.",
@@ -275,6 +278,82 @@ def _assignment_issue_prompt(
             ),
         ]
     )
+
+
+def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
+    child_outputs = context.get("childOutputs")
+    if not isinstance(child_outputs, dict):
+        return ""
+    children = child_outputs.get("children")
+    total = child_outputs.get("totalChildCount")
+    if not isinstance(children, list) or not children:
+        return ""
+    stage = _string(context.get("parentExecutionStage")) or "rerun_reconcile"
+    guidance = [
+        "## Parent Rerun Reconcile",
+        "",
+        f"This parent issue already has {total or len(children)} direct child issue(s). Treat this run as a rerun/reconcile pass, not a blank first execution.",
+        f"Current parent execution stage: `{stage}`.",
+        f'Inspect existing children with `octopus issue children "{issue_ref}" --include-work-products --json` before creating, replacing, cancelling, or completing work.',
+        "You may reuse existing child outputs, retry blocked/failed children, take over missing work in the parent, append new children, replace or cancel old children, or re-split the work if the prior split is wrong.",
+        "If you append, replace, cancel, or re-split, explicitly explain how each existing child issue is handled. Do not ignore existing children or silently create duplicate sibling tasks for the same work.",
+    ]
+    for child in children[:12]:
+        if not isinstance(child, dict):
+            continue
+        label = _string(child.get("identifier")) or _string(child.get("id")) or "child issue"
+        title = _string(child.get("title")) or "Untitled child issue"
+        status = _string(child.get("status")) or "unknown"
+        products = child.get("workProducts")
+        product_count = len(products) if isinstance(products, list) else 0
+        guidance.append(f"- {label}: {title} ({status}, workProducts={product_count})")
+    return "\n".join(guidance)
+
+
+def _child_deliverable_convergence_prompt(issue_ref: str, context: dict[str, Any]) -> str:
+    if _string(context.get("wakeReason")) != "issue_children_settled":
+        return ""
+    prompt = _string(context.get("childWorkProductsPrompt"))
+    products = context.get("childPrimaryWorkProducts")
+    blocked_children = context.get("blockedChildIssues")
+    if (
+        not prompt
+        and not isinstance(products, list)
+        and not isinstance(blocked_children, list)
+    ):
+        return ""
+    guidance = [
+        "## Parent Deliverable Convergence",
+        "",
+        "Wake reason: `issue_children_settled`.",
+        "All direct child issues are now terminal. Your job is to synthesize their primary deliverables into the parent issue's final deliverable.",
+        "Do not finish by only summarizing child task status. Produce a parent-owned final report or artifact first.",
+        f'Use `octopus issue get "{issue_ref}" --json` if you need the current registered work products and child provenance.',
+    ]
+    if prompt:
+        guidance.extend(["", prompt])
+    if isinstance(blocked_children, list) and blocked_children:
+        guidance.extend(["", "## Blocked or Cancelled Child Issues", ""])
+        for child in blocked_children:
+            if not isinstance(child, dict):
+                continue
+            label = _string(child.get("identifier")) or _string(child.get("title")) or "child issue"
+            title = _string(child.get("title")) or "Untitled child issue"
+            status = _string(child.get("status")) or "blocked"
+            guidance.append(f"- {label}: {title} ({status})")
+        guidance.extend(
+            [
+                "",
+                "Do not mark the parent issue done while any child is blocked or cancelled unless the user explicitly asked for an incomplete deliverable. Either fix/retry the missing child work, create a replacement child, or block the parent issue with a clear missing-output explanation.",
+            ]
+        )
+    guidance.extend(
+        [
+            "",
+            "Before closing out, write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md`. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work.",
+        ]
+    )
+    return "\n".join(guidance)
 
 
 def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
@@ -304,16 +383,16 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             "## Subtask Coordination",
             "",
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
-            'List available agents first with `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
-            f'Before creating a child issue, check existing children with `control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "{issue_ref}" --json` and reuse the existing child when the title already matches.',
-            'Create each real subtask with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
+            'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
+            f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json` or `octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "{issue_ref}" --json`. Reuse, retry, replace, cancel, or explicitly supersede existing children before creating similar new child issues.',
+            'Create each real subtask with `octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
             f'"{issue_ref}" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json` before treating it as delegated.',
             "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
             "After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent again after every child is terminal.",
             "Do not poll or wait for delegated children inside the current runtime process because that keeps the issue execution slot occupied.",
             "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary.",
-            "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.",
+            "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. If an existing child is blocked or cancelled, do not recreate the same sibling; retry/reassign it, create an explicit replacement child that references the blocked child, or block the parent with the missing output.",
             "Do not mark the parent issue done while child issues are still open; wait for child issues to finish, or explicitly close/cancel them with a reason.",
             "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
             "If the work should stay inside the parent run, do not create delegated child issues for it; say that explicitly in the close-out comment.",

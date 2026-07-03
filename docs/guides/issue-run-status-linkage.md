@@ -152,6 +152,10 @@ UI 控制只是防误操作。Server 仍应保留关键业务校验和联动，�
 
 重新执行不会删除旧 run。每次 run 都是独立历史事实。
 
+父子任务重新执行时，平台不应把父任务当成空白任务。重新执行 context 应包含现有 child issues、child work products、失败 run、closeout 和产物缺失情况。manager agent 可以复用已有 children、重试异常 child、接管缺失工作、追加新 child、替换或取消旧 child，必要时也可以重新拆分；但必须显式说明旧 children 的处置关系，不能无视已有 children 重复创建同类任务。
+
+当前父子关系以 `issues.parent_id` 为事实来源，不引入 `childKey` 作为额外身份层。child issue 的 `id`、状态、产物和 activity/comment 构成重新执行时的审计依据。
+
 ## Data fields to inspect
 
 排查 issue/run 联动时，优先看这些字段：

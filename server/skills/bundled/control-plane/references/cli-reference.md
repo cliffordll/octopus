@@ -1,4 +1,4 @@
-﻿# control-plane agent CLI Reference
+# octopus agent CLI Reference
 
 Stable CLI contract for agents using the bundled `control-plane` skill. Prefer these commands over direct `/api` calls.
 
@@ -11,7 +11,7 @@ Stable CLI contract for agents using the bundled `control-plane` skill. Prefer t
 
 ## JSON Output Contract
 
-`control-plane ... --json` commands must write valid JSON to stdout on success. If a command cannot produce the requested JSON, it must exit nonzero and write a diagnostic error to stderr. An exit-0 command with empty stdout is a CLI/runtime defect, not a valid empty result.
+`octopus ... --json` commands must write valid JSON to stdout on success. If a command cannot produce the requested JSON, it must exit nonzero and write a diagnostic error to stderr. An exit-0 command with empty stdout is a CLI/runtime defect, not a valid empty result.
 
 Direct API fallback is allowed for heartbeat close-out only when a required CLI command fails diagnostically or returns exit 0 with empty stdout. When using fallback, note the affected command and reason in the issue comment or run notes so the CLI path can be fixed.
 
@@ -19,57 +19,57 @@ Direct API fallback is allowed for heartbeat close-out only when a required CLI 
 
 | Command | Description | Mutating | Org | Agent | Run ID |
 | --- | --- | --- | --- | --- | --- |
-| `control-plane agent me` | Show the authenticated agent identity, budget, and chain of command. | no | no | no | no |
-| `control-plane agent inbox` | List the compact assignee and reviewer work inbox for the authenticated agent. | no | no | no | no |
-| `control-plane agent capabilities` | List the stable control-plane agent command contract. | no | no | no | no |
-| `control-plane agent skills create [agent-id] --name <name> [--enable]` | Create an agent-private skill package under AGENT_HOME/skills. | yes | no | no | attached when available |
-| `control-plane agent skills enable <agent-id> <selection-ref...>` | Add skill selections to an agent without replacing existing enabled skills. | yes | no | no | attached when available |
-| `control-plane agent skills sync <agent-id>` | Sync the desired enabled skill set for an agent. | yes | no | no | attached when available |
-| `control-plane issue get <issue>` | Read a full issue by UUID or identifier. | no | no | no | no |
-| `control-plane issue search <query> [--org-id <id>]` | Search issues with the server-side issue index across title, identifier, description, and comments. | no | required | no | no |
-| `control-plane issue context <issue>` | Read the compact heartbeat context for an issue. | no | no | no | no |
-| `control-plane issue checkout <issue>` | Atomically checkout an issue for the current or specified agent. | yes | no | required | attached when available |
-| `control-plane issue comment <issue> --body <text> [--image <path>]` | Add a comment to an issue, optionally uploading images and appending Markdown image links. | yes | no | no | attached when available |
-| `control-plane issue comments list <issue>` | List issue comments, optionally only newer comments after a cursor. | no | no | no | no |
-| `control-plane issue comments get <issue> <comment-id>` | Read one issue comment by id. | no | no | no | no |
-| `control-plane issue update <issue> ... [--image <path>]` | Apply generic issue updates when workflow commands are not enough, optionally uploading images for the update comment. | yes | no | no | attached when available |
-| `control-plane issue review <issue> --decision <decision> --comment <text>` | Record a structured reviewer decision with a required comment. | yes | no | no | attached when available |
-| `control-plane issue commit <issue> --sha <sha> --message <subject>` | Report a code commit created during issue work as structured issue activity. | yes | no | no | attached when available |
-| `control-plane issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment; when the issue has a reviewer, submit it to review instead. | yes | no | no | attached when available |
-| `control-plane issue block <issue> --comment <text> [--image <path>]` | Mark an issue blocked with a required blocker comment, optionally uploading images. | yes | no | no | attached when available |
-| `control-plane issue release <issue>` | Release an issue back to todo and clear ownership. | yes | no | no | attached when available |
-| `control-plane issue documents list <issue>` | List issue documents. | no | no | no | no |
-| `control-plane issue documents get <issue> <key>` | Read one issue document by key. | no | no | no | no |
-| `control-plane issue documents put <issue> <key> --body <text>` | Create or update an issue document. | yes | no | no | attached when available |
-| `control-plane issue documents revisions <issue> <key>` | List revisions for an issue document. | no | no | no | no |
-| `control-plane approval get <approval-id>` | Read one approval request. | no | no | no | no |
-| `control-plane approval issues <approval-id>` | List the issues linked to an approval. | no | no | no | no |
-| `control-plane approval comment <approval-id> --body <text>` | Add a comment to an approval. | yes | no | no | attached when available |
-| `control-plane skill list --org-id <id>` | List organization-visible skills. | no | required | no | no |
-| `control-plane skill get <skill-id> --org-id <id>` | Read one organization skill detail. | no | required | no | no |
-| `control-plane skill file <skill-id> --org-id <id> [--path SKILL.md]` | Read one file from an organization skill package. | no | required | no | no |
-| `control-plane skill import --org-id <id> --source <source>` | Import a skill package into the organization skill library. | yes | required | no | attached when available |
-| `control-plane skill scan-local --org-id <id> [--roots <csv>]` | Scan local roots for skill packages and import new ones. | yes | required | no | attached when available |
-| `control-plane skill scan-projects --org-id <id> [--project-ids <csv>] [--workspace-ids <csv>]` | Scan the org workspace and any legacy project workspace records for skill packages and import new ones. | yes | required | no | attached when available |
+| `octopus agent me` | Show the authenticated agent identity, budget, and chain of command. | no | no | no | no |
+| `octopus agent inbox` | List the compact assignee and reviewer work inbox for the authenticated agent. | no | no | no | no |
+| `octopus agent capabilities` | List the stable octopus agent command contract. | no | no | no | no |
+| `octopus agent skills create [agent-id] --name <name> [--enable]` | Create an agent-private skill package under AGENT_HOME/skills. | yes | no | no | attached when available |
+| `octopus agent skills enable <agent-id> <selection-ref...>` | Add skill selections to an agent without replacing existing enabled skills. | yes | no | no | attached when available |
+| `octopus agent skills sync <agent-id>` | Sync the desired enabled skill set for an agent. | yes | no | no | attached when available |
+| `octopus issue get <issue>` | Read a full issue by UUID or identifier. | no | no | no | no |
+| `octopus issue search <query> [--org-id <id>]` | Search issues with the server-side issue index across title, identifier, description, and comments. | no | required | no | no |
+| `octopus issue context <issue>` | Read the compact heartbeat context for an issue. | no | no | no | no |
+| `octopus issue checkout <issue>` | Atomically checkout an issue for the current or specified agent. | yes | no | required | attached when available |
+| `octopus issue comment <issue> --body <text> [--image <path>]` | Add a comment to an issue, optionally uploading images and appending Markdown image links. | yes | no | no | attached when available |
+| `octopus issue comments list <issue>` | List issue comments, optionally only newer comments after a cursor. | no | no | no | no |
+| `octopus issue comments get <issue> <comment-id>` | Read one issue comment by id. | no | no | no | no |
+| `octopus issue update <issue> ... [--image <path>]` | Apply generic issue updates when workflow commands are not enough, optionally uploading images for the update comment. | yes | no | no | attached when available |
+| `octopus issue review <issue> --decision <decision> --comment <text>` | Record a structured reviewer decision with a required comment. | yes | no | no | attached when available |
+| `octopus issue commit <issue> --sha <sha> --message <subject>` | Report a code commit created during issue work as structured issue activity. | yes | no | no | attached when available |
+| `octopus issue done <issue> --comment <text> [--image <path>]` | Mark an issue done with a required completion comment; when the issue has a reviewer, submit it to review instead. | yes | no | no | attached when available |
+| `octopus issue block <issue> --comment <text> [--image <path>]` | Mark an issue blocked with a required blocker comment, optionally uploading images. | yes | no | no | attached when available |
+| `octopus issue release <issue>` | Release an issue back to todo and clear ownership. | yes | no | no | attached when available |
+| `octopus issue documents list <issue>` | List issue documents. | no | no | no | no |
+| `octopus issue documents get <issue> <key>` | Read one issue document by key. | no | no | no | no |
+| `octopus issue documents put <issue> <key> --body <text>` | Create or update an issue document. | yes | no | no | attached when available |
+| `octopus issue documents revisions <issue> <key>` | List revisions for an issue document. | no | no | no | no |
+| `octopus approval get <approval-id>` | Read one approval request. | no | no | no | no |
+| `octopus approval issues <approval-id>` | List the issues linked to an approval. | no | no | no | no |
+| `octopus approval comment <approval-id> --body <text>` | Add a comment to an approval. | yes | no | no | attached when available |
+| `octopus skill list --org-id <id>` | List organization-visible skills. | no | required | no | no |
+| `octopus skill get <skill-id> --org-id <id>` | Read one organization skill detail. | no | required | no | no |
+| `octopus skill file <skill-id> --org-id <id> [--path SKILL.md]` | Read one file from an organization skill package. | no | required | no | no |
+| `octopus skill import --org-id <id> --source <source>` | Import a skill package into the organization skill library. | yes | required | no | attached when available |
+| `octopus skill scan-local --org-id <id> [--roots <csv>]` | Scan local roots for skill packages and import new ones. | yes | required | no | attached when available |
+| `octopus skill scan-projects --org-id <id> [--project-ids <csv>] [--workspace-ids <csv>]` | Scan the org workspace and any legacy project workspace records for skill packages and import new ones. | yes | required | no | attached when available |
 
 ## Issue Close-Out Signals
 
 Before a successful `todo` or `in_progress` issue run exits, leave one close-out signal with the command that matches the outcome:
 
-- progress remains: `control-plane issue comment <issue> --body <text> [--image <path>]`
-- work is complete: `control-plane issue done <issue> --comment <text> [--image <path>]`
-- work is blocked: `control-plane issue block <issue> --comment <text> [--image <path>]`
+- progress remains: `octopus issue comment <issue> --body <text> [--image <path>]`
+- work is complete: `octopus issue done <issue> --comment <text> [--image <path>]`
+- work is blocked: `octopus issue block <issue> --comment <text> [--image <path>]`
 - ownership changes: add an explicit handoff comment before or with the assignee update
 
 If the issue has a reviewer, `issue done` means the assignee is ready for
 review. The control plane moves the issue to `in_review` and wakes the
 reviewer agent when `reviewerAgentId` is configured; only
-`control-plane issue review --decision approve` marks the issue done. A
+`octopus issue review --decision approve` marks the issue done. A
 `reviewerUserId` assignment enters human review without creating an agent run.
 Without either reviewer field, `issue done` marks the issue `done` directly,
 and a direct attempt to set `in_review` is rejected.
 
-If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: the reviewer should confirm the blocker, request changes, approve, or keep explicit follow-up open with `control-plane issue review`.
+If an issue has a reviewer, moving it to `blocked` is also a reviewer handoff: the reviewer should confirm the blocker, request changes, approve, or keep explicit follow-up open with `octopus issue review`.
 
 `--image` may be repeated. The CLI uploads each local PNG/JPEG/WebP/GIF as an issue attachment and appends Markdown image links to the comment text before sending it.
 
@@ -85,24 +85,24 @@ Local runtime `HOME` is isolated from the operator home. Codex local runs and ru
 
 When the inbox row or wake context says `relationship: "reviewer"`, `role: "reviewer"`, or `wakeSource: "review"`, finish the review with one structured reviewer decision. Reviewer work can be either `in_review` or `blocked`; blocked reviewer work means blocker triage, not implementation takeover.
 
-- approve: `control-plane issue review <issue> --decision approve --comment <text>`
-- request changes: `control-plane issue review <issue> --decision request_changes --comment <text>`
-- needs follow-up: `control-plane issue review <issue> --decision needs_followup --comment <text>`
-- blocked or blocker confirmed: `control-plane issue review <issue> --decision blocked --comment <text>`; use this only for a confirmed human/external blocker and name the next human action.
+- approve: `octopus issue review <issue> --decision approve --comment <text>`
+- request changes: `octopus issue review <issue> --decision request_changes --comment <text>`
+- needs follow-up: `octopus issue review <issue> --decision needs_followup --comment <text>`
+- blocked or blocker confirmed: `octopus issue review <issue> --decision blocked --comment <text>`; use this only for a confirmed human/external blocker and name the next human action.
 
 Do not rely on a free-form reject or accept comment as the review outcome. The structured decision is the durable close-out signal. A blocked reviewer decision records a human handoff and removes the issue from repeated reviewer pickup until the board changes the issue.
 
 ## Compatibility Commands
 
-- `control-plane agent list --org-id <id>` — List agents for an organization.
-- `control-plane agent get <agent-id-or-shortname>` — Read one agent by id or shortname.
-- `control-plane agent hire --org-id <id> --payload <json>` — Create a new hire using the canonical hire workflow.
-- `control-plane agent config index` — Read the installed agent runtime configuration index.
-- `control-plane agent config doc <agent-runtime-type>` — Read adapter-specific configuration guidance for one runtime.
-- `control-plane agent config list --org-id <id>` — List redacted agent configuration snapshots for an organization.
-- `control-plane agent config get <agent-id-or-shortname>` — Read one redacted agent configuration snapshot by id or shortname.
-- `control-plane agent icons` — List legacy named agent icons for compatibility/debugging; normal create and hire payloads should omit icon.
-- `control-plane issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`. Before creating delegated subtasks, list existing children with `control-plane issue list --org-id <id> --parent-id <parent>` and reuse a matching child title.
-- `control-plane issue labels list --org-id <id>` — List organization issue labels available for issue creation.
-- `control-plane approval create --org-id <id> --type <type> --payload <json>` — Create a new approval request.
-- `control-plane approval resubmit <approval-id> [--payload <json>]` — Resubmit a revision-requested approval, optionally with updated payload.
+- `octopus agent list --org-id <id>` — List agents for an organization.
+- `octopus agent get <agent-id-or-shortname>` — Read one agent by id or shortname.
+- `octopus agent hire --org-id <id> --payload <json>` — Create a new hire using the canonical hire workflow.
+- `octopus agent config index` — Read the installed agent runtime configuration index.
+- `octopus agent config doc <agent-runtime-type>` — Read adapter-specific configuration guidance for one runtime.
+- `octopus agent config list --org-id <id>` — List redacted agent configuration snapshots for an organization.
+- `octopus agent config get <agent-id-or-shortname>` — Read one redacted agent configuration snapshot by id or shortname.
+- `octopus agent icons` — List legacy named agent icons for compatibility/debugging; normal create and hire payloads should omit icon.
+- `octopus issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`. Before creating delegated subtasks, list existing children with `octopus issue list --org-id <id> --parent-id <parent>` and reuse a matching child title.
+- `octopus issue labels list --org-id <id>` — List organization issue labels available for issue creation.
+- `octopus approval create --org-id <id> --type <type> --payload <json>` — Create a new approval request.
+- `octopus approval resubmit <approval-id> [--payload <json>]` — Resubmit a revision-requested approval, optionally with updated payload.

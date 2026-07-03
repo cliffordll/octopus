@@ -83,7 +83,7 @@ reviewerAgentId must differ from assigneeAgentId
 完整触发流程：
 
 1. 先给 issue 配置 `reviewerAgentId` 或 `reviewerUserId`
-2. assignee 完成工作并执行 `control-plane issue done ...`
+2. assignee 完成工作并执行 `octopus issue done ...`
 3. server 把有 reviewer 的任务转换为 `in_review`
 4. 如果配置的是 `reviewerAgentId`，server 创建 reviewer wakeup 并调度 reviewer run
 5. reviewer 用结构化评审结论推进任务
@@ -106,12 +106,12 @@ reviewerAgentId must differ from assigneeAgentId
 
 assignee 完成工作时，不应该直接把 issue 改成 `done`。正确结果是：
 
-- assignee 调用 `control-plane issue done ...`
+- assignee 调用 `octopus issue done ...`
 - server 识别到这个 issue 有 reviewer
 - issue 实际进入 `in_review`
 - 配置了 `reviewerAgentId` 时，server 创建 `issue_review_requested`
 - reviewer agent 执行 reviewer run；如果配置的是 `reviewerUserId`，则等待人工评审
-- reviewer 用 `control-plane issue review ... --decision approve|request_changes|needs_followup|blocked` 留下结构化结论
+- reviewer 用 `octopus issue review ... --decision approve|request_changes|needs_followup|blocked` 留下结构化结论
 
 这样可以避免 “assignee 说完成了，所以任务直接 done，但 reviewer 没有执行” 的问题。
 
@@ -137,7 +137,7 @@ assignee 完成工作时，不应该直接把 issue 改成 `done`。正确结果
 
 1. server 给智能体的运行提示里写明 closeout 要求
 2. 本地 runtime 启动时，把 `control-plane` 命令放进智能体的 `PATH`
-3. 智能体执行 `control-plane issue done`、`control-plane issue block`、`control-plane issue comment` 或 `control-plane issue review`
+3. 智能体执行 `octopus issue done`、`octopus issue block`、`octopus issue comment` 或 `octopus issue review`
 4. CLI 从环境变量读取当前上下文
 5. CLI 请求 server 的 issue 接口
 6. server 写入 issue 状态、评论或评审结论
@@ -159,10 +159,10 @@ CLI 会把这些信息转成请求 header，尤其是当前 run id。这样 serv
 常用命令：
 
 ```bash
-control-plane issue comment "11C5D5-17" --body "已完成主要修改，等待用户确认。" --json
-control-plane issue done "11C5D5-17" --comment "已完成并验证。" --json
-control-plane issue block "11C5D5-17" --comment "缺少外部凭证，暂时阻塞。" --json
-control-plane issue review "11C5D5-17" --decision approve --comment "评审通过。" --json
+octopus issue comment "11C5D5-17" --body "已完成主要修改，等待用户确认。" --json
+octopus issue done "11C5D5-17" --comment "已完成并验证。" --json
+octopus issue block "11C5D5-17" --comment "缺少外部凭证，暂时阻塞。" --json
+octopus issue review "11C5D5-17" --decision approve --comment "评审通过。" --json
 ```
 
 这些命令里的 issue 可以是数据库 UUID，也可以是用户看到的编号，例如 `11C5D5-17`。系统会解析成真实的 `issues.id` 后再写入数据。

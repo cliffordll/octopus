@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import Agent, Base, Issue, Organization
+from packages.database.schema import ActivityLog, Agent, Base, Issue, Organization
 from server.app import create_app
 from server.services.documents import DocumentService
 from server.services.heartbeat import HeartbeatService
@@ -276,7 +276,7 @@ async def test_shared_workspace_generated_scan_ignores_root_artifacts(
     assert rows == []
 
 
-async def test_shared_workspace_generated_scan_captures_recent_shared_files(
+async def test_shared_workspace_generated_scan_captures_declared_recent_shared_files(
     app: tuple[FastAPI, async_sessionmaker],
     tmp_path: Path,
 ) -> None:
@@ -303,6 +303,12 @@ async def test_shared_workspace_generated_scan_captures_recent_shared_files(
     }
 
     async with factory() as session:
+        issue = await session.get(Issue, issue_id)
+        assert issue is not None
+        issue.description = "Write the deliverable to reports/deliverable.md"
+        await session.commit()
+
+    async with factory() as session:
         rows = await WorkspaceService(session).persist_generated_workspace_files(
             run_id="run-1", context_snapshot=snapshot, since=since
         )
@@ -316,6 +322,137 @@ async def test_shared_workspace_generated_scan_captures_recent_shared_files(
     assert md["source"] == "shared_workspace_scan"
     assert md["executionWorkspaceId"] == "ws-shared"
 
+
+async def test_shared_workspace_generated_scan_captures_unicode_path_from_closeout(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    org_id, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    report = shared_cwd / "reports" / "中国佛教四大名山.md"
+    report.parent.mkdir(parents=True)
+    since = datetime.now(UTC)
+    report.write_text("# 中国佛教四大名山", encoding="utf-8")
+
+    async with factory() as session:
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="agent",
+                actor_id="agent-1",
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue_id,
+                run_id="run-1",
+                details={
+                    "status": "done",
+                    "comment": "汇总报告位于 `reports/中国佛教四大名山.md`。",
+                },
+            )
+        )
+        await session.commit()
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    assert [row["title"] for row in rows] == ["reports/中国佛教四大名山.md"]
+    assert rows[0]["isPrimary"] is True
+
+async def test_shared_workspace_generated_scan_ignores_undeclared_recent_shared_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    shared_cwd.mkdir()
+    report = shared_cwd / "reports" / "other-child.md"
+    report.parent.mkdir(parents=True)
+    since = datetime.now(UTC)
+    report.write_text("belongs to another child task")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    assert rows == []
+
+async def test_shared_workspace_generated_scan_uses_issue_requested_report_path(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    org_id, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    reports = shared_cwd / "reports"
+    reports.mkdir(parents=True)
+    since = datetime.now(UTC)
+    (reports / "hongzehu.md").write_text("belongs to hongzehu")
+    (reports / "chaohu.md").write_text("belongs to chaohu")
+
+    async with factory() as session:
+        issue = await session.get(Issue, issue_id)
+        assert issue is not None
+        issue.title = "洪泽湖介绍"
+        issue.description = (
+            "撰写洪泽湖介绍。完成后将文档保存到工作区的 reports/ "
+            "目录下，文件名为 hongzehu.md"
+        )
+        await session.commit()
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    assert [row["title"] for row in rows] == ["reports/hongzehu.md"]
+    assert rows[0]["isPrimary"] is True
 
 async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
     app: tuple[FastAPI, async_sessionmaker],
@@ -486,6 +623,66 @@ async def test_issue_work_products_have_independent_crud_routes(
     assert listed_after_delete.json() == []
 
 
+async def test_heartbeat_context_lists_blocked_child_issues(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = str(uuid.uuid4())
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key=f"blocked-child-{org_id[:8]}",
+                name="Blocked Child",
+                issue_prefix="BC",
+            )
+        )
+        session.add_all(
+            [
+                Issue(
+                    id=parent_id,
+                    org_id=org_id,
+                    title="五湖报告",
+                    status="in_progress",
+                    priority="medium",
+                ),
+                Issue(
+                    id=child_id,
+                    org_id=org_id,
+                    parent_id=parent_id,
+                    title="太湖介绍",
+                    status="blocked",
+                    priority="medium",
+                ),
+            ]
+        )
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="agent",
+                actor_id="child-agent",
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=child_id,
+                details={"status": "blocked", "reason": "run_failed"},
+            )
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        context = await client.get(f"/api/issues/{parent_id}/heartbeat-context")
+
+    assert context.status_code == 200
+    body = context.json()
+    assert body["blockedChildIssues"][0]["id"] == child_id
+    assert body["blockedChildIssues"][0]["title"] == "太湖介绍"
+    assert body["blockedChildIssues"][0]["status"] == "blocked"
+    assert body["blockedChildIssues"][0]["workProductCount"] == 0
+
 async def test_parent_issue_lists_child_primary_work_products(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -521,6 +718,17 @@ async def test_parent_issue_lists_child_primary_work_products(
                 ),
             ]
         )
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="agent",
+                actor_id="child-agent",
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=child_id,
+                details={"status": "done", "comment": "完成西施介绍"},
+            )
+        )
         await session.commit()
 
     async with AsyncClient(
@@ -538,19 +746,31 @@ async def test_parent_issue_lists_child_primary_work_products(
         )
         listed = await client.get(f"/api/issues/{parent_id}/work-products")
         detail = await client.get(f"/api/issues/{parent_id}")
+        context = await client.get(f"/api/issues/{parent_id}/heartbeat-context")
+        children = await client.get(
+            f"/api/issues/{parent_id}/children?includeWorkProducts=true"
+        )
 
     assert created.status_code == 201
     assert listed.status_code == 200
-    products = listed.json()
-    assert [product["id"] for product in products] == [created.json()["id"]]
-    assert products[0]["issueId"] == child_id
-    assert products[0]["isPrimary"] is True
-    metadata = products[0]["metadata"]
-    assert metadata["parentAggregated"] is True
-    assert metadata["sourceIssueId"] == child_id
-    assert metadata["sourceIssueTitle"] == "西施介绍"
+    assert listed.json() == []
     assert detail.status_code == 200
-    assert detail.json()["workProducts"][0]["id"] == created.json()["id"]
+    assert detail.json()["workProducts"] == []
+    assert context.status_code == 200
+    heartbeat_context = context.json()
+    assert heartbeat_context["childPrimaryWorkProducts"][0]["id"] == created.json()["id"]
+    assert heartbeat_context["childPrimaryWorkProducts"][0]["sourceIssueTitle"] == "西施介绍"
+    assert "Child Primary Work Products" in heartbeat_context["childWorkProductsPrompt"]
+    assert "西施.md" in heartbeat_context["childWorkProductsPrompt"]
+    assert children.status_code == 200
+    child_outputs = children.json()
+    assert child_outputs["parent"]["id"] == parent_id
+    assert child_outputs["totalChildCount"] == 1
+    assert child_outputs["activeChildCount"] == 0
+    assert child_outputs["settledChildCount"] == 1
+    assert child_outputs["children"][0]["id"] == child_id
+    assert child_outputs["children"][0]["lastCloseout"]["action"] == "issue.updated"
+    assert child_outputs["children"][0]["workProducts"][0]["title"] == "西施.md"
 
 
 async def test_issue_documents_are_injected_into_heartbeat_context() -> None:
@@ -637,6 +857,6 @@ async def test_issue_documents_are_injected_into_heartbeat_context() -> None:
     assert "## Issue Documents" in context["issueDocumentsPrompt"]
     assert "Use the documented requirement." in context["issueDocumentsPrompt"]
     assert (
-        f"control-plane issue documents get {issue_id} design --json"
+        f"octopus issue documents get {issue_id} design --json"
         in context["issueDocumentsPrompt"]
     )

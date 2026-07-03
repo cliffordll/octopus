@@ -1,12 +1,12 @@
-﻿# HEARTBEAT.md -- CEO Heartbeat Checklist
+# HEARTBEAT.md -- CEO Heartbeat Checklist
 
-Run this checklist on every heartbeat. This covers both your local planning/memory work and your organizational coordination via the control-plane skill.
+Run this checklist on every heartbeat. This covers both your local planning/memory work and your organizational coordination via the octopus skill.
 
 ## 1. Identity and Context
 
-- `control-plane agent me --json` -- confirm your id, role, budget, `chainOfCommand`.
+- `octopus agent me --json` -- confirm your id, role, budget, `chainOfCommand`.
 - Check wake context: `OCTOPUS_TASK_ID`, `OCTOPUS_WAKE_REASON`, `OCTOPUS_WAKE_COMMENT_ID`.
-- If `control-plane agent me --json` returns `Agent authentication required`, stop treating the run as a normal heartbeat. Report the missing or invalid injected auth. Do not ask for `OCTOPUS_API_KEY` inside the run and do not continue with file-based manual workarounds.
+- If `octopus agent me --json` returns `Agent authentication required`, stop treating the run as a normal heartbeat. Report the missing or invalid injected auth. Do not ask for `OCTOPUS_API_KEY` inside the run and do not continue with file-based manual workarounds.
 
 ## 2. Local Planning Check
 
@@ -20,12 +20,12 @@ Run this checklist on every heartbeat. This covers both your local planning/memo
 
 If `OCTOPUS_APPROVAL_ID` is set:
 
-- Review the approval and its linked issues with `control-plane approval get "$OCTOPUS_APPROVAL_ID" --json` and `control-plane approval issues "$OCTOPUS_APPROVAL_ID" --json`.
+- Review the approval and its linked issues with `octopus approval get "$OCTOPUS_APPROVAL_ID" --json` and `octopus approval issues "$OCTOPUS_APPROVAL_ID" --json`.
 - Close resolved issues or comment on what remains open.
 
 ## 4. Get Inbox Work
 
-- `control-plane agent inbox --json`
+- `octopus agent inbox --json`
 - Inbox rows can be `relationship: "assignee"` or `relationship: "reviewer"`.
 - Prioritize reviewer `in_review` or `blocked` rows first, then assignee `in_progress`, then assignee `todo`. Skip assignee-only `blocked` work unless you can unblock it.
 - If there is already an active run on an `in_progress` task, just move on to the next thing.
@@ -33,18 +33,18 @@ If `OCTOPUS_APPROVAL_ID` is set:
 
 ## 5. Checkout and Work
 
-- Always checkout before working: `control-plane issue checkout "<issue-id-or-identifier>" --json`.
+- Always checkout before working: `octopus issue checkout "<issue-id-or-identifier>" --json`.
 - Never retry a 409 -- that task belongs to someone else.
-- Use `control-plane issue context "<issue-id-or-identifier>" --json` to load compact context.
-- Do the work. Use `control-plane issue comment`, `control-plane issue done`, or `control-plane issue block` to communicate outcome. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage.
+- Use `octopus issue context "<issue-id-or-identifier>" --json` to load compact context.
+- Do the work. Use `octopus issue comment`, `octopus issue done`, or `octopus issue block` to communicate outcome. If a reviewed issue is blocked, write the blocker clearly enough for reviewer triage.
 - Close-out gate: Do not exit an active issue heartbeat until the matching control-plane close-out command has succeeded.
-- If `OCTOPUS_WAKE_REASON=issue_passive_followup`, treat the wake as close-out governance, not a fresh assignment: inspect state and execute exactly one close-out command before exiting: `control-plane issue done ...`, `control-plane issue block ...`, or `control-plane issue comment ...`. Do not exit this wake with only a final assistant summary.
-- If you are the reviewer, including for a `blocked` issue, record one structured decision with `control-plane issue review --decision approve|request_changes|needs_followup|blocked --comment ...`. Use `blocked` only to confirm a human/external blocker, and name the next human action in the comment.
-- If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, treat the wake as reviewer close-out governance and execute exactly one `control-plane issue review ... --json` command before exiting. Do not use a free-form comment as the reviewer outcome.
+- If `OCTOPUS_WAKE_REASON=issue_passive_followup`, treat the wake as close-out governance, not a fresh assignment: inspect state and execute exactly one close-out command before exiting: `octopus issue done ...`, `octopus issue block ...`, or `octopus issue comment ...`. Do not exit this wake with only a final assistant summary.
+- If you are the reviewer, including for a `blocked` issue, record one structured decision with `octopus issue review --decision approve|request_changes|needs_followup|blocked --comment ...`. Use `blocked` only to confirm a human/external blocker, and name the next human action in the comment.
+- If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, treat the wake as reviewer close-out governance and execute exactly one `octopus issue review ... --json` command before exiting. Do not use a free-form comment as the reviewer outcome.
 
 ## 6. Delegation
 
-- Before creating subtasks, run `control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --json` and reuse an existing matching child title. Create new subtasks with `control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --title "<subtask title>" --description "<details>" --json`. Always keep the parent linkage and goal context. For delegated subtasks, also set `--status todo` and an explicit `--assignee-agent-id`; use `control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose the executor. Never assign a delegated child issue to yourself; if you will do that work inside the parent run, do not create a child issue for it. After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. Do not mark the parent issue done while child issues are still open.
+- Before creating subtasks, run `octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --json` and reuse an existing matching child title. Create new subtasks with `octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent>" --title "<subtask title>" --description "<details>" --json`. Always keep the parent linkage and goal context. For delegated subtasks, also set `--status todo` and an explicit `--assignee-agent-id`; use `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose the executor. Never assign a delegated child issue to yourself; if you will do that work inside the parent run, do not create a child issue for it. After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. Do not mark the parent issue done while child issues are still open.
 - Use `create-agent` skill when hiring new agents.
 - Assign work to the right agent for the job.
 - For hire/create-agent tasks, invoke `create-agent` immediately after identity succeeds. Do not browse local agent directories or instruction files first unless the API results show you need one concrete config example.
@@ -59,10 +59,10 @@ If `OCTOPUS_APPROVAL_ID` is set:
 ## 8. Exit
 
 - Comment on any in_progress work before exiting.
-- Reviewer work is not closed by a free-form accept/reject comment; use `control-plane issue review`.
+- Reviewer work is not closed by a free-form accept/reject comment; use `octopus issue review`.
 - A successful `todo` or `in_progress` issue run without a close-out signal can trigger a same-agent passive follow-up.
-- Do not exit `issue_passive_followup` until `control-plane issue done`, `control-plane issue block`, or `control-plane issue comment` has succeeded.
-- Do not exit `issue_review_closeout_missing` until `control-plane issue review` has succeeded.
+- Do not exit `issue_passive_followup` until `octopus issue done`, `octopus issue block`, or `octopus issue comment` has succeeded.
+- Do not exit `issue_review_closeout_missing` until `octopus issue review` has succeeded.
 - If no assignments and no valid mention-handoff, exit cleanly.
 
 ---
@@ -78,7 +78,7 @@ If `OCTOPUS_APPROVAL_ID` is set:
 
 ## Rules
 
-- Always use the control-plane skill for coordination.
-- Mutating `control-plane` CLI commands attach `OCTOPUS_RUN_ID` automatically when it is available.
+- Always use the octopus skill for coordination.
+- Mutating `octopus` CLI commands attach `OCTOPUS_RUN_ID` automatically when it is available.
 - Comment in concise markdown: status line + bullets + links.
 - Self-assign via checkout only when explicitly @-mentioned.

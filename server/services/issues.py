@@ -24,7 +24,7 @@ from packages.database.queries.issues import (
     update_issue,
 )
 from packages.database.queries.organizations import increment_issue_counter
-from packages.database.schema import Asset, Issue, IssueAttachment, IssueComment
+from packages.database.schema import ActivityLog, Asset, Issue, IssueAttachment, IssueComment
 from packages.shared.constants.issue import (
     IssueOriginKind,
     IssuePriority,
@@ -191,6 +191,103 @@ class IssueService:
         if row is None:
             return None
         return await self._to_detail(row)
+
+    async def get_child_outputs(
+        self, issue_id: str, *, include_work_products: bool = False
+    ) -> dict[str, Any] | None:
+        parent = await get_issue_by_id(self._session, issue_id)
+        if parent is None:
+            return None
+        children = (
+            (
+                await self._session.execute(
+                    select(Issue)
+                    .where(
+                        Issue.org_id == parent.org_id,
+                        Issue.parent_id == parent.id,
+                        Issue.hidden_at.is_(None),
+                    )
+                    .order_by(Issue.created_at, Issue.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        workspace = WorkspaceService(self._session)
+        child_items: list[dict[str, Any]] = []
+        active_statuses = {"backlog", "todo", "in_progress", "in_review"}
+        terminal_statuses = {"done", "blocked", "cancelled"}
+        for child in children:
+            item: dict[str, Any] = dict(_to_list_item(child))
+            item.update(
+                {
+                    "parentId": child.parent_id,
+                    "assigneeUserId": child.assignee_user_id,
+                    "reviewerAgentId": child.reviewer_agent_id,
+                    "reviewerUserId": child.reviewer_user_id,
+                    "startedAt": child.started_at.isoformat()
+                    if child.started_at
+                    else None,
+                    "completedAt": child.completed_at.isoformat()
+                    if child.completed_at
+                    else None,
+                    "cancelledAt": child.cancelled_at.isoformat()
+                    if child.cancelled_at
+                    else None,
+                    "lastCloseout": await self._latest_child_closeout(child),
+                }
+            )
+            if include_work_products:
+                item["workProducts"] = await workspace.list_work_products_for_issue(
+                    child.id
+                )
+            child_items.append(item)
+        active_count = sum(1 for child in children if child.status in active_statuses)
+        settled_count = sum(1 for child in children if child.status in terminal_statuses)
+        blocked_count = sum(
+            1 for child in children if child.status in {"blocked", "cancelled"}
+        )
+        return {
+            "parent": dict(_to_list_item(parent)),
+            "children": child_items,
+            "activeChildCount": active_count,
+            "settledChildCount": settled_count,
+            "blockedChildCount": blocked_count,
+            "totalChildCount": len(children),
+            "parentExecutionStage": _parent_execution_stage(child_items),
+            "includeWorkProducts": include_work_products,
+        }
+
+    async def _latest_child_closeout(self, child: Issue) -> dict[str, Any] | None:
+        result = await self._session.execute(
+            select(ActivityLog)
+            .where(
+                ActivityLog.org_id == child.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == child.id,
+                ActivityLog.action.in_(
+                    (
+                        "issue.updated",
+                        "issue.comment_added",
+                        "issue.review_decision_recorded",
+                        "issue.review_closeout_missing",
+                        "issue.closure_needs_operator_review",
+                    )
+                ),
+            )
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "action": row.action,
+            "runId": row.run_id,
+            "details": row.details,
+            "createdAt": row.created_at.isoformat(),
+        }
 
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
         issue = await get_issue_by_id(self._session, issue_id)
@@ -625,6 +722,19 @@ class IssueService:
             plan_document=plan_document,
             document_summaries=document_summaries,
         )
+        aggregated_work_products = await WorkspaceService(
+            self._session
+        ).list_work_products_for_issue(issue_id, include_child_primary=True)
+        child_primary_work_products = _child_primary_work_products(
+            aggregated_work_products
+        )
+        child_work_products_prompt = _build_child_work_products_prompt(
+            child_primary_work_products
+        )
+        child_outputs = await self.get_child_outputs(issue_id, include_work_products=True)
+        blocked_child_issues = _blocked_child_issues(
+            child_outputs.get("children", []) if child_outputs else []
+        )
         issue = {
             "id": detail["id"],
             "identifier": detail["identifier"],
@@ -649,8 +759,59 @@ class IssueService:
             "planDocument": plan_document,
             "legacyPlanDocument": None,
             "issueDocumentsPrompt": issue_documents_prompt,
+            "childPrimaryWorkProducts": child_primary_work_products,
+            "childWorkProductsPrompt": child_work_products_prompt,
+            "childOutputs": child_outputs,
+            "childIssues": child_outputs.get("children", []) if child_outputs else [],
+            "parentExecutionStage": child_outputs.get("parentExecutionStage")
+            if child_outputs
+            else "no_children",
+            "blockedChildIssues": blocked_child_issues,
             "wakeComment": None,
         }
+
+    async def record_child_replaced(
+        self,
+        old_child: IssueDetail,
+        replacement: IssueDetail,
+        *,
+        reason: object,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None = None,
+    ) -> None:
+        await insert_activity_log(
+            self._session,
+            org_id=old_child["orgId"],
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.child_replaced",
+            entity_type="issue",
+            entity_id=old_child["id"],
+            run_id=run_id,
+            details={"replacementIssueId": replacement["id"], "reason": reason},
+        )
+
+    async def record_incomplete_accepted(
+        self,
+        issue: IssueDetail,
+        *,
+        reason: str,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None = None,
+    ) -> None:
+        await insert_activity_log(
+            self._session,
+            org_id=issue["orgId"],
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.incomplete_accepted",
+            entity_type="issue",
+            entity_id=issue["id"],
+            run_id=run_id,
+            details={"reason": reason},
+        )
 
     async def add_comment(
         self,
@@ -769,7 +930,7 @@ class IssueService:
         detail = _to_detail(row)
         detail["workProducts"] = await WorkspaceService(
             self._session
-        ).list_work_products_for_issue(row.id, include_child_primary=True)
+        ).list_work_products_for_issue(row.id)
         detail["documentSummaries"] = await DocumentService(
             self._session
         ).list_issue_documents(row.id)
@@ -777,6 +938,104 @@ class IssueService:
 
 
 _ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT = 12_000
+
+
+def _parent_execution_stage(children: Sequence[Mapping[str, Any]]) -> str:
+    if not children:
+        return "no_children"
+    statuses = {str(child.get("status") or "") for child in children}
+    if statuses & {"backlog", "todo", "in_progress", "in_review"}:
+        return "children_active"
+    if statuses & {"blocked", "cancelled"}:
+        return "children_blocked"
+    if statuses <= {"done"}:
+        return "children_settled"
+    return "children_mixed"
+
+
+def _blocked_child_issues(
+    children: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for child in children:
+        status = child.get("status")
+        if status not in {"blocked", "cancelled"}:
+            continue
+        work_products = child.get("workProducts")
+        result.append(
+            {
+                "id": child.get("id"),
+                "identifier": child.get("identifier"),
+                "title": child.get("title"),
+                "status": status,
+                "lastCloseout": child.get("lastCloseout"),
+                "workProductCount": len(work_products)
+                if isinstance(work_products, Sequence)
+                else 0,
+            }
+        )
+    return result
+
+
+def _child_primary_work_products(
+    work_products: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for product in work_products:
+        metadata = product.get("metadata")
+        if not isinstance(metadata, Mapping) or metadata.get("parentAggregated") is not True:
+            continue
+        result.append(
+            {
+                "id": product.get("id"),
+                "issueId": product.get("issueId"),
+                "title": product.get("title"),
+                "type": product.get("type"),
+                "summary": product.get("summary"),
+                "url": product.get("url"),
+                "contentPath": product.get("contentPath"),
+                "sourceIssueId": metadata.get("sourceIssueId"),
+                "sourceIssueIdentifier": metadata.get("sourceIssueIdentifier"),
+                "sourceIssueTitle": metadata.get("sourceIssueTitle"),
+            }
+        )
+    return result
+
+
+def _build_child_work_products_prompt(
+    child_primary_work_products: Sequence[Mapping[str, Any]],
+) -> str:
+    if not child_primary_work_products:
+        return ""
+    lines = [
+        "## Child Primary Work Products",
+        "",
+        "Direct child issues have completed and exposed these primary deliverables. Use them as source material for the parent issue's final deliverable.",
+    ]
+    for product in child_primary_work_products:
+        child_label = str(
+            product.get("sourceIssueIdentifier")
+            or product.get("sourceIssueTitle")
+            or product.get("sourceIssueId")
+            or "child issue"
+        )
+        title = str(product.get("title") or "Untitled work product")
+        summary = str(product.get("summary") or "").strip()
+        location = str(product.get("contentPath") or product.get("url") or "").strip()
+        line = f"- {child_label}: {title}"
+        if summary:
+            line += f" — {summary}"
+        if location:
+            line += f" ({location})"
+        lines.append(line)
+    lines.extend(
+        [
+            "",
+            "Create a parent-owned final report or deliverable that synthesizes these child outputs. Do not merely point the user at child task artifacts.",
+            "Write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md` so Octopus can register it as this parent issue's own primary work product. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work. Then close out the parent issue.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _build_issue_documents_prompt(
@@ -831,7 +1090,7 @@ def _build_issue_documents_prompt(
             title_text = f" - {title}" if title else ""
             lines.append(
                 f"- `{key}`{title_text}{revision_text}. Fetch with "
-                f"`control-plane issue documents get {issue_id} {key} --json`."
+                f"`octopus issue documents get {issue_id} {key} --json`."
             )
         sections.append("\n".join(lines))
 
@@ -850,7 +1109,7 @@ def _truncate_issue_document_body(body: str) -> str:
     return (
         body[:_ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT].rstrip()
         + "\n\n[Document truncated in prompt. Fetch the full document with the "
-        "control-plane CLI.]"
+        "octopus CLI.]"
     )
 
 

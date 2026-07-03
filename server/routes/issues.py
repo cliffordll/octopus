@@ -19,6 +19,7 @@ from packages.shared.api_paths.issue_attachments import (
 from packages.shared.api_paths.heartbeat import ISSUE_HEARTBEAT_RUNS_PATH
 from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
+    ISSUE_CHILDREN_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DOCUMENT_DETAIL_PATH,
     ISSUE_DOCUMENT_REVISIONS_PATH,
@@ -28,6 +29,9 @@ from packages.shared.api_paths.issues import (
     ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_PASSIVE_FOLLOWUP_PATH,
+    ISSUE_RETRY_CHILD_PATH,
+    ISSUE_REPLACE_CHILD_PATH,
+    ISSUE_ACCEPT_INCOMPLETE_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ISSUE_WORK_PRODUCTS_PATH,
     ORG_ISSUE_LIST_PATH,
@@ -342,6 +346,126 @@ async def list_issue_heartbeat_runs_route(
     return runs
 
 
+@router.post(ISSUE_RETRY_CHILD_PATH)
+async def retry_child_issue_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> HeartbeatRun:
+    actor = require_actor_identity(request)
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+    assert_organization_access(request, detail["orgId"])
+    runs = await heartbeat.list_for_issue(id)
+    failed = next(
+        (run for run in runs or [] if run.get("status") in {"failed", "timed_out", "cancelled"}),
+        None,
+    )
+    if failed is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Child issue has no failed, timed out, or cancelled run to retry",
+        )
+    await service.update_issue(
+        id,
+        {"status": "in_progress", "comment": "Retrying blocked child issue."},
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    retried = await heartbeat.retry_run(
+        str(failed["runId"]),
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        execute_immediately=False,
+        recovery_trigger="manual",
+    )
+    if retried is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return retried
+
+
+@router.post(ISSUE_REPLACE_CHILD_PATH, status_code=http_status.HTTP_201_CREATED)
+async def replace_child_issue_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: IssueService = Depends(get_issue_service),
+) -> IssueDetail:
+    actor = require_actor_identity(request)
+    old_child = await service.get_by_id(id)
+    if old_child is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+    assert_organization_access(request, old_child["orgId"])
+    parent_id = old_child.get("parentId")
+    if not parent_id:
+        raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail="Issue is not a child issue")
+    title = body.get("title") or f"Replacement for {old_child['title']}"
+    description = body.get("description") or old_child.get("description")
+    payload = validate_create_issue(
+        {
+            "title": title,
+            "description": description,
+            "status": "todo",
+            "parentId": parent_id,
+            "projectId": old_child.get("projectId"),
+            "goalId": old_child.get("goalId"),
+            "assigneeAgentId": body.get("assigneeAgentId") or old_child.get("assigneeAgentId"),
+        }
+    )
+    replacement = await service.create_issue(
+        old_child["orgId"],
+        payload,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    await service.record_child_replaced(
+        old_child,
+        replacement,
+        reason=body.get("reason"),
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    return replacement
+
+
+@router.post(ISSUE_ACCEPT_INCOMPLETE_PATH)
+async def accept_incomplete_issue_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: IssueService = Depends(get_issue_service),
+) -> IssueDetail:
+    actor = require_actor_identity(request)
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+    assert_organization_access(request, detail["orgId"])
+    reason = body.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT, detail="reason is required")
+    await service.record_incomplete_accepted(
+        detail,
+        reason=reason.strip(),
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    updated = await service.update_issue(
+        id,
+        {"status": "in_progress", "comment": f"Accepted incomplete delivery: {reason.strip()}"},
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    assert updated is not None
+    return updated
+
+
 @router.get(ISSUE_HEARTBEAT_CONTEXT_PATH)
 async def get_issue_heartbeat_context_route(
     id: str,
@@ -358,6 +482,27 @@ async def get_issue_heartbeat_context_route(
     context = await service.get_heartbeat_context(id)
     assert context is not None
     return context
+
+
+@router.get(ISSUE_CHILDREN_PATH)
+async def list_issue_children_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    includeWorkProducts: bool = Query(default=False),
+) -> dict[str, Any]:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    result = await service.get_child_outputs(
+        id, include_work_products=includeWorkProducts
+    )
+    assert result is not None
+    return result
 
 
 @router.post(ISSUE_CHECKOUT_PATH)
@@ -929,9 +1074,7 @@ async def list_issue_work_products_route(
             detail="Issue not found",
         )
     assert_organization_access(request, detail["orgId"])
-    return await workspace_service.list_work_products_for_issue(
-        id, include_child_primary=True
-    )
+    return await workspace_service.list_work_products_for_issue(id)
 
 
 @router.post(ISSUE_WORK_PRODUCTS_PATH, status_code=http_status.HTTP_201_CREATED)

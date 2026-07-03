@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import httpx
 import pytest
@@ -113,6 +114,43 @@ def test_issue_commands_support_full_server_fields() -> None:
     assert requests[2].read() == b'{"goalId":"goal-2","reviewerUserId":"user-1"}'
 
 
+def test_issue_child_recovery_commands_call_expected_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "ok"})
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["issue", "retry-child", "child-1"], client=client) == 0
+    assert (
+        main(
+            [
+                "issue",
+                "replace-child",
+                "child-1",
+                "--title",
+                "Replacement",
+            ],
+            client=client,
+        )
+        == 0
+    )
+    assert (
+        main(
+            ["issue", "accept-incomplete", "parent-1", "--reason", "User accepted"],
+            client=client,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/child-1/retry-child"
+    assert requests[1].url.path == "/api/issues/child-1/replace-child"
+    assert requests[1].read() == b'{"title":"Replacement"}'
+    assert requests[2].url.path == "/api/issues/parent-1/accept-incomplete"
+    assert requests[2].read() == b'{"reason":"User accepted"}'
+
+
 def test_issue_create_accepts_body_alias_for_description() -> None:
     requests: list[httpx.Request] = []
 
@@ -152,7 +190,7 @@ def test_json_flag_after_subcommand_is_normalized_from_sys_argv(
     monkeypatch.setattr(
         "sys.argv",
         [
-            "control-plane",
+            "octopus",
             "agent",
             "list",
             "--org-id",
@@ -245,6 +283,31 @@ def test_issue_list_sends_route_supported_filters() -> None:
         )
         == 0
     )
+
+
+def test_issue_children_command_requests_child_outputs() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"parent": {"id": "issue-1"}, "children": [], "totalChildCount": 0},
+        )
+
+    output = io.StringIO()
+    assert (
+        main(
+            ["--json", "issue", "children", "issue-1", "--include-work-products"],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+            stdout=output,
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/issue-1/children"
+    assert requests[0].url.params["includeWorkProducts"] == "true"
+    assert "totalChildCount" in output.getvalue()
 
 
 def test_issue_checkout_and_heartbeat_context_commands() -> None:
@@ -404,6 +467,10 @@ def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
                 "issue-1",
                 "--comment",
                 "Implemented and verified.",
+                "--primary-work-product",
+                "reports/final.md",
+                "--work-product",
+                "reports/supporting.md",
                 "--json",
             ],
             client=client,
@@ -419,6 +486,8 @@ def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
                 "issue-2",
                 "--comment",
                 "Waiting for credentials.",
+                "--work-product",
+                "reports/blocker.md",
                 "--json",
             ],
             client=client,
@@ -444,14 +513,23 @@ def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
 
     assert requests[0].method == "PATCH"
     assert requests[0].url.path == "/api/issues/issue-1"
-    assert requests[0].read() == (
-        b'{"status":"done","comment":"Implemented and verified."}'
-    )
+    assert json.loads(requests[0].read()) == {
+        "status": "done",
+        "comment": "Implemented and verified.",
+        "workProductDeclarations": [
+            {"path": "reports/supporting.md", "isPrimary": False},
+            {"path": "reports/final.md", "isPrimary": True},
+        ],
+    }
     assert requests[1].method == "PATCH"
     assert requests[1].url.path == "/api/issues/issue-2"
-    assert requests[1].read() == (
-        b'{"status":"blocked","comment":"Waiting for credentials."}'
-    )
+    assert json.loads(requests[1].read()) == {
+        "status": "blocked",
+        "comment": "Waiting for credentials.",
+        "workProductDeclarations": [
+            {"path": "reports/blocker.md", "isPrimary": False},
+        ],
+    }
     assert requests[2].method == "POST"
     assert requests[2].url.path == "/api/issues/issue-3/review-decision"
     assert requests[2].read() == (b'{"decision":"approve","note":"Review passed."}')

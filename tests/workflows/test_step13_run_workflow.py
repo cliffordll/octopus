@@ -1072,6 +1072,93 @@ async def test_periodic_recovery_skips_running_local_child_that_is_still_alive(
     assert run.error_code is None
 
 
+async def test_periodic_recovery_does_not_cancel_live_run_after_issue_done(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: True)
+    agent = await _seed_agent(
+        session,
+        name="LiveDoneIssueOpenCode",
+        runtime_type="opencode_local",
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Live issue closed by running agent",
+            status="done",
+            assignee_agent_id=agent["id"],
+            completed_at=datetime.now(UTC),
+        )
+        session.add(issue)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            process_pid=12345,
+            process_started_at=datetime.now(UTC),
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(run)
+        await session.flush()
+        issue.checkout_run_id = run.id
+        issue.execution_run_id = run.id
+        issue.execution_locked_at = datetime.now(UTC)
+        HeartbeatService._active_run_ids.setdefault(agent["id"], set()).add(run.id)
+        recovery = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+
+    await session.refresh(run)
+    await session.refresh(issue)
+    HeartbeatService._active_run_ids.get(agent["id"], set()).discard(run.id)
+    assert recovery == []
+    assert run.status == "running"
+    assert run.error_code is None
+    assert issue.execution_run_id == run.id
+
+async def test_periodic_recovery_recovers_stale_active_local_child_loss(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: False)
+    agent = await _seed_agent(
+        session,
+        name="StaleActiveOpenCode",
+        runtime_type="opencode_local",
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            process_pid=12345,
+            process_started_at=datetime.now(UTC),
+        )
+        session.add(run)
+        await session.flush()
+        HeartbeatService._active_run_ids.setdefault(agent["id"], set()).add(run.id)
+        recovery = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+
+    await session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "process_lost"
+    assert recovery[0]["status"] == "queued"
+    assert recovery[0]["retryOfRunId"] == run.id
+    assert run.id not in HeartbeatService._active_run_ids.get(agent["id"], set())
+
+
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
     session: AsyncSession,
 ) -> None:

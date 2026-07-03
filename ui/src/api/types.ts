@@ -1,4 +1,4 @@
-﻿export type OrganizationStatus = "active" | "paused" | "archived";
+export type OrganizationStatus = "active" | "paused" | "archived";
 
 export interface OrganizationSummary {
   id: string;
@@ -333,6 +333,29 @@ export interface IssueDetail extends IssueListItem {
   workProducts?: IssueWorkProduct[];
   documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
+}
+
+export interface IssueChildOutput extends IssueListItem {
+  parentId: string | null;
+  assigneeUserId: string | null;
+  reviewerAgentId: string | null;
+  reviewerUserId: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  lastCloseout?: ActivityEvent | null;
+  workProducts?: IssueWorkProduct[];
+}
+
+export interface IssueChildrenResponse {
+  parent: IssueListItem;
+  children: IssueChildOutput[];
+  activeChildCount: number;
+  settledChildCount: number;
+  blockedChildCount: number;
+  totalChildCount: number;
+  parentExecutionStage: string;
+  includeWorkProducts: boolean;
 }
 
 export interface IssueDocumentSummary {

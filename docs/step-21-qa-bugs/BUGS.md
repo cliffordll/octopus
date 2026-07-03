@@ -1,4 +1,4 @@
-﻿# Step 21 Bug Ledger
+# Step 21 Bug Ledger
 
 本文件是 Step 21 的唯一 Bug 清单。所有最小闭环审查、调试和代码复查发现的问题必须先记录到这里，再决定修复或排期。
 
@@ -73,7 +73,7 @@
 - 状态：fixed
 - 严重级别：P2
 - 是否阻塞最小闭环：否。attachments/approvals 已可用，issue detail 已能聚合 `workProducts`，但 UI 侧栏和 agent/control-plane 需要独立 documents/work-products API 才能完整对齐上游。
-- 影响范围：issue 详情侧栏 `documents`、`work-products`；control-plane skill 中 `issue documents` 命令；后续 plugin host 的 `issues.documents.*` 能力。
+- 影响范围：issue 详情侧栏 `documents`、`work-products`；octopus skill 中 `issue documents` 命令；后续 plugin host 的 `issues.documents.*` 能力。
 - 复现步骤：
   1. 打开 issue 详情侧栏，查看 `documents` 与 `work-products`。
   2. 请求 `GET /api/issues/{issueId}/documents` 或 `GET /api/issues/{issueId}/work-products`。
@@ -475,7 +475,7 @@
   - `GET /api/issues/{issueId}/heartbeat-context`。
   - checkout 成功后按上游语义可把 issue 切到 `in_progress`，并用 `checkoutRunId/executionRunId` 防止多个 run/agent 同时处理同一任务。
   - actor 为 agent 时只能 checkout 自己；board/user 代 checkout 时按上游判断是否需要额外 wake assignee。
-- 实际行为（修复前）：Python server 没有这两个路由；onboarding 和 bundled control-plane skill 已要求 checkout/context，但 API 不存在，UI 暂时只能调用已支持的 wakeup。
+- 实际行为（修复前）：Python server 没有这两个路由；onboarding 和 bundled octopus skill 已要求 checkout/context，但 API 不存在，UI 暂时只能调用已支持的 wakeup。
 - 初步根因：Step 11/13/15 已实现 wakeup/run/workspace 基线，但未迁移上游 issue lifecycle 的 checkout/context 子路由；`checkout_run_id` 字段已存在，说明 schema 留位但 service/route 缺实现。
 - 处理归属：Step 21。优先补齐 server contract，不改 UI/CLI；UI 可在接口存在后对接。
 - 修复记录：已补 `POST /api/issues/{issueId}/checkout` 和 `GET /api/issues/{issueId}/heartbeat-context`。checkout 使用条件 UPDATE 处理 expected status、assignee 和 run lock，冲突返回 409；成功后写 `issue.checked_out` activity，并按 assignment wakeup 语义唤醒 assignee。heartbeat-context 返回 issue 紧凑摘要和当前未实现的 project/goal/comment/document 占位结构。
