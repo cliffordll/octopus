@@ -116,7 +116,7 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(runRecordsRegion).getByText("来源 automation")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("任务执行")).toBeInTheDocument();
   expect(within(runRecordsRegion).getByText("收尾跟进")).toBeInTheDocument();
-  expect(within(runRecordsRegion).getByText("触发原因 issue_passive_followup")).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByText("阶段 自动收口跟进")).toHaveAttribute("title", "原始触发原因：issue_passive_followup");
   expect(screen.getByText("最新运行结果：运行中")).toBeInTheDocument();
   const runRecordGroup = within(runRecordsRegion).getByText("run-visible").closest(".issue-run-record-group") as HTMLElement;
   const runRecordMainRow = runRecordGroup.querySelector(".issue-run-record-main-row") as HTMLElement;
@@ -144,7 +144,7 @@ it("shows existing run records without collapsing the section by default", async
   expect(await within(runRecordsRegion).findByRole("heading", { name: "运行上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*运行中/ })).toBeInTheDocument();
   expect(within(runRecordsRegion).queryByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*成功/ })).not.toBeInTheDocument();
-  expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*来源 automation.*触发原因 issue_passive_followup.*失败/ })).toBeInTheDocument();
+  expect(within(runRecordsRegion).getByRole("button", { name: /第 2 次 run-second.*来源 automation.*阶段 自动收口跟进.*失败/ })).toBeInTheDocument();
   expect(runRecordsRegion).not.toHaveTextContent("未知来源");
   await ensureRunExpanded(runRecordsRegion, "run-second");
   expect((await within(runRecordsRegion).findAllByRole("heading", { name: "运行上下文" })).length).toBeGreaterThanOrEqual(2);

@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from sqlalchemy import desc, select, update
@@ -1789,7 +1789,9 @@ class WorkspaceService:
         self, issue_id: str, *, include_child_primary: bool = False
     ) -> list[IssueWorkProductData]:
         rows = await list_issue_work_products(self._session, issue_id)
-        products = [self._to_work_product(row) for row in rows]
+        products = [
+            self._to_work_product(row) for row in _dedupe_work_product_rows(rows)
+        ]
         if include_child_primary:
             products.extend(await self._list_child_primary_work_products(issue_id))
         return products
@@ -1902,6 +1904,11 @@ class WorkspaceService:
             for path in (_work_product_workspace_paths(row),)
             if path
         }
+        existing_by_content_identity = {
+            identity: row
+            for row in existing
+            for identity in _work_product_content_identities(row)
+        }
         stored: list[IssueWorkProductData] = []
         for product in products:
             if not isinstance(product, dict):
@@ -1923,6 +1930,29 @@ class WorkspaceService:
             ):
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
+            content_identities = _payload_content_identities(product)
+            matching_identity = next(
+                (
+                    identity
+                    for identity in content_identities
+                    if identity in existing_by_content_identity
+                ),
+                None,
+            )
+            if matching_identity:
+                row = await self._merge_existing_work_product(
+                    existing_by_content_identity[matching_identity],
+                    product=product,
+                    run_id=run_id,
+                )
+                if external_id:
+                    seen_external_ids.add(external_id)
+                if product_workspace_path:
+                    seen_workspace_paths.add(product_workspace_path)
+                for identity in _work_product_content_identities(row):
+                    existing_by_content_identity[identity] = row
+                stored.append(self._to_work_product(row))
+                continue
             row = await create_issue_work_product(
                 self._session,
                 {
@@ -1950,8 +1980,44 @@ class WorkspaceService:
                 seen_external_ids.add(external_id)
             if product_workspace_path:
                 seen_workspace_paths.add(product_workspace_path)
+            for identity in _work_product_content_identities(row):
+                existing_by_content_identity[identity] = row
             stored.append(self._to_work_product(row))
         return stored
+
+    async def _merge_existing_work_product(
+        self,
+        row: IssueWorkProduct,
+        *,
+        product: Mapping[str, Any],
+        run_id: str,
+    ) -> IssueWorkProduct:
+        metadata = dict(row.metadata_json or {})
+        incoming_metadata = (
+            product.get("metadata") if isinstance(product.get("metadata"), dict) else {}
+        )
+        incoming_metadata = cast(Mapping[str, Any], incoming_metadata)
+        sources = _work_product_sources(metadata)
+        incoming_source = _string(incoming_metadata.get("source"))
+        if incoming_source:
+            sources.add(incoming_source)
+        metadata.update(incoming_metadata)
+        if sources:
+            metadata["sources"] = sorted(sources)
+        fields: dict[str, Any] = {
+            "metadata_json": metadata,
+            "created_by_run_id": row.created_by_run_id or run_id,
+        }
+        if bool(product.get("isPrimary")) and not row.is_primary:
+            fields["is_primary"] = True
+        if not row.url and product.get("url"):
+            fields["url"] = product.get("url")
+        summary = _string(product.get("summary"))
+        if summary and (not row.summary or bool(product.get("isPrimary"))):
+            fields["summary"] = summary
+        updated = await update_issue_work_product(self._session, row.id, fields)
+        assert updated is not None
+        return updated
 
     async def persist_generated_workspace_files(
         self,
@@ -2761,6 +2827,20 @@ def _parse_datetime(value: object) -> datetime | None:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
+def _dedupe_work_product_rows(
+    rows: Sequence[IssueWorkProduct],
+) -> list[IssueWorkProduct]:
+    deduped: list[IssueWorkProduct] = []
+    seen_identities: set[str] = set()
+    for row in rows:
+        identities = _work_product_content_identities(row)
+        if identities and seen_identities.intersection(identities):
+            continue
+        seen_identities.update(identities)
+        deduped.append(row)
+    return deduped
+
+
 def _payload_workspace_path(product: Mapping[str, Any]) -> str | None:
     metadata = product.get("metadata")
     if isinstance(metadata, dict):
@@ -2777,6 +2857,52 @@ def _work_product_workspace_paths(row: IssueWorkProduct) -> str | None:
     if value:
         return value.replace("\\", "/")
     return row.title.replace("\\", "/") if row.title else None
+
+
+def _payload_content_identities(product: Mapping[str, Any]) -> set[str]:
+    metadata = product.get("metadata")
+    if not isinstance(metadata, dict):
+        return set()
+    return _content_path_identities(metadata)
+
+
+def _work_product_content_identities(row: IssueWorkProduct) -> set[str]:
+    metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+    return _content_path_identities(metadata)
+
+
+def _content_path_identities(metadata: Mapping[str, Any]) -> set[str]:
+    content_markers = [
+        f"{key}:{value}"
+        for key in ("assetId", "sha256")
+        for value in (_string(metadata.get(key)),)
+        if value
+    ]
+    path_markers = [
+        value.replace("\\", "/")
+        for key in ("workspacePath", "workspaceBrowserPath")
+        for value in (_string(metadata.get(key)),)
+        if value
+    ]
+    return {
+        f"{content_marker}|path:{path_marker}"
+        for content_marker in content_markers
+        for path_marker in path_markers
+    }
+
+
+def _work_product_sources(metadata: Mapping[str, Any]) -> set[str]:
+    sources: set[str] = set()
+    source = _string(metadata.get("source"))
+    if source:
+        sources.add(source)
+    existing = metadata.get("sources")
+    if isinstance(existing, list):
+        for value in existing:
+            source = _string(value)
+            if source:
+                sources.add(source)
+    return sources
 
 
 def _json_dump(value: Any) -> str:

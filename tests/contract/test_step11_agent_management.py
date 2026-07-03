@@ -1633,7 +1633,8 @@ async def test_create_assigned_issue_dispatches_assignee_without_scheduler(
         and run.context_snapshot.get("issueId") == issue["id"]
     ]
     assert len(task_runs) == 1
-    assert task_runs[0].status == "succeeded"
+    assert task_runs[0].status == "failed"
+    assert task_runs[0].error_code == "closeout_missing"
     assert task_runs[0].invocation_source == "assignment"
     assert task_runs[0].context_snapshot["wakeReason"] == "issue_assigned"
     assert wakeups[0].source == "assignment"
@@ -1694,7 +1695,8 @@ async def test_issue_comment_dispatches_assignee_wakeup_without_scheduler(
             )
         ).scalar_one()
 
-    assert run.status == "succeeded"
+    assert run.status == "failed"
+    assert run.error_code == "closeout_missing"
     assert run.run_purpose == "task_execution"
     assert run.context_snapshot is not None
     assert run.context_snapshot["wakeReason"] == "issue_comment_added"

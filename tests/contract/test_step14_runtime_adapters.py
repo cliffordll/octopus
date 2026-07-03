@@ -920,7 +920,7 @@ async def test_runtime_materializes_prefixed_control_plane_skill_key(
     from packages.runtimes.local_skills import materialize_runtime_skills
 
     skills_root = tmp_path / "skills"
-    control_plane = skills_root / "octopus"
+    control_plane = skills_root / "control-plane"
     control_plane.mkdir(parents=True)
     control_plane.joinpath("SKILL.md").write_text(
         "# Control Plane\n\nCoordinate work.", encoding="utf-8"
@@ -937,13 +937,13 @@ async def test_runtime_materializes_prefixed_control_plane_skill_key(
 
     assert mounted == [
         {
-            "key": "octopus",
-            "runtimeName": "octopus",
-            "name": "octopus",
+            "key": "control-plane",
+            "runtimeName": "control-plane",
+            "name": "control-plane",
             "description": "Coordinate work.",
         }
     ]
-    assert (skills_home / "octopus" / "SKILL.md").is_file()
+    assert (skills_home / "control-plane" / "SKILL.md").is_file()
 
 
 async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_root(
@@ -969,7 +969,7 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert snapshot_code == 200
     entries = {entry["key"]: entry for entry in snapshot["entries"]}
     assert {
-        "octopus",
+        "control-plane",
         "conversation-to-skill",
         "create-agent",
         "create-plugin",
@@ -983,8 +983,8 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert entries["conversation-to-skill"]["readOnly"] is True
     assert entries["conversation-to-skill"]["description"]
     assert entries["conversation-to-skill"]["description"] != "---"
-    assert entries["octopus"]["description"]
-    assert entries["octopus"]["description"] != "\ufeff---"
+    assert entries["control-plane"]["description"]
+    assert entries["control-plane"]["description"] != "\ufeff---"
     assert entries["create-agent"]["description"]
     assert entries["create-agent"]["description"] != "\ufeff---"
     assert entries["create-plugin"]["description"]

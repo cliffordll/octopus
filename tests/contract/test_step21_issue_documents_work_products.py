@@ -11,7 +11,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
-from packages.database.schema import ActivityLog, Agent, Base, Issue, Organization
+from packages.database.schema import (
+    ActivityLog,
+    Agent,
+    Base,
+    Issue,
+    IssueWorkProduct,
+    Organization,
+)
 from server.app import create_app
 from server.services.documents import DocumentService
 from server.services.heartbeat import HeartbeatService
@@ -132,6 +139,123 @@ async def test_work_product_archive_reuses_asset_for_identical_content(
     urls = {row["url"] for row in rows}
     assert len(asset_ids) == 1  # ...but one shared asset for identical content
     assert len(urls) == 1
+
+
+async def test_work_product_listing_hides_historical_duplicate_content_path_rows(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    _, factory = app
+    org_id, issue_id = await _seed_issue(factory)
+    metadata = {
+        "assetId": "asset-1",
+        "sha256": "abc123",
+        "workspacePath": "artifacts/issues/issue-1/final.md",
+        "workspaceBrowserPath": "artifacts/issues/issue-1/final.md",
+    }
+    async with factory() as session:
+        session.add_all(
+            [
+                IssueWorkProduct(
+                    org_id=org_id,
+                    issue_id=issue_id,
+                    type="document",
+                    provider="octopus",
+                    external_id="scan:final.md",
+                    title="final.md",
+                    status="active",
+                    review_state="none",
+                    is_primary=True,
+                    health_status="unknown",
+                    metadata_json=metadata,
+                    created_by_run_id="run-1",
+                ),
+                IssueWorkProduct(
+                    org_id=org_id,
+                    issue_id=issue_id,
+                    type="document",
+                    provider="octopus",
+                    external_id="opencode:final.md",
+                    title="artifacts/issues/issue-1/final.md",
+                    status="active",
+                    review_state="none",
+                    is_primary=False,
+                    health_status="unknown",
+                    metadata_json=metadata,
+                    created_by_run_id="run-1",
+                ),
+            ]
+        )
+        await session.commit()
+    async with factory() as session:
+        from server.services.workspaces import WorkspaceService
+
+        listed = await WorkspaceService(session).list_work_products_for_issue(issue_id)
+
+    assert len(listed) == 1
+    assert listed[0]["title"] == "final.md"
+    assert listed[0]["isPrimary"] is True
+
+
+async def test_work_product_capture_merges_same_archived_path_from_runtime_and_scan(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    body = b"# Final report\n"
+    runtime_product = {
+        "title": "artifacts/issues/issue-1/final.md",
+        "type": "document",
+        "provider": "octopus",
+        "externalId": "opencode_write:run-1:artifacts/issues/issue-1/final.md",
+        "isPrimary": False,
+        "summary": "File written by OpenCode during this run.",
+        "content": body,
+        "contentType": "text/markdown",
+        "filename": "final.md",
+        "metadata": {
+            "source": "opencode_write_event",
+            "workspacePath": "artifacts/issues/issue-1/final.md",
+        },
+    }
+    scanned_product = {
+        "title": "final.md",
+        "type": "document",
+        "provider": "octopus",
+        "externalId": "issue_artifacts_scan:organization_workspace:org:final.md",
+        "isPrimary": True,
+        "summary": "Generated file captured from managed workspace storage.",
+        "content": body,
+        "contentType": "text/markdown",
+        "filename": "final.md",
+        "metadata": {
+            "source": "issue_artifacts_scan",
+            "workspacePath": "final.md",
+            "workspaceBrowserPath": "artifacts/issues/issue-1/final.md",
+        },
+    }
+
+    async with factory() as session:
+        first = await WorkspaceService(session).persist_run_work_products(
+            run_id="run-1",
+            context_snapshot={"issueId": issue_id},
+            products=[runtime_product, scanned_product],
+        )
+        await session.commit()
+    async with factory() as session:
+        listed = await WorkspaceService(session).list_work_products_for_issue(issue_id)
+
+    assert len(first) == 2
+    assert len(listed) == 1
+    assert listed[0]["isPrimary"] is True
+    metadata = listed[0]["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["sources"] == [
+        "issue_artifacts_scan",
+        "opencode_write_event",
+    ]
+    assert metadata["workspaceBrowserPath"] == "artifacts/issues/issue-1/final.md"
 
 
 async def test_generated_work_product_primary_prefers_run_worktree(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import asyncio
 import logging
 
 from fastapi import Request
@@ -72,7 +73,9 @@ async def _close_session(session: AsyncSession) -> None:
 
 
 def _cleanup_error_requires_invalidate(error: BaseException | None) -> bool:
-    return error is not None and not isinstance(error, TimeoutError)
+    return error is not None and not isinstance(
+        error, (TimeoutError, asyncio.CancelledError)
+    )
 
 
 async def _invalidate_session(session: AsyncSession) -> None:

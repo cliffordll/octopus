@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if command -v git >/dev/null 2>&1; then
+  for name in $(git rev-parse --local-env-vars); do
+    unset "$name"
+  done
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  uv run python scripts/verify.py --pre-commit
+else
+  echo "uv is required to run the Octopus pre-commit gate." >&2
+  exit 127
+fi

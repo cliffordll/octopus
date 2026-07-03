@@ -65,17 +65,25 @@ health: http://127.0.0.1:8000/api/health
 
 ### 测试命令
 
-提交前完整检查：
+提交前完整检查统一使用仓库脚本：
 
 ```powershell
-uv run ruff check .
-uv run ruff format --check .
-uv run pyright .
-uv run pytest
-cd ui
-npm run typecheck
-npm test
+uv run python scripts/verify.py
 ```
+
+首次 clone 或重新配置仓库后，安装本仓库的 git hook：
+
+```powershell
+.\scripts\install-git-hooks.ps1
+```
+
+安装后，每次 `git commit` 会自动运行：
+
+```powershell
+uv run python scripts/verify.py --pre-commit
+```
+
+该 hook 会执行 ruff format check、ruff check、pyright、pytest、UI typecheck 和 UI test；任一失败都会阻止提交。
 ### 测试失败时先看这里
 
 先确认依赖是同步过的：
@@ -91,8 +99,9 @@ cd ..
 
 | 现象 | 处理方式 |
 | --- | --- |
+| `uv run python scripts/verify.py --pre-commit` 阻止提交 | 按失败输出修复后重跑 `uv run python scripts/verify.py`，通过后再提交。 |
 | `uv run pyright .` 报缺包、找不到模块 | 先执行 `uv sync`。如果正在运行 server 导致 `.venv` 文件被锁，先停 server，或改用 `uv run --no-sync pyright .`。 |
-| `uv run ruff format --check .` 失败 | 运行 `uv run ruff format .`，再重新执行 `uv run ruff check .` 和 `uv run ruff format --check .`。 |
+| `uv run ruff format --check .` 失败 | 运行 `uv run ruff format .`，再重新执行 `uv run python scripts/verify.py`。 |
 | `uv run pytest` 失败但不知道是哪一个测试 | 用失败输出里的完整节点重跑：`uv run pytest path\to\test_file.py::test_name -q -vv -x`。 |
 | 数据库、迁移、本地数据相关测试失败 | 确认没有连到旧数据库：`Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue`。需要本地 server 数据库时再执行 `uv run alembic upgrade head`。 |
 | UI `npm run typecheck` 或 `npm test` 报依赖缺失 | 在 `ui/` 下执行 `npm install`，再重跑对应命令。 |

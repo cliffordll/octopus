@@ -1705,6 +1705,7 @@ class HeartbeatService:
                             since=running.started_at,
                         )
                     )
+                work_products = _dedupe_work_product_payloads(work_products)
             except Exception as wp_exc:  # noqa: BLE001
                 # Work-product capture is best-effort and must never override the
                 # run's real outcome nor abort finalization. The capture is
@@ -3430,6 +3431,7 @@ class HeartbeatService:
             if "wakeOnOnDemand" in config
             else config.get("wakeOnAutomation", True)
         )
+        run_diagnostics_on_timer = config.get("runDiagnosticsOnTimer")
         return {
             "enabled": enabled if isinstance(enabled, bool) else True,
             "intervalSec": interval_sec
@@ -3438,11 +3440,9 @@ class HeartbeatService:
             "wakeOnDemand": (
                 wake_on_demand if isinstance(wake_on_demand, bool) else True
             ),
-            "runDiagnosticsOnTimer": (
-                config.get("runDiagnosticsOnTimer")
-                if isinstance(config.get("runDiagnosticsOnTimer"), bool)
-                else False
-            ),
+            "runDiagnosticsOnTimer": run_diagnostics_on_timer
+            if isinstance(run_diagnostics_on_timer, bool)
+            else False,
         }
 
     def _max_concurrent_runs(self, agent: AgentRow) -> int:
@@ -3740,6 +3740,19 @@ def _activity_details_text(details: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             values.append(value)
     return "\n".join(values)
+
+
+def _dedupe_work_product_payloads(products: list[Any]) -> list[Any]:
+    deduped: list[Any] = []
+    seen_ids: set[str] = set()
+    for product in products:
+        product_id = product.get("id") if isinstance(product, dict) else None
+        if isinstance(product_id, str) and product_id:
+            if product_id in seen_ids:
+                continue
+            seen_ids.add(product_id)
+        deduped.append(product)
+    return deduped
 
 
 async def _shielded_session_close(session: AsyncSession) -> None:
