@@ -29,13 +29,13 @@ Issue/Run
 - 工作区执行模式：从选中的项目工作区复用或派生执行 cwd 的方式，即 `shared_workspace`、`isolated_workspace`、`operator_branch`。模式归属于项目工作区，而不是项目。
 - 组织级工作区：organization 范围的运行时文件根目录，用于 artifacts、plans、skills、agents、managed checkout 父目录和无项目 scratch，不是项目代码目录。
 - 智能体级工作区：agent 私有 scratch、memory、工具缓存和 session 辅助文件，不是项目代码目录。
-- 任务产物目录：某个 issue/run 的截图、报告、日志、handoff 文件归档目录，对应 `OCTOPUS_ISSUE_ARTIFACTS_DIR`。
+- 产物登记：某个 issue/run 产生的截图、报告、日志、handoff 或变更摘要会登记为 work products；物理文件可以在共享工作区、organization artifacts 或 issue 兼容目录中，归属由 DB 元数据表达。
 - Git 分支或 worktree：代码变更如何隔离、累积、review 和合并。
 - 队列或 lease：多个任务是否可以同时写同一个执行 cwd。
 
 关键规则：
 
-> `OCTOPUS_WORKSPACE_CWD` 是执行目录；`OCTOPUS_ISSUE_ARTIFACTS_DIR` 是任务产物目录；组织级/智能体级 workspace 是运行时基础设施目录。三者不能混为一个概念。
+> `OCTOPUS_WORKSPACE_CWD` 是执行目录；organization artifacts 是共享持久文件面；`OCTOPUS_ISSUE_ARTIFACTS_DIR` 只是兼容的 issue 产物建议路径。工作区模式不能靠 artifact 子目录来定义。
 
 如果 shared 模式下每个子任务都有独立执行 cwd，那么 shared 就退化成 isolated。对齐上游 upstream reference 后，shared 模式应明确为“直接使用所选项目工作区 cwd”，不应再叠加“每个任务一个执行目录 + workspace 长锁 + workspace 队列”这套语义。
 
@@ -121,7 +121,7 @@ issue mode override
 | --- | --- | --- |
 | organization workspace root | 组织范围 scratch、artifacts/plans/skills/agents 根目录、managed checkout 父目录 | 否，除非明确进入 organization scratch run |
 | agent workspace root | agent 私有 memory、scratch、工具缓存 | 否 |
-| issue artifacts dir | issue/run 产物归档 | 否 |
+| issue artifacts dir | 兼容的 issue 产物建议目录；不是共享模式下的强制隔离边界 | 否 |
 | execution workspace cwd | agent 真正执行和修改代码的目录 | 是 |
 
 ### 2.5 Preflight 场景矩阵
@@ -148,7 +148,7 @@ issue mode override
 | `OCTOPUS_WORKSPACE_CWD` | `<OCTOPUS_HOME>\instances\<instanceId>\organizations\<orgId>\workspaces` |
 | Git/worktree | 不创建 |
 | 队列 | 按 organization scratch cwd 串行 |
-| artifacts | 仍然按 issue 独立：`artifacts\issues\<issueId>` |
+| artifacts | 可以写 organization artifacts 或约定的共享路径；issue/run 归属由 work product 元数据记录 |
 
 这个场景适合写报告、整理资料、生成文档、轻量自动化；不适合作为代码修改任务。需要修改代码时，应先关联 project 并选择或创建项目工作区。
 
@@ -223,7 +223,7 @@ D:\coding\octopus\.octopus\instances\default\organizations\<orgId>\workspaces\pr
 | organization workspace root | `<OCTOPUS_HOME>\instances\<instanceId>\organizations\<orgId>\workspaces` | 组织级文件根目录 |
 | managed checkout | `...\workspaces\projects\<projectId前8位>\<workspaceId前8位>\checkout` | 一个项目工作区的受管代码来源，即 `project_workspaces.cwd` |
 | organization scratch | organization workspace root 或其 scratch 子目录 | 无项目/无代码任务的临时执行位置 |
-| issue artifacts | `...\workspaces\artifacts\issues\<issueId>` | 任务产物目录 |
+| issue artifacts | `...\workspaces\artifacts\issues\<issueId>` | 兼容的任务产物建议目录；不是 workspace 隔离机制 |
 
 因此，managed checkout 虽然物理上位于组织级工作区之下，但语义上属于一个具体的项目工作区。UI/API 不能把它展示成 organization scratch，也不能把 organization workspace root 本身展示成项目 shared workspace。多仓库项目的 checkout 路径必须包含 workspace 标识，不能让 frontend/backend 共用同一 checkout 目录。
 
@@ -284,7 +284,7 @@ operator branch 必须有 Git 来源；否则 branch 语义不存在。
 
 | 模式 | 执行 cwd | Git 语义 | 任务复用范围 | 写并发规则 | 典型用途 |
 | --- | --- | --- | --- | --- | --- |
-| `shared_workspace` | 所选项目工作区 cwd 或其 managed checkout cwd | 使用当前工作树，不自动切换分支 | 同一项目工作区 | 不创建 workspace 级长锁；同目录并发风险由 issue/agent/run 层约束和用户策略承担 | 直接在所选代码来源上工作 |
+| `shared_workspace` | 所选项目工作区 cwd 或其 managed checkout cwd | 使用当前工作树，不自动切换分支 | 同一项目工作区 | 共享现场；覆盖和冲突由用户/agent 协作控制，平台只提醒、记录和展示 diff | 快速直接在所选代码来源上工作 |
 | `isolated_workspace` | 每个 issue 一个 Git worktree cwd | 每个 issue 一个固定分支和 worktree | 单个 issue | 不同 issue 可并行；同一 issue 串行 | 多任务隔离、独立 review、方便丢弃 |
 | `operator_branch` | 多个 issue 共用一个固定 operator worktree | 一组任务累积到同一个长期 feature/operator 分支 | 项目工作区 + operator 分支 | 同一 operator cwd 写任务必须串行 | 一个大 feature 拆成多个子任务共同推进 |
 
@@ -307,19 +307,14 @@ D:\projects\shop-app
 OCTOPUS_WORKSPACE_CWD=D:\projects\shop-app
 ```
 
-不同任务可以有不同产物目录：
+不同任务可以写同一套项目文件、报告文件和输出文件。共享工作区的语义就是“共享现场”，不通过每个 issue 的物理目录来避免覆盖。
 
-```text
-OCTOPUS_ISSUE_ARTIFACTS_DIR=...\artifacts\issues\ISSUE-A
-OCTOPUS_ISSUE_ARTIFACTS_DIR=...\artifacts\issues\ISSUE-B
-```
-
-但这些产物目录不是 execution workspace，不能展示或记录成任务的工作区 cwd。
+如果 runtime 仍注入 `OCTOPUS_ISSUE_ARTIFACTS_DIR`，它只是一条兼容的建议落点，方便登记当前 issue 的 work products；它不是 shared workspace 的隔离边界，也不能展示或记录成任务的工作区 cwd。共享模式下更重要的是记录 `issueId`、`runId`、`agentId`、修改路径和 diff，让用户知道谁改了什么。
 
 ### 4.2 适用场景
 
 - 用户希望 agent 像本地开发者一样直接改当前项目目录。
-- 项目很小，或者用户明确接受所有任务在同一个 working tree 中累积改动。
+- 项目很小，或者用户明确接受所有任务在同一个 working tree / 输出目录中累积改动。
 - 用户希望避免为每个 issue 创建分支和 worktree。
 - 当前任务不是并行开发，而是按顺序推进。
 
@@ -332,7 +327,7 @@ OCTOPUS_ISSUE_ARTIFACTS_DIR=...\artifacts\issues\ISSUE-B
 
 ### 4.4 并发规则
 
-shared 模式下，Octopus 不应为了“保护共享工作区”而在整个任务执行周期持有 workspace 写锁。
+shared 模式下，Octopus 不应为了“保护共享工作区”而在整个任务执行周期持有 workspace 写锁，也不应把任务产物强行转移到 issue 私有目录来伪装隔离。
 
 原因：
 
@@ -345,6 +340,7 @@ shared 模式下，Octopus 不应为了“保护共享工作区”而在整个�
 - 同一个 issue 仍由 issue checkout / execution lock 防重复执行。
 - 同一个 agent 如果运行时一次只能执行一个 run，继续使用 agent/run 队列。
 - 共享项目 cwd 不再通过 workspace lease 长时间锁住。
+- 文件覆盖风险由用户/agent 的任务分工、路径约定、diff review 和 closeout 说明控制；平台只做提示、审计和可见性，不在 shared 模式下替用户做物理隔离。
 - 如果用户要并行修改不同功能，应选择 `isolated_workspace`。
 
 ### 4.5 分支安全
@@ -503,28 +499,30 @@ operator_branch:
 - Octopus 不自动 merge operator branch。
 - push、PR、merge、删除分支都应是后续显式动作。
 
-## 7. 任务产物目录不是工作区模式
+## 7. 产物登记不是工作区模式
 
-三种模式都可以为每个 issue/run 创建独立产物目录，例如：
+三种模式都可以登记 issue/run work products，但这不要求每个 issue/run 都有独立物理产物目录。物理路径服从当前工作模式和用户约定：
 
 ```text
-...\artifacts\issues\<issueId>
+shared_workspace   -> 共享项目 cwd / organization artifacts / 用户指定路径
+isolated_workspace -> 当前 issue worktree / organization artifacts
+operator_branch    -> 固定 operator worktree / organization artifacts
 ```
 
-这个目录用于：
+work products 用于记录：
 
 - 截图
 - 报告
 - 日志摘要
 - CSV/JSON/Markdown handoff
-- issue work products
+- 代码变更摘要、diff、测试证据
 
-它不决定代码在哪里执行，也不参与 shared/isolated/operator 的模式判断。
+这些记录不决定代码在哪里执行，也不参与 shared/isolated/operator 的模式判断。归属应由 `issue_id`、`created_by_run_id`、`execution_workspace_id`、路径和时间戳表达，而不是靠目录名推断。
 
-因此 UI/API 应避免把 `issueArtifactsDir` 命名或展示成 workspace cwd。推荐命名：
+因此 UI/API 应避免把 `issueArtifactsDir` 命名或展示成 workspace cwd，也不应暗示 shared 模式会自动按 issue 目录隔离。推荐命名：
 
 - `workspace.cwd`：执行目录。
-- `issueArtifactsDir`：任务产物目录。
+- `issueArtifactsDir`：兼容的 issue 产物建议目录。
 - `workspace.mode`：执行工作区模式。
 - `workspace.providerType`：执行目录提供者，如 `local_fs` 或 `git_worktree`。
 
@@ -544,7 +542,7 @@ shared workspace 不应再新增 workspace 级长锁或 workspace lease 队列�
 | isolated 模式不同 issue 写不同 cwd | 不需要跨 issue 队列 |
 | isolated 模式同一 issue 多个 run 写同一 cwd | 需要同 issue 串行 |
 | operator 模式多个 issue 写同一个 operator cwd | 需要 |
-| 多个任务只写各自 artifacts 目录 | 不因此需要 workspace 写队列 |
+| 多个任务写共享 artifacts 或共享项目目录 | shared 下由用户/agent 控制覆盖；operator 下按 operator cwd 策略控制 |
 
 ## 9. Preflight 输出必须满足的约束
 
@@ -553,7 +551,7 @@ shared workspace 不应再新增 workspace 级长锁或 workspace lease 队列�
 ### 9.1 运行时约束
 
 - `OCTOPUS_WORKSPACE_CWD` 指向真实执行目录。
-- `OCTOPUS_ISSUE_ARTIFACTS_DIR` 如果存在，只表示产物目录。
+- `OCTOPUS_ISSUE_ARTIFACTS_DIR` 如果存在，只表示兼容的产物建议路径，不表示任务有独立 execution workspace。
 - `providerType=git_worktree` 时，目录必须能被 Git 原生命令验证为 worktree。
 - 没有 Git 来源时，不能生成 fake `git_worktree`。
 - shared 模式不能为每个子任务生成新的 execution cwd。
@@ -568,7 +566,7 @@ Preflight/API 应返回足够事实，避免 UI 只能从 `cwd` 或 mode 猜语�
 - `projectWorkspaceId`：本次运行选择的项目工作区；organization scratch 时为 null。
 - `codeSourceKind`：`local_cwd`、`managed_checkout`、`repo_url_pending_checkout` 或 `none`。
 - `workspaceCwd`：实际执行 cwd。
-- `issueArtifactsDir`：issue 产物目录。
+- `issueArtifactsDir`：兼容的 issue 产物建议路径；shared 模式下不能据此宣称物理隔离。
 - `providerType`：`local_fs`、`git_worktree` 等。
 - `strategyType`：实际工作区策略。
 - `branchName`：执行目录当前/目标分支。

@@ -692,7 +692,14 @@ async def test_execution_workspace_resolution_binds_issue_to_workspace(
     assert workspace["metadata"]["sourceWorkspaceCwd"] == str(project_cwd)
 
 
-async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -> None:
+async def test_shared_workspace_run_uses_project_workspace_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    org_root = tmp_path / "org-workspace"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
     project_cwd = tmp_path / "project-workspace"
     project_cwd.mkdir()
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
@@ -764,12 +771,11 @@ async def test_shared_workspace_run_uses_project_workspace_cwd(tmp_path: Path) -
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_CODE_SOURCE"] == "local_cwd"
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_WARNINGS_JSON"] == "[]"
     assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_REQUIRES_LEASE"] == "false"
-    issue_artifacts_dir = (
-        Path(context["workspace"]["env"]["OCTOPUS_ORG_ARTIFACTS_DIR"])
-        / "issues"
-        / issue.id
-    )
+    issue_artifacts_dir = org_root / "artifacts" / "issues" / issue.id
     assert workspace["issueArtifactsDir"] == str(issue_artifacts_dir)
+    assert context["workspace"]["env"]["OCTOPUS_ISSUE_ARTIFACTS_DIR"] == str(
+        issue_artifacts_dir
+    )
     assert not str(issue_artifacts_dir).startswith(str(project_cwd))
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 import uuid
 
@@ -273,6 +274,47 @@ async def test_shared_workspace_generated_scan_ignores_root_artifacts(
         await session.commit()
 
     assert rows == []
+
+
+async def test_shared_workspace_generated_scan_captures_recent_shared_files(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    _, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    shared_cwd.mkdir()
+    report = shared_cwd / "reports" / "deliverable.md"
+    report.parent.mkdir(parents=True)
+    since = datetime.now(UTC)
+    report.write_text("belongs to this run")
+
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+
+    async with factory() as session:
+        rows = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1", context_snapshot=snapshot, since=since
+        )
+        await session.commit()
+
+    assert len(rows) == 1
+    md = rows[0]["metadata"]
+    assert md
+    assert rows[0]["title"] == "reports/deliverable.md"
+    assert md["workspacePath"] == "reports/deliverable.md"
+    assert md["source"] == "shared_workspace_scan"
+    assert md["executionWorkspaceId"] == "ws-shared"
 
 
 async def test_shared_workspace_generated_scan_captures_issue_scoped_files(

@@ -55,7 +55,7 @@ Important files and conventions:
 - If a run or chat is linked to a project, control plane injects only that project's attached resources into the runtime context.
 - If you need broader org-wide resources, query the org resource catalog explicitly instead of assuming it is already in the prompt.
 - Use Workspaces for disk-backed shared files, plans, and skill packages.
-- When you need to place durable generated output on disk, use `$OCTOPUS_ISSUE_ARTIFACTS_DIR`. Do not rely on files written to the organization artifacts root being auto-registered as work products. Use `/tmp` only for transient scratch files and temporary verification artifacts.
+- When you need to place durable generated output on disk, use the path the task/user specifies, `$OCTOPUS_ORG_ARTIFACTS_DIR`, or the compatibility `$OCTOPUS_ISSUE_ARTIFACTS_DIR` when you want an issue-scoped suggested location. In shared workspace mode, `$OCTOPUS_ISSUE_ARTIFACTS_DIR` is not a physical isolation boundary; record the output in closeout so work products can be traced to the issue/run. Use `/tmp` only for transient scratch files and temporary verification artifacts.
 - For other shared output, prefer the managed workspace paths control plane injected for this run such as `$OCTOPUS_ORG_PLANS_DIR`, `$OCTOPUS_ORG_SKILLS_DIR`, and the active `$OCTOPUS_WORKSPACE_CWD` or `$OCTOPUS_ORG_WORKSPACE_ROOT`. Do not invent new top-level `projects/` folders.
 - If a `resources.md` file exists, treat it like a normal workspace file rather than a reserved control plane surface.
 - Agent-specific files live under `workspaces/agents/<workspace-key>/...`.

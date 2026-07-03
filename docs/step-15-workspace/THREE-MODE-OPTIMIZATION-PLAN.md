@@ -17,7 +17,7 @@
 - `_ensure_managed_workspace_paths()` 只执行目录创建，没有执行 `git worktree add`。
 - 标记为 `git_worktree` 的目录可能实际上只是普通目录。
 - `operator_branch` 仍按 issue 范围复用，无法表达固定长期 operator 分支。
-- 缺少共享目录和 operator 分支的写租约。
+- 缺少 operator 分支的写协调，以及 shared 工作区的风险提示、diff 可见性和审计记录。
 - 缺少 dirty workspace、未合并提交和冲突状态下的安全清理规则。
 - 项目只有 `repoUrl`、没有本地 `cwd` 时，没有受管 checkout 的准备流程。
 
@@ -27,7 +27,7 @@
 
 | 模式 | 执行目录 | 分支规则 | 复用范围 | 并发规则 |
 | --- | --- | --- | --- | --- |
-| `shared_workspace` | 项目主工作区 `cwd` | 使用主工作区当前分支，不自动切换 | 项目工作区 | 同一工作区写任务串行 |
+| `shared_workspace` | 项目主工作区 `cwd` | 使用主工作区当前分支，不自动切换 | 项目工作区 | 共享现场；覆盖由用户/agent 控制，平台提示和记录 |
 | `isolated_workspace` | issue 独立 worktree | issue 首次解析时创建固定分支，后续 run 永久复用 | 单个 issue | 不同 issue 可并行 |
 | `operator_branch` | 固定 operator worktree | 使用项目配置的固定长期分支，不按 issue 创建新分支 | 项目 + operator 分支 | 同一 operator workspace 串行 |
 
@@ -176,9 +176,8 @@ Octopus 应创建受管 project checkout，并将生成的本地路径持久化�
 resolve project workspace
   -> verify cwd exists and is writable
   -> if Git expectations exist, verify repo and current branch
-  -> acquire project-workspace write lease
   -> run adapter directly in project cwd
-  -> release lease
+  -> record changed files / diff / work products for audit
 ```
 
 规则：
@@ -186,7 +185,7 @@ resolve project workspace
 - 非 Git 项目也可以使用 shared。
 - 不创建 branch 或 worktree。
 - 不自动 merge，因为改动已经发生在主工作区。
-- 多个写任务不得同时执行；只读任务并发属于后续能力，不在第一版推断。
+- 多个写任务可以操作同一个共享现场；平台必须提示风险并记录改动来源，但不通过任务目录隔离来避免覆盖。需要系统级隔离时选择 `isolated_workspace`。
 
 ### 6.2 Isolated workspace
 
@@ -240,7 +239,7 @@ resolve configured operator branch
 
 要求：
 
-- shared 与 operator 在 adapter 执行前获取写租约。
+- operator 在 adapter 执行前获取写租约或等价串行控制；shared 不用 workspace 级写租约伪装隔离。
 - isolated workspace 天然按 issue 隔离，但同一 issue 的重复 run 仍需防止并发写。
 - server 重启后过期租约可恢复。
 - 竞争失败应保持 run queued 或返回明确冲突，不得静默进入同一目录。
@@ -291,21 +290,21 @@ Execution workspace 需要可追踪以下事实：
 
 ## 10. 产出物边界
 
-代码和项目内生成物：
+代码、项目文件和共享输出：
 
-- shared 写入项目主工作区。
+- shared 写入项目主工作区或用户/agent 约定的共享输出路径。
 - isolated 写入当前 issue worktree。
 - operator 写入固定 operator worktree。
 
 正式交付物：
 
-- 报告、截图、CSV、handoff 文档继续写入 `OCTOPUS_ORG_ARTIFACTS_DIR`。
-- `issue_work_products` 继续通过 `issue_id`、`created_by_run_id`、`execution_workspace_id` 关联。
-- isolated 只扫描当前 issue worktree。
-- shared 只扫描 `artifacts/issues/<issueId>` 范围。
-- 不扫描整个组织 artifacts root 并归属给单个任务。
+- 报告、截图、CSV、handoff 文档可以写入 `OCTOPUS_ORG_ARTIFACTS_DIR`、共享工作区约定路径，或兼容的 issue artifacts 目录。
+- `issue_work_products` 继续通过 `issue_id`、`created_by_run_id`、`execution_workspace_id`、路径和时间戳关联。
+- shared 不用 `artifacts/issues/<issueId>` 做物理隔离；如果多个任务写同一文件，平台记录来源并在 UI/diff 中暴露风险。
+- isolated 的任务级隔离由 worktree 提供。
+- operator 的协作边界由固定 operator branch/worktree 提供。
 
-Workspace 模式变化不得改变 work product 的任务归属语义。
+Workspace 模式变化不得改变 work product 的追溯语义：归属靠元数据，不靠 shared 模式下的目录隔离。
 
 ## 11. API 与 UI
 
@@ -413,7 +412,7 @@ UI 文案不得暗示 Octopus 会自动切换项目主分支或自动合并。
 - cwd 精确等于配置的项目主工作区。
 - preflight 前后项目主工作树分支不变。
 - 非 Git 目录可运行。
-- 两个写 run 不会同时进入同一 shared cwd。
+- shared cwd 的覆盖风险会被提示和记录；平台不声称提供任务级物理隔离。
 
 ### Isolated
 
@@ -443,7 +442,7 @@ UI 文案不得暗示 Octopus 会自动切换项目主分支或自动合并。
 - dirty workspace 不被自动删除。
 - active issue 或 lease 阻止 archive。
 - cleanup failure 可见且可重试。
-- 三种模式下 work products 均保持正确 issue/run/workspace 关联。
+- 三种模式下 work products 均保持正确 issue/run/workspace/path 关联；shared 下归属不依赖物理 issue 目录。
 
 ### Repository validation
 
