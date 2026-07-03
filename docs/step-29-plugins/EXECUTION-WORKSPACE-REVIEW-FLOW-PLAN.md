@@ -6,7 +6,7 @@
 
 这个阶段要解决的核心问题不是再新增零散按钮，而是回答：
 
-- 三种 workspace 模式下，任务产物如何进入 Git 主流程？
+- 三种 workspace 模式下，任务结果如何进入 Git 主流程，work products 又如何追溯来源？
 - 如何避免系统私自切换主工作区分支？
 - 如何在 merge / push / PR / abandon 之间建立明确、可审计的选择？
 - 如何保证 cleanup 不误删主工作区、不丢任务成果？
@@ -52,7 +52,7 @@
 
 - 不创建隔离 worktree。
 - 任务直接在项目主工作区执行。
-- UI 必须显示“共享工作区风险”：多个任务可能污染同一目录。
+- UI 必须显示“共享工作区风险”：多个任务可以操作和覆盖同一目录，平台只提示、记录和展示 diff，不提供任务级物理隔离。
 - 不提供“从任务 worktree merge 回主目录”的动作，因为本来就在主目录。
 - 可以提供 status / diff / push，但必须基于当前主工作区 Git 状态。
 
@@ -331,7 +331,7 @@ Issue 详情页显示：
 
 本阶段完成后，应能回答并验证：
 
-- 三种模式下任务产物在哪里。
+- 三种模式下任务结果在哪里：shared 在共享现场，isolated 在任务 worktree，operator 在长期操作分支；work products 通过元数据追溯来源。
 - 三种模式下任务结果如何进入 Git。
 - 哪些场景允许 merge。
 - 哪些场景只能 push / PR。
@@ -361,5 +361,5 @@ Issue 详情页显示：
 
 - Windows git worktree 删除容易受当前进程 cwd 影响，必须从 source workspace 执行 remove。
 - merge 操作如果直接 checkout target branch，会复发“私自切分支”问题；必须设计成明确目标和安全 guard。
-- shared workspace 天然不隔离，UI 必须明确提示，而不是伪装成 isolated。
+- shared workspace 天然不隔离，UI 必须明确提示，而不是用 issue artifact 目录伪装成 isolated。
 - operator_branch 容易被误解为自动 merge；默认应偏向 push / PR。

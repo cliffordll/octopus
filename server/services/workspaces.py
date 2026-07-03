@@ -1461,7 +1461,12 @@ class WorkspaceService:
         )
         workspace_cwd = _string(workspace.get("cwd"))
         if workspace_cwd:
-            issue_artifacts_dir = (artifacts_dir / "issues" / issue.id).resolve()
+            if workspace.get("mode") == "shared_workspace":
+                issue_artifacts_dir = artifacts_dir / "issues" / issue.id
+            else:
+                issue_artifacts_dir = (
+                    Path(workspace_cwd).resolve() / "artifacts" / "issues" / issue.id
+                )
             issue_artifacts_dir.mkdir(parents=True, exist_ok=True)
             workspace = cast(
                 ExecutionWorkspaceData,
@@ -1966,6 +1971,14 @@ class WorkspaceService:
             )
             if issue_artifacts_root is not None and issue_artifacts_root.is_dir():
                 scan_roots.append(("issue_artifacts_scan", issue_artifacts_root))
+            if threshold is not None:
+                scan_roots.append(("shared_workspace_scan", worktree_root))
+                if (
+                    artifacts_root is not None
+                    and artifacts_root.is_dir()
+                    and not _is_relative_to(artifacts_root, worktree_root)
+                ):
+                    scan_roots.append(("organization_artifacts_scan", artifacts_root))
         else:
             scan_roots.append(("execution_workspace_scan", worktree_root))
         seen_paths: set[Path] = set()
@@ -1978,6 +1991,16 @@ class WorkspaceService:
                     continue
                 seen_paths.add(resolved_path)
                 rel_path = path.relative_to(root).as_posix()
+                if (
+                    source == "shared_workspace_scan"
+                    and artifacts_root is not None
+                    and _is_other_issue_artifact(
+                        path=path,
+                        artifacts_root=artifacts_root,
+                        issue_id=issue.id,
+                    )
+                ):
+                    continue
                 workspace_browser_path = _workspace_browser_path(
                     path=path,
                     artifacts_root=artifacts_root,
@@ -2630,3 +2653,21 @@ def _workspace_browser_path(*, path: Path, artifacts_root: Path | None) -> str |
     except ValueError:
         return None
     return f"artifacts/{rel_path}"
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _is_other_issue_artifact(
+    *, path: Path, artifacts_root: Path, issue_id: str
+) -> bool:
+    try:
+        rel_parts = path.resolve().relative_to(artifacts_root.resolve()).parts
+    except ValueError:
+        return False
+    return len(rel_parts) >= 3 and rel_parts[0] == "issues" and rel_parts[1] != issue_id

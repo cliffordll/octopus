@@ -452,12 +452,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
     assert "D:/octopus/worktree/artifacts/issues/issue-1" in captured_prompt
-    assert "D:/octopus/artifacts" not in captured_prompt
+    assert "D:/octopus/artifacts" in captured_prompt
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
-    assert "Prefer the workspace artifacts directory" in captured_prompt
+    assert "Prefer the organization artifacts directory" in captured_prompt
     assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" in captured_prompt
-    assert "captured for compatibility" in captured_prompt
+    assert "compatibility convenience path" in captured_prompt
+    assert "not a workspace isolation boundary" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt

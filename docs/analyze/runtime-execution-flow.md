@@ -306,7 +306,7 @@ Project workspace 一旦可用，应视为项目本地源码和下载物目录�
 
 如果项目策略是 `shared_workspace`，runtime cwd 应直接使用主 project workspace 的 `cwd`，例如 `D:/coding/test`。如果项目策略是 `isolated_workspace` 或 `operator_branch`，runtime cwd 应使用该任务解析出的 execution workspace worktree；这类模式适合隔离每个任务的文件改动，不会直接在项目主目录执行。
 
-这不代表所有输出都写进项目源码目录。报告、截图、CSV、mockup、运行日志摘要和 handoff 文档属于 durable output，应优先写到 `OCTOPUS_ORG_ARTIFACTS_DIR`，再由 server 登记到 issue work products/documents。
+这不代表所有输出都必须写进项目源码目录。报告、截图、CSV、mockup、运行日志摘要和 handoff 文档属于 durable output，可以写到 `OCTOPUS_ORG_ARTIFACTS_DIR`、共享工作区约定路径，或兼容的 issue artifact 路径，再由 server 登记到 issue work products/documents。shared workspace 下不要把 issue artifact 路径解释成物理隔离。
 
 ### 5.3 Agent Home / AGENT_HOME / Runtime Managed HOME
 
@@ -483,9 +483,9 @@ OCTOPUS_ORG_ARTIFACTS_DIR
 OCTOPUS_ORG_ARTIFACTS_DIR
 ```
 
-如果 agent 只是写相对路径，例如 `report.md`，文件会落到 runtime `cwd`。这适合源码修改、下载物或项目内临时工作文件，但不适合作为稳定交付物。报告、截图、CSV、mockup、日志摘要等 durable output 应优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`。
+如果 agent 只是写相对路径，例如 `report.md`，文件会落到 runtime `cwd`。shared workspace 下这是共享现场的一部分，可能被后续任务读取或覆盖；是否这样做由用户/agent 的路径约定控制。报告、截图、CSV、mockup、日志摘要等 durable output 可优先写入 `OCTOPUS_ORG_ARTIFACTS_DIR`，也可以写入用户指定的共享路径。
 
-server 成功 run 后应扫描受管 worktree 和组织 artifacts 中本次新增/修改文件，并登记为 issue work products。
+server 成功 run 后应登记本次 run 新增/修改的可追溯文件，并保存 issue/run/workspace/path 元数据。shared workspace 下归属不能只靠目录层级推断。
 
 ### 6.4 Issue Documents / Work Products / Attachments
 

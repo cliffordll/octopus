@@ -1815,8 +1815,9 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     await _wait_for_dispatch(app)
 
     _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
-    assert detail["status"] == "succeeded"
-    assert detail["errorCode"] is None
+    assert detail["status"] == "failed"
+    assert detail["errorCode"] == "closeout_missing"
+    assert "control-plane issue done" in detail["error"]
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
     assert issue_after["status"] == "in_progress"
@@ -1904,8 +1905,10 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         assert issue_row is not None
         assert followup_run.invocation_source == "automation"
         assert followup_run.run_purpose == "closeout_followup"
-        assert followup_run.status == "succeeded"
-        assert followup_run.error_code is None
+        assert followup_run.status == "failed"
+        assert followup_run.error_code == "closeout_missing"
+        assert followup_run.error is not None
+        assert "control-plane issue done" in followup_run.error
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -1923,7 +1926,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
                     AgentWakeupRequest.id != rows[0].id,
                 )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
         premature_activity = (
             await session.execute(
                 select(ActivityLog).where(
@@ -1932,10 +1935,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
                 )
             )
         ).scalar_one_or_none()
-        assert second_followup.payload["originRunId"] == run["id"]
-        assert second_followup.payload["previousRunId"] == followup_run.id
-        assert second_followup.payload["attempt"] == 2
-        assert second_followup.status == "scheduled"
+        assert second_followup is None
         assert premature_activity is None
         assert issue_row.execution_run_id is None
         assert issue_row.checkout_run_id is None
@@ -2236,7 +2236,7 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
     assert rows == []
 
 
-async def test_successful_issue_run_without_closeout_waits_for_passive_followup(
+async def test_successful_issue_run_without_closeout_is_failed_for_passive_followup(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -2293,9 +2293,10 @@ async def test_successful_issue_run_without_closeout_waits_for_passive_followup(
             )
         ).scalar_one_or_none()
 
-    assert final.status == "succeeded"
-    assert final.error_code is None
-    assert final.error is None
+    assert final.status == "failed"
+    assert final.error_code == "closeout_missing"
+    assert final.error is not None
+    assert "control-plane issue done" in final.error
     assert activity is None
 
 
@@ -3046,7 +3047,7 @@ async def test_passive_followup_exhaustion_with_reviewer_queues_convergence_revi
     assert activity.details["previousRunId"] == run_id
 
 
-async def test_successful_passive_followup_without_closeout_waits_before_final_attempt(
+async def test_passive_followup_without_closeout_fails_immediately(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -3112,9 +3113,10 @@ async def test_successful_passive_followup_without_closeout_waits_before_final_a
             )
         ).scalar_one_or_none()
 
-    assert final.status == "succeeded"
-    assert final.error_code is None
-    assert final.error is None
+    assert final.status == "failed"
+    assert final.error_code == "closeout_missing"
+    assert final.error is not None
+    assert "control-plane issue done" in final.error
     assert issue.status == "in_progress"
     assert activity is None
 

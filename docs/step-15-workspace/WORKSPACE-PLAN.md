@@ -8,14 +8,15 @@
 
 这份文档只描述开发计划，不重复定义工作区语义。设计语义见 [WORKSPACE-MODES.md](./WORKSPACE-MODES.md)。
 
-当前优先级是先清理错误模型，再做新功能：
+当前优先级是先把 shared 新语义落到 runtime 和 work products，再补 UI 可见性，最后做父子任务交付和 operator branch：
 
 ```text
 先清理 shared 错误模型
-  -> 再统一 preflight/API 事实输出
-  -> 再调整 UI 展示和文案
-  -> 再补齐 isolated worktree 行为
-  -> 最后讨论和实现 operator_branch
+  -> 让 runtime guidance 不再默认 issue 目录隔离
+  -> 让 shared work products 支持共享路径追溯
+  -> UI 展示 shared 覆盖风险和 changed files
+  -> 父子任务 primary deliverable 闭环
+  -> operator_branch 长期协作分支闭环
 ```
 
 不能先在现有错误模型上继续包装 UI 或添加新模式能力。
@@ -25,10 +26,11 @@
 | --- | --- | --- |
 | 第一阶段：清理 Shared 错误模型 | 已执行 | 已删除 workspace operation lease、shared workspace lease 队列、相关 migration 与测试断言 |
 | 第二阶段：统一 Preflight/API 事实输出 | 已执行 | 已输出 `workspaceKind`、`codeSourceKind`、warnings、lease/canRun 等结构化事实 |
-| 第三阶段：UI 调整 | 已执行 | 项目页按 project workspace 展示代码来源与各自执行模式；无 workspace 时展示组织草稿状态 |
-| 第四阶段：Shared Workspace 实现目标 | 已执行 | 项目 cwd 直用；repoUrl-only 创建并复用 managed checkout；无项目或未配置 project workspace 时显式解析为 organization scratch；已配置 workspace 但缺少 cwd/repoUrl 时拒绝执行 |
+| 第三阶段：UI 调整 | 部分完成 | 项目页按 project workspace 展示代码来源与各自执行模式；还缺 shared 覆盖风险、changed files 和 work product 来源解释 |
+| 第四阶段：Shared Workspace 实现目标 | 部分完成 | 项目 cwd 直用、repoUrl-only checkout、organization scratch 已有；还缺 runtime guidance 和 shared 路径 work product 捕获语义 |
 | 第五阶段：Isolated Workspace 实现目标 | 已执行 | Git cwd 创建真实 worktree；repoUrl-only 复用 managed checkout 并按 issue 隔离 worktree；non-Git/无代码来源明确拒绝 |
-| 第六阶段：Operator Branch 后续计划 | 未开始 | 等 Shared/Isolated 稳定后再讨论 |
+| 第六阶段：父子任务交付闭环 | 未开始 | 需要 child outputs 聚合、父任务 primary deliverable、UI 默认展示最终报告 |
+| 第七阶段：Operator Branch 后续计划 | 未开始 | 等 Shared/Isolated 稳定后再实现固定 operator worktree、串行控制和 PR/merge/cleanup |
 
 ## 2. 第一阶段：清理 Shared 错误模型
 
@@ -65,7 +67,7 @@
 - `workspaceKind`：`project_execution`、`organization_scratch` 或 `agent_scratch`。
 - `codeSourceKind`：`local_cwd`、`managed_checkout`、`repo_url_pending_checkout` 或 `none`。
 - `workspaceCwd`：实际执行 cwd。
-- `issueArtifactsDir`：issue 产物目录。
+- `issueArtifactsDir`：兼容的 issue 产物建议路径；不能当作 shared 的隔离边界。
 - `providerType`：`local_fs`、`git_worktree` 等。
 - `strategyType`：实际工作区策略。
 - `branchName`：执行目录当前/目标分支。
@@ -151,7 +153,7 @@ Octopus 会从仓库 URL 创建一次项目主工作区，后续执行策略会�
 - 不自动 `git checkout` / `git switch` / `git reset` / rebase。
 - 不按 issue 创建 execution workspace cwd。
 - 不创建 workspace 级长锁或基于 workspace lease 的排队。
-- 每个 issue 仍可有独立 `OCTOPUS_ISSUE_ARTIFACTS_DIR`。
+- `OCTOPUS_ISSUE_ARTIFACTS_DIR` 只作为兼容的 issue 产物建议路径；shared 下不代表物理隔离。
 
 ### 5.3 实施结果
 
@@ -160,7 +162,7 @@ Octopus 会从仓库 URL 创建一次项目主工作区，后续执行策略会�
 - 无项目或项目未配置 workspace：输出 mode=organization_scratch，不再输出 mode=shared_workspace。
 - 已配置 workspace 但 cwd/repoUrl 都为空：preflight 明确拒绝，要求先配置代码来源。
 - chat 无主任务时同样使用 organization scratch；agent heartbeat 使用独立的 agent_scratch。
-- Shared 场景不要求 workspace lease，任务产物继续写入 issue 独立产物目录。
+- Shared 场景不要求 workspace lease；任务输出可以写共享现场、organization artifacts 或兼容 issue 路径，work products 通过元数据追溯来源。
 
 ## 6. 第五阶段：Isolated Workspace 实现目标
 
@@ -209,12 +211,16 @@ operator_branch 暂时不在本轮清理中展开实现。讨论和开发必须�
 
 ## 8. 开发顺序检查清单
 
-1. 清理 shared 每任务目录、workspace 长锁、workspace lease 队列。
+1. 清理 shared 每任务执行目录、workspace 长锁、workspace lease 队列，以及把 issue artifacts 当作 shared 隔离边界的文案。
 2. 修正无 project / 无代码来源 fallback 的 API 语义和 warning。
 3. 增加或收敛 preflight/API 事实字段。
 4. 调整 UI 信息架构和误导文案。
 5. 修正 shared runtime cwd 解析。（已完成）
 6. 修正 isolated Git worktree 创建、复用和校验。（已完成）
 7. 把 execution policy 从 projects 迁到 project_workspaces，并删除项目级字段和兼容逻辑。
-8. 补测试覆盖多工作区不同模式、默认工作区选择、shared / isolated / no project / repoUrl-only / non-Git cwd。
-9. 在 Shared 和 Isolated 稳定后，再讨论 operator_branch。
+8. 调整 runtime guidance：shared 下不再默认引导 agent 把 durable output 放进 issue 私有目录。
+9. 调整 shared work product 捕获：支持共享 cwd / org artifacts 中本 run 新增修改文件，并记录 issue/run/workspace/path 元数据。
+10. UI 增加 shared 覆盖风险、changed files、work product 来源解释。
+11. 补父子任务最终交付闭环：child outputs 聚合、parent primary deliverable、默认一眼看报告。
+12. 补测试覆盖多工作区不同模式、默认工作区选择、shared / isolated / no project / repoUrl-only / non-Git cwd、shared 共享路径产物。
+13. 在 Shared 和 Isolated 稳定后，再实现 operator_branch。

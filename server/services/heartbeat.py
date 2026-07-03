@@ -2219,14 +2219,13 @@ class HeartbeatService:
             raw_origin_run_id if isinstance(raw_origin_run_id, str) else final.id
         )
         if wake_reason == ISSUE_PASSIVE_FOLLOWUP_REASON:
-            if attempts < ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
-                return final
-            await self._record_issue_closure_convergence_needed(
-                final,
-                issue,
-                origin_run_id=origin_run_id,
-                attempts=attempts,
-            )
+            if attempts >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+                await self._record_issue_closure_convergence_needed(
+                    final,
+                    issue,
+                    origin_run_id=origin_run_id,
+                    attempts=attempts,
+                )
             return await self._mark_closeout_governance_failed(
                 final,
                 (
@@ -2235,14 +2234,13 @@ class HeartbeatService:
                     "or `control-plane issue comment`."
                 ),
             )
-        if attempts < ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
-            return final
-        await self._record_issue_closure_convergence_needed(
-            final,
-            issue,
-            origin_run_id=origin_run_id,
-            attempts=attempts,
-        )
+        if attempts >= ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS:
+            await self._record_issue_closure_convergence_needed(
+                final,
+                issue,
+                origin_run_id=origin_run_id,
+                attempts=attempts,
+            )
         return await self._mark_closeout_governance_failed(
             final,
             (
