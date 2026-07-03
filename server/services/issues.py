@@ -769,7 +769,7 @@ class IssueService:
         detail = _to_detail(row)
         detail["workProducts"] = await WorkspaceService(
             self._session
-        ).list_work_products_for_issue(row.id)
+        ).list_work_products_for_issue(row.id, include_child_primary=True)
         detail["documentSummaries"] = await DocumentService(
             self._session
         ).list_issue_documents(row.id)

@@ -486,6 +486,73 @@ async def test_issue_work_products_have_independent_crud_routes(
     assert listed_after_delete.json() == []
 
 
+async def test_parent_issue_lists_child_primary_work_products(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = str(uuid.uuid4())
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid4())
+    async with factory() as session:
+        session.add(
+            Organization(
+                id=org_id,
+                url_key=f"parent-products-{org_id[:8]}",
+                name="Parent Products",
+                issue_prefix="PP",
+            )
+        )
+        session.add_all(
+            [
+                Issue(
+                    id=parent_id,
+                    org_id=org_id,
+                    title="四大美女报告",
+                    status="in_progress",
+                    priority="medium",
+                ),
+                Issue(
+                    id=child_id,
+                    org_id=org_id,
+                    parent_id=parent_id,
+                    title="西施介绍",
+                    status="done",
+                    priority="medium",
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        created = await client.post(
+            f"/api/issues/{child_id}/work-products",
+            json={
+                "type": "document",
+                "provider": "octopus",
+                "title": "西施.md",
+                "summary": "西施介绍",
+                "isPrimary": True,
+            },
+        )
+        listed = await client.get(f"/api/issues/{parent_id}/work-products")
+        detail = await client.get(f"/api/issues/{parent_id}")
+
+    assert created.status_code == 201
+    assert listed.status_code == 200
+    products = listed.json()
+    assert [product["id"] for product in products] == [created.json()["id"]]
+    assert products[0]["issueId"] == child_id
+    assert products[0]["isPrimary"] is True
+    metadata = products[0]["metadata"]
+    assert metadata["parentAggregated"] is True
+    assert metadata["sourceIssueId"] == child_id
+    assert metadata["sourceIssueTitle"] == "西施介绍"
+    assert detail.status_code == 200
+    assert detail.json()["workProducts"][0]["id"] == created.json()["id"]
+
+
 async def test_issue_documents_are_injected_into_heartbeat_context() -> None:
     engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
