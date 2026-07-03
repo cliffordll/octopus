@@ -179,6 +179,10 @@ def test_cleanup_timeout_does_not_require_connection_invalidation() -> None:
         database_dependency._cleanup_error_requires_invalidate(TimeoutError()) is False
     )
     assert (
+        database_dependency._cleanup_error_requires_invalidate(asyncio.CancelledError())
+        is False
+    )
+    assert (
         database_dependency._cleanup_error_requires_invalidate(
             RuntimeError("connection is broken")
         )
