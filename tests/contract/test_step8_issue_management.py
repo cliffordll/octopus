@@ -1910,9 +1910,12 @@ async def test_parent_done_rejects_open_children(
     parent_id = await _seed_issue(session, org_id, status="todo")
     child_a_id = await _seed_issue(session, org_id, title="Child A", status="todo")
     child_b_id = await _seed_issue(session, org_id, title="Child B", status="blocked")
+    child_cancelled_id = await _seed_issue(
+        session, org_id, title="Child Cancelled", status="cancelled"
+    )
     done_child_id = await _seed_issue(session, org_id, title="Child C", status="done")
     async with async_transaction(session):
-        for issue_id in (child_a_id, child_b_id, done_child_id):
+        for issue_id in (child_a_id, child_b_id, child_cancelled_id, done_child_id):
             row = await session.get(Issue, issue_id)
             assert row is not None
             row.parent_id = parent_id
@@ -1925,7 +1928,7 @@ async def test_parent_done_rejects_open_children(
     )
 
     assert code == 422
-    assert "child issues are still open" in body["detail"]
+    assert "child issues" in body["detail"]
     child_code, children = await _request(
         app, "GET", f"/api/orgs/{org_id}/issues?parentId={parent_id}"
     )
@@ -1933,8 +1936,46 @@ async def test_parent_done_rejects_open_children(
     assert {child["id"]: child["status"] for child in children} == {
         child_a_id: "todo",
         child_b_id: "blocked",
+        child_cancelled_id: "cancelled",
         done_child_id: "done",
     }
+
+
+async def test_parent_done_allows_accepted_cancelled_child(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, status="todo")
+    child_id = await _seed_issue(
+        session, org_id, title="Cancelled child", status="cancelled"
+    )
+    async with async_transaction(session):
+        child = await session.get(Issue, child_id)
+        assert child is not None
+        child.parent_id = parent_id
+
+    accept_code, accept_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/accept-incomplete",
+        json={
+            "childIssueId": child_id,
+            "reason": "用户确认取消该子任务，不影响父任务交付",
+        },
+    )
+    assert accept_code == 200
+    assert accept_body["status"] == "in_progress"
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{parent_id}",
+        json={"status": "done"},
+    )
+
+    assert code == 200
+    assert body["status"] == "done"
 
 
 async def test_issue_detail_returns_association_fields_and_nulls(

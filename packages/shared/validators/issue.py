@@ -122,6 +122,8 @@ def _check_work_product_declarations(payload: Mapping[str, Any]) -> None:
             )
         if "isPrimary" in item and not isinstance(item["isPrimary"], bool):
             raise ValueError("'workProductDeclarations[].isPrimary' must be a boolean")
+
+
 def validate_list_org_issues_query(
     query: Mapping[str, Any],
 ) -> ListOrgIssuesQuery:

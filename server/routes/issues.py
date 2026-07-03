@@ -356,11 +356,17 @@ async def retry_child_issue_route(
     actor = require_actor_identity(request)
     detail = await service.get_by_id(id)
     if detail is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
     assert_organization_access(request, detail["orgId"])
     runs = await heartbeat.list_for_issue(id)
     failed = next(
-        (run for run in runs or [] if run.get("status") in {"failed", "timed_out", "cancelled"}),
+        (
+            run
+            for run in runs or []
+            if run.get("status") in {"failed", "timed_out", "cancelled"}
+        ),
         None,
     )
     if failed is None:
@@ -383,7 +389,9 @@ async def retry_child_issue_route(
         recovery_trigger="manual",
     )
     if retried is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found"
+        )
     return retried
 
 
@@ -397,11 +405,16 @@ async def replace_child_issue_route(
     actor = require_actor_identity(request)
     old_child = await service.get_by_id(id)
     if old_child is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
     assert_organization_access(request, old_child["orgId"])
     parent_id = old_child.get("parentId")
     if not parent_id:
-        raise HTTPException(status_code=http_status.HTTP_409_CONFLICT, detail="Issue is not a child issue")
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Issue is not a child issue",
+        )
     title = body.get("title") or f"Replacement for {old_child['title']}"
     description = body.get("description") or old_child.get("description")
     payload = validate_create_issue(
@@ -412,7 +425,8 @@ async def replace_child_issue_route(
             "parentId": parent_id,
             "projectId": old_child.get("projectId"),
             "goalId": old_child.get("goalId"),
-            "assigneeAgentId": body.get("assigneeAgentId") or old_child.get("assigneeAgentId"),
+            "assigneeAgentId": body.get("assigneeAgentId")
+            or old_child.get("assigneeAgentId"),
         }
     )
     replacement = await service.create_issue(
@@ -443,21 +457,62 @@ async def accept_incomplete_issue_route(
     actor = require_actor_identity(request)
     detail = await service.get_by_id(id)
     if detail is None:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
     assert_organization_access(request, detail["orgId"])
     reason = body.get("reason")
     if not isinstance(reason, str) or not reason.strip():
-        raise HTTPException(status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT, detail="reason is required")
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="reason is required",
+        )
+    child_ids: list[str] = []
+    raw_child_ids = body.get("childIssueIds")
+    raw_child_id = body.get("childIssueId")
+    if isinstance(raw_child_id, str) and raw_child_id.strip():
+        child_ids.append(raw_child_id.strip())
+    if isinstance(raw_child_ids, list):
+        child_ids.extend(
+            child_id.strip()
+            for child_id in raw_child_ids
+            if isinstance(child_id, str) and child_id.strip()
+        )
+    child_ids = list(dict.fromkeys(child_ids))
+    for child_id in child_ids:
+        child = await service.get_by_id(child_id)
+        if child is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Child issue {child_id} not found",
+            )
+        if (
+            child.get("orgId") != detail["orgId"]
+            or child.get("parentId") != detail["id"]
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"Issue {child_id} is not a child of {detail['id']}",
+            )
+        if child.get("status") not in {"blocked", "cancelled"}:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"Child issue {child_id} is not blocked or cancelled",
+            )
     await service.record_incomplete_accepted(
         detail,
         reason=reason.strip(),
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
+        child_issue_ids=child_ids,
         run_id=actor.run_id,
     )
     updated = await service.update_issue(
         id,
-        {"status": "in_progress", "comment": f"Accepted incomplete delivery: {reason.strip()}"},
+        {
+            "status": "in_progress",
+            "comment": f"Accepted incomplete delivery: {reason.strip()}",
+        },
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         run_id=actor.run_id,

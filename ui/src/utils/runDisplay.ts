@@ -16,6 +16,28 @@ function fallbackReasonLabel(value: unknown): string | null {
   return normalized ? sourceLabel(normalized) : null;
 }
 
+const RUN_PHASE_LABELS: Record<string, string> = {
+  issue_assigned: "任务分配后执行",
+  issue_checked_out: "签出后执行",
+  issue_children_settled: "子任务完成后汇总",
+  issue_comment_added: "评论后继续处理",
+  issue_comment_mentioned: "被提及后处理",
+  issue_execute: "手动执行",
+  issue_passive_followup: "自动收口跟进",
+  issue_review_requested: "评审执行",
+  issue_status_changed: "任务状态变更后执行",
+  issue_changes_requested: "修改请求后执行",
+};
+
+export function runPhaseLabel(run: Pick<HeartbeatRun, "contextSnapshot" | "triggerDetail" | "retryOfRunId" | "processLossRetryCount"> | null | undefined): string | null {
+  if (!run) return null;
+  if (normalize(run.retryOfRunId)) return "恢复重试";
+  if ((run.processLossRetryCount ?? 0) > 0) return "进程丢失恢复";
+  const reason = runWakeReason(run);
+  if (!reason) return null;
+  return RUN_PHASE_LABELS[reason] ?? fallbackReasonLabel(reason) ?? reason;
+}
+
 export function runContextSnapshot(run: Pick<HeartbeatRun, "contextSnapshot"> | null | undefined): Record<string, unknown> | null {
   const snapshot = run?.contextSnapshot;
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
@@ -68,6 +90,7 @@ export function hasIssueContext(run: Pick<HeartbeatRun, "issueId" | "contextSnap
 }
 
 export function runPurposeLabel(run: Pick<HeartbeatRun, "runPurpose" | "invocationSource" | "contextSnapshot" | "triggerDetail" | "issueId"> | null | undefined): string {
+  if (runWakeReason(run) === "issue_children_settled") return "父任务收尾";
   const purpose = runPurpose(run);
   const issueScoped = hasIssueContext(run);
   if (purpose === "closeout_followup") return "自动收口";

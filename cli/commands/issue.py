@@ -99,24 +99,38 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     heartbeat_context_parser.add_argument("issue_id")
     heartbeat_context_parser.set_defaults(handler=get_issue_heartbeat_context)
 
-    children_parser = actions.add_parser("children", help="List child issues and outputs")
+    children_parser = actions.add_parser(
+        "children", help="List child issues and outputs"
+    )
     children_parser.add_argument("issue_id")
     children_parser.add_argument("--include-work-products", action="store_true")
     children_parser.set_defaults(handler=list_issue_children)
 
-    retry_child_parser = actions.add_parser("retry-child", help="Retry a blocked child issue")
+    retry_child_parser = actions.add_parser(
+        "retry-child", help="Retry a blocked child issue"
+    )
     retry_child_parser.add_argument("issue_id")
     retry_child_parser.set_defaults(handler=retry_child_issue)
 
-    replace_child_parser = actions.add_parser("replace-child", help="Create a replacement child issue")
+    replace_child_parser = actions.add_parser(
+        "replace-child", help="Create a replacement child issue"
+    )
     replace_child_parser.add_argument("issue_id")
     replace_child_parser.add_argument("--title")
     replace_child_parser.add_argument("--description")
     replace_child_parser.add_argument("--assignee-agent-id")
     replace_child_parser.set_defaults(handler=replace_child_issue)
 
-    accept_incomplete_parser = actions.add_parser("accept-incomplete", help="Allow incomplete parent delivery")
+    accept_incomplete_parser = actions.add_parser(
+        "accept-incomplete", help="Allow incomplete parent delivery"
+    )
     accept_incomplete_parser.add_argument("issue_id")
+    accept_incomplete_parser.add_argument(
+        "--child", action="append", dest="child_issue_ids"
+    )
+    accept_incomplete_parser.add_argument(
+        "--child-issue-id", action="append", dest="child_issue_ids"
+    )
     accept_incomplete_parser.add_argument("--reason", required=True)
     accept_incomplete_parser.set_defaults(handler=accept_incomplete_issue)
 
@@ -277,15 +291,21 @@ def replace_child_issue(args: argparse.Namespace, client: ApiClient) -> Any:
         }.items()
         if value is not None
     }
-    return client.request("POST", f"/api/issues/{args.issue_id}/replace-child", json=payload)
+    return client.request(
+        "POST", f"/api/issues/{args.issue_id}/replace-child", json=payload
+    )
 
 
 def accept_incomplete_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload: dict[str, Any] = {"reason": args.reason}
+    if args.child_issue_ids:
+        payload["childIssueIds"] = args.child_issue_ids
     return client.request(
         "POST",
         f"/api/issues/{args.issue_id}/accept-incomplete",
-        json={"reason": args.reason},
+        json=payload,
     )
+
 
 def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {
@@ -344,9 +364,8 @@ def list_comments(args: argparse.Namespace, client: ApiClient) -> Any:
 
 def add_comment(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = _add_work_product_declarations({"body": args.body}, args)
-    return client.request(
-        "POST", f"/api/issues/{args.issue_id}/comments", json=payload
-    )
+    return client.request("POST", f"/api/issues/{args.issue_id}/comments", json=payload)
+
 
 def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, str] = {"decision": args.decision}
@@ -368,6 +387,7 @@ def done_issue(args: argparse.Namespace, client: ApiClient) -> Any:
         json=payload,
     )
 
+
 def block_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = _add_work_product_declarations(
         {"status": "blocked", "comment": args.comment}, args
@@ -377,6 +397,7 @@ def block_issue(args: argparse.Namespace, client: ApiClient) -> Any:
         f"/api/issues/{args.issue_id}",
         json=payload,
     )
+
 
 def list_attachments(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/issues/{args.issue_id}/attachments")

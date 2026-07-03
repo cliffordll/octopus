@@ -70,6 +70,11 @@ from packages.shared.types.heartbeat import (
     WakeAgentPayload,
 )
 
+from packages.database.clients.cleanup import (
+    REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+    run_shielded_cleanup as _run_shielded_cleanup,
+)
+
 from .agents import AgentConflictError, prepare_agent_runtime_config
 from .costs import CostService
 from .logs import (
@@ -1027,6 +1032,9 @@ class HeartbeatService:
         return recovered
 
     async def _cancel_orphaned_run_if_issue_closed(self, run: HeartbeatRunRow) -> bool:
+        await self._session.refresh(run)
+        if run.status != "running":
+            return True
         if run.invocation_source != "assignment":
             return False
         issue_id = _issue_id_from_context(run.context_snapshot)
@@ -2168,16 +2176,20 @@ class HeartbeatService:
         if issue is None or issue.org_id != final.org_id:
             return final
         if issue.assignee_agent_id == agent.id and issue.status == "done":
-            has_unresolved_blocked_child = await self._record_parent_blocked_child_unresolved_if_needed(
-                final, issue
+            has_unresolved_blocked_child = (
+                await self._record_parent_blocked_child_unresolved_if_needed(
+                    final, issue
+                )
             )
             if has_unresolved_blocked_child:
                 return await self._mark_closeout_governance_failed(
                     final,
                     "Parent issue was marked done while child issues are blocked or cancelled.",
                 )
-            missing_expected = await self._record_done_missing_expected_work_product_if_needed(
-                final, issue
+            missing_expected = (
+                await self._record_done_missing_expected_work_product_if_needed(
+                    final, issue
+                )
             )
             if missing_expected:
                 return await self._mark_closeout_governance_failed(
@@ -2241,8 +2253,9 @@ class HeartbeatService:
             )
             assert waiting is not None
             return waiting
-        if wake_reason == "issue_children_settled" and await self._block_parent_for_unresolved_blocked_children(
-            final, issue
+        if (
+            wake_reason == "issue_children_settled"
+            and await self._block_parent_for_unresolved_blocked_children(final, issue)
         ):
             return final
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
@@ -2534,8 +2547,10 @@ class HeartbeatService:
             or issue.status != "done"
         ):
             return
-        missing_expected = await self._record_done_missing_expected_work_product_if_needed(
-            final, issue
+        missing_expected = (
+            await self._record_done_missing_expected_work_product_if_needed(
+                final, issue
+            )
         )
         if not missing_expected:
             return
@@ -2564,7 +2579,9 @@ class HeartbeatService:
             )
         )
         for product in result.scalars().all():
-            metadata = product.metadata_json if isinstance(product.metadata_json, dict) else {}
+            metadata = (
+                product.metadata_json if isinstance(product.metadata_json, dict) else {}
+            )
             workspace_path = metadata.get("workspacePath")
             candidates = {product.title}
             if isinstance(workspace_path, str):
@@ -2590,13 +2607,52 @@ class HeartbeatService:
         )
         return True
 
+    async def _accepted_incomplete_child_ids(self, issue: IssueRow) -> set[str]:
+        rows = (
+            (
+                await self._session.execute(
+                    select(ActivityLog.details).where(
+                        and_(
+                            ActivityLog.org_id == issue.org_id,
+                            ActivityLog.entity_type == "issue",
+                            ActivityLog.entity_id == issue.id,
+                            ActivityLog.action == "issue.incomplete_accepted",
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accepted: set[str] = set()
+        for details in rows:
+            if not isinstance(details, dict):
+                continue
+            child_issue_id = details.get("childIssueId")
+            if isinstance(child_issue_id, str) and child_issue_id:
+                accepted.add(child_issue_id)
+            child_issue_ids = details.get("childIssueIds")
+            if isinstance(child_issue_ids, list):
+                accepted.update(
+                    child_id
+                    for child_id in child_issue_ids
+                    if isinstance(child_id, str) and child_id
+                )
+        return accepted
+
+    async def _unaccepted_blocked_children(self, issue: IssueRow) -> list[IssueRow]:
+        accepted_child_ids = await self._accepted_incomplete_child_ids(issue)
+        return [
+            child
+            for child in await self._direct_children(issue)
+            if child.status in {"blocked", "cancelled"}
+            and child.id not in accepted_child_ids
+        ]
+
     async def _block_parent_for_unresolved_blocked_children(
         self, final: HeartbeatRunRow, issue: IssueRow
     ) -> bool:
-        children = await self._direct_children(issue)
-        blocked_children = [
-            child for child in children if child.status in {"blocked", "cancelled"}
-        ]
+        blocked_children = await self._unaccepted_blocked_children(issue)
         if not blocked_children:
             return False
         from_status = issue.status
@@ -2657,7 +2713,12 @@ class HeartbeatService:
                     }
                     for child in blocked_children
                 ],
-                "nextActions": ["retry_child", "reassign_child", "create_replacement_child", "accept_incomplete"],
+                "nextActions": [
+                    "retry_child",
+                    "reassign_child",
+                    "create_replacement_child",
+                    "accept_incomplete",
+                ],
             },
         )
         return True
@@ -2665,12 +2726,48 @@ class HeartbeatService:
     async def _record_parent_blocked_child_unresolved_if_needed(
         self, final: HeartbeatRunRow, issue: IssueRow
     ) -> bool:
-        children = await self._direct_children(issue)
-        blocked_children = [
-            child for child in children if child.status in {"blocked", "cancelled"}
-        ]
+        blocked_children = await self._unaccepted_blocked_children(issue)
         if not blocked_children:
             return False
+        if issue.status == "done":
+            await update_issue(
+                self._session,
+                issue.id,
+                {
+                    "status": "blocked",
+                    "completed_at": None,
+                    "cancelled_at": None,
+                },
+            )
+            await insert_activity_log(
+                self._session,
+                org_id=issue.org_id,
+                actor_type="system",
+                actor_id="parent_child_governance",
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                agent_id=final.agent_id,
+                run_id=final.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": "done",
+                    "reason": "parent_done_with_blocked_children",
+                    "runId": final.id,
+                    "childIssues": [
+                        {
+                            "id": child.id,
+                            "identifier": child.identifier,
+                            "title": child.title,
+                            "status": child.status,
+                        }
+                        for child in blocked_children
+                    ],
+                },
+            )
+            issue.status = "blocked"
+            issue.completed_at = None
+            issue.cancelled_at = None
         if await self._run_has_issue_activity(
             final, issue.id, ("issue.parent_blocked_child_unresolved",)
         ):
@@ -3647,12 +3744,20 @@ def _activity_details_text(details: dict[str, Any]) -> str:
 
 async def _shielded_session_close(session: AsyncSession) -> None:
     with contextlib.suppress(BaseException):
-        await asyncio.shield(session.close())
+        await _run_shielded_cleanup(
+            "close heartbeat dispatch database session",
+            session.close,
+            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+        )
 
 
 async def _shielded_session_rollback(session: AsyncSession) -> None:
     with contextlib.suppress(BaseException):
-        await asyncio.shield(session.rollback())
+        await _run_shielded_cleanup(
+            "roll back heartbeat dispatch database session",
+            session.rollback,
+            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+        )
 
 
 def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:

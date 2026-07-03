@@ -24,7 +24,10 @@ def test_shared_project_workspace_prompt_prefers_workspace_cwd_for_reports() -> 
     assert "Prefer the workspace worktree with a clear shared path" in prompt
     assert "reports/" in prompt
     assert "$OCTOPUS_WORKSPACE_CWD" in prompt
-    assert "do not use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` as the default deliverable target" in prompt
+    assert (
+        "do not use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` as the default deliverable target"
+        in prompt
+    )
     assert "Issue compatibility artifacts path" in prompt
 
 
@@ -91,8 +94,7 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert "## Subtask Coordination" in prompt
     assert "Product-visible subtasks must be Octopus child issues" in prompt
     assert (
-        'octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "OCT-42"'
-        in prompt
+        'octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "OCT-42"' in prompt
     )
     assert "--status todo" in prompt
     assert "--assignee-agent-id" in prompt
@@ -165,7 +167,9 @@ def test_runtime_prompt_reconciles_existing_children_on_rerun() -> None:
     assert "--child-key" not in prompt
 
 
-def test_runtime_prompt_converges_child_primary_products_after_children_settle() -> None:
+def test_runtime_prompt_converges_child_primary_products_after_children_settle() -> (
+    None
+):
     prompt = runtime_prompt_from_config(
         {
             "promptTemplate": "# Base\n\nYou are an agent.",
@@ -212,7 +216,9 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
     assert "太湖介绍" in prompt
     assert "Do not mark the parent issue done" in prompt
     assert "$OCTOPUS_WORKSPACE_CWD" in prompt
-    assert "Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback" in prompt
+    assert (
+        "Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback" in prompt
+    )
     assert "not as the default target for shared project work" in prompt
     assert 'octopus issue done "OCT-88"' in prompt
 

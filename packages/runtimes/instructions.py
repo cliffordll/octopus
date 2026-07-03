@@ -301,7 +301,11 @@ def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
     for child in children[:12]:
         if not isinstance(child, dict):
             continue
-        label = _string(child.get("identifier")) or _string(child.get("id")) or "child issue"
+        label = (
+            _string(child.get("identifier"))
+            or _string(child.get("id"))
+            or "child issue"
+        )
         title = _string(child.get("title")) or "Untitled child issue"
         status = _string(child.get("status")) or "unknown"
         products = child.get("workProducts")
@@ -310,7 +314,9 @@ def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
     return "\n".join(guidance)
 
 
-def _child_deliverable_convergence_prompt(issue_ref: str, context: dict[str, Any]) -> str:
+def _child_deliverable_convergence_prompt(
+    issue_ref: str, context: dict[str, Any]
+) -> str:
     if _string(context.get("wakeReason")) != "issue_children_settled":
         return ""
     prompt = _string(context.get("childWorkProductsPrompt"))
@@ -337,7 +343,11 @@ def _child_deliverable_convergence_prompt(issue_ref: str, context: dict[str, Any
         for child in blocked_children:
             if not isinstance(child, dict):
                 continue
-            label = _string(child.get("identifier")) or _string(child.get("title")) or "child issue"
+            label = (
+                _string(child.get("identifier"))
+                or _string(child.get("title"))
+                or "child issue"
+            )
             title = _string(child.get("title")) or "Untitled child issue"
             status = _string(child.get("status")) or "blocked"
             guidance.append(f"- {label}: {title} ({status})")
