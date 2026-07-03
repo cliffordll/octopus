@@ -1014,6 +1014,7 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
           {workProducts.map((product) => {
             const workspaceBrowserPath = metadataString(product.metadata, "workspaceBrowserPath");
             const displayName = workProductDisplayName(product);
+            const isParentAggregated = product.metadata?.parentAggregated === true;
             return (
             <article className="issue-work-product-card" key={product.id}>
               <div className="issue-work-product-title-row">
@@ -1028,6 +1029,7 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
                 <StatusPill status={product.status}>{statusLabel(product.status)}</StatusPill>
                 <StatusPill status={product.reviewState}>{statusLabel(product.reviewState)}</StatusPill>
                 {product.isPrimary && <Badge>primary</Badge>}
+                {isParentAggregated && <Badge>来自子任务</Badge>}
               </div>
               <dl className="issue-work-product-details">
                 <div><dt>大小</dt><dd>{workProductSize(product)}</dd></div>
@@ -1069,14 +1071,16 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
                   </Link>
                 )}
                 {product.url && <a className="button secondary small-button" href={product.url}>打开运行产物</a>}
-                <button
-                  className="danger small-button"
-                  disabled={deleteWorkProduct.isPending}
-                  onClick={() => deleteWorkProduct.mutate(product.id)}
-                  type="button"
-                >
-                  删除产物
-                </button>
+                {!isParentAggregated && (
+                  <button
+                    className="danger small-button"
+                    disabled={deleteWorkProduct.isPending}
+                    onClick={() => deleteWorkProduct.mutate(product.id)}
+                    type="button"
+                  >
+                    删除产物
+                  </button>
+                )}
               </div>
             </article>
           );

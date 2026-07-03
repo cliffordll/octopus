@@ -239,6 +239,37 @@ it("shows an issue and records comments and review decisions", async () => {
         createdAt: "2026-05-28T09:00:00Z",
         updatedAt: "2026-05-28T10:00:00Z",
       },
+      {
+        id: "wp-child",
+        orgId: "org-1",
+        projectId: "project-1",
+        issueId: "issue-child",
+        executionWorkspaceId: null,
+        runtimeServiceId: null,
+        type: "document",
+        provider: "octopus",
+        externalId: null,
+        assetId: null,
+        contentPath: null,
+        contentType: "text/markdown",
+        byteSize: 64,
+        sha256: "child",
+        title: "西施介绍.md",
+        url: null,
+        status: "open",
+        reviewState: "pending",
+        isPrimary: true,
+        healthStatus: "healthy",
+        summary: "子任务主交付物",
+        metadata: {
+          parentAggregated: true,
+          sourceIssueId: "issue-child",
+          sourceIssueTitle: "西施介绍",
+        },
+        createdByRunId: "run-child",
+        createdAt: "2026-05-28T09:00:00Z",
+        updatedAt: "2026-05-28T10:05:00Z",
+      },
     ],
     createdAt: "",
     updatedAt: "",
@@ -460,9 +491,11 @@ it("shows an issue and records comments and review decisions", async () => {
   await ensureRunExpanded(runRecordsRegion, "run-1");
   const workProductsRegion = screen.getByRole("region", { name: "运行产物" });
   expect(workProductsRegion).toHaveTextContent("任务产物已折叠");
-  await userEvent.click(within(workProductsRegion).getByRole("button", { name: "展开任务产物 2" }));
+  await userEvent.click(within(workProductsRegion).getByRole("button", { name: "展开任务产物 3" }));
   expect(workProductsRegion).toHaveTextContent("登录流程 PR");
   expect(workProductsRegion).toHaveTextContent("运行摘要");
+  expect(workProductsRegion).toHaveTextContent("西施介绍.md");
+  expect(workProductsRegion).toHaveTextContent("来自子任务");
   expect(workProductsRegion).toHaveTextContent("pull_request");
   expect(workProductsRegion).toHaveTextContent("运行产物");
   expect(workProductsRegion).toHaveTextContent("共享工作区");
@@ -476,6 +509,7 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(screen.getByRole("link", { name: "预览内容" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "打开运行产物" })).toHaveAttribute("href", "https://example.com/pr/42");
   expect(workProductsRegion).toHaveTextContent("不可下载");
+  expect(screen.getAllByRole("button", { name: "删除产物" })).toHaveLength(2);
   expect(screen.queryByDisplayValue("## 执行步骤")).not.toBeInTheDocument();
   expect(await screen.findByRole("region", { name: "任务文档" })).not.toHaveTextContent("执行计划");
   await userEvent.click(within(screen.getByRole("region", { name: "任务文档" })).getByRole("button", { name: "展开任务文档" }));

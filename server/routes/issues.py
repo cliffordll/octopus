@@ -929,7 +929,9 @@ async def list_issue_work_products_route(
             detail="Issue not found",
         )
     assert_organization_access(request, detail["orgId"])
-    return await workspace_service.list_work_products_for_issue(id)
+    return await workspace_service.list_work_products_for_issue(
+        id, include_child_primary=True
+    )
 
 
 @router.post(ISSUE_WORK_PRODUCTS_PATH, status_code=http_status.HTTP_201_CREATED)

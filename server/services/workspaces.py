@@ -10,7 +10,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, cast
 
-from sqlalchemy import update
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.projects import get_project_by_id
@@ -1784,10 +1784,41 @@ class WorkspaceService:
         return [self._to_runtime_service(row) for row in rows]
 
     async def list_work_products_for_issue(
-        self, issue_id: str
+        self, issue_id: str, *, include_child_primary: bool = False
     ) -> list[IssueWorkProductData]:
         rows = await list_issue_work_products(self._session, issue_id)
-        return [self._to_work_product(row) for row in rows]
+        products = [self._to_work_product(row) for row in rows]
+        if include_child_primary:
+            products.extend(await self._list_child_primary_work_products(issue_id))
+        return products
+
+    async def _list_child_primary_work_products(
+        self, issue_id: str
+    ) -> list[IssueWorkProductData]:
+        result = await self._session.execute(
+            select(IssueWorkProduct, Issue)
+            .join(Issue, Issue.id == IssueWorkProduct.issue_id)
+            .where(
+                Issue.parent_id == issue_id,
+                IssueWorkProduct.is_primary.is_(True),
+            )
+            .order_by(desc(IssueWorkProduct.updated_at))
+        )
+        products: list[IssueWorkProductData] = []
+        for product_row, child_issue in result.all():
+            product = self._to_work_product(product_row)
+            metadata = dict(product.get("metadata") or {})
+            metadata.update(
+                {
+                    "parentAggregated": True,
+                    "sourceIssueId": child_issue.id,
+                    "sourceIssueIdentifier": child_issue.identifier,
+                    "sourceIssueTitle": child_issue.title,
+                }
+            )
+            product["metadata"] = metadata
+            products.append(product)
+        return products
 
     async def get_work_product(self, product_id: str) -> IssueWorkProductData | None:
         row = await get_issue_work_product(self._session, product_id)
