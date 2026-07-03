@@ -1817,7 +1817,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
     assert detail["status"] == "failed"
     assert detail["errorCode"] == "closeout_missing"
-    assert "control-plane issue done" in detail["error"]
+    assert "octopus issue done" in detail["error"]
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
     assert issue_after["status"] == "in_progress"
@@ -1908,7 +1908,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         assert followup_run.status == "failed"
         assert followup_run.error_code == "closeout_missing"
         assert followup_run.error is not None
-        assert "control-plane issue done" in followup_run.error
+        assert "octopus issue done" in followup_run.error
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -2296,7 +2296,7 @@ async def test_successful_issue_run_without_closeout_is_failed_for_passive_follo
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
     assert final.error is not None
-    assert "control-plane issue done" in final.error
+    assert "octopus issue done" in final.error
     assert activity is None
 
 
@@ -3116,7 +3116,7 @@ async def test_passive_followup_without_closeout_fails_immediately(
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
     assert final.error is not None
-    assert "control-plane issue done" in final.error
+    assert "octopus issue done" in final.error
     assert issue.status == "in_progress"
     assert activity is None
 
@@ -3362,7 +3362,7 @@ async def test_review_closeout_missing_success_without_decision_is_failed(
 
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
-    assert "control-plane issue review" in (final.error or "")
+    assert "octopus issue review" in (final.error or "")
     assert activity.run_id == closeout_run_id
     assert activity.details["originRunId"] == origin_run_id
 

@@ -29,8 +29,8 @@
 | 第三阶段：UI 调整 | 部分完成 | 项目页按 project workspace 展示代码来源与各自执行模式；还缺 shared 覆盖风险、changed files 和 work product 来源解释 |
 | 第四阶段：Shared Workspace 实现目标 | 部分完成 | 项目 cwd 直用、repoUrl-only checkout、organization scratch 已有；还缺 runtime guidance 和 shared 路径 work product 捕获语义 |
 | 第五阶段：Isolated Workspace 实现目标 | 已执行 | Git cwd 创建真实 worktree；repoUrl-only 复用 managed checkout 并按 issue 隔离 worktree；non-Git/无代码来源明确拒绝 |
-| 第六阶段：父子任务交付闭环 | 未开始 | 需要 child outputs 聚合、父任务 primary deliverable、UI 默认展示最终报告 |
-| 第七阶段：Operator Branch 后续计划 | 未开始 | 等 Shared/Isolated 稳定后再实现固定 operator worktree、串行控制和 PR/merge/cleanup |
+| 第六阶段：父子任务交付闭环 | 部分完成 | 已补 child outputs API/CLI、child primary work product 注入、父任务最终交付 prompt、closeout warning、run history 展示、UI 默认置顶最终报告和“四大美女”契约验收；仍需补父任务重新执行的 rerun reconcile、异常 child 恢复动作和重新拆分处置记录 |
+| 第七阶段：Operator Branch 后续计划 | 已执行主体 | 已实现固定 operator worktree 创建/复用和 Git 来源 preflight；PR、merge、push、cleanup 仍作为显式后续动作 |
 
 ## 2. 第一阶段：清理 Shared 错误模型
 
@@ -192,22 +192,23 @@ Octopus 会从仓库 URL 创建一次项目主工作区，后续执行策略会�
 - cwd/repoUrl 都为空：preflight 拒绝并要求先配置代码来源。
 - Isolated 场景输出 workspaceKind=project_execution、providerType=git_worktree、requiresLease=false。
 
-## 7. 第六阶段：Operator Branch 后续计划
+## 7. 第七阶段：Operator Branch 后续计划
 
-operator_branch 暂时不在本轮清理中展开实现。讨论和开发必须建立在 Shared 和 Isolated 语义已经收敛之后。
+operator_branch 的主体执行语义已经落地：基于项目 Git 来源创建或复用固定 operator worktree，多个 issue 可以进入同一个 operator branch cwd 累积改动；无 cwd/repoUrl 或非 Git 来源时 preflight 会拒绝。
 
-待讨论问题：
+已验收行为：
 
-- operator branch 是否自动创建固定 worktree。
-- operator branch 的分支命名、配置入口和复用范围。
-- 多个 issue 共享 operator cwd 时的串行控制 scope。
-- push、PR、merge、cleanup 是否作为显式动作。
-- operator branch 与 shared / isolated 的 UI 区分方式。
+- operator branch 自动创建固定 project execution worktree。
+- 同一 operator branch 在多个 issue 间复用同一个 execution workspace。
+- 无项目 workspace 不会伪装成 operator mode。
+- 缺少 cwd/repoUrl 或非 Git 来源时明确失败。
+- operator_branch 不复用 shared workspace 长锁语义。
 
-当前计划只保留两条原则：
+仍保留为后续显式动作：
 
-- operator_branch 必须基于项目 Git 来源或 repoUrl。
-- operator_branch 不能复用 shared workspace 长锁语义。
+- push、PR、merge、cleanup 的用户命令和 UI。
+- 多个 issue 共享 operator cwd 时更细的串行控制展示。
+- operator branch 与 shared / isolated 的更多 UI 对比说明。
 
 ## 8. 开发顺序检查清单
 
@@ -221,6 +222,8 @@ operator_branch 暂时不在本轮清理中展开实现。讨论和开发必须�
 8. 调整 runtime guidance：shared 下不再默认引导 agent 把 durable output 放进 issue 私有目录。
 9. 调整 shared work product 捕获：支持共享 cwd / org artifacts 中本 run 新增修改文件，并记录 issue/run/workspace/path 元数据。
 10. UI 增加 shared 覆盖风险、changed files、work product 来源解释。
-11. 补父子任务最终交付闭环：child outputs 聚合、parent primary deliverable、默认一眼看报告。
-12. 补测试覆盖多工作区不同模式、默认工作区选择、shared / isolated / no project / repoUrl-only / non-Git cwd、shared 共享路径产物。
-13. 在 Shared 和 Isolated 稳定后，再实现 operator_branch。
+11. 补父子任务最终交付闭环：child outputs 聚合、parent primary deliverable、默认一眼看报告。（已完成主体）
+12. 补父任务重新执行语义：重新执行时注入已有 children、产物、失败和 closeout 历史；agent 可复用、重试、接管、追加、替换或重新拆分，但必须显式处置已有 children，不能当空白任务重复创建。
+13. 补异常 child 恢复动作：按 child issue id 重试、接管补产物、创建 replacement、取消旧 child、用户接受不完整交付，并在 comment/activity 中记录处置关系。
+14. 补测试覆盖多工作区不同模式、默认工作区选择、shared / isolated / no project / repoUrl-only / non-Git cwd、shared 共享路径产物，以及 rerun reconcile 下复用/重试/替换/重拆的父子任务行为。（部分完成）
+15. 在 Shared 和 Isolated 稳定后，再实现 operator_branch。（已完成主体；PR/merge/push/cleanup 另列后续显式动作）

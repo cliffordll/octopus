@@ -46,11 +46,11 @@ def test_closeout_governance_instructions_are_hard_gated() -> None:
     for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
         assert "Close-out gate" in content
         assert "issue_passive_followup" in content
-        assert "control-plane issue done" in content
-        assert "control-plane issue block" in content
-        assert "control-plane issue comment" in content
+        assert "octopus issue done" in content
+        assert "octopus issue block" in content
+        assert "octopus issue comment" in content
         assert "issue_review_closeout_missing" in content
-        assert "control-plane issue review" in content
+        assert "octopus issue review" in content
         assert "Do not exit" in content
 
 
@@ -72,7 +72,7 @@ def test_control_plane_instructions_are_runtime_env_and_shell_safe() -> None:
     assert "Do not read or create workspace `.env` files" in control_plane_skill
     assert "do not hard-code the managed `.octopus/bin` shim path" in control_plane_skill
     assert "$env:OCTOPUS_AGENT_ID" in control_plane_skill
-    assert "control-plane agent me" in control_plane_skill
+    assert "octopus agent me" in control_plane_skill
     assert "defaults `--expected-status` to `todo` and `in_progress`" in cli_reference
 
 

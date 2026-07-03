@@ -1,4 +1,4 @@
-﻿# Close-Out Governance 整体设计
+# Close-Out Governance 整体设计
 
 ## 目标
 
@@ -51,7 +51,7 @@ D:\coding\upstream-reference\server\src\__tests__\issue-lifecycle-routes.test.ts
 本次采用的规则是：
 
 ```text
-control-plane issue comment / done / block
+octopus issue comment / done / block
   -> 只要是当前 run 内发出的明确动作，就立刻算作 close-out 完成
   -> 立即停止后续 passive follow-up
 

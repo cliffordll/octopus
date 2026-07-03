@@ -21,6 +21,39 @@ PRIORITIES = ("critical", "high", "medium", "low")
 DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
 
 
+def _add_work_product_declaration_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--work-product", action="append", dest="work_products")
+    parser.add_argument(
+        "--primary-work-product", action="append", dest="primary_work_products"
+    )
+
+
+def _work_product_declarations(args: argparse.Namespace) -> list[dict[str, Any]]:
+    declarations: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in args.work_products or []:
+        if path not in seen:
+            declarations.append({"path": path, "isPrimary": False})
+            seen.add(path)
+    for path in args.primary_work_products or []:
+        for item in declarations:
+            if item["path"] == path:
+                item["isPrimary"] = True
+                break
+        else:
+            declarations.append({"path": path, "isPrimary": True})
+    return declarations
+
+
+def _add_work_product_declarations(
+    payload: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
+    declarations = _work_product_declarations(args)
+    if declarations:
+        payload["workProductDeclarations"] = declarations
+    return payload
+
+
 def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subparsers.add_parser("issue", help="Manage issues")
     actions = parser.add_subparsers(dest="issue_action", required=True)
@@ -65,6 +98,27 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     heartbeat_context_parser.add_argument("issue_id")
     heartbeat_context_parser.set_defaults(handler=get_issue_heartbeat_context)
+
+    children_parser = actions.add_parser("children", help="List child issues and outputs")
+    children_parser.add_argument("issue_id")
+    children_parser.add_argument("--include-work-products", action="store_true")
+    children_parser.set_defaults(handler=list_issue_children)
+
+    retry_child_parser = actions.add_parser("retry-child", help="Retry a blocked child issue")
+    retry_child_parser.add_argument("issue_id")
+    retry_child_parser.set_defaults(handler=retry_child_issue)
+
+    replace_child_parser = actions.add_parser("replace-child", help="Create a replacement child issue")
+    replace_child_parser.add_argument("issue_id")
+    replace_child_parser.add_argument("--title")
+    replace_child_parser.add_argument("--description")
+    replace_child_parser.add_argument("--assignee-agent-id")
+    replace_child_parser.set_defaults(handler=replace_child_issue)
+
+    accept_incomplete_parser = actions.add_parser("accept-incomplete", help="Allow incomplete parent delivery")
+    accept_incomplete_parser.add_argument("issue_id")
+    accept_incomplete_parser.add_argument("--reason", required=True)
+    accept_incomplete_parser.set_defaults(handler=accept_incomplete_issue)
 
     create_parser = actions.add_parser("create", help="Create an issue")
     create_parser.add_argument("--org-id", required=True)
@@ -113,6 +167,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     comment_add.add_argument("issue_id")
     comment_add.add_argument("--org-id")
     comment_add.add_argument("--body", required=True)
+    _add_work_product_declaration_args(comment_add)
     comment_add.set_defaults(handler=add_comment)
 
     review_parser = actions.add_parser("review", help="Record an issue review decision")
@@ -125,11 +180,13 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     done_parser = actions.add_parser("done", help="Mark an issue done")
     done_parser.add_argument("issue_id")
     done_parser.add_argument("--comment", required=True)
+    _add_work_product_declaration_args(done_parser)
     done_parser.set_defaults(handler=done_issue)
 
     block_parser = actions.add_parser("block", help="Mark an issue blocked")
     block_parser.add_argument("issue_id")
     block_parser.add_argument("--comment", required=True)
+    _add_work_product_declaration_args(block_parser)
     block_parser.set_defaults(handler=block_issue)
 
     attachment_list = actions.add_parser("attachments", help="List issue attachments")
@@ -201,6 +258,35 @@ def get_issue_heartbeat_context(args: argparse.Namespace, client: ApiClient) -> 
     return client.request("GET", f"/api/issues/{args.issue_id}/heartbeat-context")
 
 
+def list_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
+    params = {"includeWorkProducts": "true"} if args.include_work_products else None
+    return client.request("GET", f"/api/issues/{args.issue_id}/children", params=params)
+
+
+def retry_child_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("POST", f"/api/issues/{args.issue_id}/retry-child", json={})
+
+
+def replace_child_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = {
+        key: value
+        for key, value in {
+            "title": args.title,
+            "description": args.description,
+            "assigneeAgentId": args.assignee_agent_id,
+        }.items()
+        if value is not None
+    }
+    return client.request("POST", f"/api/issues/{args.issue_id}/replace-child", json=payload)
+
+
+def accept_incomplete_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST",
+        f"/api/issues/{args.issue_id}/accept-incomplete",
+        json={"reason": args.reason},
+    )
+
 def create_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload = {
         key: value
@@ -257,10 +343,10 @@ def list_comments(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def add_comment(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _add_work_product_declarations({"body": args.body}, args)
     return client.request(
-        "POST", f"/api/issues/{args.issue_id}/comments", json={"body": args.body}
+        "POST", f"/api/issues/{args.issue_id}/comments", json=payload
     )
-
 
 def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     payload: dict[str, str] = {"decision": args.decision}
@@ -273,20 +359,24 @@ def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def done_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _add_work_product_declarations(
+        {"status": "done", "comment": args.comment}, args
+    )
     return client.request(
         "PATCH",
         f"/api/issues/{args.issue_id}",
-        json={"status": "done", "comment": args.comment},
+        json=payload,
     )
-
 
 def block_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    payload = _add_work_product_declarations(
+        {"status": "blocked", "comment": args.comment}, args
+    )
     return client.request(
         "PATCH",
         f"/api/issues/{args.issue_id}",
-        json={"status": "blocked", "comment": args.comment},
+        json=payload,
     )
-
 
 def list_attachments(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/issues/{args.issue_id}/attachments")

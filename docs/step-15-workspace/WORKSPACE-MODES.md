@@ -1,4 +1,4 @@
-﻿# 项目工作区与执行工作区模式语义
+# 项目工作区与执行工作区模式语义
 
 状态：草案
 日期：2026-07-01
@@ -484,13 +484,14 @@ operator_branch:
 
 ### 6.6 并发规则
 
-上游 upstream reference 当前只把 `operator_branch` 作为 policy mode 识别和持久化；已读到的代码里没有看到自动创建或切换 operator branch/worktree 的实现。
+Octopus 已实现 operator branch 的固定 worktree 创建和复用。它的执行目录是独立 project execution workspace，不是项目主 shared cwd。
 
-因此 Octopus 后续实现 operator branch 时，应单独定义它的串行控制和 lease scope，不能沿用 shared workspace 长锁：
+当前边界：
 
-- 如果 operator branch 复用一个固定 operator cwd，同一 operator cwd 的写入需要串行。
-- 这个串行只属于 operator execution workspace，不属于项目主 shared cwd。
-- operator branch 的自动创建、checkout、push、PR、cleanup 都必须单独设计和验收。
+- 同一 operator branch 复用一个固定 operator cwd。
+- 这个 cwd 的写入风险属于 operator execution workspace，不属于项目主 shared cwd。
+- operator branch 自动创建和 checkout 已纳入执行链路。
+- push、PR、merge、cleanup 仍必须作为后续显式用户动作单独验收。
 
 ### 6.7 分支规则
 
@@ -518,6 +519,8 @@ work products 用于记录：
 - 代码变更摘要、diff、测试证据
 
 这些记录不决定代码在哪里执行，也不参与 shared/isolated/operator 的模式判断。归属应由 `issue_id`、`created_by_run_id`、`execution_workspace_id`、路径和时间戳表达，而不是靠目录名推断。
+
+父子任务重新执行同样不属于工作区模式问题。平台应通过 `issues.parent_id` 查出现有 children 和产物，把它们作为重新执行上下文交给 manager agent；agent 可以复用、重试、接管、追加、替换、取消或重新拆分，但必须显式处置已有 children。shared workspace 不通过 child 私有目录或额外 `childKey` 身份层解决这个问题。
 
 因此 UI/API 应避免把 `issueArtifactsDir` 命名或展示成 workspace cwd，也不应暗示 shared 模式会自动按 issue 目录隔离。推荐命名：
 

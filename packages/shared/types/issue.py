@@ -112,6 +112,11 @@ class CreateIssuePayload(TypedDict):
     requestDepth: NotRequired[int]
 
 
+class WorkProductDeclarationPayload(TypedDict, total=False):
+    path: str
+    isPrimary: bool
+
+
 class UpdateIssuePayload(TypedDict, total=False):
     title: str
     description: str | None
@@ -129,6 +134,7 @@ class UpdateIssuePayload(TypedDict, total=False):
     hiddenAt: str | None
     reviewDecision: "RecordIssueReviewDecisionPayload"
     requestedStatus: str
+    workProductDeclarations: list[WorkProductDeclarationPayload]
 
 
 IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_followup"]
@@ -136,6 +142,7 @@ IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_fo
 
 class CreateIssueCommentPayload(TypedDict):
     body: str
+    workProductDeclarations: NotRequired[list[WorkProductDeclarationPayload]]
 
 
 class CheckoutIssuePayload(TypedDict):

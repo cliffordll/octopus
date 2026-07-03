@@ -40,13 +40,12 @@ Octopus 已经具备主干机制：
 
 当前还不能算一个足够稳的 manager workflow：
 
-- 父任务 resume 上下文太薄。`issue_children_settled` 唤醒时，没有直接给主任务一份子任务状态、closeout、work products 摘要。
-- 父任务需要自己执行多次低层查询：list children、逐个 get child、逐个看 work products。
-- 缺少一个面向 manager 的 child outputs 聚合命令。
-- 当 issue 有子任务，或 wake reason 是 `issue_children_settled` 时，父任务 prompt 应更明确要求检查子任务结果再汇总。
-- 平台已经阻止“有 open child 时 done”，但还不会提示“父任务 closeout 没有引用或使用子任务结果”。
+- 父任务 resume 上下文已补强。`issue_children_settled` 唤醒时会注入 child primary work products，并且可通过聚合 API/CLI 拉取 child 状态、closeout 摘要和 work products。
+- 父任务不再需要多次低层查询；manager agent 可以使用 `octopus issue children <parent-id> --include-work-products --json` 一次收集子任务输出。
+- 当 wake reason 是 `issue_children_settled` 时，父任务 prompt 已明确要求基于 child primary work products 生成父任务自己的最终交付。
+- 平台已经阻止“有 open child 时 done”，并在父任务 done 缺少子任务结果使用证据时记录 soft warning；UI / run history 已展示 children settled 和 convergence warning。
 - runtime 产物路径必须稳定可写。共享工作区下，报告和项目文件都可以写入共享现场或用户指定路径；issue work products 负责记录来源，不代表物理隔离。
-- closeout governance 不能允许 issue run 或 passive followup 在没有成功执行 `control-plane issue done/block/comment` 时表现为成功。
+- closeout governance 不能允许 issue run 或 passive followup 在没有成功执行 `octopus issue done/block/comment` 时表现为成功。
 - UI 对父子任务产物关系、等待原因、唤醒原因的展示还不够清楚。
 
 ## 产品模型
@@ -132,11 +131,43 @@ docs/<requested-document>.md
 - 需要冲突处理、git policy、测试和 review 预期。
 - 父子任务并行改代码时必须特别小心重叠文件冲突。
 
+## 父任务重新执行语义
+
+重新执行不是从空白任务重新开始，也不是机械地只处理异常子任务。重新执行应在当前 issue 树和历史产物基础上，由 manager agent 重新判断最合适的执行策略。
+
+平台必须给 agent 提供完整事实：
+
+- 父任务当前标题、描述、状态、最近 run 结果和 closeout 记录。
+- 现有 child issues，按 `parentId` 查询，不引入额外 `childKey` 身份层。
+- 每个 child 的状态、负责人、最近 closeout/comment、work products、失败原因和产物缺失情况。
+- 父任务已有 work products 和最终交付物状态。
+
+agent 可以选择：
+
+- 复用已有 done child 的产物并继续汇总。
+- 重试 blocked、failed、timed out 或 process lost 的 child issue。
+- 接管某个 child 的缺失工作，在父任务中补产物，并记录来源说明。
+- 追加新的 child issue，补足原任务树缺少的工作。
+- 替换旧 child issue，但必须 comment/activity 说明替代关系和旧 child 的处理原因。
+- 取消不再需要的旧 child issue，并说明为什么不再需要。
+- 在原拆分明显不合理时重新拆分，但必须先显式处置已有 children，不能直接重复创建一批同类子任务。
+- 如果不需要拆分或继续拆分，在父任务内直接完成。
+
+硬约束：
+
+- 不能忽略已有 children，把重新执行当成第一次执行。
+- 不能因为旧 child blocked 或没有产物，就静默创建同名 sibling 规避问题。
+- 父任务 closeout 前必须说明已有 children 是被复用、等待、重试、替换、取消、接管，还是被纳入重新拆分。
+- 有 active child 时，父任务不能 `done`。
+- 有 blocked/cancelled child 且用户没有接受不完整交付时，父任务不能把结果当完整成功。
+
+当前模型不新增 `childKey` 或计划表。父子关系由 `issues.parent_id` 表达，child issue 自身的 `issue.id` 就是执行事实身份。只有未来需要“先审批计划再创建 issue”、“一个计划项绑定多个 replacement issue”、“计划版本 diff/回滚”等能力时，才考虑引入独立 plan item 表。
+
 ## 优化计划
 
-### 1. 强化父任务 Resume 上下文
+### 1. 强化父任务 Resume / Rerun Reconcile 上下文
 
-当父任务以 `wakeReason=issue_children_settled` 被唤醒时，向 runtime context 和 prompt 注入面向 manager 的子任务摘要。
+当父任务以 `wakeReason=issue_children_settled` 被唤醒，或用户/API 重新执行已有父任务时，向 runtime context 和 prompt 注入面向 manager 的子任务摘要与重新执行事实。
 
 每个 child 应包含：
 
@@ -145,21 +176,22 @@ docs/<requested-document>.md
 - assignee。
 - 最后 closeout/comment 摘要。
 - work products：title、type、content path、可用时的内容摘要。
-- 子任务是 done、blocked 还是 cancelled。
+- 子任务是 done、active、blocked、cancelled，还是缺少期望产物。
+- 旧 run 是否 failed、timed out、process lost，以及对应错误摘要。
 
-目标：主任务醒来后直接知道该检查什么、汇总什么，而不是先摸索一轮。
+目标：主任务醒来或重新执行后直接知道该检查什么、汇总什么、恢复什么，而不是把已有 issue 树当成空白任务重新开始。
 
 ### 2. 新增 Child Outputs 聚合命令
 
 增加一个一次性返回子任务及产物的 control-plane 命令。
 
-建议命令：
+已实现命令：
 
 ```text
-control-plane issue children <parent-id> --include-work-products --json
+octopus issue children <parent-id> --include-work-products --json
 ```
 
-对应 API 可设计为：
+对应 API：
 
 ```text
 GET /api/issues/{id}/children?includeWorkProducts=true
@@ -177,21 +209,22 @@ GET /api/issues/{id}/children?includeWorkProducts=true
 
 ### 3. 改进父任务 Manager Prompt
 
-当 issue 有 child issues，或 wake reason 是 `issue_children_settled` 时，增加明确指令：
+当 issue 有 child issues、wake reason 是 `issue_children_settled`，或本次 run 是重新执行时，增加明确指令：
 
 - 父任务 closeout 前必须检查所有 child issue 结果。
 - blocked/cancelled child 需要作为异常输入说明，不能当成功内容处理。
 - 最终报告应基于 child outputs，而不是只凭记忆重写。
-- 如果 child outputs 不完整或质量不足，应 comment 下一步或创建补充子任务。
+- 如果 child outputs 不完整或质量不足，应 comment 下一步、重试原 child、接管补产物、创建明确补充/替换 child，或在用户接受后交付不完整结果。
 - 只有在产出主任务要求的最终交付后，才能 `done`。
+- 重新执行时必须先审视已有 children；可以重新拆分或追加，但必须说明旧 children 如何处置，不能无视已有 children 重复创建同类任务。
 
-目标：让主任务像 manager 一样收尾，而不是像普通单任务 worker 一样随便醒来后 closeout。
+目标：让主任务像 manager 一样收尾和恢复执行，而不是像普通单任务 worker 一样随便醒来后 closeout，也不是把重新执行当成第一次执行。
 
 ### 4. 增加父任务 Closeout 软校验
 
 保留现有硬约束：有 active child 时父任务不能 `done`。
 
-增加软 warning：当有 child issues 的父任务 closeout 时，检查是否有使用子任务结果的证据。
+增加软 warning：当有 child issues 的父任务 closeout 时，检查是否有使用子任务结果的证据。当前已在 heartbeat closeout governance 中记录 `issue.parent_deliverable_convergence_warning`，不硬失败。
 
 可选信号：
 
@@ -225,7 +258,7 @@ issue run 只有留下真实 control-plane closeout 信号，才可以视为完�
 
 ### 7. 增加端到端验收用例
 
-用“四大美女”作为 manager-subtask-closeout 验收场景：
+已用“四大美女”作为 manager-subtask-closeout 契约验收场景：
 
 1. 主任务被派发。
 2. 主任务创建 4 个 child issues。
@@ -270,8 +303,11 @@ run history 应展示：
 - 父任务能收到或一键拉取 compact child outputs summary。
 - 父任务最终报告登记为父任务 primary deliverable，UI 第一眼展示；物理路径可以是共享约定路径或 artifacts。
 - 最终报告被捕获为父任务 work product。
-- 父任务通过真实 `control-plane issue done` 收尾。
+- 父任务通过真实 `octopus issue done` 收尾。
 - 没有真实 closeout 信号的 issue run 或 followup 不能显示为成功。
+- 重新执行已有 children 的父任务时，runtime context 展示现有 children、状态、产物和异常；agent 不能无视这些事实直接重复创建同类子任务。
+- 重新执行时如需重新拆分、追加或替换子任务，必须对旧 child issue 留下 comment/activity 说明处置关系。
+- done 但缺少期望产物、blocked、failed、process lost 的 child issue 必须在父任务 closeout 前被重试、接管、替换、取消或作为用户接受的不完整交付记录下来。
 
 ## 非目标
 

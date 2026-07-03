@@ -24,7 +24,7 @@ from .commands import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m cli", description="Octopus board API client"
+        prog="octopus", description="Octopus board API client"
     )
     parser.add_argument(
         "--api-base",

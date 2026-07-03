@@ -437,6 +437,8 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
                 "octopusWorkspace": {
                     "cwd": "D:/octopus/worktree",
                     "worktreePath": "D:/octopus/worktree",
+                    "mode": "shared_workspace",
+                    "workspaceKind": "project_execution",
                     "orgArtifactsDir": "D:/octopus/artifacts",
                     "issueArtifactsDir": "D:/octopus/worktree/artifacts/issues/issue-1",
                 }
@@ -455,7 +457,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "D:/octopus/artifacts" in captured_prompt
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
-    assert "Prefer the organization artifacts directory" in captured_prompt
+    assert "Prefer the workspace worktree with a clear shared path" in captured_prompt
+    assert "reports/" in captured_prompt
+    assert "OCTOPUS_WORKSPACE_CWD" in captured_prompt
+    assert (
+        "do not use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` as the default deliverable target"
+        in captured_prompt
+    )
     assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" in captured_prompt
     assert "compatibility convenience path" in captured_prompt
     assert "not a workspace isolation boundary" in captured_prompt
@@ -912,7 +920,7 @@ async def test_runtime_materializes_prefixed_control_plane_skill_key(
     from packages.runtimes.local_skills import materialize_runtime_skills
 
     skills_root = tmp_path / "skills"
-    control_plane = skills_root / "control-plane"
+    control_plane = skills_root / "octopus"
     control_plane.mkdir(parents=True)
     control_plane.joinpath("SKILL.md").write_text(
         "# Control Plane\n\nCoordinate work.", encoding="utf-8"
@@ -929,13 +937,13 @@ async def test_runtime_materializes_prefixed_control_plane_skill_key(
 
     assert mounted == [
         {
-            "key": "control-plane",
-            "runtimeName": "control-plane",
-            "name": "control-plane",
+            "key": "octopus",
+            "runtimeName": "octopus",
+            "name": "octopus",
             "description": "Coordinate work.",
         }
     ]
-    assert (skills_home / "control-plane" / "SKILL.md").is_file()
+    assert (skills_home / "octopus" / "SKILL.md").is_file()
 
 
 async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_root(
@@ -961,7 +969,7 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert snapshot_code == 200
     entries = {entry["key"]: entry for entry in snapshot["entries"]}
     assert {
-        "control-plane",
+        "octopus",
         "conversation-to-skill",
         "create-agent",
         "create-plugin",
@@ -975,8 +983,8 @@ async def test_agent_skills_snapshot_includes_bundled_skills_without_configured_
     assert entries["conversation-to-skill"]["readOnly"] is True
     assert entries["conversation-to-skill"]["description"]
     assert entries["conversation-to-skill"]["description"] != "---"
-    assert entries["control-plane"]["description"]
-    assert entries["control-plane"]["description"] != "\ufeff---"
+    assert entries["octopus"]["description"]
+    assert entries["octopus"]["description"] != "\ufeff---"
     assert entries["create-agent"]["description"]
     assert entries["create-agent"]["description"] != "\ufeff---"
     assert entries["create-plugin"]["description"]
@@ -1071,6 +1079,46 @@ async def test_opencode_local_agent_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
+async def test_opencode_local_agent_defaults_to_noninteractive_permissions(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    create_code, created = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Default Permissions",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {"model": "openai/gpt-5"},
+        },
+    )
+    duplicate_code, duplicate = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Explicit Permissions",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {
+                "model": "openai/gpt-5",
+                "extraArgs": ["--dangerously-skip-permissions"],
+            },
+        },
+    )
+
+    assert create_code == 201
+    assert created["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
+    assert duplicate_code == 201
+    assert duplicate["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
+
+
 async def test_opencode_local_update_requires_provider_model(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -1109,6 +1157,9 @@ async def test_opencode_local_update_requires_provider_model(
     assert "opencode_local requires agentRuntimeConfig.model" in switch_error["detail"]
     assert valid_code == 200
     assert valid["agentRuntimeType"] == "opencode_local"
+    assert valid["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
     assert invalid_code == 422
     assert "provider/model" in invalid_error["detail"]
 
@@ -2095,10 +2146,10 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         path_entries = env["PATH"].split(os.pathsep)
         shim_dir = Path(path_entries[0])
         assert env["OCTOPUS_GIT_WRITE_POLICY"] == "read_only"
-        assert (shim_dir / "control-plane").is_file()
+        assert (shim_dir / "octopus").is_file()
         assert (shim_dir / "git").is_file()
         if os.name == "nt":
-            assert (shim_dir / "control-plane.cmd").is_file()
+            assert (shim_dir / "octopus.cmd").is_file()
             assert (shim_dir / "git.cmd").is_file()
 
 

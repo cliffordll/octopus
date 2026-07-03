@@ -15,7 +15,7 @@ import type {
   HeartbeatRunEvent,
   IssueComment,
   IssueDetail,
-  IssueListItem,
+  
   IssuePriority,
   IssueReviewDecision,
   IssueStatus,
@@ -33,32 +33,26 @@ import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPurposeLabel, runWakeReason } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
-
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
 const LIVE_RUN_REFETCH_MS = 1000;
 const AGENT_REPLY_COLLAPSE_CHARS = 600;
 const AGENT_REPLY_COLLAPSE_LINES = 8;
 const RUN_SUMMARY_PREVIEW_CHARS = 110;
-
 interface RunStreamCursor {
   lastSeq: number;
   nextOffset: number;
 }
-
 function issueDisplayId(issue: IssueDetail): string {
   return issue.identifier ?? issue.id.slice(0, 8);
 }
-
 function nullableSelectValue(value: string | null | undefined): string {
   return value ?? "";
 }
-
 function agentName(agentId: string | null | undefined, agentsById: Map<string, Agent>): string {
   if (!agentId) return "-";
   return agentsById.get(agentId)?.name ?? agentId;
 }
-
 function agentMentionToken(agent: Agent): string {
   const candidates = [agent.urlKey, agent.name, agent.id];
   for (const candidate of candidates) {
@@ -66,24 +60,20 @@ function agentMentionToken(agent: Agent): string {
   }
   return agent.id;
 }
-
 function mentionQueryAtCursor(value: string, cursor: number): { start: number; query: string } | null {
   const prefix = value.slice(0, cursor);
   const match = /(^|\s)@([A-Za-z0-9_.-]*)$/.exec(prefix);
   if (!match) return null;
   return { start: prefix.length - match[2].length - 1, query: match[2].toLowerCase() };
 }
-
 function issueRunStorageKey(orgId: string, issueId: string): string {
   return `octopus:issue-run:${orgId}:${issueId}`;
 }
-
 function reviewDecisionBlockReason(issue: IssueDetail): string {
   if (!issue.reviewerAgentId) return "请先设置 Reviewer，当前任务不能评审。";
   if (!["in_review", "blocked"].includes(issue.status)) return "任务进入 in_review 或 blocked 后才能评审。";
   return "";
 }
-
 function reviewDecisionLabel(decision: IssueReviewDecision): string {
   switch (decision) {
     case "approve":
@@ -96,7 +86,6 @@ function reviewDecisionLabel(decision: IssueReviewDecision): string {
       return "标记阻塞";
   }
 }
-
 function reviewStatusText(issue: IssueDetail, agentsById: Map<string, Agent>): string {
   if (!["in_review", "blocked"].includes(issue.status)) return "当前任务不在评审阶段。";
   if (!issue.reviewerAgentId) return "未设置 Reviewer，无法提交评审结论。";
@@ -105,58 +94,47 @@ function reviewStatusText(issue: IssueDetail, agentsById: Map<string, Agent>): s
     ? `任务已阻塞，等待 ${reviewer} 给出 closeout 或后续处理意见。`
     : `任务正在评审中，等待 ${reviewer} 给出 closeout。`;
 }
-
 function markReviewBlockReason(issue: IssueDetail): string {
   if (!issue.reviewerAgentId) return "请先设置 Reviewer，当前任务不能标记为待评审。";
   if (issue.status === "in_review") return "当前任务已经是待评审状态。";
   return "";
 }
-
 function isLiveRun(status?: string | null): boolean {
   return status === "queued" || status === "running";
-}
-
+}
 function isOpenIssueStatus(status?: string | null): boolean {
   return status === "todo" || status === "in_progress" || status === "in_review" || status === "blocked";
-}
-
+}
 function isRerunnableRun(status?: string | null): boolean {
   return status === "failed" || status === "timed_out" || status === "cancelled";
-}
-
+}
 function isTerminalRun(status?: string | null): boolean {
   return status === "succeeded" || status === "waiting_for_children" || isRerunnableRun(status);
-}
-
+}
 function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
   return run?.id || run?.runId || "";
 }
-
 function runContextIssueId(run: HeartbeatRun | null | undefined): string | null {
   const value = run?.contextSnapshot?.issueId ?? run?.contextSnapshot?.primaryIssueId;
   return typeof value === "string" && value ? value : null;
 }
-
 function runBelongsToIssue(run: HeartbeatRun | null | undefined, issueId: string, listedRunIds: Set<string>): boolean {
   if (!run) return false;
   const runId = heartbeatRunId(run);
   if (runId && listedRunIds.has(runId)) return true;
   return run.issueId === issueId || runContextIssueId(run) === issueId;
 }
-
 function runSortTime(run: HeartbeatRun): number {
   const value = run.createdAt ?? run.startedAt ?? run.updatedAt ?? "";
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
-
 function activeQueueRunsForAgent(runs: HeartbeatRun[], agentId: string | null | undefined): HeartbeatRun[] {
   if (!agentId) return [];
   return runs
     .filter((run) => run.agentId === agentId && isLiveRun(run.status))
     .sort((left, right) => runSortTime(left) - runSortTime(right));
 }
-
 function queueRunsAhead(activeRuns: HeartbeatRun[], currentRun: HeartbeatRun | null): number {
   if (!currentRun) return 0;
   const currentRunId = heartbeatRunId(currentRun);
@@ -165,7 +143,6 @@ function queueRunsAhead(activeRuns: HeartbeatRun[], currentRun: HeartbeatRun | n
   const currentTime = runSortTime(currentRun);
   return activeRuns.filter((run) => runSortTime(run) <= currentTime).length;
 }
-
 function queueSourceCounts(runs: HeartbeatRun[]): Array<{ count: number; source: string }> {
   const counts = new Map<string, number>();
   for (const run of runs) counts.set(run.invocationSource, (counts.get(run.invocationSource) ?? 0) + 1);
@@ -173,7 +150,6 @@ function queueSourceCounts(runs: HeartbeatRun[]): Array<{ count: number; source:
     .map(([source, count]) => ({ count, source }))
     .sort((left, right) => right.count - left.count || sourceLabel(left.source).localeCompare(sourceLabel(right.source)));
 }
-
 function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, issueId: string): HeartbeatRun | null {
   const merged = new Map<string, HeartbeatRun>();
   const listedRunIds = new Set<string>();
@@ -196,36 +172,31 @@ function latestIssueRun(runs: HeartbeatRun[], currentRun: HeartbeatRun | null, i
     .sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
 }
-
 function latestTerminalRunForIssue(runs: HeartbeatRun[], issueId: string): HeartbeatRun | null {
   const listedRunIds = new Set(runs.map(heartbeatRunId).filter(Boolean));
   const sorted = runs
     .filter((run) => isTerminalRun(run.status) && runBelongsToIssue(run, issueId, listedRunIds))
     .sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
-}
-
+}
 function latestAnyRunForIssue(runs: HeartbeatRun[], issueId: string): HeartbeatRun | null {
   const listedRunIds = new Set(runs.map(heartbeatRunId).filter(Boolean));
   const sorted = runs
     .filter((run) => runBelongsToIssue(run, issueId, listedRunIds))
     .sort((left, right) => runSortTime(right) - runSortTime(left));
   return sorted[0] ?? null;
-}
-
+}
 function metadataText(metadata: Record<string, unknown> | null | undefined, key: string): string {
   const value = metadata?.[key];
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value);
 }
-
 function nextLogOffset(log: LogReadResult): number | null {
   if (typeof log.nextOffset === "number") return log.nextOffset;
   if (typeof log.endOffset === "number") return log.endOffset;
   return null;
 }
-
 function AutoScrollPre({
   className,
   content,
@@ -241,7 +212,6 @@ function AutoScrollPre({
   }, [content]);
   return <pre className={className} ref={ref}>{content}</pre>;
 }
-
 function streamLogDelta(streamLog: string, persistedLog: string | undefined): string {
   if (!streamLog) return "";
   const persisted = persistedLog ?? "";
@@ -250,7 +220,6 @@ function streamLogDelta(streamLog: string, persistedLog: string | undefined): st
   if (streamLog.startsWith(persisted)) return streamLog.slice(persisted.length);
   return streamLog;
 }
-
 function runElapsedText(run: HeartbeatRun | null): string {
   const startedAt = run?.startedAt ?? run?.createdAt;
   if (!startedAt) return "";
@@ -267,19 +236,16 @@ function runElapsedText(run: HeartbeatRun | null): string {
   const restMinutes = minutes % 60;
   return restMinutes ? `${hours} 小时 ${restMinutes} 分` : `${hours} 小时`;
 }
-
 function metadataString(metadata: Record<string, unknown> | null | undefined, key: string): string | null {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
-
 function pathBasename(value: string | null | undefined): string {
   if (!value?.trim()) return "";
   const normalized = value.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts.at(-1) ?? value;
 }
-
 function workProductDisplayName(product: IssueWorkProduct): string {
   return (
     pathBasename(product.title) ||
@@ -288,7 +254,6 @@ function workProductDisplayName(product: IssueWorkProduct): string {
     product.id
   );
 }
-
 function workProductSourceLabel(product: IssueWorkProduct): string {
   const source = metadataString(product.metadata, "source") ?? "";
   const workspacePath = metadataString(product.metadata, "workspacePath") ?? "";
@@ -303,17 +268,24 @@ function workProductSourceLabel(product: IssueWorkProduct): string {
   if (source.includes("organization_artifacts")) return "组织 artifacts";
   if (product.createdByRunId) return "运行产物";
   return "任务产物";
-}
-
+}
 function workspaceModeNotice(mode: string | null | undefined): string {
   if (mode !== "shared_workspace") return "";
   return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
 }
-
+function childPrimaryProductTitle(child: { workProducts?: IssueWorkProduct[] }): string {
+  const primary = child.workProducts?.find((product) => product.isPrimary) ?? child.workProducts?.[0];
+  return primary ? workProductDisplayName(primary) : "";
+}
+function isParentOwnedPrimary(product: IssueWorkProduct): boolean {
+  return product.isPrimary && product.metadata?.parentAggregated !== true;
+}
 function activitySummary(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return issueCloseoutReviewSummary(event);
   if (event.action === "issue.review_closeout_missing") return issueCloseoutReviewSummary(event);
-  if (event.action === "issue.convergence_review_requested") return issueConvergenceReviewSummary(event);
+  if (event.action === "issue.convergence_review_requested") return issueConvergenceReviewSummary(event);
+  if (event.action === "issue.parent_deliverable_convergence_warning") return "父任务已收尾，但没有看到父任务最终产物或引用子任务结果的证据。";
+  if (event.action === "issue.children_settled") return "所有子任务已进入终态，父任务已被唤醒继续汇总。";
   if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
   const details = event.details ?? {};
   for (const key of ["summary", "message", "title", "note"]) {
@@ -322,7 +294,6 @@ function activitySummary(event: ActivityEvent): string {
   }
   return event.entityId;
 }
-
 function activityTitle(event: ActivityEvent): string {
   switch (event.action) {
     case "issue.executed":
@@ -341,37 +312,41 @@ function activityTitle(event: ActivityEvent): string {
       return "缺少评审结论";
     case "issue.convergence_review_requested":
       return "需要收敛评审";
+    case "issue.parent_deliverable_convergence_warning":
+      return "父任务汇总证据不足";
+    case "issue.children_settled":
+      return "子任务已完成";
     case "heartbeat.invoked":
-      return "启动运行";
-
+      return "启动运行";
     case "heartbeat.retried":
       return "重试运行";
     default:
       return statusLabel(event.action);
   }
 }
-
 function activityIcon(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return "!";
   if (event.action === "issue.review_closeout_missing") return "!";
   if (event.action === "issue.convergence_review_requested") return "!";
+  if (event.action === "issue.parent_deliverable_convergence_warning") return "!";
+  if (event.action === "issue.children_settled") return "S";
   if (event.action.includes("executed") || event.action.includes("heartbeat")) return "R";
   if (event.action.includes("status")) return "S";
   if (event.action.includes("review")) return "V";
   return event.actorType === "agent" ? "A" : "U";
 }
-
 function activityTone(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return "needs-attention";
   if (event.action === "issue.review_closeout_missing") return "needs-attention";
   if (event.action === "issue.convergence_review_requested") return "needs-review";
+  if (event.action === "issue.parent_deliverable_convergence_warning") return "needs-attention";
+  if (event.action === "issue.children_settled") return "status";
   if (event.action.includes("heartbeat") || event.action === "issue.executed") return "run";
   if (event.action.includes("review")) return "review";
   if (event.action.includes("status") || event.action === "issue.updated") return "status";
   if (event.action === "issue.created") return "created";
   return event.actorType === "agent" ? "agent" : "default";
 }
-
 function activityMeta(event: ActivityEvent): string {
   const parts = [formatIssueTime(event.createdAt)];
   if (event.runId) parts.push(`Run ${event.runId}`);
@@ -379,12 +354,10 @@ function activityMeta(event: ActivityEvent): string {
   if (agentId) parts.push(`Agent ${agentId}`);
   return parts.join(" · ");
 }
-
 function activityNumber(event: ActivityEvent, key: string): number | null {
   const value = event.details?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-
 function issueCloseoutReviewSummary(event: ActivityEvent): string {
   const attempts = activityNumber(event, "attempts");
   const maxAttempts = activityNumber(event, "maxAttempts");
@@ -394,14 +367,12 @@ function issueCloseoutReviewSummary(event: ActivityEvent): string {
   }
   return `自动收口已尝试${attemptText}，智能体仍未明确完成、阻塞或提交评审。`;
 }
-
 function issueConvergenceReviewSummary(event: ActivityEvent): string {
   const attempts = activityNumber(event, "attempts");
   const maxAttempts = activityNumber(event, "maxAttempts");
   const attemptText = attempts !== null && maxAttempts !== null ? ` ${attempts}/${maxAttempts} 次` : "";
   return `自动收口已尝试${attemptText}，已转交 Reviewer 判断下一步。`;
 }
-
 function issueCloseoutReviewActivity(
   issue: IssueDetail,
   events: ActivityEvent[] | undefined,
@@ -417,8 +388,7 @@ function issueCloseoutReviewActivity(
   }
   if (issue.status !== "in_progress") return null;
   return events.find((event) => matchesLatestRun(event, "issue.closure_needs_operator_review")) ?? null;
-}
-
+}
 function runHasExplicitCloseoutSignal(run: HeartbeatRun | null, events: ActivityEvent[] | undefined, issueId: string): boolean {
   if (!run || !Array.isArray(events)) return false;
   const runId = heartbeatRunId(run);
@@ -430,16 +400,13 @@ function runHasExplicitCloseoutSignal(run: HeartbeatRun | null, events: Activity
     return typeof status === "string" && ["done", "blocked", "in_review"].includes(status);
   });
 }
-
 type IssueTimelineItem =
   | { id: string; item: ActivityEvent; kind: "activity"; timestamp: string }
   | { id: string; item: IssueComment; kind: "comment"; timestamp: string };
-
 function timelineTime(value: string): number {
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
-
 function issueTimelineItems(
   events: ActivityEvent[] | undefined,
   comments: IssueComment[] | undefined,
@@ -464,32 +431,26 @@ function issueTimelineItems(
   ];
   return items.sort((left, right) => timelineTime(left.timestamp) - timelineTime(right.timestamp));
 }
-
 function workProductSize(product: IssueWorkProduct): string {
   const metadataByteSize = product.metadata?.byteSize;
   const byteSize = typeof metadataByteSize === "number" ? metadataByteSize : product.byteSize;
   return byteSize !== undefined && byteSize !== null ? formatBytes(byteSize) : "-";
 }
-
 function workProductSummary(product: IssueWorkProduct): string {
   return product.summary ?? "server 已登记该产物。";
 }
-
 function mergeRunEvents(left: HeartbeatRunEvent[], right: HeartbeatRunEvent[]): HeartbeatRunEvent[] {
   const next = new Map<number, HeartbeatRunEvent>();
   for (const event of left) next.set(event.id, event);
   for (const event of right) next.set(event.id, event);
   return Array.from(next.values()).sort((leftEvent, rightEvent) => leftEvent.seq - rightEvent.seq);
 }
-
 function hasJsonObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
-
 function formattedJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
-
 function runSummary(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录";
   const error = runErrorMessage(run.error);
@@ -503,27 +464,22 @@ function runSummary(run: HeartbeatRun | null): string {
   }
   return statusLabel(run.status);
 }
-
 function latestRunBadgeLabel(run: HeartbeatRun | null | undefined): string {
   if (!run) return "";
   return isPassiveFollowupRun(run) ? "补充关闭信号运行" : "最新运行";
 }
-
 function latestRunStatusText(run: HeartbeatRun | null | undefined): string {
   if (!run) return "";
   if (run.status === "cancelled") return isPassiveFollowupRun(run) ? "已停止" : "已取消";
   return statusLabel(run.status);
 }
-
 function isUserCancelledRun(run: HeartbeatRun | null | undefined): boolean {
   return Boolean(run && run.status === "cancelled" && runErrorMessage(run.error) === "run cancelled");
 }
-
 function previewRunSummary(summary: string): string {
   if (summary.length <= RUN_SUMMARY_PREVIEW_CHARS) return summary;
   return `${summary.slice(0, RUN_SUMMARY_PREVIEW_CHARS).trimEnd()}...`;
 }
-
 function eventPayloadText(payload: Record<string, unknown> | null | undefined): string {
   if (!payload) return "";
   for (const key of ["text", "content", "message", "delta", "output"]) {
@@ -532,7 +488,6 @@ function eventPayloadText(payload: Record<string, unknown> | null | undefined): 
   }
   return "";
 }
-
 function isLowValueRunEvent(event: HeartbeatRunEvent): boolean {
   const eventType = event.eventType.toLowerCase();
   return (
@@ -544,7 +499,6 @@ function isLowValueRunEvent(event: HeartbeatRunEvent): boolean {
     eventType.includes("step.finished")
   );
 }
-
 function isErrorRunEvent(event: HeartbeatRunEvent): boolean {
   const eventType = event.eventType.toLowerCase();
   return (
@@ -555,7 +509,6 @@ function isErrorRunEvent(event: HeartbeatRunEvent): boolean {
     eventType.includes("failed")
   );
 }
-
 function isTextRunEvent(event: HeartbeatRunEvent): boolean {
   const eventType = event.eventType.toLowerCase();
   return (
@@ -566,7 +519,6 @@ function isTextRunEvent(event: HeartbeatRunEvent): boolean {
     Boolean(eventPayloadText(event.payload))
   );
 }
-
 function runEventLabel(event: HeartbeatRunEvent): string {
   const eventType = event.eventType.toLowerCase();
   if (eventType.includes("issue_review_requested")) return "请求评审";
@@ -583,15 +535,12 @@ function runEventLabel(event: HeartbeatRunEvent): string {
   if (eventType.includes("cancel")) return "取消";
   return event.eventType;
 }
-
 function runEventBody(event: HeartbeatRunEvent): string {
   return eventPayloadText(event.payload) || event.message || "";
 }
-
 function shouldCollapseAgentReply(body: string): boolean {
   return body.length > AGENT_REPLY_COLLAPSE_CHARS || body.split(/\r?\n/).length > AGENT_REPLY_COLLAPSE_LINES;
 }
-
 function agentReplyPreview(body: string): string {
   const lines = body.split(/\r?\n/);
   const linePreview = lines.slice(0, AGENT_REPLY_COLLAPSE_LINES).join("\n");
@@ -600,7 +549,6 @@ function agentReplyPreview(body: string): string {
     : linePreview;
   return lines.length > AGENT_REPLY_COLLAPSE_LINES && !preview.endsWith("...") ? `${preview}\n...` : preview;
 }
-
 function parseJsonReply(body: string): unknown | null {
   const trimmed = body.trim();
   if (!trimmed || !["{", "["].includes(trimmed[0] ?? "")) return null;
@@ -611,7 +559,6 @@ function parseJsonReply(body: string): unknown | null {
     return null;
   }
 }
-
 function AgentReplyBody({ body }: { body: string }) {
   const json = parseJsonReply(body);
   const shouldCollapse = shouldCollapseAgentReply(body);
@@ -642,18 +589,15 @@ function AgentReplyBody({ body }: { body: string }) {
     </div>
   );
 }
-
 function RunEventBody({ event }: { event: HeartbeatRunEvent }) {
   const body = runEventBody(event);
   if (!body) return null;
   if (isTextRunEvent(event) && !isErrorRunEvent(event)) return <AgentReplyBody body={body} />;
   return <pre className={`issue-run-event-log${isErrorRunEvent(event) ? " error" : ""}`}>{body}</pre>;
 }
-
 function formatIssueTime(value: string | null | undefined): string {
   return formatDateTime(value);
 }
-
 function numericUsageValue(run: HeartbeatRun, key: string): number {
   const value = run.usageJson?.[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -663,7 +607,6 @@ function numericUsageValue(run: HeartbeatRun, key: string): number {
   }
   return 0;
 }
-
 function runHasReportedUsage(run: HeartbeatRun): boolean {
   const usage = run.usageJson;
   if (!usage || typeof usage !== "object") return false;
@@ -673,7 +616,6 @@ function runHasReportedUsage(run: HeartbeatRun): boolean {
   const stdout = typeof run.resultJson?.stdout === "string" ? run.resultJson.stdout : "";
   return stdout.includes('"type":"step_finish"') || stdout.includes('"type":"turn.completed"');
 }
-
 function issueRunCostSummary(runs: HeartbeatRun[]): {
   cachedInputTokens: number;
   inputTokens: number;
@@ -705,7 +647,6 @@ function issueRunCostSummary(runs: HeartbeatRun[]): {
     { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reportedRuns: 0, totalCostCents: 0, totalTokens: 0, unreportedRuns: 0 },
   );
 }
-
 function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus): string {
   if (status === issue.status) return "";
   if (status === "in_review" && !issue.reviewerAgentId) return "请先设置 Reviewer。";
@@ -716,7 +657,6 @@ function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus
   if (issue.status === "cancelled") return "已取消任务请使用重新打开流程。";
   return "";
 }
-
 function IssuePropertiesPanel({
   agents,
   goals,
@@ -873,7 +813,6 @@ function IssuePropertiesPanel({
     </section>
   );
 }
-
 function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
   const costSummary = issueRunCostSummary(runs);
   const hasReportedUsage = costSummary.reportedRuns > 0;
@@ -900,7 +839,6 @@ function IssueCostPanel({ runs }: { runs: HeartbeatRun[] }) {
     </section>
   );
 }
-
 function IssueQueueStatusPanel({
   activeRuns,
   agentsById,
@@ -958,7 +896,6 @@ function IssueQueueStatusPanel({
     </section>
   );
 }
-
 function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { embedded?: boolean; issue: IssueDetail; latestRunStatus?: HeartbeatRun["status"] }) {
   const queryClient = useQueryClient();
   const [workProductsExpanded, setWorkProductsExpanded] = useState(!embedded);
@@ -967,7 +904,12 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
     queryFn: () => issuesApi.listWorkProducts(issue.id),
     initialData: issue.workProducts ?? [],
   });
-  const workProducts = workProductsQuery.data ?? [];
+  const workProducts = workProductsQuery.data ?? [];
+  const hasParentFinalDeliverable = workProducts.some(isParentOwnedPrimary);
+  const orderedWorkProducts = [...workProducts].sort((left, right) => Number(isParentOwnedPrimary(right)) - Number(isParentOwnedPrimary(left)));
+  useEffect(() => {
+    if (embedded && hasParentFinalDeliverable) setWorkProductsExpanded(true);
+  }, [embedded, hasParentFinalDeliverable]);
   const deleteWorkProduct = useMutation({
     mutationFn: (workProductId: string) => issuesApi.deleteWorkProduct(workProductId),
     onSuccess: () => {
@@ -1011,10 +953,11 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
       )}
       {workProducts.length > 0 && (
         <div className="issue-work-product-list">
-          {workProducts.map((product) => {
+          {orderedWorkProducts.map((product) => {
             const workspaceBrowserPath = metadataString(product.metadata, "workspaceBrowserPath");
             const displayName = workProductDisplayName(product);
             const isParentAggregated = product.metadata?.parentAggregated === true;
+            const isFinalDeliverable = isParentOwnedPrimary(product);
             return (
             <article className="issue-work-product-card" key={product.id}>
               <div className="issue-work-product-title-row">
@@ -1029,6 +972,7 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
                 <StatusPill status={product.status}>{statusLabel(product.status)}</StatusPill>
                 <StatusPill status={product.reviewState}>{statusLabel(product.reviewState)}</StatusPill>
                 {product.isPrimary && <Badge>primary</Badge>}
+                {isFinalDeliverable && <Badge>最终报告</Badge>}
                 {isParentAggregated && <Badge>来自子任务</Badge>}
               </div>
               <dl className="issue-work-product-details">
@@ -1093,11 +1037,9 @@ function IssueWorkProductsPanel({ embedded = false, issue, latestRunStatus }: { 
     </section>
   );
 }
-
 function issueWorkspaceText(value: string | null | undefined): string {
   return value && value.trim() ? value : "未设置";
 }
-
 function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
   const queryClient = useQueryClient();
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
@@ -1226,7 +1168,6 @@ function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
     </section>
   );
 }
-
 function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean; issueId: string }) {
   const queryClient = useQueryClient();
   const [documentsHidden, setDocumentsHidden] = useState(true);
@@ -1401,7 +1342,6 @@ function IssueDocumentsPanel({ embedded = false, issueId }: { embedded?: boolean
     </section>
   );
 }
-
 function IssueRunsPanel({
   agentsById,
   currentRunId,
@@ -1546,13 +1486,11 @@ function IssueRunsPanel({
     </section>
   );
 }
-
 interface IssueRunPanelData {
   events: UseQueryResult<HeartbeatRunEvent[], Error>;
   operations: UseQueryResult<WorkspaceOperation[], Error>;
   run: UseQueryResult<HeartbeatRun, Error>;
 }
-
 function PaginatedLogView({
   emptyText,
   loadMore,
@@ -1571,7 +1509,6 @@ function PaginatedLogView({
   const [eof, setEof] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<Error | null>(null);
-
   useEffect(() => {
     const data = log.data;
     if (!data) {
@@ -1586,7 +1523,6 @@ function PaginatedLogView({
     setEof(data.eof !== false);
     setLoadMoreError(null);
   }, [log.data?.content, log.data?.endOffset, log.data?.eof, log.data?.nextOffset]);
-
   async function handleLoadMore() {
     if (cursor === null || loadingMore) return;
     setLoadingMore(true);
@@ -1602,7 +1538,6 @@ function PaginatedLogView({
       setLoadingMore(false);
     }
   }
-
   return (
     <>
       {log.isLoading && <p className="muted">{loadingText}</p>}
@@ -1625,7 +1560,6 @@ function PaginatedLogView({
     </>
   );
 }
-
 function WorkspaceOperationLogPanel({ operation }: { operation: WorkspaceOperation }) {
   const operationLog = useQuery({
     queryKey: ["workspace-operation-log", operation.id],
@@ -1645,7 +1579,6 @@ function WorkspaceOperationLogPanel({ operation }: { operation: WorkspaceOperati
     </div>
   );
 }
-
 function IssueRunOutputPanel({
   cancelling,
   data,
@@ -2005,7 +1938,6 @@ function IssueRunOutputPanel({
     </>
   );
 }
-
 function IssueRunDetailsPanel({
   issue,
   issueId,
@@ -2115,7 +2047,6 @@ function IssueRunDetailsPanel({
       setStreamActive(false);
     };
   }, [issueId, orgId, queryClient, runDetail.data?.status, runId]);
-
   return (
     <>
       <IssueRunOutputPanel
@@ -2136,44 +2067,36 @@ function IssueRunDetailsPanel({
         streamError={streamError}
         streamLog={streamLog}
       />
-
-      <section aria-label="运行上下文" className="issue-run-output-block">
-
+      <section aria-label="运行上下文" className="issue-run-output-block">
         <div className="issue-run-output-heading">
           <div>
-            <h3>运行上下文</h3>
-
+            <h3>运行上下文</h3>
           </div>
           <div className="issue-run-operation-actions">
-            <button aria-label={heartbeatContextExpanded ? "折叠运行上下文" : "展开运行上下文"} className="secondary small-button" type="button" onClick={() => setHeartbeatContextExpanded((value) => !value)}>
-
+            <button aria-label={heartbeatContextExpanded ? "折叠运行上下文" : "展开运行上下文"} className="secondary small-button" type="button" onClick={() => setHeartbeatContextExpanded((value) => !value)}>
               {heartbeatContextExpanded ? "折叠" : "展开"}
             </button>
           </div>
         </div>
         {!heartbeatContextExpanded ? (
-          <p className="muted">运行上下文已折叠。</p>
-
+          <p className="muted">运行上下文已折叠。</p>
         ) : (
           <>
         {heartbeatContext.isLoading && <p className="muted">加载上下文中...</p>}
         {heartbeatContext.error && <ErrorNotice error={heartbeatContext.error} />}
         {heartbeatContext.data && (
           <details className="issue-run-inline-details">
-            <summary>运行上下文详情</summary>
-
+            <summary>运行上下文详情</summary>
             <pre className="agent-run-json">{formattedJson(heartbeatContext.data)}</pre>
           </details>
         )}
           </>
         )}
       </section>
-
       <IssueWorkProductsPanel embedded issue={issue} latestRunStatus={latestRunStatus} />
     </>
   );
 }
-
 export function IssuePage() {
   const { orgId = "", issueId = "" } = useParams();
   const [comment, setComment] = useState("");
@@ -2223,11 +2146,11 @@ export function IssuePage() {
     refetchInterval: (query) => query.state.data?.some((run) => isLiveRun(run.status)) ? LIVE_RUN_REFETCH_MS : false,
   });
   const subIssues = useQuery({
-    queryKey: ["issues", orgId, "children", issueId],
-    queryFn: () => issuesApi.list(orgId, { parentId: issueId }),
-    enabled: Boolean(orgId && issueId),
+    queryKey: ["issue-children", issueId, "with-work-products"],
+    queryFn: () => issuesApi.children(issueId, true),
+    enabled: Boolean(issueId),
     refetchInterval: (query) => {
-      const children = Array.isArray(query.state.data) ? query.state.data : [];
+      const children = query.state.data?.children ?? [];
       return issueRuns.data?.some((run) => isLiveRun(run.status)) || children.some((child) => isOpenIssueStatus(child.status))
         ? LIVE_RUN_REFETCH_MS
         : false;
@@ -2310,13 +2233,8 @@ export function IssuePage() {
         status: "todo",
       });
     },
-    onSuccess: (created) => {
+    onSuccess: () => {
       setSubIssueTitle("");
-      queryClient.setQueryData<IssueListItem[]>(["issues", orgId, "children", issueId], (current = []) => [
-        ...current.filter((item) => item.id !== created.id),
-        created,
-      ]);
-      void queryClient.invalidateQueries({ queryKey: ["issues", orgId, "children", issueId] });
       void queryClient.invalidateQueries({ queryKey: ["issues", orgId] });
     },
   });
@@ -2584,7 +2502,7 @@ export function IssuePage() {
     : [];
   const goalList = Array.isArray(goals.data) ? goals.data : [];
   const projectList = Array.isArray(projects.data) ? projects.data : [];
-  const subIssueList = Array.isArray(subIssues.data) ? subIssues.data : [];
+  const subIssueList = subIssues.data?.children ?? [];
   const latestRun = latestIssueRun(issueRuns.data ?? [], null, issueId);
   const latestRunError = runErrorMessage(latestRun?.error);
   const latestRunErrorNotice =
@@ -2648,7 +2566,6 @@ export function IssuePage() {
               <span>/</span>
               <span>{issueDisplayId(issue.data)}</span>
             </nav>
-
             <div className="issue-detail-title-block">
               <div className="issue-detail-kicker">
                 <Badge>{issueDisplayId(issue.data)}</Badge>
@@ -2719,7 +2636,6 @@ export function IssuePage() {
             )}
             {passiveFollowup.error && <ErrorNotice error={passiveFollowup.error} />}
           </header>
-
           <main className="issue-detail-main">
             <p className="issue-description">{issue.data.description || "暂无描述"}</p>
             <IssueQueueStatusPanel
@@ -2728,10 +2644,8 @@ export function IssuePage() {
               currentRun={latestRun}
               issue={issue.data}
               orgId={orgId}
-            />
-
+            />
             <IssueExecutionWorkspacePanel issue={issue.data} />
-
             <section aria-label="子任务" className="issue-section-card">
               <div className="issue-section-heading">
                 <div>
@@ -2761,6 +2675,7 @@ export function IssuePage() {
                       <strong>{child.title}</strong>
                       <span className="issue-subtask-meta">
                         <Badge>{child.status}</Badge>
+                        {childPrimaryProductTitle(child) && <Badge>产物 {childPrimaryProductTitle(child)}</Badge>}
                         <Badge>{child.priority}</Badge>
                       </span>
                     </Link>
@@ -2768,7 +2683,6 @@ export function IssuePage() {
                 </div>
               )}
             </section>
-
             <section aria-label="评审" className="issue-section-card">
               <div className="issue-section-heading">
                 <div>
@@ -2817,7 +2731,6 @@ export function IssuePage() {
               {review.error && <ErrorNotice error={review.error} />}
               {updateIssue.error && <ErrorNotice error={updateIssue.error} />}
             </section>
-
             <section aria-label="运行记录" className="issue-section-card">
               <div className="issue-section-heading">
                 <div>
@@ -2828,7 +2741,6 @@ export function IssuePage() {
                   <span className="muted">{issueRuns.data?.length ?? 0} 次运行</span>
                 </div>
               </div>
-
               <IssueRunsPanel
                 agentsById={agentsById}
                 currentRunId={currentRunId}
@@ -2871,9 +2783,7 @@ export function IssuePage() {
               {cancelIssueRun.error && <ErrorNotice error={cancelIssueRun.error} />}
               {retryRun.error && <ErrorNotice error={retryRun.error} />}
             </section>
-
             <IssueDocumentsPanel issueId={issueId} />
-
             <section aria-label="动态" className="issue-section-card">
               <div className="issue-section-heading">
                 <div>
@@ -3041,7 +2951,6 @@ export function IssuePage() {
               </form>
             </section>
           </main>
-
           <aside className="issue-detail-sidebar">
             <div className="issue-sidebar-sticky">
               <IssuePropertiesPanel
@@ -3069,4 +2978,4 @@ export function IssuePage() {
       )}
     </IssuesWorkspace>
   );
-}
+}

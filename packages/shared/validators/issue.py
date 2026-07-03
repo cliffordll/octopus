@@ -66,6 +66,7 @@ _UPDATE_ISSUE_FIELDS = {
     "reopen",
     "hiddenAt",
     "reviewDecision",
+    "workProductDeclarations",
 }
 
 _REVIEW_DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
@@ -104,6 +105,23 @@ def _check_status_priority_origin(payload: Mapping[str, Any]) -> None:
         raise ValueError(f"'originKind' must be one of {list(ISSUE_ORIGIN_KINDS)}")
 
 
+def _check_work_product_declarations(payload: Mapping[str, Any]) -> None:
+    if "workProductDeclarations" not in payload:
+        return
+    declarations = payload["workProductDeclarations"]
+    if not isinstance(declarations, list):
+        raise ValueError("'workProductDeclarations' must be a list")
+    for item in declarations:
+        if not isinstance(item, Mapping):
+            raise ValueError("'workProductDeclarations' entries must be objects")
+        _reject_unknown_fields(item, allowed_fields={"path", "isPrimary"})
+        path = item.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(
+                "'workProductDeclarations[].path' must be a non-empty string"
+            )
+        if "isPrimary" in item and not isinstance(item["isPrimary"], bool):
+            raise ValueError("'workProductDeclarations[].isPrimary' must be a boolean")
 def validate_list_org_issues_query(
     query: Mapping[str, Any],
 ) -> ListOrgIssuesQuery:
@@ -200,16 +218,19 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
             raise ValueError("'reviewDecision' must be an object")
         validate_record_issue_review_decision(decision)
 
+    _check_work_product_declarations(payload)
+
     return cast(UpdateIssuePayload, payload)
 
 
 def validate_create_issue_comment(
     payload: Mapping[str, Any],
 ) -> CreateIssueCommentPayload:
-    _reject_unknown_fields(payload, allowed_fields={"body"})
+    _reject_unknown_fields(payload, allowed_fields={"body", "workProductDeclarations"})
     body = payload.get("body")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("'body' is required and must be a non-empty string")
+    _check_work_product_declarations(payload)
     return cast(CreateIssueCommentPayload, payload)
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import importlib
 import importlib.util
 import shutil
@@ -20,6 +20,7 @@ from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.schema import (
     Agent,
+    ActivityLog,
     AgentWakeupRequest,
     Base,
     HeartbeatRun,
@@ -2304,6 +2305,16 @@ async def test_settled_children_queue_parent_continuation() -> None:
             assert (
                 continuation.context_snapshot["wakeReason"] == "issue_children_settled"
             )
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity_id == parent.id,
+                        ActivityLog.action == "issue.children_settled",
+                    )
+                )
+            ).scalar_one()
+            assert activity.details["completedChildIssueId"] == child.id
+            assert activity.details["reason"] == "issue_children_settled"
     finally:
         await engine.dispose()
 
@@ -2384,6 +2395,584 @@ async def test_parent_run_with_active_children_is_valid_stage_closeout() -> None
             assert wakeup.status == "completed"
             assert agent.status == "idle"
             assert parent.execution_run_id is None
+    finally:
+        await engine.dispose()
+
+
+async def test_parent_done_without_child_output_evidence_fails_closeout() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-parent-warning",
+                name="Step 15 Parent Warning",
+                issue_prefix="PCW",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Four beauties report",
+                status="done",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Xi Shi report",
+                status="done",
+                completed_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+            session.add(child)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": parent.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                agent, run
+            )
+            warning = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action
+                        == "issue.parent_deliverable_convergence_warning"
+                    )
+                )
+            ).scalar_one()
+
+            assert final.status == "failed"
+            assert final.error_code == "closeout_missing"
+            assert warning.entity_id == parent.id
+            assert warning.run_id == run.id
+            assert warning.details["reason"] == "parent_done_without_child_output_evidence"
+            assert warning.details["childIssues"][0]["title"] == "Xi Shi report"
+    finally:
+        await engine.dispose()
+
+
+async def test_done_issue_with_expected_output_requires_matching_work_product() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-done-output-required",
+                name="Step 15 Done Output Required",
+                issue_prefix="DOR",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Lake Agent")
+            session.add(agent)
+            await session.flush()
+            issue = Issue(
+                org_id=org.id,
+                title="太湖介绍",
+                description="完成后将文档保存到 reports/ 目录下，文件名为 taihu.md",
+                status="done",
+                assignee_agent_id=agent.id,
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                agent, run
+            )
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action == "issue.done_missing_work_product"
+                    )
+                )
+            ).scalar_one()
+
+            assert final.status == "failed"
+            assert final.error_code == "closeout_missing"
+            assert activity.entity_id == issue.id
+            assert activity.details["reason"] == "done_without_expected_work_product"
+            assert activity.details["expectedPaths"] == [
+                "reports/taihu.md",
+                "taihu.md",
+            ]
+    finally:
+        await engine.dispose()
+
+async def test_failed_run_reconciles_done_issue_missing_expected_output_to_blocked() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-failed-done-reconcile",
+                name="Step 15 Failed Done Reconcile",
+                issue_prefix="FDR",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Lake Agent")
+            session.add(agent)
+            await session.flush()
+            issue = Issue(
+                org_id=org.id,
+                title="巢湖介绍",
+                description="完成后将文档保存到 reports/ 目录下，文件名为 chaohu.md",
+                status="done",
+                completed_at=datetime.now(UTC),
+                assignee_agent_id=agent.id,
+            )
+            session.add(issue)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="failed",
+                error_code="process_lost",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": issue.id},
+            )
+            session.add(run)
+            await session.flush()
+
+            await HeartbeatService(session)._reconcile_failed_done_issue(agent, run)
+            await session.refresh(issue)
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action == "issue.done_missing_work_product"
+                    )
+                )
+            ).scalar_one()
+
+            assert issue.status == "blocked"
+            assert issue.completed_at is None
+            assert activity.entity_id == issue.id
+            assert activity.details["reason"] == "done_without_expected_work_product"
+    finally:
+        await engine.dispose()
+
+async def test_parent_children_settled_with_blocked_child_blocks_parent() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-settled-blocks-parent",
+                name="Step 15 Settled Blocks Parent",
+                issue_prefix="SBP",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="四海报告",
+                status="in_progress",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            blocked_child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="东海介绍",
+                status="blocked",
+            )
+            done_child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="北海介绍",
+                status="done",
+                completed_at=datetime.now(UTC),
+            )
+            session.add_all([blocked_child, done_child])
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+            )
+            session.add(run)
+            await session.flush()
+            session.add(
+                ActivityLog(
+                    org_id=org.id,
+                    actor_type="agent",
+                    actor_id=agent.id,
+                    action="issue.comment_added",
+                    entity_type="issue",
+                    entity_id=parent.id,
+                    run_id=run.id,
+                    details={"body": "进度更新：部分子任务 blocked"},
+                )
+            )
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                agent, run
+            )
+            await session.refresh(parent)
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action == "issue.parent_blocked_child_unresolved"
+                    )
+                )
+            ).scalar_one()
+
+            assert final.status == "succeeded"
+            assert parent.status == "blocked"
+            assert activity.details["reason"] == "parent_blocked_due_to_blocked_children"
+            assert activity.details["childIssues"][0]["title"] == "东海介绍"
+            assert "retry_child" in activity.details["nextActions"]
+    finally:
+        await engine.dispose()
+
+async def test_parent_done_with_blocked_child_is_closeout_failure() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-parent-blocked-child",
+                name="Step 15 Parent Blocked Child",
+                issue_prefix="PBC",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="五湖报告",
+                status="done",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="太湖介绍",
+                status="blocked",
+                assignee_agent_id=agent.id,
+            )
+            session.add(child)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+            )
+            session.add(run)
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                agent, run
+            )
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action == "issue.parent_blocked_child_unresolved"
+                    )
+                )
+            ).scalar_one()
+
+            assert final.status == "failed"
+            assert final.error_code == "closeout_missing"
+            assert activity.entity_id == parent.id
+            assert activity.details["reason"] == "parent_done_with_blocked_children"
+            assert activity.details["childIssues"][0]["title"] == "太湖介绍"
+    finally:
+        await engine.dispose()
+
+async def test_parent_primary_work_product_satisfies_child_output_evidence() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-parent-primary-evidence",
+                name="Step 15 Parent Primary Evidence",
+                issue_prefix="PCE",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Four beauties report",
+                status="done",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Xi Shi report",
+                status="done",
+                completed_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+            session.add(child)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": parent.id},
+            )
+            session.add(run)
+            await session.flush()
+            session.add(
+                IssueWorkProduct(
+                    org_id=org.id,
+                    issue_id=parent.id,
+                    type="document",
+                    provider="local_file",
+                    title="four-beauties.md",
+                    status="ready",
+                    is_primary=True,
+                    created_by_run_id=run.id,
+                )
+            )
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                agent, run
+            )
+            warnings = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.action
+                            == "issue.parent_deliverable_convergence_warning"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            assert final.status == "succeeded"
+            assert warnings == []
+    finally:
+        await engine.dispose()
+
+
+async def test_four_beauties_parent_child_delivery_acceptance() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-four-beauties",
+                name="Step 15 Four Beauties",
+                issue_prefix="FB",
+            )
+            session.add(org)
+            await session.flush()
+            parent_agent = Agent(org_id=org.id, name="Parent Agent")
+            child_agent = Agent(org_id=org.id, name="Child Agent")
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="四大美女报告",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child_titles = ["西施介绍", "王昭君介绍", "貂蝉介绍", "杨贵妃介绍"]
+            children: list[Issue] = []
+            for title in child_titles:
+                child = Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title=title,
+                    status="done",
+                    assignee_agent_id=child_agent.id,
+                    completed_at=datetime.now(UTC) - timedelta(minutes=5),
+                )
+                children.append(child)
+                session.add(child)
+            await session.flush()
+            for child in children:
+                session.add(
+                    IssueWorkProduct(
+                        org_id=org.id,
+                        issue_id=child.id,
+                        type="document",
+                        provider="octopus",
+                        title=f"reports/four-beauties/{child.title}.md",
+                        status="ready",
+                        is_primary=True,
+                        summary=child.title,
+                    )
+                )
+                session.add(
+                    ActivityLog(
+                        org_id=org.id,
+                        actor_type="agent",
+                        actor_id=child_agent.id,
+                        action="issue.updated",
+                        entity_type="issue",
+                        entity_id=child.id,
+                        details={"status": "done", "comment": f"完成{child.title}"},
+                    )
+                )
+            await session.flush()
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": children[-1].id},
+            )
+            session.add(child_run)
+            await session.flush()
+
+            await HeartbeatService(session)._wake_parent_after_child_settled(
+                child_run, children[-1]
+            )
+            outputs = await IssueService(session).get_child_outputs(
+                parent.id, include_work_products=True
+            )
+
+            assert outputs is not None
+            assert outputs["totalChildCount"] == 4
+            assert outputs["activeChildCount"] == 0
+            assert outputs["settledChildCount"] == 4
+            assert {child["title"] for child in outputs["children"]} == set(child_titles)
+            assert all(child["workProducts"] for child in outputs["children"])
+            continuation = (
+                await session.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == parent_agent.id,
+                        HeartbeatRun.status == "queued",
+                    )
+                )
+            ).scalar_one()
+            assert continuation.context_snapshot["wakeReason"] == "issue_children_settled"
+            activity = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity_id == parent.id,
+                        ActivityLog.action == "issue.children_settled",
+                    )
+                )
+            ).scalar_one()
+            assert activity.details["completedChildIssueId"] == children[-1].id
+
+            parent.status = "done"
+            parent.completed_at = datetime.now(UTC)
+            parent_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=parent_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+            )
+            session.add(parent_run)
+            await session.flush()
+            session.add(
+                IssueWorkProduct(
+                    org_id=org.id,
+                    issue_id=parent.id,
+                    type="document",
+                    provider="octopus",
+                    title="reports/four-beauties.md",
+                    status="ready",
+                    is_primary=True,
+                    summary="四大美女最终汇总报告",
+                    created_by_run_id=parent_run.id,
+                )
+            )
+            await session.flush()
+
+            final = await HeartbeatService(session)._enforce_closeout_governance_success(
+                parent_agent, parent_run
+            )
+            warnings = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.action
+                            == "issue.parent_deliverable_convergence_warning"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            detail = await IssueService(session).get_by_id(parent.id)
+
+            assert final.status == "succeeded"
+            assert warnings == []
+            assert detail is not None
+            assert detail["workProducts"][0]["title"] == "reports/four-beauties.md"
+            assert detail["workProducts"][0]["issueId"] == parent.id
     finally:
         await engine.dispose()
 
@@ -2693,6 +3282,9 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             assert isinstance(artifacts_dir, str)
             artifact = Path(artifacts_dir) / "analysis-plan.md"
             artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
+            shared_report = Path(workspace) / "reports" / "four-beauties.md"
+            shared_report.parent.mkdir(parents=True, exist_ok=True)
+            shared_report.write_text("# Four Beauties\n\nShared report.\n", encoding="utf-8")
             nested_artifact = issue_artifacts / "python-demo" / "README.md"
             nested_artifact.parent.mkdir(parents=True, exist_ok=True)
             nested_artifact.write_text(
@@ -2765,6 +3357,10 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
                 org_id=org.id,
                 project_id=project["id"],
                 title="Generate summary files",
+                description=(
+                    "Expected shared deliverables: analysis-plan.md and "
+                    "reports/four-beauties.md"
+                ),
             )
             session.add(issue)
             await session.flush()
@@ -2797,6 +3393,8 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert titles == {
         "CLAUDE_SUMMARY.md",
         "python-demo/README.md",
+        "analysis-plan.md",
+        "reports/four-beauties.md",
     }
     assert all(not title.startswith("agents/") for title in titles)
     assert all(product["contentPath"] for product in result_json["workProducts"])
@@ -2805,6 +3403,8 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     assert detail_titles == {
         "CLAUDE_SUMMARY.md",
         "python-demo/README.md",
+        "analysis-plan.md",
+        "reports/four-beauties.md",
     }
     metadata_by_title = {
         product["title"]: product["metadata"] for product in detail["workProducts"]
@@ -2814,6 +3414,13 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
     nested_metadata = metadata_by_title["python-demo/README.md"]
     assert isinstance(nested_metadata, dict)
     assert nested_metadata["source"] == "issue_artifacts_scan"
+    org_artifact_metadata = metadata_by_title["analysis-plan.md"]
+    assert isinstance(org_artifact_metadata, dict)
+    assert org_artifact_metadata["source"] == "organization_artifacts_scan"
+    shared_metadata = metadata_by_title["reports/four-beauties.md"]
+    assert isinstance(shared_metadata, dict)
+    assert shared_metadata["source"] == "shared_workspace_scan"
+    assert shared_metadata["workspacePath"] == "reports/four-beauties.md"
 
 
 async def test_run_preflight_and_adapter_execution_record_workspace_operations(

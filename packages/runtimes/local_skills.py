@@ -54,7 +54,7 @@ def configure_managed_profile_env(env: dict[str, str], home: Path) -> None:
         Path(env[key]).mkdir(parents=True, exist_ok=True)
 
 
-def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
+def ensure_octopus_cli_shim(env: dict[str, str], home: Path) -> Path:
     shim_dir = home / ".octopus" / "bin"
     shim_dir.mkdir(parents=True, exist_ok=True)
     repo_root = Path(__file__).resolve().parents[2]
@@ -65,7 +65,7 @@ def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
         pythonpath = f"{pythonpath}{os.pathsep}{existing_pythonpath}"
     env["PYTHONPATH"] = pythonpath
 
-    unix_shim = shim_dir / "control-plane"
+    unix_shim = shim_dir / "octopus"
     unix_shim.write_text(
         "\n".join(
             [
@@ -78,7 +78,7 @@ def ensure_control_plane_cli_shim(env: dict[str, str], home: Path) -> Path:
     )
     unix_shim.chmod(unix_shim.stat().st_mode | stat.S_IEXEC)
 
-    windows_shim = shim_dir / "control-plane.cmd"
+    windows_shim = shim_dir / "octopus.cmd"
     windows_shim.write_text(
         "\r\n".join(
             [

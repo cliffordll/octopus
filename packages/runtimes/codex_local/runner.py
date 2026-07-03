@@ -18,7 +18,7 @@ from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     configure_managed_profile_env,
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
 )
 from ..provider_config import apply_provider_env, model_for_cli
@@ -86,7 +86,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     managed_home = await _prepare_managed_home(env, context.on_log)
     _prepare_managed_git_config(env)
     if managed_home is not None:
-        ensure_control_plane_cli_shim(env, managed_home)
+        ensure_octopus_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     materialize_runtime_skills(
         runtime_type="codex_local",

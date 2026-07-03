@@ -65,8 +65,15 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
     workspace_artifacts_dir = (
         f"{normalized_worktree}/artifacts" if normalized_worktree else None
     )
+    workspace_mode = _string(workspace_context.get("mode"))
+    workspace_kind = _string(workspace_context.get("workspaceKind"))
+    is_shared_project_workspace = (
+        workspace_mode == "shared_workspace" and workspace_kind == "project_execution"
+    )
     preferred_artifacts_label = (
-        "organization artifacts directory"
+        "workspace worktree with a clear shared path such as `reports/`"
+        if is_shared_project_workspace
+        else "organization artifacts directory"
         if artifacts_dir
         else "workspace worktree or the task-specified path"
     )
@@ -98,7 +105,8 @@ def _workspace_guidance(workspace: dict[str, Any] | None) -> str:
             "- Treat the workspace worktree as the project source/download directory for this run.",
             "- Put project-specific checkouts, downloaded source bundles, dependency snapshots, and code edits under the workspace worktree.",
             f"- Prefer the {preferred_artifacts_label} for durable deliverables produced by this run, such as reports, screenshots, CSV files, mockups, logs, and handoff documents, unless the user requested a specific project path.",
-            "- `OCTOPUS_ISSUE_ARTIFACTS_DIR` is a compatibility convenience path for issue-scoped outputs, not a workspace isolation boundary.",
+            "- In shared project workspace mode, do not use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` as the default deliverable target. Use `$OCTOPUS_WORKSPACE_CWD` plus a clear shared path instead, for example `reports/<name>.md`.",
+            "- `OCTOPUS_ISSUE_ARTIFACTS_DIR` is only a compatibility convenience path for issue-scoped outputs, not a workspace isolation boundary or the default target for shared project work.",
             "- In shared workspace mode, files may intentionally be shared with other tasks; use clear paths and mention created or modified deliverables in closeout so they can be traced to this issue/run.",
             "- Use relative paths under the workspace worktree for source changes, patches, temporary project files, and project-local generated files.",
             "- Files written outside these managed paths may not appear as issue documents or work products.",

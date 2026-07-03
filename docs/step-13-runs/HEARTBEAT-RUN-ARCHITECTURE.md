@@ -1,4 +1,4 @@
-﻿# Heartbeat Run、Scheduler、Dispatcher、Inbox 与 OCTOPUS_SANDBOX_DIR 架构说明
+# Heartbeat Run、Scheduler、Dispatcher、Inbox 与 OCTOPUS_SANDBOX_DIR 架构说明
 
 这份文档整理当前问答后的统一理解。目标是把几件容易混淆的事分开：
 
@@ -69,7 +69,7 @@ issue 创建 / 分配 / 评论 @agent / review / 自动收口 followup
   -> runtime adapter 启动 agent CLI 子进程
   -> 子进程 cwd 使用 issue workspace
   -> agent 执行具体 issue
-  -> agent 用 control-plane issue done/block/comment/review 回写结果
+  -> agent 用 octopus issue done/block/comment/review 回写结果
   -> run 结束后再调用 dispatcher，继续派发同 agent 的下一条 queued run
 ```
 
@@ -172,7 +172,7 @@ timer 巡检：
 
 `inbox` 是待办视图，不是执行队列。
 
-当前 `control-plane agent inbox` 调的是：
+当前 `octopus agent inbox` 调的是：
 
 ```text
 GET /api/agents/me/inbox-lite
@@ -242,7 +242,7 @@ agent 醒来后查 inbox 不应该是常规任务启动方式。
 
 不是。
 
-scheduler 不调用 `control-plane` CLI。
+scheduler 不调用 `octopus` CLI。
 
 实际链路是：
 
@@ -260,7 +260,7 @@ server scheduler loop
   -> runtime adapter 启动 codex / opencode / claude / process 子进程
 ```
 
-`control-plane` CLI 是 agent 子进程启动后用来和 server 通信的工具，不是 scheduler 的实现方式。
+`octopus` CLI 是 agent 子进程启动后用来和 server 通信的工具，不是 scheduler 的实现方式。
 
 ## 9. 为什么 no-issue run 需要 OCTOPUS_SANDBOX_DIR
 
@@ -424,7 +424,7 @@ heartbeat sandbox workspace 是无任务运行的安全落脚点。
 
 ```text
 智能体读 workspace .env
-或硬编码 workspace/.octopus/bin/control-plane
+或硬编码 workspace/.octopus/bin/octopus
 ```
 
 这不是 `OCTOPUS_SANDBOX_DIR` 的问题。

@@ -2,26 +2,22 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond, respondStream } from "./render-app";
-
 afterEach(() => {
   cleanup();
   localStorage.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
-}, 10000);
-
+}, 10000);
 async function expandRunRecords() {
   const region = await screen.findByRole("region", { name: "运行记录" });
   const expandButton = within(region).queryByRole("button", { name: "展开运行记录" });
   if (expandButton) await userEvent.click(expandButton);
   return region;
 }
-
 async function ensureRunExpanded(region: HTMLElement, runId: string) {
   const expandButton = within(region).queryByRole("button", { name: `展开运行 ${runId}` });
   if (expandButton) await userEvent.click(expandButton);
 }
-
 it("shows existing run records without collapsing the section by default", async () => {
   const longSummary = `任务执行摘要很长，需要默认收起，避免运行记录布局被撑乱。${"继续补充执行细节。".repeat(12)}最终结论。`;
   const issue = {
@@ -110,9 +106,7 @@ it("shows existing run records without collapsing the section by default", async
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const runRecordsRegion = await screen.findByRole("region", { name: "运行记录" });
   expect((await within(runRecordsRegion).findAllByText("run-visible")).length).toBeGreaterThan(0);
   expect(within(runRecordsRegion).getByRole("region", { name: "运行上下文" })).toBeInTheDocument();
@@ -146,7 +140,6 @@ it("shows existing run records without collapsing the section by default", async
   expect(within(costPanel).getByText("340")).toBeInTheDocument();
   expect(within(costPanel).getByText("已缓存")).toBeInTheDocument();
   expect(within(costPanel).getByText("900")).toBeInTheDocument();
-
   await ensureRunExpanded(runRecordsRegion, "run-visible");
   expect(await within(runRecordsRegion).findByRole("heading", { name: "运行上下文" })).toBeInTheDocument();
   expect(within(runRecordsRegion).getByRole("button", { name: /第 1 次 run-visible.*来源 assignment.*运行中/ })).toBeInTheDocument();
@@ -156,7 +149,6 @@ it("shows existing run records without collapsing the section by default", async
   await ensureRunExpanded(runRecordsRegion, "run-second");
   expect((await within(runRecordsRegion).findAllByRole("heading", { name: "运行上下文" })).length).toBeGreaterThanOrEqual(2);
 });
-
 it("shows an issue and records comments and review decisions", async () => {
   const longIssueTitle = "实现登录流程并处理一个非常长的任务名称用于验证顶部操作按钮不会被标题挤压变形";
   const issue = {
@@ -287,8 +279,15 @@ it("shows an issue and records comments and review decisions", async () => {
     if (path === "/api/orgs/org-1/issues" && init?.method === "GET") {
       return respond([issue]);
     }
-    if (path === "/api/orgs/org-1/issues?parentId=issue-1" && init?.method === "GET") {
-      return respond([childIssue]);
+    if (path === "/api/issues/issue-1/children?includeWorkProducts=true" && init?.method === "GET") {
+      return respond({
+        parent: issue,
+        children: [{ ...childIssue, workProducts: [issue.workProducts[2]], lastCloseout: null }],
+        activeChildCount: 1,
+        settledChildCount: 0,
+        totalChildCount: 1,
+        includeWorkProducts: true,
+      });
     }
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
       return respond([{ id: "project-1", orgId: "org-1", name: "控制台", status: "in_progress", urlKey: "console" }]);
@@ -468,7 +467,6 @@ it("shows an issue and records comments and review decisions", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: longIssueTitle })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "复制 ID" })).toHaveLength(1);
@@ -490,9 +488,8 @@ it("shows an issue and records comments and review decisions", async () => {
   const runRecordsRegion = await expandRunRecords();
   await ensureRunExpanded(runRecordsRegion, "run-1");
   const workProductsRegion = screen.getByRole("region", { name: "运行产物" });
-  expect(workProductsRegion).toHaveTextContent("任务产物已折叠");
-  await userEvent.click(within(workProductsRegion).getByRole("button", { name: "展开任务产物 3" }));
-  expect(workProductsRegion).toHaveTextContent("登录流程 PR");
+  expect(workProductsRegion).toHaveTextContent("登录流程 PR");
+  expect(workProductsRegion).toHaveTextContent("最终报告");
   expect(workProductsRegion).toHaveTextContent("运行摘要");
   expect(workProductsRegion).toHaveTextContent("西施介绍.md");
   expect(workProductsRegion).toHaveTextContent("来自子任务");
@@ -500,7 +497,8 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(workProductsRegion).toHaveTextContent("运行产物");
   expect(workProductsRegion).toHaveTextContent("共享工作区");
   expect(workProductsRegion).toHaveTextContent("技术详情");
-  expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
+  expect(screen.getByText("登录流程 PR")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("产物 西施介绍.md");
   expect(screen.getByRole("link", { name: "下载运行产物" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
   expect(screen.getByRole("link", { name: "在工作区打开" })).toHaveAttribute(
     "href",
@@ -565,14 +563,12 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
   ]);
-
   await userEvent.type(screen.getByLabelText("添加评论"), "准备合并");
   await userEvent.click(screen.getByRole("button", { name: "发送评论" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/comments",
     expect.objectContaining({ method: "POST" }),
   );
-
   await userEvent.click(screen.getByRole("button", { name: "添加附件" }));
   await userEvent.upload(screen.getByLabelText("上传本地文件"), new File(["upload"], "upload.txt", { type: "text/plain" }));
   expect(await screen.findByRole("status")).toHaveTextContent("已上传 upload.txt");
@@ -580,13 +576,11 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/orgs/org-1/issues/issue-1/attachments",
     expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
   );
-
   await userEvent.click(within(attachmentRegion).getByRole("button", { name: "删除 note.txt" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/attachments/attachment-1",
     expect.objectContaining({ method: "DELETE" }),
   );
-
   await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/review-decision",
@@ -600,7 +594,6 @@ it("shows an issue and records comments and review decisions", async () => {
     "/api/issues/issue-1/review-decision",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ decision: "needs_followup" }) }),
   );
-
   await userEvent.type(screen.getByLabelText("子任务名称"), "新增子任务");
   await userEvent.click(screen.getByRole("button", { name: "添加子任务" }));
   expect(fetchMock).toHaveBeenCalledWith(
@@ -619,7 +612,7 @@ it("shows an issue and records comments and review decisions", async () => {
     }),
   );
   expect(fetchMock).toHaveBeenCalledWith(
-    "/api/orgs/org-1/issues?parentId=issue-1",
+    "/api/issues/issue-1/children?includeWorkProducts=true",
     expect.objectContaining({ method: "GET" }),
   );
   expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("新增子任务");
@@ -628,7 +621,6 @@ it("shows an issue and records comments and review decisions", async () => {
     expect.objectContaining({ method: "GET" }),
   );
 }, 10000);
-
 it("suggests agents when adding issue comment mentions", async () => {
   const issue = {
     id: "issue-1",
@@ -677,9 +669,7 @@ it("suggests agents when adding issue comment mentions", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const commentBox = await screen.findByLabelText("添加评论");
   await userEvent.type(commentBox, "请 @rev");
   const mentionList = await screen.findByRole("listbox", { name: "智能体提及候选" });
@@ -693,7 +683,6 @@ it("suggests agents when adding issue comment mentions", async () => {
     expect.objectContaining({ method: "POST" }),
   );
   await userEvent.keyboard("{Enter}");
-
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/comments",
     expect.objectContaining({
@@ -701,8 +690,7 @@ it("suggests agents when adding issue comment mentions", async () => {
       body: JSON.stringify({ body: "请 @reviewer \n补充说明" }),
     }),
   );
-});
-
+});
 it("refreshes subtasks while the parent issue run is still live", async () => {
   const issue = {
     id: "issue-1",
@@ -764,10 +752,16 @@ it("refreshes subtasks while the parent issue run is still live", async () => {
     if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
     if (path === "/api/issues/issue-1/activity" && init?.method === "GET") return respond([]);
-    if (path === "/api/orgs/org-1/issues?parentId=issue-1" && init?.method === "GET") {
+    if (path === "/api/issues/issue-1/children?includeWorkProducts=true" && init?.method === "GET") {
       childListCalls += 1;
-      if (childListCalls === 1) return respond([]);
-      return respond([{ ...childIssue, status: childListCalls >= 3 ? "done" : "todo" }]);
+      return respond({
+        parent: issue,
+        children: childListCalls === 1 ? [] : [{ ...childIssue, status: childListCalls >= 3 ? "done" : "todo", workProducts: [], lastCloseout: null }],
+        activeChildCount: childListCalls === 1 ? 0 : 1,
+        settledChildCount: childListCalls >= 3 ? 1 : 0,
+        totalChildCount: childListCalls === 1 ? 0 : 1,
+        includeWorkProducts: true,
+      });
     }
     if (path === "/api/heartbeat-runs/run-live" && init?.method === "GET") return respond(run);
     if (path === "/api/heartbeat-runs/run-live/events" && init?.method === "GET") return respond([]);
@@ -776,18 +770,14 @@ it("refreshes subtasks while the parent issue run is still live", async () => {
     if (path.startsWith("/api/heartbeat-runs/run-live/stream") && init?.method === "GET") return respondStream([]);
     return respond(issue);
   });
-  vi.stubGlobal("fetch", fetchMock);
-
-  renderApp("/orgs/org-1/issues/issue-1");
-
-  expect(await screen.findByText("暂无子任务。")).toBeInTheDocument();
-
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/orgs/org-1/issues/issue-1");
+  expect(await screen.findByText("暂无子任务。")).toBeInTheDocument();
   await waitFor(() => expect(childListCalls).toBeGreaterThanOrEqual(2), { timeout: 1500 });
   expect(await screen.findByText("运行中新建子任务")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("todo");
   await waitFor(() => expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("done"), { timeout: 1500 });
-}, 3000);
-
+}, 3000);
 it("executes an assigned issue through the issue execution route", async () => {
   let hasExecuted = false;
   const longAgentReply = `${"长回复内容。".repeat(130)}最终结论`;
@@ -966,7 +956,6 @@ it("executes an assigned issue through the issue execution route", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   const executeButton = await screen.findByRole("button", { name: "启动执行" });
   expect(executeButton).not.toHaveAttribute("aria-disabled");
@@ -977,7 +966,6 @@ it("executes an assigned issue through the issue execution route", async () => {
   await userEvent.click(screen.getByRole("button", { name: "通过评审" }));
   expect(screen.getByText("请先设置 Reviewer，当前任务不能评审。")).toBeInTheDocument();
   expect(screen.getByText("已连接到运行 run-1")).toBeInTheDocument();
-
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1",
     expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "in_progress" }) }),
@@ -1105,7 +1093,6 @@ it("executes an assigned issue through the issue execution route", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 });
-
 it("auto-expands the latest live run and explains silent runtime progress", async () => {
   const issue = {
     id: "issue-1",
@@ -1170,9 +1157,7 @@ it("auto-expands the latest live run and explains silent runtime progress", asyn
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const runRecordsRegion = await expandRunRecords();
   expect(await within(runRecordsRegion).findByRole("button", { name: "折叠运行 run-live" })).toBeInTheDocument();
   const output = await screen.findByRole("region", { name: "执行输出" });
@@ -1182,7 +1167,6 @@ it("auto-expands the latest live run and explains silent runtime progress", asyn
   expect(output).toHaveTextContent("动态刷新中");
   expect(output).not.toHaveTextContent("stream 连接中");
 });
-
 it("surfaces operator closeout review activity on the issue page", async () => {
   const issue = {
     id: "issue-1",
@@ -1259,9 +1243,7 @@ it("surfaces operator closeout review activity on the issue page", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   expect(await screen.findByRole("heading", { name: "收口缺失任务" })).toBeInTheDocument();
   expect(await screen.findByRole("status", { name: "需要人工确认收口" })).toHaveTextContent(
     "自动收口已尝试 2/2 次",
@@ -1271,8 +1253,7 @@ it("surfaces operator closeout review activity on the issue page", async () => {
   expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
   expect(screen.getByText("需要人工确认收口").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
   expect(screen.getByText(/Run run-closeout/)).toHaveClass("muted");
-});
-
+});
 it("does not keep stale closeout review warning after a newer run starts", async () => {
   const issue = {
     id: "issue-1",
@@ -1359,17 +1340,71 @@ it("does not keep stale closeout review warning after a newer run starts", async
     }
     return respond(issue);
   });
-  vi.stubGlobal("fetch", fetchMock);
-
-  renderApp("/orgs/org-1/issues/issue-1");
-
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: "重新执行任务" })).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByRole("status", { name: "需要人工确认收口" })).not.toBeInTheDocument());
   const activityRegion = await screen.findByRole("region", { name: "动态" });
   expect(activityRegion).toHaveTextContent("需要人工确认收口");
   expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
-});
-
+});
+it("surfaces parent child-settled and convergence warning activity", async () => {
+  const issue = {
+    id: "issue-1",
+    orgId: "org-1",
+    identifier: "OCT-1",
+    title: "四大美女汇总",
+    description: "汇总子任务输出",
+    status: "done",
+    priority: "high",
+    projectId: null,
+    goalId: null,
+    parentId: null,
+    assigneeAgentId: "agent-1",
+    assigneeUserId: null,
+    reviewerAgentId: null,
+    reviewerUserId: null,
+    originKind: "manual",
+    originId: null,
+    issueNumber: 1,
+    requestDepth: 0,
+    startedAt: "2026-06-02T10:00:00Z",
+    completedAt: "2026-06-02T11:00:00Z",
+    workProducts: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([{ id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle" }]);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/goals" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/heartbeat-runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/runs" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/heartbeat-context" && init?.method === "GET") return respond({ issueId: "issue-1" });
+    if (path === "/api/issues/issue-1/comments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/attachments" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/documents" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/work-products" && init?.method === "GET") return respond([]);
+    if (path === "/api/issues/issue-1/children?includeWorkProducts=true" && init?.method === "GET") {
+      return respond({ parent: issue, children: [], activeChildCount: 0, settledChildCount: 4, totalChildCount: 4, includeWorkProducts: true });
+    }
+    if (path === "/api/issues/issue-1/activity" && init?.method === "GET") {
+      return respond([
+        { id: "activity-settled", orgId: "org-1", action: "issue.children_settled", entityType: "issue", entityId: "issue-1", actorType: "system", details: { completedChildIssueId: "issue-child-4" }, createdAt: "2026-06-02T10:00:00Z" },
+        { id: "activity-warning", orgId: "org-1", action: "issue.parent_deliverable_convergence_warning", entityType: "issue", entityId: "issue-1", actorType: "system", details: {}, createdAt: "2026-06-02T11:00:00Z" },
+      ]);
+    }
+    return respond(issue);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderApp("/orgs/org-1/issues/issue-1");
+  expect(await screen.findByRole("heading", { name: "四大美女汇总" })).toBeInTheDocument();
+  const activityRegion = await screen.findByRole("region", { name: "动态" });
+  expect(activityRegion).toHaveTextContent("子任务已完成");
+  expect(activityRegion).toHaveTextContent("所有子任务已进入终态，父任务已被唤醒继续汇总。");
+  expect(activityRegion).toHaveTextContent("父任务汇总证据不足");
+  expect(activityRegion).toHaveTextContent("父任务已收尾，但没有看到父任务最终产物或引用子任务结果的证据。");
+});
 it("surfaces missing reviewer closeout decisions on the issue page", async () => {
   const issue = {
     id: "issue-1",
@@ -1449,9 +1484,7 @@ it("surfaces missing reviewer closeout decisions on the issue page", async () =>
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   expect(await screen.findByRole("heading", { name: "缺少评审结论" })).toBeInTheDocument();
   expect(await screen.findByRole("status", { name: "需要人工确认收口" })).toHaveTextContent(
     "Reviewer 收口已尝试 1/1 次",
@@ -1461,7 +1494,6 @@ it("surfaces missing reviewer closeout decisions on the issue page", async () =>
   expect(activityRegion).toHaveTextContent("Reviewer 收口已尝试 1/1 次");
   expect(within(activityRegion).getByText("缺少评审结论").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
 });
-
 it("shows unreported usage instead of zero when runs omit token events", async () => {
   const issue = {
     id: "issue-1",
@@ -1522,14 +1554,11 @@ it("shows unreported usage instead of zero when runs omit token events", async (
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const costPanel = await screen.findByRole("region", { name: "任务成本" });
   expect(within(costPanel).getAllByText("未上报").length).toBeGreaterThanOrEqual(4);
   expect(costPanel).toHaveTextContent("当前运行未上报 token/cost 事件。");
 });
-
 it("prompts for explicit closeout when the latest run succeeded without a closeout signal", async () => {
   const issue = {
     id: "issue-1",
@@ -1612,9 +1641,7 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const prompt = await screen.findByRole("status", { name: "需要收尾" });
   expect(prompt).toHaveTextContent("最新运行已成功，但任务仍未收口");
   expect(prompt).toHaveTextContent("任务阶段下拉");
@@ -1630,7 +1657,6 @@ it("prompts for explicit closeout when the latest run succeeded without a closeo
   expect(await screen.findByText("已创建收尾跟进 run-followup")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "标记任务完成" })).not.toBeInTheDocument();
 });
-
 it("refreshes issue status after a reviewer run completes", async () => {
   const staleIssue = {
     id: "issue-1",
@@ -1700,13 +1726,10 @@ it("refreshes issue status after a reviewer run completes", async () => {
     return respond(staleIssue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   expect(await screen.findByText("任务阶段：评审中")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText("任务阶段：已完成")).toBeInTheDocument());
 });
-
 it("labels cancelled passive follow-up runs explicitly", async () => {
   const issue = {
     id: "issue-1",
@@ -1783,9 +1806,7 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   await screen.findByRole("heading", { name: "需要收尾的任务" });
   expect(screen.getByText("最新运行结果：成功")).toBeInTheDocument();
   const runRecords = await screen.findByRole("region", { name: "运行记录" });
@@ -1794,7 +1815,6 @@ it("labels cancelled passive follow-up runs explicitly", async () => {
   expect(within(runRecords).getAllByText("已停止").length).toBeGreaterThan(0);
   expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
-
 it("does not show user cancelled task runs as page errors", async () => {
   const issue = {
     id: "issue-1",
@@ -1855,14 +1875,11 @@ it("does not show user cancelled task runs as page errors", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   await screen.findByRole("heading", { name: "取消后的任务" });
   expect(screen.getByText("最新运行结果：已取消")).toBeInTheDocument();
   expect(screen.queryByText("run cancelled")).not.toBeInTheDocument();
 });
-
 it("refreshes server registered work products when an issue run succeeds", async () => {
   const issue = {
     id: "issue-1",
@@ -1957,10 +1974,8 @@ it("refreshes server registered work products when an issue run succeeds", async
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
-
   const runRecordsRegion = await expandRunRecords();
   await ensureRunExpanded(runRecordsRegion, "run-1");
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 1" }));
@@ -1974,7 +1989,6 @@ it("refreshes server registered work products when an issue run succeeds", async
     expect.objectContaining({ method: "GET" }),
   );
 });
-
 it("allows re-executing an issue after the latest run failed", async () => {
   const issue = {
     id: "issue-1",
@@ -2042,7 +2056,6 @@ it("allows re-executing an issue after the latest run failed", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("heading", { name: "修复运行错误" })).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: "重新执行" })).toBeInTheDocument();
@@ -2057,7 +2070,6 @@ it("allows re-executing an issue after the latest run failed", async () => {
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
 });
-
 it("retries failed reviewer and passive follow-up runs from their run records only", async () => {
   const issue = {
     id: "issue-1",
@@ -2157,7 +2169,6 @@ it("retries failed reviewer and passive follow-up runs from their run records on
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   const runRecords = await expandRunRecords();
   expect(within(runRecords).getAllByText("Reviewer 评审")).toHaveLength(1);
@@ -2174,29 +2185,24 @@ it("retries failed reviewer and passive follow-up runs from their run records on
   expect(within(runRecords).queryByRole("button", { name: "重新执行 Reviewer 评审 run-review" })).not.toBeInTheDocument();
   expect(within(runRecords).queryByRole("button", { name: "重新执行 收尾跟进 run-followup" })).not.toBeInTheDocument();
   expect(within(runRecords).queryByRole("button", { name: "重新执行 Reviewer 评审 run-assignment" })).not.toBeInTheDocument();
-
   await ensureRunExpanded(runRecords, "run-review");
   let outputRegion = await screen.findByRole("region", { name: "执行输出" });
   await userEvent.click(within(outputRegion).getByRole("button", { name: "重新执行 Reviewer 评审 run-review" }));
-
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-review/retry",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
-
   await ensureRunExpanded(runRecords, "run-followup");
   outputRegion = (await screen.findAllByRole("region", { name: "执行输出" })).find((region) =>
     within(region).queryByRole("button", { name: "重新执行 收尾跟进 run-followup" }),
   ) as HTMLElement;
   expect(outputRegion).toBeInTheDocument();
   await userEvent.click(within(outputRegion).getByRole("button", { name: "重新执行 收尾跟进 run-followup" }));
-
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/heartbeat-runs/run-followup/retry",
     expect.objectContaining({ method: "POST", body: "{}" }),
   );
 });
-
 it("hides the live stream log when it duplicates the persisted run log", async () => {
   const issue = {
     id: "issue-1",
@@ -2248,9 +2254,7 @@ it("hides the live stream log when it duplicates the persisted run log", async (
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const runRecordsRegion = await expandRunRecords();
   await ensureRunExpanded(runRecordsRegion, "run-1");
   expect(await screen.findByRole("heading", { name: "执行输出" })).toBeInTheDocument();
@@ -2260,7 +2264,6 @@ it("hides the live stream log when it duplicates the persisted run log", async (
   expect(await screen.findByText("same log")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "实时日志增量" })).not.toBeInTheDocument();
 });
-
 it("shows repeat execution after the latest run succeeded", async () => {
   const issue = {
     id: "issue-1",
@@ -2319,7 +2322,6 @@ it("shows repeat execution after the latest run succeeded", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   const runRecordsRegion = await expandRunRecords();
@@ -2329,7 +2331,6 @@ it("shows repeat execution after the latest run succeeded", async () => {
   await userEvent.click(within(screen.getByRole("region", { name: "运行产物" })).getByRole("button", { name: "展开任务产物 0" }));
   expect(screen.getByRole("region", { name: "运行产物" })).toHaveTextContent("最新运行已成功，但 server 没有登记受管产物。");
 });
-
 it("ignores stale selected runs that do not belong to the issue", async () => {
   localStorage.setItem("octopus:issue-run:org-1:issue-1", "stale-running-run");
   const issue = {
@@ -2396,14 +2397,11 @@ it("ignores stale selected runs that do not belong to the issue", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   expect(await screen.findByRole("button", { name: "再次执行" })).toBeInTheDocument();
   expect(screen.getByText("最新运行结果：成功")).toBeInTheDocument();
   expect(screen.queryByText("运行：运行中")).not.toBeInTheDocument();
 });
-
 it("refreshes issue runs when execute returns no new run id", async () => {
   const issue = {
     id: "issue-1",
@@ -2447,17 +2445,14 @@ it("refreshes issue runs when execute returns no new run id", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   await userEvent.click(await screen.findByRole("button", { name: "启动执行" }));
-
   expect(screen.getByRole("status")).toHaveTextContent("执行请求已提交，暂未返回新的运行记录，正在刷新任务运行。");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/issues/issue-1/runs",
     expect.objectContaining({ method: "GET" }),
   );
 });
-
 it("explains why an unassigned issue cannot be executed", async () => {
   const issue = {
     id: "issue-1",
@@ -2497,7 +2492,6 @@ it("explains why an unassigned issue cannot be executed", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
   const executeButton = await screen.findByRole("button", { name: "启动执行" });
   expect(executeButton).toHaveAttribute("aria-disabled", "true");
@@ -2509,7 +2503,6 @@ it("explains why an unassigned issue cannot be executed", async () => {
     expect.objectContaining({ method: "POST" }),
   );
 });
-
 it("explains queued issue runs from the assignee active queue", async () => {
   const issue = {
     id: "issue-1",
@@ -2572,9 +2565,7 @@ it("explains queued issue runs from the assignee active queue", async () => {
     return respond(issue);
   });
   vi.stubGlobal("fetch", fetchMock);
-
   renderApp("/orgs/org-1/issues/issue-1");
-
   const queueRegion = await screen.findByRole("region", { name: "运行队列状态" });
   expect(queueRegion).toHaveTextContent("Builder 正在处理 3 个活跃运行");
   expect(queueRegion).toHaveTextContent("当前任务前面还有 2 个运行");

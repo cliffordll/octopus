@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import mimetypes
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,7 +14,7 @@ from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -78,7 +79,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         context=context,
         env=env,
     )
-    ensure_control_plane_cli_shim(env, home)
+    ensure_octopus_cli_shim(env, home)
     _materialize_runtime_provider_config(home, context.config)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
@@ -255,6 +256,7 @@ async def _run_once(
         result_json=_result_json(
             stdout_text, stderr_text, parsed, model, error, loaded_skills
         ),
+        work_products=_work_products_from_opencode_writes(context, parsed),
     )
 
 
@@ -346,6 +348,7 @@ async def _execute_with_communicate(
         result_json=_result_json(
             stdout_text, stderr_text, parsed, model, error, loaded_skills
         ),
+        work_products=_work_products_from_opencode_writes(context, parsed),
     )
 
 
@@ -501,6 +504,145 @@ def _read_opencode_config(config_path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+
+def _work_products_from_opencode_writes(
+    context: RuntimeExecutionContext, parsed: dict
+) -> list[dict[str, object]]:
+    workspace_root = _workspace_root(context)
+    if workspace_root is None:
+        return []
+    written_files = parsed.get("writtenFiles")
+    if not isinstance(written_files, list):
+        return []
+    declared_paths = _normalized_path_set(parsed.get("declaredWorkProducts"))
+    primary_paths = _normalized_path_set(parsed.get("primaryWorkProducts"))
+    candidates: list[tuple[str, Path, bytes]] = []
+    seen: set[str] = set()
+    for value in written_files:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            path = Path(value).expanduser().resolve()
+        except OSError:
+            continue
+        if not _is_relative_to(path, workspace_root) or not path.is_file():
+            continue
+        rel_path = path.relative_to(workspace_root).as_posix()
+        if rel_path in seen or _is_excluded_work_product_path(rel_path):
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        if not content:
+            continue
+        seen.add(rel_path)
+        candidates.append((rel_path, path, content))
+    if not candidates:
+        return []
+
+    primary_path = next(
+        (rel for rel, _, _ in candidates if rel in primary_paths),
+        None,
+    )
+    if primary_path is None:
+        primary_path = next(
+            (rel for rel, _, _ in candidates if rel in declared_paths),
+            candidates[0][0] if len(candidates) == 1 else None,
+        )
+
+    workspace_ref = _workspace_ref(context)
+    products: list[dict[str, object]] = []
+    for rel_path, path, content in candidates:
+        products.append(
+            {
+                "title": rel_path,
+                "type": "document"
+                if path.suffix.lower() in {".md", ".txt"}
+                else "artifact",
+                "provider": "octopus",
+                "externalId": f"opencode_write:{workspace_ref}:{rel_path}",
+                "status": "active",
+                "reviewState": "none",
+                "isPrimary": rel_path == primary_path,
+                "summary": "File written by OpenCode during this run.",
+                "content": content,
+                "contentType": mimetypes.guess_type(path.name)[0] or "text/plain",
+                "filename": path.name,
+                "metadata": {
+                    "source": "opencode_write_event",
+                    "workspacePath": rel_path,
+                    "byteSize": len(content),
+                },
+            }
+        )
+    return products
+
+
+def _workspace_root(context: RuntimeExecutionContext) -> Path | None:
+    workspace_context = context.workspace
+    workspace = None
+    if isinstance(workspace_context, dict):
+        candidate = workspace_context.get("octopusWorkspace")
+        workspace = candidate if isinstance(candidate, dict) else workspace_context
+    cwd = workspace.get("cwd") if isinstance(workspace, dict) else None
+    if not isinstance(cwd, str) or not cwd.strip():
+        cwd = context.config.get("cwd")
+    if not isinstance(cwd, str) or not cwd.strip():
+        return None
+    try:
+        root = Path(cwd).expanduser().resolve()
+    except OSError:
+        return None
+    return root if root.is_dir() else None
+
+
+def _workspace_ref(context: RuntimeExecutionContext) -> str:
+    workspace_context = context.workspace
+    if isinstance(workspace_context, dict):
+        workspace = workspace_context.get("octopusWorkspace")
+        if isinstance(workspace, dict):
+            workspace_id = string(workspace.get("id"))
+            if workspace_id:
+                return workspace_id
+    return context.run_id
+
+
+def _normalized_path_set(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {
+        item.replace("\\", "/").strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _is_excluded_work_product_path(rel_path: str) -> bool:
+    parts = set(Path(rel_path).parts)
+    return bool(
+        parts
+        & {
+            ".git",
+            ".mypy_cache",
+            ".octopus",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        }
+    )
 def _result_json(
     stdout_text: str,
     stderr_text: str,

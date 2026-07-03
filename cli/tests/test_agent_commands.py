@@ -106,8 +106,8 @@ def test_agent_capabilities_outputs_static_supported_commands() -> None:
     assert main(["agent", "capabilities", "--json"], stdout=output) == 0
 
     body = output.getvalue()
-    assert "control-plane agent me" in body
-    assert "control-plane issue checkout" in body
+    assert "octopus agent me" in body
+    assert "octopus issue checkout" in body
     assert "checkoutExpectedStatuses" in body
 
 
