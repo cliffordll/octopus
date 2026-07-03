@@ -24,7 +24,13 @@ from packages.database.queries.issues import (
     update_issue,
 )
 from packages.database.queries.organizations import increment_issue_counter
-from packages.database.schema import ActivityLog, Asset, Issue, IssueAttachment, IssueComment
+from packages.database.schema import (
+    ActivityLog,
+    Asset,
+    Issue,
+    IssueAttachment,
+    IssueComment,
+)
 from packages.shared.constants.issue import (
     IssueOriginKind,
     IssuePriority,
@@ -243,7 +249,9 @@ class IssueService:
                 )
             child_items.append(item)
         active_count = sum(1 for child in children if child.status in active_statuses)
-        settled_count = sum(1 for child in children if child.status in terminal_statuses)
+        settled_count = sum(
+            1 for child in children if child.status in terminal_statuses
+        )
         blocked_count = sum(
             1 for child in children if child.status in {"blocked", "cancelled"}
         )
@@ -491,6 +499,39 @@ class IssueService:
             )
         return await self._to_detail(row)
 
+    async def _accepted_incomplete_child_ids(self, parent: Issue) -> set[str]:
+        rows = (
+            (
+                await self._session.execute(
+                    select(ActivityLog.details).where(
+                        and_(
+                            ActivityLog.org_id == parent.org_id,
+                            ActivityLog.entity_type == "issue",
+                            ActivityLog.entity_id == parent.id,
+                            ActivityLog.action == "issue.incomplete_accepted",
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accepted: set[str] = set()
+        for details in rows:
+            if not isinstance(details, dict):
+                continue
+            child_issue_id = details.get("childIssueId")
+            if isinstance(child_issue_id, str) and child_issue_id:
+                accepted.add(child_issue_id)
+            child_issue_ids = details.get("childIssueIds")
+            if isinstance(child_issue_ids, list):
+                accepted.update(
+                    child_id
+                    for child_id in child_issue_ids
+                    if isinstance(child_id, str) and child_id
+                )
+        return accepted
+
     async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
         rows = (
             (
@@ -506,15 +547,23 @@ class IssueService:
             if row.parent_id is not None:
                 children_by_parent.setdefault(row.parent_id, []).append(row)
 
+        accepted_child_ids = await self._accepted_incomplete_child_ids(parent)
         stack = list(children_by_parent.get(parent.id, []))
         while stack:
             child = stack.pop()
             stack.extend(children_by_parent.get(child.id, []))
-            if child.status in {"done", "cancelled"}:
+            if child.status == "done":
                 continue
+            if child.status in {"blocked", "cancelled"}:
+                if child.id in accepted_child_ids:
+                    continue
+                raise ValueError(
+                    "Cannot mark issue done while child issues are blocked or cancelled. "
+                    f"Retry, replace, or explicitly resolve child issue {child.identifier or child.id} first."
+                )
             raise ValueError(
                 "Cannot mark issue done while child issues are still open. "
-                f"Complete or cancel child issue {child.identifier or child.id} first."
+                f"Complete child issue {child.identifier or child.id} first."
             )
 
     async def _apply_parent_values(
@@ -731,7 +780,9 @@ class IssueService:
         child_work_products_prompt = _build_child_work_products_prompt(
             child_primary_work_products
         )
-        child_outputs = await self.get_child_outputs(issue_id, include_work_products=True)
+        child_outputs = await self.get_child_outputs(
+            issue_id, include_work_products=True
+        )
         blocked_child_issues = _blocked_child_issues(
             child_outputs.get("children", []) if child_outputs else []
         )
@@ -799,8 +850,14 @@ class IssueService:
         reason: str,
         actor_type: str,
         actor_id: str,
+        child_issue_ids: Sequence[str] | None = None,
         run_id: str | None = None,
     ) -> None:
+        details: dict[str, Any] = {"reason": reason}
+        if child_issue_ids:
+            details["childIssueIds"] = list(child_issue_ids)
+            if len(child_issue_ids) == 1:
+                details["childIssueId"] = child_issue_ids[0]
         await insert_activity_log(
             self._session,
             org_id=issue["orgId"],
@@ -810,7 +867,7 @@ class IssueService:
             entity_type="issue",
             entity_id=issue["id"],
             run_id=run_id,
-            details={"reason": reason},
+            details=details,
         )
 
     async def add_comment(
@@ -983,7 +1040,10 @@ def _child_primary_work_products(
     result: list[dict[str, Any]] = []
     for product in work_products:
         metadata = product.get("metadata")
-        if not isinstance(metadata, Mapping) or metadata.get("parentAggregated") is not True:
+        if (
+            not isinstance(metadata, Mapping)
+            or metadata.get("parentAggregated") is not True
+        ):
             continue
         result.append(
             {

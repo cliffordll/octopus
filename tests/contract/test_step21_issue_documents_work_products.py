@@ -375,6 +375,7 @@ async def test_shared_workspace_generated_scan_captures_unicode_path_from_closeo
     assert [row["title"] for row in rows] == ["reports/中国佛教四大名山.md"]
     assert rows[0]["isPrimary"] is True
 
+
 async def test_shared_workspace_generated_scan_ignores_undeclared_recent_shared_files(
     app: tuple[FastAPI, async_sessionmaker],
     tmp_path: Path,
@@ -408,6 +409,7 @@ async def test_shared_workspace_generated_scan_ignores_undeclared_recent_shared_
         await session.commit()
 
     assert rows == []
+
 
 async def test_shared_workspace_generated_scan_uses_issue_requested_report_path(
     app: tuple[FastAPI, async_sessionmaker],
@@ -453,6 +455,7 @@ async def test_shared_workspace_generated_scan_uses_issue_requested_report_path(
 
     assert [row["title"] for row in rows] == ["reports/hongzehu.md"]
     assert rows[0]["isPrimary"] is True
+
 
 async def test_shared_workspace_generated_scan_captures_issue_scoped_files(
     app: tuple[FastAPI, async_sessionmaker],
@@ -683,6 +686,7 @@ async def test_heartbeat_context_lists_blocked_child_issues(
     assert body["blockedChildIssues"][0]["status"] == "blocked"
     assert body["blockedChildIssues"][0]["workProductCount"] == 0
 
+
 async def test_parent_issue_lists_child_primary_work_products(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -758,8 +762,13 @@ async def test_parent_issue_lists_child_primary_work_products(
     assert detail.json()["workProducts"] == []
     assert context.status_code == 200
     heartbeat_context = context.json()
-    assert heartbeat_context["childPrimaryWorkProducts"][0]["id"] == created.json()["id"]
-    assert heartbeat_context["childPrimaryWorkProducts"][0]["sourceIssueTitle"] == "西施介绍"
+    assert (
+        heartbeat_context["childPrimaryWorkProducts"][0]["id"] == created.json()["id"]
+    )
+    assert (
+        heartbeat_context["childPrimaryWorkProducts"][0]["sourceIssueTitle"]
+        == "西施介绍"
+    )
     assert "Child Primary Work Products" in heartbeat_context["childWorkProductsPrompt"]
     assert "西施.md" in heartbeat_context["childWorkProductsPrompt"]
     assert children.status_code == 200

@@ -31,7 +31,7 @@ import { IssuesWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
-import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPurposeLabel, runWakeReason } from "../utils/runDisplay";
+import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPhaseLabel, runPurposeLabel, runWakeReason } from "../utils/runDisplay";
 import { writeRecentIssue } from "../utils/recentIssues";
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
@@ -1372,6 +1372,7 @@ function IssueRunsPanel({
         const displayRun = run;
         const source = displayRun.invocationSource?.trim();
         const wakeReason = runWakeReason(displayRun);
+        const phaseLabel = runPhaseLabel(displayRun);
         const summary = runSummary(displayRun);
         const summaryExpanded = expandedSummaryRunIds.has(runId);
         const summaryExpandable = summary.length > RUN_SUMMARY_PREVIEW_CHARS;
@@ -1407,7 +1408,7 @@ function IssueRunsPanel({
                     <span className="issue-run-record-badges">
                       <span className={`badge issue-run-type-badge ${runTypeClass}`}>{runTypeLabel}</span>
                       {source && <Badge>来源 {source}</Badge>}
-                      {wakeReason && <Badge>触发原因 {wakeReason}</Badge>}
+                      {phaseLabel && <span className="badge" title={wakeReason ? `原始触发原因：${wakeReason}` : undefined}>阶段 {phaseLabel}</span>}
                       <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
                     </span>
                   </div>

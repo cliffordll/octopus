@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from packages.database.clients import create_database_engine
 from packages.database.clients.session import create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
+from packages.database.queries.activity_log import insert_activity_log
 from packages.database.schema import (
     Agent,
     ActivityLog,
@@ -2445,9 +2446,9 @@ async def test_parent_done_without_child_output_evidence_fails_closeout() -> Non
             session.add(run)
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                agent, run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
             warning = (
                 await session.execute(
                     select(ActivityLog).where(
@@ -2461,7 +2462,9 @@ async def test_parent_done_without_child_output_evidence_fails_closeout() -> Non
             assert final.error_code == "closeout_missing"
             assert warning.entity_id == parent.id
             assert warning.run_id == run.id
-            assert warning.details["reason"] == "parent_done_without_child_output_evidence"
+            assert (
+                warning.details["reason"] == "parent_done_without_child_output_evidence"
+            )
             assert warning.details["childIssues"][0]["title"] == "Xi Shi report"
     finally:
         await engine.dispose()
@@ -2505,9 +2508,9 @@ async def test_done_issue_with_expected_output_requires_matching_work_product() 
             session.add(run)
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                agent, run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
             activity = (
                 await session.execute(
                     select(ActivityLog).where(
@@ -2527,7 +2530,10 @@ async def test_done_issue_with_expected_output_requires_matching_work_product() 
     finally:
         await engine.dispose()
 
-async def test_failed_run_reconciles_done_issue_missing_expected_output_to_blocked() -> None:
+
+async def test_failed_run_reconciles_done_issue_missing_expected_output_to_blocked() -> (
+    None
+):
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -2584,6 +2590,7 @@ async def test_failed_run_reconciles_done_issue_missing_expected_output_to_block
     finally:
         await engine.dispose()
 
+
 async def test_parent_children_settled_with_blocked_child_blocks_parent() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
@@ -2631,7 +2638,10 @@ async def test_parent_children_settled_with_blocked_child_blocks_parent() -> Non
                 trigger_detail="system",
                 status="succeeded",
                 finished_at=datetime.now(UTC),
-                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                },
             )
             session.add(run)
             await session.flush()
@@ -2649,9 +2659,9 @@ async def test_parent_children_settled_with_blocked_child_blocks_parent() -> Non
             )
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                agent, run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
             await session.refresh(parent)
             activity = (
                 await session.execute(
@@ -2663,11 +2673,102 @@ async def test_parent_children_settled_with_blocked_child_blocks_parent() -> Non
 
             assert final.status == "succeeded"
             assert parent.status == "blocked"
-            assert activity.details["reason"] == "parent_blocked_due_to_blocked_children"
+            assert (
+                activity.details["reason"] == "parent_blocked_due_to_blocked_children"
+            )
             assert activity.details["childIssues"][0]["title"] == "东海介绍"
             assert "retry_child" in activity.details["nextActions"]
     finally:
         await engine.dispose()
+
+
+async def test_accepted_cancelled_child_does_not_fail_parent_closeout() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-accepted-cancelled-child",
+                name="Step 15 Accepted Cancelled Child",
+                issue_prefix="ACC",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="父任务",
+                status="done",
+                assignee_agent_id=agent.id,
+                completed_at=datetime.now(UTC),
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="用户取消的子任务",
+                status="cancelled",
+                assignee_agent_id=agent.id,
+                cancelled_at=datetime.now(UTC),
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                },
+            )
+            session.add_all([child, run])
+            await session.flush()
+            parent_product = IssueWorkProduct(
+                org_id=org.id,
+                issue_id=parent.id,
+                title="reports/final.md",
+                type="file",
+                provider="local",
+                status="ready",
+                summary="父任务最终报告",
+                is_primary=True,
+                created_by_run_id=run.id,
+                created_at=datetime.now(UTC),
+            )
+            session.add(parent_product)
+            await session.flush()
+            await insert_activity_log(
+                session,
+                org_id=org.id,
+                actor_type="user",
+                actor_id="local-board",
+                action="issue.incomplete_accepted",
+                entity_type="issue",
+                entity_id=parent.id,
+                details={
+                    "reason": "用户确认取消该子任务，不影响父任务交付",
+                    "childIssueId": child.id,
+                    "childIssueIds": [child.id],
+                },
+            )
+
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
+
+            await session.refresh(parent)
+            assert final.status == "succeeded"
+            assert parent.status == "done"
+    finally:
+        await engine.dispose()
+
 
 async def test_parent_done_with_blocked_child_is_closeout_failure() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
@@ -2710,14 +2811,17 @@ async def test_parent_done_with_blocked_child_is_closeout_failure() -> None:
                 trigger_detail="system",
                 status="succeeded",
                 finished_at=datetime.now(UTC),
-                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                },
             )
             session.add(run)
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                agent, run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
             activity = (
                 await session.execute(
                     select(ActivityLog).where(
@@ -2726,13 +2830,17 @@ async def test_parent_done_with_blocked_child_is_closeout_failure() -> None:
                 )
             ).scalar_one()
 
+            await session.refresh(parent)
             assert final.status == "failed"
             assert final.error_code == "closeout_missing"
+            assert parent.status == "blocked"
+            assert parent.completed_at is None
             assert activity.entity_id == parent.id
             assert activity.details["reason"] == "parent_done_with_blocked_children"
             assert activity.details["childIssues"][0]["title"] == "太湖介绍"
     finally:
         await engine.dispose()
+
 
 async def test_parent_primary_work_product_satisfies_child_output_evidence() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
@@ -2793,9 +2901,9 @@ async def test_parent_primary_work_product_satisfies_child_output_evidence() -> 
             )
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                agent, run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
             warnings = (
                 (
                     await session.execute(
@@ -2902,7 +3010,9 @@ async def test_four_beauties_parent_child_delivery_acceptance() -> None:
             assert outputs["totalChildCount"] == 4
             assert outputs["activeChildCount"] == 0
             assert outputs["settledChildCount"] == 4
-            assert {child["title"] for child in outputs["children"]} == set(child_titles)
+            assert {child["title"] for child in outputs["children"]} == set(
+                child_titles
+            )
             assert all(child["workProducts"] for child in outputs["children"])
             continuation = (
                 await session.execute(
@@ -2912,7 +3022,9 @@ async def test_four_beauties_parent_child_delivery_acceptance() -> None:
                     )
                 )
             ).scalar_one()
-            assert continuation.context_snapshot["wakeReason"] == "issue_children_settled"
+            assert (
+                continuation.context_snapshot["wakeReason"] == "issue_children_settled"
+            )
             activity = (
                 await session.execute(
                     select(ActivityLog).where(
@@ -2932,7 +3044,10 @@ async def test_four_beauties_parent_child_delivery_acceptance() -> None:
                 trigger_detail="system",
                 status="succeeded",
                 finished_at=datetime.now(UTC),
-                context_snapshot={"issueId": parent.id, "wakeReason": "issue_children_settled"},
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                },
             )
             session.add(parent_run)
             await session.flush()
@@ -2951,9 +3066,9 @@ async def test_four_beauties_parent_child_delivery_acceptance() -> None:
             )
             await session.flush()
 
-            final = await HeartbeatService(session)._enforce_closeout_governance_success(
-                parent_agent, parent_run
-            )
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(parent_agent, parent_run)
             warnings = (
                 (
                     await session.execute(
@@ -3284,7 +3399,9 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
             artifact.write_text("# Plan\n\nGenerated artifact.\n", encoding="utf-8")
             shared_report = Path(workspace) / "reports" / "four-beauties.md"
             shared_report.parent.mkdir(parents=True, exist_ok=True)
-            shared_report.write_text("# Four Beauties\n\nShared report.\n", encoding="utf-8")
+            shared_report.write_text(
+                "# Four Beauties\n\nShared report.\n", encoding="utf-8"
+            )
             nested_artifact = issue_artifacts / "python-demo" / "README.md"
             nested_artifact.parent.mkdir(parents=True, exist_ok=True)
             nested_artifact.write_text(

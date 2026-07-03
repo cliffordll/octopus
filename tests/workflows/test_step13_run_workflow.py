@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from packages.database.clients import (
@@ -612,7 +612,13 @@ async def test_timer_wakeup_does_not_stack_when_timer_run_is_active(
     agent = await _seed_agent(
         session,
         name="TimerCoalesces",
-        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1, "runDiagnosticsOnTimer": True}},
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "runDiagnosticsOnTimer": True,
+            }
+        },
     )
     heartbeat = HeartbeatService(session)
 
@@ -745,7 +751,13 @@ async def test_cancel_retry_and_timer_preserve_recovery_context(
     agent = await _seed_agent(
         session,
         name="Recover",
-        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1, "runDiagnosticsOnTimer": True}},
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "runDiagnosticsOnTimer": True,
+            }
+        },
     )
     heartbeat = HeartbeatService(session)
 
@@ -1122,6 +1134,7 @@ async def test_periodic_recovery_does_not_cancel_live_run_after_issue_done(
     assert run.error_code is None
     assert issue.execution_run_id == run.id
 
+
 async def test_periodic_recovery_recovers_stale_active_local_child_loss(
     monkeypatch: pytest.MonkeyPatch,
     session: AsyncSession,
@@ -1237,6 +1250,60 @@ async def test_orphaned_assignment_run_for_closed_issue_is_cancelled_without_ret
     assert orphan.status == "cancelled"
     assert orphan.error_code == "issue_already_closed"
     assert wakeup.status == "cancelled"
+
+
+async def test_closed_issue_recovery_does_not_override_finalized_run(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ClosedIssueFinalized")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Already completed during finalize",
+            status="done",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        wakeup = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            payload={"issueId": issue.id},
+            status="completed",
+            run_id=None,
+            claimed_at=datetime.now(UTC),
+        )
+        session.add(wakeup)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            wakeup_request_id=wakeup.id,
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(run)
+        await session.flush()
+        wakeup.run_id = run.id
+        await session.execute(
+            update(HeartbeatRun)
+            .where(HeartbeatRun.id == run.id)
+            .values(status="succeeded", finished_at=datetime.now(UTC))
+        )
+        handled = await heartbeat._cancel_orphaned_run_if_issue_closed(run)
+
+    assert handled is True
+    await session.refresh(run)
+    await session.refresh(wakeup)
+    assert run.status == "succeeded"
+    assert run.error_code is None
+    assert run.error is None
+    assert wakeup.status == "completed"
 
 
 async def test_process_run_persists_child_process_metadata(

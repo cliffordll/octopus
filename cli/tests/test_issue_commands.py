@@ -354,7 +354,9 @@ def test_issue_checkout_defaults_agent_and_statuses_from_runtime_env(
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": "issue-1", "assigneeAgentId": "agent-env"})
+        return httpx.Response(
+            200, json={"id": "issue-1", "assigneeAgentId": "agent-env"}
+        )
 
     assert (
         main(

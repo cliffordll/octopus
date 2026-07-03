@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 
 from server import lifespan as lifespan_module
+from server.services import heartbeat as heartbeat_module
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import (
@@ -183,6 +184,19 @@ def test_cleanup_timeout_does_not_require_connection_invalidation() -> None:
         )
         is True
     )
+
+
+async def test_heartbeat_dispatch_session_close_survives_task_cancellation() -> None:
+    session = SlowCloseSession()
+    task = asyncio.create_task(
+        heartbeat_module._shielded_session_close(session)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+
+    await task
+
+    assert session.close_finished is True
 
 
 async def test_dispose_engine_times_out() -> None:

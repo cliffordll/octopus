@@ -504,7 +504,6 @@ def _read_opencode_config(config_path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-
 def _work_products_from_opencode_writes(
     context: RuntimeExecutionContext, parsed: dict
 ) -> list[dict[str, object]]:
@@ -643,6 +642,8 @@ def _is_excluded_work_product_path(rel_path: str) -> bool:
             "node_modules",
         }
     )
+
+
 def _result_json(
     stdout_text: str,
     stderr_text: str,

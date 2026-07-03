@@ -1917,7 +1917,10 @@ class WorkspaceService:
             # must not duplicate an already-registered artifact for this issue.
             if external_id and external_id in seen_external_ids:
                 continue
-            if product_workspace_path and product_workspace_path in seen_workspace_paths:
+            if (
+                product_workspace_path
+                and product_workspace_path in seen_workspace_paths
+            ):
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
             row = await create_issue_work_product(
@@ -2109,7 +2112,8 @@ class WorkspaceService:
                 (
                     i
                     for i in range(len(products) - 1, -1, -1)
-                    if products[i]["metadata"].get("source") == "execution_workspace_scan"
+                    if products[i]["metadata"].get("source")
+                    == "execution_workspace_scan"
                 ),
                 len(products) - 1,
             )
@@ -2172,6 +2176,7 @@ class WorkspaceService:
                 if isinstance(value, str) and value.strip():
                     paths.add(value.replace("\\", "/").strip())
         return paths
+
     async def _archive_work_product_content(
         self, org_id: str, product: dict[str, Any]
     ) -> dict[str, Any]:
@@ -2772,6 +2777,8 @@ def _work_product_workspace_paths(row: IssueWorkProduct) -> str | None:
     if value:
         return value.replace("\\", "/")
     return row.title.replace("\\", "/") if row.title else None
+
+
 def _json_dump(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
@@ -2801,8 +2808,7 @@ def _declared_work_product_paths_from_text(text: str) -> set[str]:
         for match in _EXPECTED_WORK_PRODUCT_PATH_RE.finditer(text)
     }
     filenames = {
-        match.group(1)
-        for match in _EXPECTED_WORK_PRODUCT_FILENAME_RE.finditer(text)
+        match.group(1) for match in _EXPECTED_WORK_PRODUCT_FILENAME_RE.finditer(text)
     }
     paths.update(filenames)
     if "reports/" in text or "reports\\" in text:
@@ -2819,6 +2825,7 @@ def _expected_work_product_paths(issue: Issue) -> set[str]:
         part for part in (issue.title, issue.description) if isinstance(part, str)
     )
     return _declared_work_product_paths_from_text(text)
+
 
 def _workspace_browser_path(*, path: Path, artifacts_root: Path | None) -> str | None:
     if artifacts_root is None:

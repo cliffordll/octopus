@@ -70,7 +70,9 @@ def test_control_plane_instructions_are_runtime_env_and_shell_safe() -> None:
     ).read_text(encoding="utf-8")
 
     assert "Do not read or create workspace `.env` files" in control_plane_skill
-    assert "do not hard-code the managed `.octopus/bin` shim path" in control_plane_skill
+    assert (
+        "do not hard-code the managed `.octopus/bin` shim path" in control_plane_skill
+    )
     assert "$env:OCTOPUS_AGENT_ID" in control_plane_skill
     assert "octopus agent me" in control_plane_skill
     assert "defaults `--expected-status` to `todo` and `in_progress`" in cli_reference
