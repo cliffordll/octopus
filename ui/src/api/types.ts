@@ -845,6 +845,18 @@ export interface ExecutionWorkspaceDiff {
   error: string | null;
 }
 
+export interface ExecutionWorkspaceCommitResult {
+  committed: boolean;
+  commit: string | null;
+  message: string;
+  branch: string | null;
+  remoteUrl: string | null;
+  url: string | null;
+  stat: string;
+  stdout: string;
+  stderr: string;
+}
+
 export interface ExecutionWorkspaceMergePreview {
   available: boolean;
   canMerge: boolean;

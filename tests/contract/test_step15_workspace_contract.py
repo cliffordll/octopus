@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 import uuid
 
 import pytest
@@ -207,8 +207,19 @@ async def test_execution_workspace_status_diff_and_archive_service(
             workspace = await service.resolve_for_issue(issue)
             assert workspace is not None
             workspace = await service._ensure_managed_workspace_paths(workspace)
+            assert workspace["cwd"] is not None
+            Path(workspace["cwd"], ".venv", "local.txt").parent.mkdir()
+            Path(workspace["cwd"], ".venv", "local.txt").write_text(
+                "local\n", encoding="utf-8"
+            )
+            Path(workspace["cwd"], "tests", "__pycache__").mkdir(parents=True)
+            Path(workspace["cwd"], "tests", "__pycache__", "cache.pyc").write_bytes(
+                b"cache"
+            )
             status_payload = await service.workspace_status(workspace["id"])
             diff_payload = await service.git_diff_for_workspace(workspace["id"])
+            shutil.rmtree(Path(workspace["cwd"], ".venv"))
+            shutil.rmtree(Path(workspace["cwd"], "tests"))
             archived = await service.archive_workspace(workspace["id"])
             await session.commit()
     finally:
@@ -217,6 +228,8 @@ async def test_execution_workspace_status_diff_and_archive_service(
     assert status_payload is not None
     assert status_payload["workspace"]["id"] == workspace["id"]
     assert status_payload["git"]["available"] is True
+    assert status_payload["git"]["dirty"] is False
+    assert status_payload["git"]["entries"] == []
     assert diff_payload is not None
     assert diff_payload["available"] is True
     assert archived is not None
@@ -1471,6 +1484,16 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
             context_two = await workspace_service.prepare_runtime_context_for_run(
                 run_two.id, run_two.context_snapshot
             )
+            assert context is not None
+            await session.execute(
+                text(
+                    "update execution_workspaces set branch_name = NULL where id = :id"
+                ),
+                {"id": context["workspace"]["octopusWorkspace"]["id"]},
+            )
+            legacy_workspace = await workspace_service.get_execution_workspace(
+                context["workspace"]["octopusWorkspace"]["id"]
+            )
             detail = await project_service.get_by_id(project["id"])
             await session.commit()
     finally:
@@ -1490,6 +1513,11 @@ async def test_repo_url_only_shared_workspace_creates_managed_checkout(
     )
     assert workspace["mode"] == "shared_workspace"
     assert workspace["strategyType"] == "project_primary"
+    assert workspace["baseRef"] == "main"
+    assert workspace["branchName"] == "main"
+    assert legacy_workspace is not None
+    assert legacy_workspace["branchName"] == "main"
+    assert context["workspace"]["env"]["OCTOPUS_WORKSPACE_BRANCH"] == "main"
     assert workspace["cwd"] == str(expected_checkout)
     assert workspace_two["id"] == workspace["id"]
     assert workspace_two["cwd"] == str(expected_checkout)
@@ -4341,3 +4369,242 @@ async def test_projectless_workspace_fallback_has_no_workspace_lock(
             assert second["status"] == "running"
     finally:
         await engine.dispose()
+
+
+async def test_workspace_commit_requires_user_approval_and_records_work_product(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-user-approved-commit",
+                name="User Approved Commit",
+                issue_prefix="UAC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Commit Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Commit workspace changes",
+            )
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            project_cwd.joinpath("hello.py").write_text(
+                "print('hello')\n", encoding="utf-8"
+            )
+            project_cwd.joinpath(".venv").mkdir()
+            project_cwd.joinpath(".venv", "local.py").write_text(
+                "local cache\n", encoding="utf-8"
+            )
+            listed_for_issue = await service.list_execution_workspaces(
+                org.id, issue_id=issue.id
+            )
+            with pytest.raises(ValueError, match="explicit user approval"):
+                await service.commit_workspace_changes(
+                    workspace["id"], message="Add hello script", approved=False
+                )
+            result = await service.commit_workspace_changes(
+                workspace["id"], message="Add hello script", approved=True
+            )
+            products = await service.list_work_products_for_issue(issue.id)
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert result is not None
+    assert result["committed"] is True
+    assert result["commit"]
+    assert result["message"] == "Add hello script"
+    assert [workspace["id"] for workspace in listed_for_issue] == [workspace["id"]]
+    status_lines = _git(project_cwd, "status", "--porcelain").stdout.splitlines()
+    assert status_lines == ["?? .venv/"]
+    assert _git(
+        project_cwd, "ls-tree", "-r", "--name-only", "HEAD"
+    ).stdout.splitlines() == [
+        "README.md",
+        "hello.py",
+    ]
+    assert (
+        _git(project_cwd, "log", "--oneline", "-1")
+        .stdout.strip()
+        .endswith("Add hello script")
+    )
+    assert len(products) == 1
+    assert products[0]["type"] == "commit"
+    assert products[0]["externalId"] == result["commit"]
+    assert products[0]["reviewState"] == "approved"
+
+
+async def test_repo_url_configured_empty_shared_cwd_is_cloned_before_run(
+    tmp_path: Path,
+) -> None:
+    remote_repo = tmp_path / "remote-repo"
+    _init_repo_with_branch(remote_repo, "main")
+    shared_cwd = tmp_path / "shared-empty"
+    shared_cwd.mkdir()
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-empty-cwd-clone",
+                name="Empty Cwd Clone",
+                issue_prefix="ECC",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Clone Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(shared_cwd),
+                    "repoUrl": str(remote_repo),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Clone configured shared cwd",
+            )
+            session.add(issue)
+            await session.flush()
+            context = await WorkspaceService(session).prepare_runtime_context_for_run(
+                "run-clone", {"issueId": issue.id}
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert context is not None
+    workspace = context["workspace"]["octopusWorkspace"]
+    assert workspace["cwd"] == str(shared_cwd)
+    assert (
+        _git(shared_cwd, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+    )
+    assert (
+        shared_cwd.joinpath("README.md").read_text(encoding="utf-8") == "# Test repo\n"
+    )
+
+
+async def test_execution_workspace_push_uses_one_time_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_cwd = tmp_path / "project-repo"
+    _init_repo_with_branch(project_cwd, "main")
+    captured: dict[str, Any] = {}
+    real_run = subprocess.run
+
+    def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        command = args[0]
+        if (
+            isinstance(command, list)
+            and command[:3] == ["git", "-C", str(project_cwd)]
+            and command[3:] == ["push", "--set-upstream", "origin", "main"]
+        ):
+            captured["env"] = kwargs.get("env")
+            captured["command"] = command
+            return subprocess.CompletedProcess(command, 0, "pushed\n", "")
+        return real_run(*args, **kwargs)
+
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-push-creds",
+                name="Push Creds",
+                issue_prefix="PCD",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Push Creds Project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": "shared_workspace",
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            issue = Issue(org_id=org.id, project_id=project["id"], title="Push")
+            session.add(issue)
+            await session.flush()
+            service = WorkspaceService(session)
+            workspace = await service.resolve_for_issue(issue)
+            assert workspace is not None
+            monkeypatch.setattr("server.services.workspaces.subprocess.run", fake_run)
+            pushed = await service.push_workspace_branch(
+                workspace["id"], username="alice", password="token-secret"
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+    assert pushed is not None
+    assert pushed["pushed"] is True
+    assert pushed["branch"] == "main"
+    assert captured["env"]["OCTOPUS_GIT_USERNAME"] == "alice"
+    assert captured["env"]["OCTOPUS_GIT_PASSWORD"] == "token-secret"
+    assert captured["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert "token-secret" not in str(pushed)

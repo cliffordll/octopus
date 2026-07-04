@@ -163,6 +163,28 @@ async def create_execution_workspace_pr_route(
     return result
 
 
+@router.post("/api/execution-workspaces/{workspaceId}/commit")
+async def commit_execution_workspace_route(
+    workspaceId: str,
+    request: Request,
+    body: dict[str, Any] = Body(default_factory=dict),
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> dict[str, Any]:
+    workspace = await _workspace_or_404(workspaceId, request=request, service=service)
+    try:
+        result = await service.commit_workspace_changes(
+            workspace["id"],
+            message=str(body.get("message") or ""),
+            approved=bool(body.get("approved", False)),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    assert result is not None
+    return result
+
+
 @router.post("/api/execution-workspaces/{workspaceId}/push")
 async def push_execution_workspace_route(
     workspaceId: str,
@@ -172,10 +194,16 @@ async def push_execution_workspace_route(
 ) -> dict[str, Any]:
     workspace = await _workspace_or_404(workspaceId, request=request, service=service)
     try:
+        raw_credentials = body.get("credentials")
+        credentials: dict[str, Any] = (
+            raw_credentials if isinstance(raw_credentials, dict) else {}
+        )
         result = await service.push_workspace_branch(
             workspace["id"],
             remote=str(body.get("remote") or "origin"),
             set_upstream=bool(body.get("setUpstream", True)),
+            username=str(credentials.get("username") or "") or None,
+            password=str(credentials.get("password") or "") or None,
         )
     except ValueError as exc:
         raise HTTPException(
