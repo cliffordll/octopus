@@ -59,6 +59,18 @@ async def get_execution_workspace_status_route(
     return result
 
 
+@router.get("/api/execution-workspaces/{workspaceId}/files")
+async def get_execution_workspace_files_route(
+    workspaceId: str,
+    request: Request,
+    service: WorkspaceService = Depends(get_workspace_service),
+) -> dict[str, Any]:
+    workspace = await _workspace_or_404(workspaceId, request=request, service=service)
+    result = await service.workspace_files(workspace["id"])
+    assert result is not None
+    return result
+
+
 @router.get("/api/execution-workspaces/{workspaceId}/diff")
 async def get_execution_workspace_diff_route(
     workspaceId: str,

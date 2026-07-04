@@ -216,6 +216,7 @@ async def test_execution_workspace_status_diff_and_archive_service(
             Path(workspace["cwd"], "tests", "__pycache__", "cache.pyc").write_bytes(
                 b"cache"
             )
+            files_payload = await service.workspace_files(workspace["id"])
             status_payload = await service.workspace_status(workspace["id"])
             diff_payload = await service.git_diff_for_workspace(workspace["id"])
             shutil.rmtree(Path(workspace["cwd"], ".venv"))
@@ -225,6 +226,10 @@ async def test_execution_workspace_status_diff_and_archive_service(
     finally:
         await engine.dispose()
 
+    assert files_payload is not None
+    assert files_payload["available"] is True
+    assert {node["name"] for node in files_payload["tree"]} >= {"README.md"}
+    assert ".venv" not in {node["name"] for node in files_payload["tree"]}
     assert status_payload is not None
     assert status_payload["workspace"]["id"] == workspace["id"]
     assert status_payload["git"]["available"] is True
