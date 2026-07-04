@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -555,6 +557,61 @@ def _git_dirty(cwd: Path, *, ignore_octopus: bool = False) -> bool:
     return status.returncode == 0 and bool(status.stdout.strip())
 
 
+_IGNORED_WORKSPACE_STATUS_DIRS = {
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+    "dist",
+    "build",
+}
+
+
+def _git_status_entries(cwd: Path) -> list[str]:
+    status = _run_git(cwd, "status", "--porcelain=v1", "--untracked-files=all")
+    if status.returncode != 0:
+        return []
+    return _filter_workspace_status_entries(status.stdout.splitlines())
+
+
+def _filter_workspace_status_entries(lines: list[str]) -> list[str]:
+    return [
+        line for line in lines if line and not _is_ignored_workspace_status_line(line)
+    ]
+
+
+def _is_ignored_workspace_status_line(line: str) -> bool:
+    if line.startswith("## "):
+        return False
+    path = line[3:].strip() if len(line) > 3 else line.strip()
+    paths = [part.strip() for part in path.split(" -> ")] if " -> " in path else [path]
+    return all(_is_ignored_workspace_status_path(item) for item in paths if item)
+
+
+def _is_ignored_workspace_status_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").strip("/")
+    parts = [part for part in normalized.split("/") if part]
+    return any(part in _IGNORED_WORKSPACE_STATUS_DIRS for part in parts)
+
+
+def _clone_repo_to_path(repo_url: str, checkout: Path, ref: str | None = None) -> None:
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    args = ["clone"]
+    if ref:
+        args.extend(["--branch", ref])
+    args.extend([repo_url, str(checkout)])
+    result = subprocess.run(
+        ["git", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git clone failed").strip()
+        raise ValueError(f"Failed to prepare managed project checkout: {detail}")
+
+
 def _remote_http_url(fetch_url: str) -> str:
     value = fetch_url.strip()
     if value.startswith("git@") and ":" in value:
@@ -629,15 +686,34 @@ class WorkspaceService:
         status: str | None = None,
         reuse_eligible: bool = False,
     ) -> list[ExecutionWorkspaceData]:
-        rows = await list_execution_workspaces(
-            self._session,
-            org_id,
-            project_id=project_id,
-            project_workspace_id=project_workspace_id,
-            issue_id=issue_id,
-            status=status,
-            reuse_eligible=reuse_eligible,
+        rows = list(
+            await list_execution_workspaces(
+                self._session,
+                org_id,
+                project_id=project_id,
+                project_workspace_id=project_workspace_id,
+                issue_id=issue_id,
+                status=status,
+                reuse_eligible=reuse_eligible,
+            )
         )
+        if issue_id is not None:
+            issue = await self._session.get(Issue, issue_id)
+            bound_id = issue.execution_workspace_id if issue is not None else None
+            if bound_id and all(row.id != bound_id for row in rows):
+                bound = await get_execution_workspace_by_id(self._session, bound_id)
+                if bound is not None and bound.org_id == org_id:
+                    if project_id is None or bound.project_id == project_id:
+                        if (
+                            project_workspace_id is None
+                            or bound.project_workspace_id == project_workspace_id
+                        ):
+                            if status is None or bound.status in [
+                                item.strip()
+                                for item in status.split(",")
+                                if item.strip()
+                            ]:
+                                rows.append(bound)
         return [self._to_execution_workspace(row) for row in rows]
 
     async def get_execution_workspace(
@@ -871,6 +947,8 @@ class WorkspaceService:
         workspace = await self.get_execution_workspace(workspace_id)
         if workspace is None:
             return None
+        if workspace["mode"] == "shared_workspace":
+            raise ValueError("Shared project workspaces do not have a PR branch")
         cwd = self._workspace_git_cwd(workspace)
         branch = _string(workspace["branchName"])
         if cwd is None or not branch:
@@ -956,6 +1034,113 @@ class WorkspaceService:
             "stderr": result.stderr,
         }
 
+    async def commit_workspace_changes(
+        self,
+        workspace_id: str,
+        *,
+        message: str,
+        approved: bool,
+    ) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        if not approved:
+            raise ValueError("Commit requires explicit user approval")
+        commit_message = message.strip()
+        if not commit_message:
+            raise ValueError("Commit message is required")
+        await self._ensure_no_running_adapter_operation(
+            workspace_id, action="committed"
+        )
+        cwd = self._workspace_git_cwd(workspace)
+        if cwd is None:
+            raise ValueError("Workspace is not a Git worktree")
+        _assert_workspace_branch_guard(workspace, operation="commit")
+        entries_before = _git_status_entries(cwd)
+        if not entries_before:
+            raise ValueError("Workspace has no changes to commit")
+        add = _run_git(
+            cwd,
+            "add",
+            "-A",
+            "--",
+            ".",
+            ":(exclude).venv",
+            ":(exclude).pytest_cache",
+            ":(exclude)__pycache__",
+            ":(exclude)node_modules",
+            ":(exclude)dist",
+            ":(exclude)build",
+            timeout=60,
+        )
+        if add.returncode != 0:
+            raise ValueError((add.stderr or add.stdout or "git add failed").strip())
+        staged = _run_git(cwd, "diff", "--cached", "--stat")
+        staged_stat = staged.stdout if staged.returncode == 0 else ""
+        no_staged = _run_git(cwd, "diff", "--cached", "--quiet")
+        if no_staged.returncode == 0:
+            raise ValueError("Workspace has no staged changes to commit")
+        result = _run_git(cwd, "commit", "-m", commit_message, timeout=120)
+        if result.returncode != 0:
+            raise ValueError(
+                (result.stderr or result.stdout or "git commit failed").strip()
+            )
+        commit_hash = _git_commit(cwd, "HEAD")
+        remote_result = _run_git(cwd, "remote", "get-url", "origin")
+        remote_url = (
+            remote_result.stdout.strip() if remote_result.returncode == 0 else None
+        )
+        commit_url = (
+            f"{_remote_http_url(remote_url)}/commit/{commit_hash}"
+            if remote_url and commit_hash
+            else None
+        )
+        metadata = {
+            **_workspace_metadata(workspace),
+            "lastCommitAt": datetime.now(UTC).isoformat(),
+            "lastCommitHash": commit_hash,
+            "lastCommitMessage": commit_message,
+            "lastCommitApprovedByUser": True,
+            "lastCommitStatusEntries": entries_before,
+        }
+        await self.update_execution_workspace(workspace_id, {"metadata": metadata})
+        issue_id = _string(workspace.get("sourceIssueId")) or _string(
+            metadata.get("resolvedForIssueId")
+        )
+        if issue_id and commit_hash:
+            await self.create_work_product_for_issue(
+                org_id=workspace["orgId"],
+                issue_id=issue_id,
+                project_id=workspace["projectId"],
+                payload={
+                    "executionWorkspaceId": workspace_id,
+                    "type": "commit",
+                    "provider": "octopus",
+                    "externalId": commit_hash,
+                    "title": commit_message,
+                    "url": commit_url,
+                    "status": "ready_for_review",
+                    "reviewState": "approved",
+                    "summary": staged_stat.strip() or None,
+                    "metadata": {
+                        "branch": _current_git_branch(cwd),
+                        "remoteUrl": remote_url,
+                        "approvedByUser": True,
+                    },
+                },
+            )
+        return {
+            "committed": True,
+            "commit": commit_hash,
+            "message": commit_message,
+            "branch": _current_git_branch(cwd),
+            "remoteUrl": remote_url,
+            "url": commit_url,
+            "stat": staged_stat,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
     async def abandon_workspace(
         self, workspace_id: str
     ) -> ExecutionWorkspaceData | None:
@@ -1008,8 +1193,65 @@ class WorkspaceService:
             },
         )
 
+    def _push_with_optional_credentials(
+        self,
+        cwd: Path,
+        args: list[str],
+        *,
+        username: str | None,
+        password: str | None,
+    ) -> subprocess.CompletedProcess[str]:
+        if not username and not password:
+            return _run_git(cwd, *args, timeout=120)
+        if not username or not password:
+            raise ValueError("Push credentials require both username and token")
+        if os.name == "nt":
+            askpass_name = "askpass.bat"
+            askpass_body = (
+                "@echo off\r\n"
+                "echo %1 | findstr /I Username >nul\r\n"
+                "if not errorlevel 1 echo %OCTOPUS_GIT_USERNAME%& exit /b 0\r\n"
+                "echo %1 | findstr /I Password >nul\r\n"
+                "if not errorlevel 1 echo %OCTOPUS_GIT_PASSWORD%& exit /b 0\r\n"
+                "echo.\r\n"
+            )
+        else:
+            askpass_name = "askpass.sh"
+            askpass_body = (
+                "#!/bin/sh\n"
+                'case "$1" in\n'
+                '*Username*) printf "%s\\n" "$OCTOPUS_GIT_USERNAME" ;;\n'
+                '*Password*) printf "%s\\n" "$OCTOPUS_GIT_PASSWORD" ;;\n'
+                "*) printf '\\n' ;;\n"
+                "esac\n"
+            )
+        with tempfile.TemporaryDirectory(prefix="octopus-git-askpass-") as tmpdir:
+            askpass = Path(tmpdir) / askpass_name
+            askpass.write_text(askpass_body, encoding="utf-8")
+            env = {
+                **os.environ,
+                "GIT_ASKPASS": str(askpass),
+                "GIT_TERMINAL_PROMPT": "0",
+                "OCTOPUS_GIT_USERNAME": username,
+                "OCTOPUS_GIT_PASSWORD": password,
+            }
+            return subprocess.run(
+                ["git", "-C", str(cwd), *args],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=env,
+            )
+
     async def push_workspace_branch(
-        self, workspace_id: str, *, remote: str = "origin", set_upstream: bool = True
+        self,
+        workspace_id: str,
+        *,
+        remote: str = "origin",
+        set_upstream: bool = True,
+        username: str | None = None,
+        password: str | None = None,
     ) -> dict[str, Any] | None:
         workspace = await self.get_execution_workspace(workspace_id)
         if workspace is None:
@@ -1023,7 +1265,9 @@ class WorkspaceService:
         if set_upstream:
             args.append("--set-upstream")
         args.extend([remote, branch])
-        result = _run_git(cwd, *args, timeout=120)
+        result = self._push_with_optional_credentials(
+            cwd, args, username=username, password=password
+        )
         if result.returncode != 0:
             raise ValueError(
                 (result.stderr or result.stdout or "git push failed").strip()
@@ -1082,14 +1326,18 @@ class WorkspaceService:
         if cwd is None:
             return None
         branch = _current_git_branch(cwd)
-        status = _run_git(cwd, "status", "--porcelain=v1", "--branch")
+        status = _run_git(
+            cwd, "status", "--porcelain=v1", "--branch", "--untracked-files=all"
+        )
         if status.returncode != 0:
             return {
                 "available": False,
                 "error": (status.stderr or status.stdout).strip(),
             }
         lines = [line for line in status.stdout.splitlines() if line]
-        dirty_lines = [line for line in lines if not line.startswith("## ")]
+        dirty_lines = _filter_workspace_status_entries(
+            [line for line in lines if not line.startswith("## ")]
+        )
         return {
             "available": True,
             "branch": branch,
@@ -1103,17 +1351,17 @@ class WorkspaceService:
     ) -> ExecutionWorkspaceData | None:
         if fields.get("status") == "archived":
             await self._ensure_workspace_can_archive(workspace_id)
-        values = {
-            "status": fields["status"] if "status" in fields else None,
-            "cleanup_eligible_at": _parse_datetime(fields.get("cleanupEligibleAt"))
-            if "cleanupEligibleAt" in fields
-            else None,
-            "cleanup_reason": fields.get("cleanupReason")
-            if "cleanupReason" in fields
-            else None,
-            "metadata_json": fields.get("metadata") if "metadata" in fields else None,
-        }
-        patch = {key: value for key, value in values.items() if key in values}
+        patch: dict[str, Any] = {}
+        if "status" in fields:
+            patch["status"] = fields["status"]
+        if "cleanupEligibleAt" in fields:
+            patch["cleanup_eligible_at"] = _parse_datetime(
+                fields.get("cleanupEligibleAt")
+            )
+        if "cleanupReason" in fields:
+            patch["cleanup_reason"] = fields.get("cleanupReason")
+        if "metadata" in fields:
+            patch["metadata_json"] = fields.get("metadata")
         row = await update_execution_workspace(self._session, workspace_id, patch)
         return self._to_execution_workspace(row) if row is not None else None
 
@@ -1228,6 +1476,9 @@ class WorkspaceService:
             execution_cwd = project_cwd
             execution_repo_url = project_repo_url
             execution_base_ref = project_base_ref
+            execution_branch_name = project_base_ref or _current_git_branch(
+                Path(project_cwd)
+            )
         elif strategy_type == "git_worktree":
             branch_template = _string(strategy.get("branchTemplate"))
             if mode == "operator_branch":
@@ -1384,6 +1635,16 @@ class WorkspaceService:
                 raise ValueError(f"Project workspace cwd '{cwd}' does not exist.")
             if not path.is_dir():
                 raise ValueError(f"Project workspace cwd '{cwd}' is not a directory.")
+            repo_url = _string(project_workspace.repo_url)
+            if repo_url and not _is_git_repository(path):
+                if any(path.iterdir()):
+                    raise ValueError(
+                        f"Project workspace cwd '{cwd}' has repoUrl configured but is not a Git repository"
+                    )
+                ref = _string(project_workspace.default_ref) or _string(
+                    project_workspace.repo_ref
+                )
+                _clone_repo_to_path(repo_url, path, ref)
             return cwd
         repo_url = _string(project_workspace.repo_url)
         if not repo_url:
@@ -1401,24 +1662,10 @@ class WorkspaceService:
                 raise ValueError(
                     f"Managed project checkout path '{checkout}' exists but is not a Git repository"
                 )
-        checkout.parent.mkdir(parents=True, exist_ok=True)
         ref = _string(project_workspace.default_ref) or _string(
             project_workspace.repo_ref
         )
-        args = ["clone"]
-        if ref:
-            args.extend(["--branch", ref])
-        args.extend([repo_url, str(checkout)])
-        result = subprocess.run(
-            ["git", *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "git clone failed").strip()
-            raise ValueError(f"Failed to prepare managed project checkout: {detail}")
+        _clone_repo_to_path(repo_url, checkout, ref)
         await update_project_workspace(
             self._session, project_workspace.id, {"cwd": str(checkout)}
         )
@@ -2374,8 +2621,7 @@ class WorkspaceService:
         if row.provider_type == "git_worktree" and row.cwd:
             cwd = Path(row.cwd)
             if _is_git_worktree(cwd):
-                status = _run_git(cwd, "status", "--porcelain")
-                if status.returncode == 0 and status.stdout.strip():
+                if _git_status_entries(cwd):
                     raise ValueError(
                         "Execution workspace cannot be archived because the Git worktree has uncommitted changes."
                     )
@@ -2659,6 +2905,19 @@ class WorkspaceService:
             return row
         return None
 
+    def _execution_workspace_branch_name(self, row: ExecutionWorkspace) -> str | None:
+        if row.branch_name:
+            return row.branch_name
+        if row.mode != "shared_workspace":
+            return None
+        metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+        return (
+            _string(metadata.get("expectedBranch"))
+            or _string(metadata.get("targetRef"))
+            or _string(row.base_ref)
+            or _string(metadata.get("createdFromBranch"))
+        )
+
     def _to_execution_workspace(
         self, row: ExecutionWorkspace
     ) -> ExecutionWorkspaceData:
@@ -2675,7 +2934,7 @@ class WorkspaceService:
             "cwd": row.cwd,
             "repoUrl": row.repo_url,
             "baseRef": row.base_ref,
-            "branchName": row.branch_name,
+            "branchName": self._execution_workspace_branch_name(row),
             "providerType": cast(Any, row.provider_type),
             "providerRef": row.provider_ref,
             "derivedFromExecutionWorkspaceId": row.derived_from_execution_workspace_id,

@@ -2277,7 +2277,8 @@ button.project-workspace-item:hover,
   line-height: 1.5;
 }
 
-.execution-workspace-row-detail .project-workspace-actions {
+.execution-workspace-row-detail .project-workspace-actions,
+.issue-execution-workspace-card > .project-workspace-actions {
   align-items: center;
   align-self: flex-end;
   display: flex;
@@ -2292,8 +2293,23 @@ button.project-workspace-item:hover,
 }
 
 .execution-workspace-row-detail .project-workspace-actions > button,
-.execution-workspace-row-detail .project-workspace-actions > .workspace-cleanup-action {
+.execution-workspace-row-detail .project-workspace-actions > .workspace-cleanup-action,
+.issue-execution-workspace-card > .project-workspace-actions > button,
+.issue-execution-workspace-card > .project-workspace-actions > .workspace-cleanup-action {
   flex: 0 0 auto;
+}
+
+.issue-execution-workspace-card > .project-workspace-actions {
+  align-self: flex-start;
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+.issue-execution-workspace-card > .issue-action-notice {
+  align-self: stretch;
+  box-sizing: border-box;
+  margin: 2px 0 0;
+  width: 100%;
 }
 
 .workspace-cleanup-action {
@@ -2352,12 +2368,13 @@ button.project-workspace-item:hover,
   border-radius: 0;
   box-sizing: border-box;
   color: #f59e0b;
-  display: inline-flex;
+  column-gap: 6px;
+  display: inline-grid;
   flex: 0 0 auto;
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 700;
-  gap: 6px;
+  grid-template-columns: auto max-content;
   height: 28px;
   line-height: 1;
   margin-top: 0;

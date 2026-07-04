@@ -272,6 +272,16 @@ function workProductSourceLabel(product: IssueWorkProduct): string {
 function workspaceModeNotice(mode: string | null | undefined): string {
   if (mode !== "shared_workspace") return "";
   return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
+}
+type PushCredentials = { username: string; password: string };
+
+function promptForPushCredentials(): PushCredentials | null {
+  const username = window.prompt("Git 用户名（留空则使用本机已有凭据）", "");
+  if (username === null) return null;
+  if (!username.trim()) return null;
+  const password = window.prompt("GitHub token/PAT（不会保存，仅用于本次 push）", "");
+  if (password === null || !password.trim()) return null;
+  return { username: username.trim(), password };
 }
 function childPrimaryProductTitle(child: { workProducts?: IssueWorkProduct[] }): string {
   const primary = child.workProducts?.find((product) => product.isPrimary) ?? child.workProducts?.[0];
@@ -1164,7 +1174,14 @@ function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
       refresh();
     },
   });
-  const pushWorkspace = useMutation({ mutationFn: (workspaceId: string) => projectsApi.pushExecutionWorkspace(workspaceId), onSuccess: refresh });
+  const commitWorkspace = useMutation({
+    mutationFn: ({ workspaceId, message }: { workspaceId: string; message: string }) => projectsApi.commitExecutionWorkspace(workspaceId, message),
+    onSuccess: (payload) => {
+      setPreviewText(`已提交：${payload.commit ?? "未识别"}\n${payload.stat || "无 diff 摘要"}`);
+      refresh();
+    },
+  });
+  const pushWorkspace = useMutation({ mutationFn: ({ workspaceId, credentials }: { workspaceId: string; credentials?: PushCredentials | null }) => projectsApi.pushExecutionWorkspace(workspaceId, credentials), onSuccess: refresh });
   const abandonWorkspace = useMutation({ mutationFn: (workspaceId: string) => projectsApi.abandonExecutionWorkspace(workspaceId), onSuccess: refresh });
   const cleanupWorkspace = useMutation({
     mutationFn: ({ workspaceId, discardDirty }: { workspaceId: string; discardDirty: boolean }) => projectsApi.cleanupExecutionWorkspace(workspaceId, discardDirty),
@@ -1176,7 +1193,7 @@ function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
   });
   const selectedDirty = Boolean(status.data?.git?.dirty);
   const canCleanup = Boolean(status.data?.canArchive) || (selectedDirty && cleanupDiscardConfirmed && !status.data?.lease.locked);
-  const error = workspaces.error || status.error || loadDiff.error || mergePreview.error || mergeWorkspace.error || preparePr.error || createPr.error || pushWorkspace.error || abandonWorkspace.error || cleanupWorkspace.error;
+  const error = workspaces.error || status.error || loadDiff.error || mergePreview.error || mergeWorkspace.error || preparePr.error || createPr.error || commitWorkspace.error || pushWorkspace.error || abandonWorkspace.error || cleanupWorkspace.error;
   return (
     <section aria-label="执行工作区审核" className="issue-section-card">
       <div className="issue-section-heading">
@@ -1209,28 +1226,32 @@ function IssueExecutionWorkspacePanel({ issue }: { issue: IssueDetail }) {
               {selected.branchName && <Badge>{selected.branchName}</Badge>}
             </div>
           </div>
-          <dl className="issue-run-record-meta">
-            <div><dt>目录</dt><dd title={issueWorkspaceText(selected.cwd)}>{issueWorkspaceText(selected.cwd)}</dd></div>
-            <div><dt>目标</dt><dd>{selected.baseRef ?? "未设置"}</dd></div>
-            <div><dt>Git</dt><dd>{status.isFetching ? "检查中..." : status.data?.git?.available ? (status.data.git.dirty ? "有未提交改动" : "干净") : status.data?.git?.error ?? "不可用"}</dd></div>
-            <div><dt>租约</dt><dd>{status.data?.lease.locked ? `运行中 ${status.data.lease.operationId ?? ""}` : "空闲"}</dd></div>
-          </dl>
-          {selectedDirty && (
-            <label className="workspace-danger-confirm">
-              <input checked={cleanupDiscardConfirmed} onChange={(event) => setCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
-              确认清理时丢弃该执行工作区的未提交改动
-            </label>
-          )}
+          <span className="execution-workspace-path" title={issueWorkspaceText(selected.cwd)}>{issueWorkspaceText(selected.cwd)}</span>
+          <div className="execution-workspace-status-line">
+            <span>分支：{status.data?.git?.branch ?? selected.branchName ?? "未识别"}</span>
+            <span>目标：{selected.baseRef ?? "未设置"}</span>
+            <span>Git：{status.isFetching ? "检查中..." : status.data?.git?.available ? (status.data.git.dirty ? "有未提交改动" : "干净") : status.data?.git?.error ?? "不可用"}</span>
+            <span>租约：{status.data?.lease.locked ? `运行中 ${status.data.lease.operationId ?? ""}` : "空闲"}</span>
+          </div>
           {workspaceModeNotice(selected.mode) && <p className="issue-action-notice" role="note">{workspaceModeNotice(selected.mode)}</p>}
-          <div className="issue-work-product-actions">
+          <div className="project-workspace-actions">
             <button className="secondary small-button" disabled={loadDiff.isPending} onClick={() => loadDiff.mutate(selected.id)} type="button">查看 diff</button>
             <button className="secondary small-button" disabled={mergePreview.isPending || selected.mode === "shared_workspace"} onClick={() => mergePreview.mutate(selected.id)} type="button">检查 merge</button>
             <button className="secondary small-button" disabled={mergeWorkspace.isPending || selected.mode === "shared_workspace" || Boolean(status.data?.lease.locked)} onClick={() => mergeWorkspace.mutate(selected.id)} type="button">merge 到目标分支</button>
-            <button className="secondary small-button" disabled={preparePr.isPending || !selected.branchName} onClick={() => preparePr.mutate(selected.id)} type="button">准备 PR</button>
-            <button className="secondary small-button" disabled={createPr.isPending || !selected.branchName} onClick={() => createPr.mutate(selected.id)} type="button">创建 PR</button>
-            <button className="secondary small-button" disabled={pushWorkspace.isPending || !selected.branchName} onClick={() => pushWorkspace.mutate(selected.id)} type="button">push 分支</button>
+            <button className="secondary small-button" disabled={preparePr.isPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => preparePr.mutate(selected.id)} type="button">准备 PR</button>
+            <button className="secondary small-button" disabled={commitWorkspace.isPending || !selectedDirty || Boolean(status.data?.lease.locked)} onClick={() => { const message = window.prompt("提交信息", `Update issue ${issue.identifier ?? issue.id.slice(0, 8)}`); if (message?.trim()) commitWorkspace.mutate({ workspaceId: selected.id, message }); }} type="button">确认提交</button>
+            <button className="secondary small-button" disabled={createPr.isPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => createPr.mutate(selected.id)} type="button">创建 PR</button>
+            <button className="secondary small-button" disabled={pushWorkspace.isPending || !selected.branchName || selectedDirty} onClick={() => { const credentials = promptForPushCredentials(); pushWorkspace.mutate({ workspaceId: selected.id, credentials }); }} type="button">push 分支</button>
             <button className="danger small-button" disabled={abandonWorkspace.isPending || Boolean(status.data?.lease.locked)} onClick={() => abandonWorkspace.mutate(selected.id)} type="button">放弃结果</button>
-            <button className="danger small-button" disabled={cleanupWorkspace.isPending || !canCleanup} onClick={() => cleanupWorkspace.mutate({ workspaceId: selected.id, discardDirty: selectedDirty && cleanupDiscardConfirmed })} type="button">清理目录</button>
+            <div className="workspace-cleanup-action">
+              {selectedDirty && (
+                <label className="workspace-danger-confirm" title="清理目录会丢弃该运行目录的未提交改动">
+                  <input checked={cleanupDiscardConfirmed} onChange={(event) => setCleanupDiscardConfirmed(event.target.checked)} type="checkbox" />
+                  <span>丢弃改动</span>
+                </label>
+              )}
+              <button className="danger small-button workspace-cleanup-button" disabled={cleanupWorkspace.isPending || !canCleanup} onClick={() => cleanupWorkspace.mutate({ workspaceId: selected.id, discardDirty: selectedDirty && cleanupDiscardConfirmed })} type="button">清理目录</button>
+            </div>
           </div>
           {previewText && <pre className="workspace-diff-preview">{previewText}</pre>}
         </article>

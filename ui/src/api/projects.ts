@@ -3,6 +3,7 @@ import type {
   CreateProjectPayload,
   CreateProjectWorkspacePayload,
   ExecutionWorkspace,
+  ExecutionWorkspaceCommitResult,
   ExecutionWorkspaceDiff,
   ExecutionWorkspaceMergePreview,
   ExecutionWorkspaceMergeResult,
@@ -70,14 +71,16 @@ export const projectsApi = {
     request<ExecutionWorkspaceDiff>(`${executionWorkspaceRoot(workspaceId)}/diff`, { method: "GET" }),
   executionWorkspaceMergePreview: (workspaceId: string, targetRef?: string | null): Promise<ExecutionWorkspaceMergePreview> =>
     jsonRequest<ExecutionWorkspaceMergePreview>(`${executionWorkspaceRoot(workspaceId)}/merge-preview`, "POST", { targetRef }),
+  commitExecutionWorkspace: (workspaceId: string, message: string): Promise<ExecutionWorkspaceCommitResult> =>
+    jsonRequest<ExecutionWorkspaceCommitResult>(`${executionWorkspaceRoot(workspaceId)}/commit`, "POST", { message, approved: true }),
   mergeExecutionWorkspace: (workspaceId: string, targetRef?: string | null): Promise<ExecutionWorkspaceMergeResult> =>
     jsonRequest<ExecutionWorkspaceMergeResult>(`${executionWorkspaceRoot(workspaceId)}/merge`, "POST", { targetRef }),
   prepareExecutionWorkspacePr: (workspaceId: string, targetRef?: string | null): Promise<ExecutionWorkspacePullRequestPlan> =>
     jsonRequest<ExecutionWorkspacePullRequestPlan>(`${executionWorkspaceRoot(workspaceId)}/prepare-pr`, "POST", { targetRef }),
   createExecutionWorkspacePr: (workspaceId: string, targetRef?: string | null): Promise<ExecutionWorkspacePullRequestResult> =>
     jsonRequest<ExecutionWorkspacePullRequestResult>(`${executionWorkspaceRoot(workspaceId)}/create-pr`, "POST", { targetRef }),
-  pushExecutionWorkspace: (workspaceId: string): Promise<Record<string, unknown>> =>
-    jsonRequest<Record<string, unknown>>(`${executionWorkspaceRoot(workspaceId)}/push`, "POST", {}),
+  pushExecutionWorkspace: (workspaceId: string, credentials?: { username: string; password: string } | null): Promise<Record<string, unknown>> =>
+    jsonRequest<Record<string, unknown>>(`${executionWorkspaceRoot(workspaceId)}/push`, "POST", credentials ? { credentials } : {}),
   archiveExecutionWorkspace: (workspaceId: string): Promise<ExecutionWorkspace> =>
     jsonRequest<ExecutionWorkspace>(`${executionWorkspaceRoot(workspaceId)}/archive`, "POST", {}),
   abandonExecutionWorkspace: (workspaceId: string): Promise<ExecutionWorkspace> =>

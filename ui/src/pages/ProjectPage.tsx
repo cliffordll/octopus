@@ -119,6 +119,16 @@ function workspaceModeNotice(mode: string | null | undefined): string {
   return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
 }
 
+type PushCredentials = { username: string; password: string };
+
+function promptForPushCredentials(): PushCredentials | null {
+  const username = window.prompt("Git 用户名（留空则使用本机已有凭据）", "");
+  if (username === null) return null;
+  if (!username.trim()) return null;
+  const password = window.prompt("GitHub token/PAT（不会保存，仅用于本次 push）", "");
+  if (password === null || !password.trim()) return null;
+  return { username: username.trim(), password };
+}
 function workspacePolicyForMode(currentJson: string, mode: WorkspacePolicyMode): string {
   let current: Record<string, unknown> = {};
   try {
@@ -213,6 +223,7 @@ function ExecutionWorkspacePanel({
   onArchive,
   onCleanup,
   onCleanupDiscardConfirmed,
+  onCommit,
   onCreatePr,
   onLoadDiff,
   onMerge,
@@ -225,6 +236,7 @@ function ExecutionWorkspacePanel({
   mergePreviewPending,
   preparePrPending,
   pushPending,
+  commitPending,
   selectedId,
   status,
   statusPending,
@@ -242,6 +254,7 @@ function ExecutionWorkspacePanel({
   onArchive: (workspaceId: string) => void;
   onCleanup: (workspaceId: string, discardDirty: boolean) => void;
   onCleanupDiscardConfirmed: (confirmed: boolean) => void;
+  onCommit: (workspaceId: string) => void;
   onCreatePr: (workspaceId: string) => void;
   onLoadDiff: (workspaceId: string) => void;
   onMerge: (workspaceId: string) => void;
@@ -254,6 +267,7 @@ function ExecutionWorkspacePanel({
   mergePreviewPending: boolean;
   preparePrPending: boolean;
   pushPending: boolean;
+  commitPending: boolean;
   selectedId: string;
   status: {
     git: { available: boolean; branch?: string | null; dirty?: boolean; entries?: string[]; summary?: string | null; error?: string | null } | null;
@@ -309,9 +323,10 @@ function ExecutionWorkspacePanel({
                     <button className="secondary small-button" disabled={diffPending} onClick={() => onLoadDiff(selected.id)} type="button">查看 diff</button>
                     <button className="secondary small-button" disabled={mergePreviewPending || selected.mode === "shared_workspace"} onClick={() => onMergePreview(selected.id)} type="button">检查 merge</button>
                     <button className="secondary small-button" disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)} onClick={() => onMerge(selected.id)} type="button">merge 到目标分支</button>
-                    <button className="secondary small-button" disabled={preparePrPending || !selected.branchName} onClick={() => onPreparePr(selected.id)} type="button">准备 PR</button>
-                    <button className="secondary small-button" disabled={createPrPending || !selected.branchName} onClick={() => onCreatePr(selected.id)} type="button">创建 PR</button>
-                    <button className="secondary small-button" disabled={pushPending || !selected.branchName} onClick={() => onPush(selected.id)} type="button">push 分支</button>
+                    <button className="secondary small-button" disabled={preparePrPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => onPreparePr(selected.id)} type="button">准备 PR</button>
+                    <button className="secondary small-button" disabled={commitPending || !selectedDirty || Boolean(status?.lease.locked)} onClick={() => onCommit(selected.id)} type="button">确认提交</button>
+                    <button className="secondary small-button" disabled={createPrPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => onCreatePr(selected.id)} type="button">创建 PR</button>
+                    <button className="secondary small-button" disabled={pushPending || !selected.branchName || selectedDirty} onClick={() => onPush(selected.id)} type="button">push 分支</button>
                     <button className="danger small-button" disabled={abandonPending || Boolean(status?.lease.locked)} onClick={() => onAbandon(selected.id)} type="button">放弃结果</button>
                     <div className="workspace-cleanup-action">
                       {selectedDirty && (
@@ -535,8 +550,16 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
       refreshExecutionWorkspaces();
     },
   });
+  const commitExecutionWorkspace = useMutation({
+    mutationFn: ({ workspaceId, message }: { workspaceId: string; message: string }) => projectsApi.commitExecutionWorkspace(workspaceId, message),
+    onSuccess: (payload) => {
+      setWorkspaceDiffPreview("");
+      setWorkspaceMergePreview(`已提交：${payload.commit ?? "未识别"}\n${payload.stat || "无 diff 摘要"}`);
+      refreshExecutionWorkspaces();
+    },
+  });
   const pushExecutionWorkspace = useMutation({
-    mutationFn: (workspaceId: string) => projectsApi.pushExecutionWorkspace(workspaceId),
+    mutationFn: ({ workspaceId, credentials }: { workspaceId: string; credentials?: PushCredentials | null }) => projectsApi.pushExecutionWorkspace(workspaceId, credentials),
     onSuccess: refreshExecutionWorkspaces,
   });
   const archiveExecutionWorkspace = useMutation({
@@ -951,9 +974,10 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 cleanupDiscardConfirmed={cleanupDiscardConfirmed}
                 cleanupPending={cleanupExecutionWorkspace.isPending}
                 createPrPending={createExecutionWorkspacePr.isPending}
+                commitPending={commitExecutionWorkspace.isPending}
                 diffPending={loadWorkspaceDiff.isPending}
                 diffPreview={workspaceDiffPreview}
-                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
+                error={executionWorkspaces.error || executionWorkspaceStatus.error || loadWorkspaceDiff.error || previewExecutionWorkspaceMerge.error || mergeExecutionWorkspace.error || prepareExecutionWorkspacePr.error || createExecutionWorkspacePr.error || commitExecutionWorkspace.error || pushExecutionWorkspace.error || archiveExecutionWorkspace.error || abandonExecutionWorkspace.error || cleanupExecutionWorkspace.error}
                 mergePending={mergeExecutionWorkspace.isPending}
                 mergePreview={workspaceMergePreview}
                 mergePreviewPending={previewExecutionWorkspaceMerge.isPending}
@@ -961,12 +985,19 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
                 onArchive={(workspaceId) => archiveExecutionWorkspace.mutate(workspaceId)}
                 onCleanup={(workspaceId, discardDirty) => cleanupExecutionWorkspace.mutate({ workspaceId, discardDirty })}
                 onCleanupDiscardConfirmed={setCleanupDiscardConfirmed}
+                onCommit={(workspaceId) => {
+                  const message = window.prompt("提交信息", `Update execution workspace ${workspaceId.slice(0, 8)}`);
+                  if (message?.trim()) commitExecutionWorkspace.mutate({ workspaceId, message });
+                }}
                 onCreatePr={(workspaceId) => createExecutionWorkspacePr.mutate(workspaceId)}
                 onLoadDiff={(workspaceId) => loadWorkspaceDiff.mutate(workspaceId)}
                 onMerge={(workspaceId) => mergeExecutionWorkspace.mutate(workspaceId)}
                 onMergePreview={(workspaceId) => previewExecutionWorkspaceMerge.mutate(workspaceId)}
                 onPreparePr={(workspaceId) => prepareExecutionWorkspacePr.mutate(workspaceId)}
-                onPush={(workspaceId) => pushExecutionWorkspace.mutate(workspaceId)}
+                onPush={(workspaceId) => {
+                  const credentials = promptForPushCredentials();
+                  pushExecutionWorkspace.mutate({ workspaceId, credentials });
+                }}
                 preparePrPending={prepareExecutionWorkspacePr.isPending}
                 onSelect={(workspaceId) => {
                   setSelectedExecutionWorkspaceId(workspaceId);
