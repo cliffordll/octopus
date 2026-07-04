@@ -3241,7 +3241,7 @@ async def test_workspace_archive_blocks_dirty_git_worktree(
 
 
 async def test_adapter_runtime_services_are_persisted_and_released(
-    monkeypatch,
+    tmp_path: Path, monkeypatch
 ) -> None:
     class ReportingAdapter:
         type = "process"
@@ -3302,6 +3302,8 @@ async def test_adapter_runtime_services_are_persisted_and_released(
         "get_runtime_adapter",
         lambda runtime_type: ReportingAdapter(),
     )
+    project_cwd = tmp_path / "service-primary"
+    project_cwd.mkdir()
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3325,7 +3327,7 @@ async def test_adapter_runtime_services_are_persisted_and_released(
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/service-primary"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
@@ -3569,7 +3571,7 @@ async def test_successful_run_captures_generated_workspace_files_as_work_product
 
 
 async def test_run_preflight_and_adapter_execution_record_workspace_operations(
-    monkeypatch,
+    tmp_path: Path, monkeypatch
 ) -> None:
     class LoggingAdapter:
         type = "process"
@@ -3599,6 +3601,8 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
         async def get_quota_windows(self):
             return {}
 
+    project_cwd = tmp_path / "ops-primary"
+    project_cwd.mkdir()
     root = Path("pytest-tmp") / f"step15-operation-logs-{uuid.uuid4().hex}"
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)
@@ -3645,7 +3649,7 @@ async def test_run_preflight_and_adapter_execution_record_workspace_operations(
             )
             await project_service.create_workspace(
                 project["id"],
-                {"name": "Primary", "cwd": "D:/work/ops-primary"},
+                {"name": "Primary", "cwd": str(project_cwd)},
                 actor_type="user",
                 actor_id="dev",
             )
