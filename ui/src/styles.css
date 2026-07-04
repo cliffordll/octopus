@@ -4742,6 +4742,43 @@ button.danger {
   white-space: nowrap;
 }
 
+.issue-id-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.issue-id-strip > div {
+  align-items: center;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  display: inline-flex;
+  gap: 6px;
+  max-width: min(100%, 520px);
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.issue-id-strip dt {
+  color: #9aa8ba;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.issue-id-strip dd {
+  color: #dbe5f4;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .issue-header-actions {
   justify-content: flex-end;
   margin-left: auto;
@@ -5049,6 +5086,13 @@ button.danger {
   text-align: right;
 }
 
+.issue-activity-actor {
+  color: #9aa8ba;
+  display: inline-block;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  margin-left: 8px;
+}
 .issue-activity-item p {
   color: #d7deea;
   font-size: 13px;

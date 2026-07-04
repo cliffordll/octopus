@@ -279,7 +279,61 @@ function childPrimaryProductTitle(child: { workProducts?: IssueWorkProduct[] }):
 }
 function isParentOwnedPrimary(product: IssueWorkProduct): boolean {
   return product.isPrimary && product.metadata?.parentAggregated !== true;
-}
+}
+function activityEntityTypeLabel(type: string | null | undefined): string {
+  switch (type) {
+    case "issue":
+      return "任务";
+    case "run":
+    case "heartbeat_run":
+      return "运行";
+    case "agent":
+      return "智能体";
+    case "project":
+      return "项目";
+    case "goal":
+      return "目标";
+    case "work_product":
+      return "产物";
+    case "chat":
+    case "conversation":
+      return "会话";
+    default:
+      return "对象";
+  }
+}
+function activityActorTypeLabel(type: string | null | undefined): string {
+  switch (type) {
+    case "agent":
+      return "智能体";
+    case "system":
+      return "系统";
+    case "user":
+      return "用户";
+    default:
+      return "操作者";
+  }
+}
+function pushUniqueIdPart(parts: Array<{ label: string; value: string }>, label: string, value: string | null | undefined) {
+  if (!value) return;
+  if (parts.some((part) => part.label === label && part.value === value)) return;
+  parts.push({ label, value });
+}
+function activityMetaIdParts(event: ActivityEvent, currentIssueId?: string): Array<{ label: string; value: string }> {
+  const parts: Array<{ label: string; value: string }> = [];
+  if (!(event.entityType === "issue" && event.entityId === currentIssueId)) pushUniqueIdPart(parts, `${activityEntityTypeLabel(event.entityType)} ID`, event.entityId);
+  pushUniqueIdPart(parts, "运行 ID", event.runId);
+  const detailRunId = typeof event.details?.runId === "string" ? event.details.runId : null;
+  pushUniqueIdPart(parts, "运行 ID", detailRunId);
+  const detailAgentId = typeof event.details?.agentId === "string" ? event.details.agentId : null;
+  const agentId = detailAgentId ?? event.agentId ?? (event.actorType === "agent" ? event.actorId : null);
+  pushUniqueIdPart(parts, "智能体 ID", agentId);
+  return parts;
+}
+function activityActorText(event: ActivityEvent): string {
+  if (!event.actorId || event.actorType === "agent") return "";
+  return `${activityActorTypeLabel(event.actorType)} ID：${event.actorId}`;
+}
 function activitySummary(event: ActivityEvent): string {
   if (event.action === "issue.closure_needs_operator_review") return issueCloseoutReviewSummary(event);
   if (event.action === "issue.review_closeout_missing") return issueCloseoutReviewSummary(event);
@@ -292,7 +346,7 @@ function activitySummary(event: ActivityEvent): string {
     const value = details[key];
     if (typeof value === "string" && value.trim()) return value;
   }
-  return event.entityId;
+  return `${activityEntityTypeLabel(event.entityType)}记录已更新。`;
 }
 function activityTitle(event: ActivityEvent): string {
   switch (event.action) {
@@ -347,12 +401,9 @@ function activityTone(event: ActivityEvent): string {
   if (event.action === "issue.created") return "created";
   return event.actorType === "agent" ? "agent" : "default";
 }
-function activityMeta(event: ActivityEvent): string {
-  const parts = [formatIssueTime(event.createdAt)];
-  if (event.runId) parts.push(`Run ${event.runId}`);
-  const agentId = typeof event.details?.agentId === "string" ? event.details.agentId : event.agentId;
-  if (agentId) parts.push(`Agent ${agentId}`);
-  return parts.join(" · ");
+function activityMeta(event: ActivityEvent, currentIssueId: string): string {
+  const idParts = activityMetaIdParts(event, currentIssueId).map((part) => `${part.label} ${part.value}`);
+  return [...idParts, formatIssueTime(event.createdAt)].join(" · ");
 }
 function activityNumber(event: ActivityEvent, key: string): number | null {
   const value = event.details?.[key];
@@ -657,6 +708,25 @@ function issueStatusOptionDisabledReason(issue: IssueDetail, status: IssueStatus
   if (issue.status === "cancelled") return "已取消任务请使用重新打开流程。";
   return "";
 }
+function IssueIdStrip({ issue }: { issue: IssueDetail }) {
+  const items = [
+    { label: "任务 ID", value: issue.id },
+    { label: "任务阶段", value: statusLabel(issue.status) },
+    { label: "优先级", value: priorityLabel(issue.priority) },
+    ...(issue.originId ? [{ label: issue.originKind === "manual" ? "来源 ID" : "来源运行 ID", value: issue.originId }] : []),
+  ];
+
+  return (
+    <dl aria-label="任务概览" className="issue-id-strip">
+      {items.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd title={item.value}>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 function IssuePropertiesPanel({
   agents,
   goals,
@@ -2563,21 +2633,20 @@ export function IssuePage() {
         <div className="issue-detail-layout">
           <header className="issue-detail-top">
             <nav aria-label="任务导航" className="issue-breadcrumb">
-              <Link to={`/orgs/${orgId}/issues`}>任务</Link>
+              <Link to={`/orgs/${orgId}/issues`}>任务编号</Link>
               <span>/</span>
               <span>{issueDisplayId(issue.data)}</span>
             </nav>
             <div className="issue-detail-title-block">
-              <div className="issue-detail-kicker">
-                <Badge>{issueDisplayId(issue.data)}</Badge>
-                <Badge>任务阶段：{statusLabel(issue.data.status)}</Badge>
-                <Badge>优先级：{priorityLabel(issue.data.priority)}</Badge>
-                {latestRun && (
-                  <StatusPill status={latestRun.status}>
+              <div className="issue-detail-kicker">
+                <IssueIdStrip issue={issue.data} />
+                {latestRun && (
+                  <StatusPill status={latestRun.status}>
                     {latestRunBadgeLabel(latestRun)}结果：{latestRunStatusText(latestRun)}
-                  </StatusPill>
-                )}
-              </div>
+                  </StatusPill>
+                )}
+              </div>
+
               <div className="issue-title-row">
                 <h1>{issue.data.title}</h1>
                 <div className="issue-header-actions">
@@ -2863,9 +2932,12 @@ export function IssuePage() {
                         <div className="issue-activity-content">
                           <div className="issue-activity-title-row">
                             <strong>{activityTitle(item)}</strong>
-                            <span className="muted">{activityMeta(item)}</span>
+                            <span className="muted">{activityMeta(item, issue.data.id)}</span>
                           </div>
-                          <p>{activitySummary(item)}</p>
+                          <p>
+                            {activitySummary(item)}
+                            {activityActorText(item) ? <span className="issue-activity-actor">{activityActorText(item)}</span> : null}
+                          </p>
                         </div>
                       </article>
                     );
