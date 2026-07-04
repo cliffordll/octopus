@@ -550,8 +550,12 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(within(attachmentRegion).getByRole("link", { name: "note.txt" })).toHaveAttribute("href", "/api/assets/asset-1/content");
   expect(await screen.findByText("已有讨论")).toBeInTheDocument();
   expect(activityRegion).toHaveTextContent("状态变更");
-  expect(activityRegion).toHaveTextContent("执行任务");
-  expect(activityRegion).toHaveTextContent("run-1");
+  expect(activityRegion).toHaveTextContent("执行任务");
+  expect(activityRegion).toHaveTextContent("运行 ID");
+  expect(activityRegion).toHaveTextContent("run-1");
+  expect(activityRegion).toHaveTextContent("智能体 ID");
+  expect(activityRegion).toHaveTextContent("agent-1");
+  expect(activityRegion).toHaveTextContent("用户 ID：board");
   expect(activityRegion).toHaveTextContent("2026年6月8日 18:05");
   expect(activityRegion).toHaveTextContent("2026年6月8日 18:03");
   expect(activityRegion).toHaveTextContent("进入评审");
@@ -559,7 +563,9 @@ it("shows an issue and records comments and review decisions", async () => {
   expect(activityItems[0]).toHaveTextContent("状态变更");
   expect(activityItems[1]).toHaveTextContent("评论");
   expect(activityItems[1]).toHaveTextContent("已有讨论");
-  expect(activityItems[2]).toHaveTextContent("执行任务");
+  expect(activityItems[2]).toHaveTextContent("执行任务");
+  expect(activityItems[2]).toHaveTextContent("任务记录已更新。");
+  expect(activityItems[2]).not.toHaveTextContent("任务 ID");
   expect(JSON.parse(localStorage.getItem("octopus:recent-issues:org-1") ?? "[]")).toEqual([
     { id: "issue-1", title: longIssueTitle, identifier: "OCT-1", status: "in_review" },
   ]);
@@ -1252,7 +1258,7 @@ it("surfaces operator closeout review activity on the issue page", async () => {
   expect(activityRegion).toHaveTextContent("需要人工确认收口");
   expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
   expect(screen.getByText("需要人工确认收口").closest(".issue-activity-item")).toHaveClass("tone-needs-attention");
-  expect(screen.getByText(/Run run-closeout/)).toHaveClass("muted");
+  expect(screen.getByText(/运行 ID run-closeout/)).toHaveClass("muted");
 });
 it("does not keep stale closeout review warning after a newer run starts", async () => {
   const issue = {
@@ -1726,9 +1732,12 @@ it("refreshes issue status after a reviewer run completes", async () => {
     return respond(staleIssue);
   });
   vi.stubGlobal("fetch", fetchMock);
-  renderApp("/orgs/org-1/issues/issue-1");
-  expect(await screen.findByText("任务阶段：评审中")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getByText("任务阶段：已完成")).toBeInTheDocument());
+  renderApp("/orgs/org-1/issues/issue-1");
+  await waitFor(() => {
+    const overview = screen.getByLabelText("任务概览");
+    expect(overview).toHaveTextContent("任务阶段");
+    expect(overview).toHaveTextContent("已完成");
+  });
 });
 it("labels cancelled passive follow-up runs explicitly", async () => {
   const issue = {
