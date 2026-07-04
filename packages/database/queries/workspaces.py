@@ -290,6 +290,17 @@ async def list_issue_work_products(
     return result.scalars().all()
 
 
+async def list_project_work_products(
+    session: AsyncSession, project_id: str
+) -> Sequence[IssueWorkProduct]:
+    result = await session.execute(
+        select(IssueWorkProduct)
+        .where(IssueWorkProduct.project_id == project_id)
+        .order_by(desc(IssueWorkProduct.updated_at), desc(IssueWorkProduct.is_primary))
+    )
+    return result.scalars().all()
+
+
 async def get_issue_work_product(
     session: AsyncSession, product_id: str
 ) -> IssueWorkProduct | None:

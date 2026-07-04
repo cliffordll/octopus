@@ -838,6 +838,24 @@ export interface ExecutionWorkspaceStatus {
   operations: WorkspaceOperation[];
 }
 
+export interface WorkspaceFileTreeNode {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  children?: WorkspaceFileTreeNode[];
+  size?: number | null;
+  modifiedAt?: string | null;
+}
+
+export interface ExecutionWorkspaceFiles {
+  workspaceId: string;
+  root: string | null;
+  available: boolean;
+  error: string | null;
+  tree: WorkspaceFileTreeNode[];
+  truncated: boolean;
+}
+
 export interface ExecutionWorkspaceDiff {
   available: boolean;
   stat?: string;

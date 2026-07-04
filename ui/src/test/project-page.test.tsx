@@ -52,7 +52,7 @@ it("updates a project and manages its resource attachments", async () => {
         remoteProvider: null,
         remoteWorkspaceRef: null,
         sharedWorkspaceKey: "console-main",
-        metadata: null,
+        metadata: { workspacePath: "app/routes/hello.py" },
         executionWorkspacePolicy: {
           enabled: true,
           defaultMode: "shared_workspace",
@@ -182,6 +182,10 @@ it("updates a project and manages its resource attachments", async () => {
   expect(within(tabs).getByRole("link", { name: "配置" })).toHaveAttribute(
     "href",
     "/orgs/org-1/projects/project-1/configuration",
+  );
+  expect(within(tabs).getByRole("link", { name: "工作区" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/projects/project-1/workspace",
   );
   expect(within(tabs).getByRole("link", { name: "资源" })).toHaveAttribute(
     "href",
@@ -320,6 +324,161 @@ it("updates a project and manages its resource attachments", async () => {
     expect.objectContaining({ method: "DELETE" }),
   );
 }, 10_000);
+it("shows project workspace artifacts as a directory tree", async () => {
+  const project = {
+    id: "project-1",
+    orgId: "org-1",
+    urlKey: "console",
+    goalId: null,
+    goalIds: [],
+    name: "控制台",
+    description: "项目描述",
+    status: "active",
+    leadAgentId: null,
+    targetDate: null,
+    color: null,
+    pauseReason: null,
+    pausedAt: null,
+    codebase: {
+      configured: true,
+      scope: "project",
+      workspaceId: "workspace-1",
+      repoUrl: null,
+      repoRef: null,
+      cwd: "D:/coding/octopus",
+      displayName: "默认代码来源",
+      managedFolder: "organizations/org-1/workspaces/artifacts",
+      executionWorkspacePolicy: { mode: "shared_workspace" },
+    },
+    workspaces: [
+      {
+        id: "workspace-1",
+        orgId: "org-1",
+        projectId: "project-1",
+        name: "默认代码来源",
+        sourceType: "local_path",
+        cwd: "D:/coding/octopus",
+        repoUrl: null,
+        repoRef: null,
+        isPrimary: true,
+        status: "active",
+        metadata: null,
+        executionWorkspacePolicy: { mode: "shared_workspace" },
+        createdAt: "2026-05-28T10:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+      },
+    ],
+    resources: [],
+    archivedAt: null,
+    createdAt: "2026-05-28T10:00:00Z",
+    updatedAt: "2026-05-28T10:00:00Z",
+  };
+  const executionWorkspace = {
+    id: "exec-1",
+    orgId: "org-1",
+    projectId: "project-1",
+    projectWorkspaceId: "workspace-1",
+    sourceIssueId: "issue-1",
+    mode: "shared_workspace",
+    strategyType: "shared_workspace",
+    name: "共享运行",
+    cwd: "D:/coding/octopus",
+    status: "active",
+    branchName: null,
+    baseBranchName: null,
+    remoteName: null,
+    metadata: null,
+    createdAt: "2026-05-28T10:00:00Z",
+    updatedAt: "2026-05-28T11:00:00Z",
+  };
+  const workProduct = {
+    id: "wp-1",
+    orgId: "org-1",
+    projectId: "project-1",
+    issueId: "issue-1",
+    executionWorkspaceId: "exec-1",
+    runtimeServiceId: null,
+    type: "report",
+    provider: "octopus",
+    externalId: null,
+    assetId: null,
+    contentPath: "/api/assets/696e0318-4c7a-4e18-9930-ee444bd6faa8/content",
+    contentType: "text/markdown",
+    byteSize: 120,
+    sha256: null,
+    title: "验收报告",
+    url: null,
+    status: "ready_for_review",
+    reviewState: "none",
+    isPrimary: true,
+    healthStatus: "healthy",
+    summary: "报告",
+    metadata: { workspacePath: "app/routes/hello.py" },
+    createdByRunId: "run-1",
+    createdAt: "2026-05-28T10:00:00Z",
+    updatedAt: "2026-05-28T11:00:00Z",
+  };
+  const commitProduct = {
+    ...workProduct,
+    id: "wp-commit",
+    type: "commit",
+    title: "代码提交 abc1234",
+    url: "https://github.com/cliffordll/mytest/commit/abc1234",
+    contentPath: null,
+    isPrimary: false,
+    updatedAt: "2026-05-28T11:30:00Z",
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/issues?projectId=project-1" && init?.method === "GET") {
+      return respond([{ id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", assigneeAgentId: null, assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" }]);
+    }
+    if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([executionWorkspace]);
+    if (path === "/api/execution-workspaces/exec-1/files" && init?.method === "GET") {
+      return respond({
+        workspaceId: "exec-1",
+        root: "D:/coding/octopus",
+        available: true,
+        error: null,
+        truncated: false,
+        tree: [
+          { name: "api", path: "api", type: "directory", modifiedAt: "2026-05-28T10:00:00Z", children: [
+            { name: "server.py", path: "api/server.py", type: "file", size: 128, modifiedAt: "2026-05-28T10:00:00Z" },
+          ] },
+          { name: "app", path: "app", type: "directory", modifiedAt: "2026-05-28T10:00:00Z", children: [
+            { name: "routes", path: "app/routes", type: "directory", modifiedAt: "2026-05-28T10:00:00Z", children: [
+              { name: "hello.py", path: "app/routes/hello.py", type: "file", size: 120, modifiedAt: "2026-05-28T10:00:00Z" },
+            ] },
+          ] },
+          { name: "README.md", path: "README.md", type: "file", size: 2048, modifiedAt: "2026-05-28T10:00:00Z" },
+        ],
+      });
+    }
+    if (path === "/api/projects/project-1/work-products" && init?.method === "GET") return respond([workProduct, commitProduct]);
+    return respond(project);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/projects/project-1/workspace");
+
+  const panel = await screen.findByRole("region", { name: "工作区产物" });
+  expect(within(panel).getByText("共享运行")).toBeInTheDocument();
+  const fileTree = await within(panel).findByRole("region", { name: "共享运行 文件树" });
+  expect(within(fileTree).getByText("api")).toBeInTheDocument();
+  expect(within(fileTree).getByText("server.py")).toBeInTheDocument();
+  expect(within(fileTree).getByText("README.md")).toBeInTheDocument();
+  expect(within(fileTree).getByText("app")).toBeInTheDocument();
+  expect(within(fileTree).getByText("routes")).toBeInTheDocument();
+  expect(within(fileTree).getByText("hello.py")).toBeInTheDocument();
+  expect(within(fileTree).queryByText("696e0318-4c7a-4e18-9930-ee444bd6faa8")).not.toBeInTheDocument();
+  expect(within(fileTree).getByText("OCT-1 完成控制台导航")).toBeInTheDocument();
+  expect(within(fileTree).getByText("验收报告")).toBeInTheDocument();
+  expect(within(panel).queryByText("执行产物")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("代码提交 abc1234")).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/work-products", expect.objectContaining({ method: "GET" }));
+});
 
 it("uses organization scratch when the project has no workspace", async () => {
   const project = {

@@ -5,6 +5,7 @@ import type {
   ExecutionWorkspace,
   ExecutionWorkspaceCommitResult,
   ExecutionWorkspaceDiff,
+  ExecutionWorkspaceFiles,
   ExecutionWorkspaceMergePreview,
   ExecutionWorkspaceMergeResult,
   ExecutionWorkspacePullRequestPlan,
@@ -14,6 +15,7 @@ import type {
   ProjectResourceAttachment,
   ProjectResourceAttachmentInput,
   ProjectWorkspace,
+  IssueWorkProduct,
   UpdateProjectPayload,
   UpdateProjectResourceAttachmentPayload,
   UpdateProjectWorkspacePayload,
@@ -42,6 +44,8 @@ export const projectsApi = {
     jsonRequest<ProjectDetail>(projectRoot(projectId), "PATCH", payload),
   remove: (projectId: string): Promise<ProjectDetail> =>
     request<ProjectDetail>(projectRoot(projectId), { method: "DELETE" }),
+  listWorkProducts: (projectId: string): Promise<IssueWorkProduct[]> =>
+    request<IssueWorkProduct[]>(`${projectRoot(projectId)}/work-products`, { method: "GET" }),
   listWorkspaces: (projectId: string): Promise<ProjectWorkspace[]> =>
     request<ProjectWorkspace[]>(`${projectRoot(projectId)}/workspaces`, { method: "GET" }),
   createWorkspace: (projectId: string, payload: CreateProjectWorkspacePayload): Promise<ProjectWorkspace> =>
@@ -67,6 +71,8 @@ export const projectsApi = {
     request<ExecutionWorkspace[]>(`/api/execution-workspaces?orgId=${encodeURIComponent(orgId)}&issueId=${encodeURIComponent(issueId)}`, { method: "GET" }),
   executionWorkspaceStatus: (workspaceId: string): Promise<ExecutionWorkspaceStatus> =>
     request<ExecutionWorkspaceStatus>(`${executionWorkspaceRoot(workspaceId)}/status`, { method: "GET" }),
+  executionWorkspaceFiles: (workspaceId: string): Promise<ExecutionWorkspaceFiles> =>
+    request<ExecutionWorkspaceFiles>(`${executionWorkspaceRoot(workspaceId)}/files`, { method: "GET" }),
   executionWorkspaceDiff: (workspaceId: string): Promise<ExecutionWorkspaceDiff> =>
     request<ExecutionWorkspaceDiff>(`${executionWorkspaceRoot(workspaceId)}/diff`, { method: "GET" }),
   executionWorkspaceMergePreview: (workspaceId: string, targetRef?: string | null): Promise<ExecutionWorkspaceMergePreview> =>

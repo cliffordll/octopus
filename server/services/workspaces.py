@@ -28,6 +28,7 @@ from packages.database.queries.workspaces import (
     get_workspace_operation,
     list_execution_workspaces,
     list_issue_work_products,
+    list_project_work_products,
     list_project_workspaces,
     list_running_workspace_operations_for_run,
     list_workspace_operations_for_execution_workspace,
@@ -566,6 +567,15 @@ _IGNORED_WORKSPACE_STATUS_DIRS = {
     "build",
 }
 
+_WORKSPACE_FILE_TREE_MAX_DEPTH = 5
+_WORKSPACE_FILE_TREE_MAX_ENTRIES = 600
+_WORKSPACE_FILE_TREE_IGNORED_DIRS = _IGNORED_WORKSPACE_STATUS_DIRS | {
+    ".git",
+    ".mypy_cache",
+    ".octopus",
+    ".ruff_cache",
+}
+
 
 def _git_status_entries(cwd: Path) -> list[str]:
     status = _run_git(cwd, "status", "--porcelain=v1", "--untracked-files=all")
@@ -750,6 +760,87 @@ class WorkspaceService:
             "canArchive": not running_adapter
             and not bool((git_status or {}).get("dirty")),
             "operations": [self._to_operation(row) for row in operations[:10]],
+        }
+
+    async def workspace_files(self, workspace_id: str) -> dict[str, Any] | None:
+        workspace = await self.get_execution_workspace(workspace_id)
+        if workspace is None:
+            return None
+        raw_cwd = _string(workspace.get("cwd"))
+        if not raw_cwd:
+            return {
+                "workspaceId": workspace_id,
+                "root": None,
+                "available": False,
+                "error": "Execution workspace has no cwd",
+                "tree": [],
+                "truncated": False,
+            }
+        root = Path(raw_cwd).expanduser().resolve()
+        if not root.exists() or not root.is_dir():
+            return {
+                "workspaceId": workspace_id,
+                "root": str(root),
+                "available": False,
+                "error": "Execution workspace cwd does not exist",
+                "tree": [],
+                "truncated": False,
+            }
+
+        remaining = _WORKSPACE_FILE_TREE_MAX_ENTRIES
+        truncated = False
+
+        def build_tree(directory: Path, depth: int) -> list[dict[str, Any]]:
+            nonlocal remaining, truncated
+            if depth > _WORKSPACE_FILE_TREE_MAX_DEPTH or remaining <= 0:
+                truncated = True
+                return []
+            try:
+                entries = sorted(
+                    [entry for entry in directory.iterdir() if not entry.is_symlink()],
+                    key=lambda entry: (not entry.is_dir(), entry.name.lower()),
+                )
+            except OSError:
+                return []
+            nodes: list[dict[str, Any]] = []
+            for entry in entries:
+                if remaining <= 0:
+                    truncated = True
+                    break
+                if entry.name in _WORKSPACE_FILE_TREE_IGNORED_DIRS:
+                    continue
+                try:
+                    resolved = entry.resolve()
+                    if not _is_relative_to(resolved, root):
+                        continue
+                    stat = entry.stat()
+                    is_dir = entry.is_dir()
+                except OSError:
+                    continue
+                remaining -= 1
+                relative = resolved.relative_to(root).as_posix()
+                node: dict[str, Any] = {
+                    "name": entry.name,
+                    "path": relative,
+                    "type": "directory" if is_dir else "file",
+                    "modifiedAt": datetime.fromtimestamp(
+                        stat.st_mtime, tz=UTC
+                    ).isoformat(),
+                }
+                if is_dir:
+                    node["children"] = build_tree(entry, depth + 1)
+                else:
+                    node["size"] = stat.st_size
+                nodes.append(node)
+            return nodes
+
+        return {
+            "workspaceId": workspace_id,
+            "root": str(root),
+            "available": True,
+            "error": None,
+            "tree": build_tree(root, 1),
+            "truncated": truncated,
         }
 
     async def git_diff_for_workspace(self, workspace_id: str) -> dict[str, Any] | None:
@@ -2070,6 +2161,12 @@ class WorkspaceService:
             product["metadata"] = metadata
             products.append(product)
         return products
+
+    async def list_work_products_for_project(
+        self, project_id: str
+    ) -> list[IssueWorkProductData]:
+        rows = await list_project_work_products(self._session, project_id)
+        return [self._to_work_product(row) for row in _dedupe_work_product_rows(rows)]
 
     async def get_work_product(self, product_id: str) -> IssueWorkProductData | None:
         row = await get_issue_work_product(self._session, product_id)

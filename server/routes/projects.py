@@ -10,6 +10,7 @@ from packages.shared.api_paths.projects import (
     PROJECT_DETAIL_PATH,
     PROJECT_RESOURCE_DETAIL_PATH,
     PROJECT_RESOURCE_LIST_PATH,
+    PROJECT_WORK_PRODUCT_LIST_PATH,
     PROJECT_WORKSPACE_DETAIL_PATH,
     PROJECT_WORKSPACE_LIST_PATH,
 )
@@ -18,6 +19,7 @@ from packages.shared.types.project import (
     ProjectResourceAttachment,
     ProjectWorkspace,
 )
+from packages.shared.types.workspace import IssueWorkProduct
 from packages.shared.validators.project import (
     validate_create_project,
     validate_create_project_workspace,
@@ -33,7 +35,9 @@ from ..dependencies.access import (
     require_organization_access,
 )
 from ..dependencies.projects import get_project_service
+from ..dependencies.workspaces import get_workspace_service
 from ..services.projects import ProjectService
+from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["projects"])
 
@@ -160,6 +164,20 @@ async def delete_project_route(
             status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
         )
     return removed
+
+
+@router.get(PROJECT_WORK_PRODUCT_LIST_PATH)
+async def list_project_work_products_route(
+    id: str,
+    request: Request,
+    orgId: str | None = Query(default=None),
+    project_service: ProjectService = Depends(get_project_service),
+    workspace_service: WorkspaceService = Depends(get_workspace_service),
+) -> list[IssueWorkProduct]:
+    detail = await _get_project_or_404(
+        id, request=request, service=project_service, org_id=orgId
+    )
+    return await workspace_service.list_work_products_for_project(detail["id"])
 
 
 @router.get(PROJECT_WORKSPACE_LIST_PATH)
