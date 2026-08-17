@@ -263,14 +263,18 @@ async def test_run_recovery_migration_repairs_partially_materialized_schema(
         run_columns = {
             row[1] for row in connection.execute("pragma table_info(heartbeat_runs)")
         }
+        agent_columns = {
+            row[1] for row in connection.execute("pragma table_info(agents)")
+        }
         wakeup_keys = connection.execute(
             "select id, idempotency_key from agent_wakeup_requests order by id"
         ).fetchall()
 
-    assert revision == ("20260813_000026",)
+    assert revision == ("20260817_000027",)
     assert "process_exited_at" in run_columns
     assert "execution_owner_token" in run_columns
     assert "terminal_effects_pending" in run_columns
+    assert "last_heartbeat_check_at" in agent_columns
     assert wakeup_keys == [
         ("newer-wakeup", "duplicate-key"),
         ("older-wakeup", None),

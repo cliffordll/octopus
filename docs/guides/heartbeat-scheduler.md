@@ -69,7 +69,7 @@ HEARTBEAT_SCHEDULER_INTERVAL_MS=30000
 | 字段 | 含义 |
 | --- | --- |
 | `enabled` | 是否允许 timer heartbeat |
-| `intervalSec` | timer heartbeat 间隔；`0` 表示没有有效定时周期 |
+| `intervalSec` | timer heartbeat 间隔；缺失、无效或不大于 `0` 时回退为 300 秒 |
 | `wakeOnDemand` | 是否允许非 timer wakeup，例如 assignment、manual、automation |
 | `preflightEnabled` | timer 触发前是否先检查有没有可执行任务 |
 | `maxConcurrentRuns` | 限制该 agent 可并发运行数量 |
@@ -78,12 +78,16 @@ HEARTBEAT_SCHEDULER_INTERVAL_MS=30000
 
 ```text
 enabled 默认 true
-intervalSec 默认 0
+intervalSec 默认 300 秒
 wakeOnDemand 默认 true
 preflightEnabled 默认 true
 ```
 
-所以一个 agent 即使 `enabled=true`，如果 `intervalSec=0`，也只是“配置未激活”，不会被 timer scheduler 定时跑。
+所以关闭 timer heartbeat 应明确设置 `enabled=false`，不能再用 `intervalSec=0` 表示关闭。
+
+旧字段 `runDiagnosticsOnTimer` 只用于兼容历史配置：仅当配置中没有
+`preflightEnabled` 或 `timerPreflightEnabled` 时，`true` 才解释为显式关闭预检。
+新字段始终优先，避免旧字段绕过明确的资源控制设置。
 
 ## Timer heartbeat 触发流程
 
@@ -100,7 +104,7 @@ server interval tick
   ↓
 检查 enabled 和 intervalSec
   ↓
-检查距离 lastHeartbeatAt 是否超过 intervalSec
+检查距离 lastHeartbeatCheckAt（旧数据回退 lastHeartbeatAt）是否超过 intervalSec
   ↓
 执行 timer preflight
   ↓

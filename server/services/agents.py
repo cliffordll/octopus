@@ -181,6 +181,11 @@ def _materialize_heartbeat_runtime_config(
         config["heartbeat"] = dict(_DEFAULT_HEARTBEAT_POLICY)
     elif isinstance(heartbeat, dict):
         materialized = {**_DEFAULT_HEARTBEAT_POLICY, **heartbeat}
+        if "preflightEnabled" not in heartbeat:
+            if isinstance(heartbeat.get("timerPreflightEnabled"), bool):
+                materialized["preflightEnabled"] = heartbeat["timerPreflightEnabled"]
+            elif heartbeat.get("runDiagnosticsOnTimer") is True:
+                materialized["preflightEnabled"] = False
         interval = materialized.get("intervalSec")
         if (
             not isinstance(interval, (int, float))

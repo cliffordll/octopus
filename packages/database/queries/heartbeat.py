@@ -91,6 +91,26 @@ async def list_wakeup_requests_by_status(
     return result.scalars().all()
 
 
+async def list_pending_runless_wakeup_requests(
+    session: AsyncSession,
+    org_id: str,
+    agent_id: str,
+    now: datetime,
+) -> Sequence[AgentWakeupRequest]:
+    result = await session.execute(
+        select(AgentWakeupRequest)
+        .where(
+            AgentWakeupRequest.org_id == org_id,
+            AgentWakeupRequest.agent_id == agent_id,
+            AgentWakeupRequest.status.in_(("queued", "deferred_issue_execution")),
+            AgentWakeupRequest.run_id.is_(None),
+            AgentWakeupRequest.requested_at <= now,
+        )
+        .order_by(AgentWakeupRequest.requested_at, AgentWakeupRequest.id)
+    )
+    return result.scalars().all()
+
+
 async def list_due_wakeup_request_ids(
     session: AsyncSession, status: str, now: datetime
 ) -> Sequence[str]:
@@ -113,6 +133,7 @@ async def claim_due_wakeup_request(
         .where(
             AgentWakeupRequest.id == wakeup_id,
             AgentWakeupRequest.status == status,
+            AgentWakeupRequest.run_id.is_(None),
             AgentWakeupRequest.requested_at <= claimed_at,
         )
         .values(
@@ -121,6 +142,7 @@ async def claim_due_wakeup_request(
             updated_at=claimed_at,
         )
         .returning(AgentWakeupRequest)
+        .execution_options(synchronize_session=False)
     )
     return result.scalar_one_or_none()
 
@@ -178,6 +200,18 @@ async def has_active_timer_run(session: AsyncSession, agent_id: str) -> bool:
         .where(
             HeartbeatRun.agent_id == agent_id,
             HeartbeatRun.invocation_source == "timer",
+            HeartbeatRun.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )
+    return result.first() is not None
+
+
+async def has_active_agent_run(session: AsyncSession, agent_id: str) -> bool:
+    result = await session.scalars(
+        select(HeartbeatRun.id)
+        .where(
+            HeartbeatRun.agent_id == agent_id,
             HeartbeatRun.status.in_(("queued", "running")),
         )
         .limit(1)

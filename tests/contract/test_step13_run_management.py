@@ -333,6 +333,7 @@ def test_lifespan_scheduler_executes_timer_wakeup(
                         "enabled": True,
                         "intervalSec": 0.1,
                         "runDiagnosticsOnTimer": True,
+                        "preflightEnabled": False,
                     }
                 },
                 "agentRuntimeConfig": {

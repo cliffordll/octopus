@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import (
+    advance_agent_heartbeat_check,
     get_agent_by_id,
     list_org_agents,
     update_agent,
@@ -22,7 +23,10 @@ from packages.database.queries.agent_state import (
     get_runtime_state,
     update_runtime_state,
 )
-from packages.database.queries.issues import update_issue
+from packages.database.queries.issues import (
+    list_agent_actionable_heartbeat_issues,
+    update_issue,
+)
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.heartbeat import (
     append_run_event,
@@ -36,7 +40,9 @@ from packages.database.queries.heartbeat import (
     create_wakeup_request_idempotent,
     get_run,
     get_wakeup_by_idempotency_key,
+    has_active_agent_run,
     has_active_timer_run,
+    list_pending_runless_wakeup_requests,
     list_queued_agent_ids,
     list_queued_runs,
     list_due_wakeup_request_ids,
@@ -1382,34 +1388,301 @@ class HeartbeatService:
         checked_at = now or datetime.now(UTC)
         triggered: list[HeartbeatRun] = []
         for agent in await list_org_agents(self._session, org_id):
+            if agent.status in {"paused", "terminated", "pending_approval"}:
+                continue
             policy = self._heartbeat_policy(agent)
-            baseline = agent.last_heartbeat_at or agent.created_at
-            if baseline.tzinfo is None:
-                baseline = baseline.replace(tzinfo=UTC)
+            baseline_candidates = [
+                value.replace(tzinfo=UTC) if value.tzinfo is None else value
+                for value in (
+                    agent.last_heartbeat_check_at,
+                    agent.last_heartbeat_at,
+                    agent.created_at,
+                )
+                if value is not None
+            ]
+            baseline = max(baseline_candidates)
             if (
                 not policy["enabled"]
                 or policy["intervalSec"] <= 0
                 or checked_at - baseline < timedelta(seconds=policy["intervalSec"])
             ):
                 continue
-            if not policy.get("runDiagnosticsOnTimer", False):
-                continue
             if await has_active_timer_run(self._session, agent.id):
                 continue
+            recovered = await self._recover_pending_wakeup_for_timer(agent, checked_at)
+            if recovered is not None:
+                await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+                triggered.append(self._to_run(recovered))
+                continue
+            due_at = baseline + timedelta(seconds=policy["intervalSec"])
+            idempotency_key = f"heartbeat:timer:{agent.id}:{due_at.isoformat()}"
+            preflight: dict[str, Any] | None = None
+            if policy.get("preflightEnabled", True):
+                preflight = await self._evaluate_timer_preflight(agent, checked_at)
+                if not preflight["shouldRun"]:
+                    reason = cast(str, preflight["reason"])
+                    await self._create_skipped_wakeup(
+                        agent,
+                        {
+                            "source": "timer",
+                            "triggerDetail": "system",
+                            "reason": reason,
+                            "payload": {"preflight": preflight},
+                            "idempotencyKey": idempotency_key,
+                            "requestedAt": checked_at,
+                        },
+                        actor_type="system",
+                        actor_id="scheduler",
+                        error=reason,
+                    )
+                    await advance_agent_heartbeat_check(
+                        self._session, agent.id, checked_at
+                    )
+                    continue
             run = await self.wakeup(
                 agent.id,
                 {
                     "source": "timer",
                     "triggerDetail": "system",
                     "reason": "heartbeat_timer",
+                    "payload": (
+                        {"preflight": preflight}
+                        if preflight is not None
+                        else {
+                            "preflight": {
+                                "enabled": False,
+                                "shouldRun": True,
+                                "reason": "heartbeat.preflight.disabled",
+                            }
+                        }
+                    ),
+                    "contextSnapshot": (
+                        {"heartbeatPreflight": preflight}
+                        if preflight is not None
+                        else {
+                            "heartbeatPreflight": {
+                                "enabled": False,
+                                "shouldRun": True,
+                                "reason": "heartbeat.preflight.disabled",
+                            }
+                        }
+                    ),
+                    "idempotencyKey": idempotency_key,
+                    "requestedAt": checked_at,
                 },
                 actor_type="system",
                 actor_id="scheduler",
                 execute_immediately=False,
             )
             if run is not None:
+                await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
                 triggered.append(run)
         return triggered
+
+    async def _recover_pending_wakeup_for_timer(
+        self, agent: AgentRow, checked_at: datetime
+    ) -> HeartbeatRunRow | None:
+        pending = await list_pending_runless_wakeup_requests(
+            self._session,
+            agent.org_id,
+            agent.id,
+            checked_at,
+        )
+        actionable_issue_ids: set[str] | None = None
+        for wakeup in pending:
+            payload = dict(wakeup.payload or {})
+            issue_id = _issue_id_from_context(payload)
+            issue = (
+                await self._session.get(IssueRow, issue_id)
+                if issue_id is not None
+                else None
+            )
+            if issue_id is not None and (
+                issue is None
+                or issue.org_id != agent.org_id
+                or issue.status in {"done", "cancelled"}
+            ):
+                await update_wakeup_request(
+                    self._session,
+                    wakeup.id,
+                    {
+                        "status": "skipped",
+                        "finished_at": checked_at,
+                        "error": "Pending wake skipped because issue is closed or missing",
+                    },
+                )
+                continue
+            if wakeup.source in {"assignment", "review"}:
+                if actionable_issue_ids is None:
+                    actionable_issue_ids = {
+                        candidate.id
+                        for candidate in await list_agent_actionable_heartbeat_issues(
+                            self._session, agent.org_id, agent.id
+                        )
+                    }
+                relationship_matches = (
+                    wakeup.source == "assignment"
+                    and issue is not None
+                    and issue.assignee_agent_id == agent.id
+                ) or (
+                    wakeup.source == "review"
+                    and issue is not None
+                    and issue.reviewer_agent_id == agent.id
+                )
+                if (
+                    issue_id is None
+                    or issue_id not in actionable_issue_ids
+                    or not relationship_matches
+                ):
+                    await update_wakeup_request(
+                        self._session,
+                        wakeup.id,
+                        {
+                            "status": "skipped",
+                            "finished_at": checked_at,
+                            "error": (
+                                "Pending wake skipped because issue assignment "
+                                "or review is stale"
+                            ),
+                        },
+                    )
+                    continue
+            if (
+                wakeup.source == "assignment"
+                and issue is not None
+                and issue.execution_run_id is not None
+            ):
+                return None
+
+            claimed = await claim_due_wakeup_request(
+                self._session,
+                wakeup.id,
+                wakeup.status,
+                checked_at,
+            )
+            if claimed is None:
+                await self._session.refresh(wakeup)
+                if wakeup.run_id is not None:
+                    return await get_run(self._session, wakeup.run_id)
+                return None
+
+            deferred_context = payload.pop(self._DEFERRED_CONTEXT_KEY, {})
+            context_snapshot = {
+                "triggeredBy": claimed.requested_by_actor_type or "system",
+                "actorId": claimed.requested_by_actor_id or "scheduler",
+                "forceFreshSession": False,
+                "recoveredPendingWakeup": True,
+                **self._payload_context(payload),
+                **(deferred_context if isinstance(deferred_context, dict) else {}),
+            }
+            context_snapshot = await self._enrich_issue_context_snapshot(
+                context_snapshot
+            )
+            run = await create_run(
+                self._session,
+                {
+                    "org_id": agent.org_id,
+                    "agent_id": agent.id,
+                    "invocation_source": claimed.source,
+                    "run_purpose": _run_purpose(claimed.source, context_snapshot),
+                    "trigger_detail": claimed.trigger_detail,
+                    "status": "queued",
+                    "wakeup_request_id": claimed.id,
+                    "context_snapshot": context_snapshot,
+                },
+            )
+            run = await self._initialize_run_log(run)
+            await update_wakeup_request(
+                self._session,
+                claimed.id,
+                {
+                    "status": "queued",
+                    "payload": payload,
+                    "run_id": run.id,
+                    "claimed_at": None,
+                    "finished_at": None,
+                    "error": None,
+                },
+            )
+            await self._claim_issue_execution_for_assignment_run(
+                agent,
+                run,
+                context_snapshot,
+                issue=issue,
+            )
+            await self._append_event(
+                run,
+                1,
+                "lifecycle",
+                stream="system",
+                message="run queued",
+                level="info",
+                payload={
+                    "status": "queued",
+                    "source": claimed.source,
+                    "triggerDetail": claimed.trigger_detail,
+                    "recoveredPendingWakeup": True,
+                },
+            )
+            return run
+        return None
+
+    async def _evaluate_timer_preflight(
+        self, agent: AgentRow, checked_at: datetime
+    ) -> dict[str, Any]:
+        pending_wakeups = await list_pending_runless_wakeup_requests(
+            self._session,
+            agent.org_id,
+            agent.id,
+            checked_at,
+        )
+        if pending_wakeups:
+            statuses: dict[str, int] = {}
+            for wakeup in pending_wakeups:
+                statuses[wakeup.status] = statuses.get(wakeup.status, 0) + 1
+            return {
+                "enabled": True,
+                "shouldRun": False,
+                "reason": "heartbeat.preflight.pending_wakeup_request",
+                "pendingWakeupCount": len(pending_wakeups),
+                "pendingWakeupStatuses": statuses,
+            }
+
+        if await has_active_agent_run(self._session, agent.id):
+            return {
+                "enabled": True,
+                "shouldRun": False,
+                "reason": "heartbeat.preflight.active_run",
+            }
+
+        issues = await list_agent_actionable_heartbeat_issues(
+            self._session,
+            agent.org_id,
+            agent.id,
+        )
+        if not issues:
+            return {
+                "enabled": True,
+                "shouldRun": False,
+                "reason": "heartbeat.preflight.no_actionable_work",
+                "actionableIssueCount": 0,
+            }
+
+        assignee_count = sum(issue.assignee_agent_id == agent.id for issue in issues)
+        reviewer_count = sum(issue.reviewer_agent_id == agent.id for issue in issues)
+        return {
+            "enabled": True,
+            "shouldRun": True,
+            "reason": (
+                "heartbeat.preflight.reviewer_issue"
+                if reviewer_count and not assignee_count
+                else "heartbeat.preflight.assignee_issue"
+            ),
+            "actionableIssueCount": len(issues),
+            "assigneeIssueCount": assignee_count,
+            "reviewerIssueCount": reviewer_count,
+            "actionableIssueIds": [issue.id for issue in issues],
+        }
 
     async def _create_queued_run(
         self,
@@ -3543,6 +3816,12 @@ class HeartbeatService:
             else config.get("wakeOnAutomation", True)
         )
         run_diagnostics_on_timer = config.get("runDiagnosticsOnTimer")
+        if "preflightEnabled" in config:
+            preflight_enabled = config.get("preflightEnabled")
+        elif "timerPreflightEnabled" in config:
+            preflight_enabled = config.get("timerPreflightEnabled")
+        else:
+            preflight_enabled = run_diagnostics_on_timer is not True
         return {
             "enabled": enabled if isinstance(enabled, bool) else True,
             "intervalSec": interval_sec
@@ -3554,6 +3833,9 @@ class HeartbeatService:
             "runDiagnosticsOnTimer": run_diagnostics_on_timer
             if isinstance(run_diagnostics_on_timer, bool)
             else False,
+            "preflightEnabled": preflight_enabled
+            if isinstance(preflight_enabled, bool)
+            else True,
         }
 
     def _max_concurrent_runs(self, agent: AgentRow) -> int:

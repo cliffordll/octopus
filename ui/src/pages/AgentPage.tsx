@@ -28,7 +28,7 @@ const DEFAULT_HEARTBEAT_POLICY = {
 };
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
 const RUN_SOURCE_HELP = [
-  ["timer", "定时运行诊断到点触发；这是显式开启后的真实 agent run，不作为任务调度主链路。"],
+  ["timer", "心跳到期触发；默认先检查是否有可执行任务，关闭空跑预检查后每次到期均创建真实 agent run。"],
   ["assignment", "任务分配后触发，通常来自 issue 指派给该智能体。"],
   ["automation", "系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。"],
   ["on_demand", "用户在 UI 或 API 中手动触发一次运行。"],
@@ -83,7 +83,16 @@ function applyHeartbeatConfig(
   runtimeConfig: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
-  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(runtimeConfig), ...patch };
+  const current = heartbeatConfigFromRuntimeConfig(runtimeConfig);
+  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...current };
+  if (!Object.hasOwn(current, "preflightEnabled")) {
+    if (typeof current.timerPreflightEnabled === "boolean") {
+      heartbeat.preflightEnabled = current.timerPreflightEnabled;
+    } else if (current.runDiagnosticsOnTimer === true) {
+      heartbeat.preflightEnabled = false;
+    }
+  }
+  Object.assign(heartbeat, patch);
   return { ...runtimeConfig, heartbeat };
 }
 
@@ -97,9 +106,8 @@ type HeartbeatConfigFieldsProps = {
 };
 
 function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) {
-  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(value) };
+  const heartbeat = heartbeatConfigFromRuntimeConfig(applyHeartbeatConfig(value, {}));
   const enabled = booleanConfigValue(heartbeat, "enabled", true);
-  const runDiagnosticsOnTimer = booleanConfigValue(heartbeat, "runDiagnosticsOnTimer", false);
   const wakeOnDemand = booleanConfigValue(heartbeat, "wakeOnDemand", true);
   const preflightEnabled = booleanConfigValue(heartbeat, "preflightEnabled", true);
 
@@ -126,13 +134,6 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
           value={numberConfigValueWithFallback(heartbeat, "intervalSec", DEFAULT_HEARTBEAT_INTERVAL_SEC)}
           onChange={(event) => setHeartbeatField("intervalSec", event.target.value ? Number(event.target.value) : 0)}
         />
-      </label>
-      <label className="agent-property-row">
-        <span>定时运行诊断</span>
-        <select aria-label="定时运行诊断" value={runDiagnosticsOnTimer ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("runDiagnosticsOnTimer", event.target.value === "enabled")}>
-          <option value="enabled">启用</option>
-          <option value="disabled">关闭</option>
-        </select>
       </label>
       <label className="agent-property-row">
         <span>允许手动诊断</span>
@@ -1834,8 +1835,8 @@ export function AgentPage() {
                         <div className="runtime-config-summary">
                           <div className="runtime-config-summary-text">
                             <h3>心跳策略</h3>
-                            <span className="muted">状态检测、运行诊断和并发限制</span>
-                            <small>默认每 300s 做状态检测；定时运行诊断默认关闭，允许手动诊断</small>
+                            <span className="muted">心跳检查、手动诊断和并发限制</span>
+                            <small>默认每 300s 检查一次；有可执行任务时才启动运行，允许手动诊断</small>
                           </div>
                           <button
                             aria-label={heartbeatPolicyExpanded ? "收起心跳策略" : "展开心跳策略"}
