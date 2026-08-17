@@ -26,10 +26,14 @@ from packages.database.queries.issues import update_issue
 from packages.database.queries.agent_skills import list_enabled_skill_keys
 from packages.database.queries.heartbeat import (
     append_run_event,
+    claim_expired_run_execution,
+    claim_run_terminal_effects,
     claim_due_wakeup_request,
     claim_queued_run,
+    complete_run_terminal_effects,
     create_run,
     create_wakeup_request,
+    create_wakeup_request_idempotent,
     get_run,
     get_wakeup_by_idempotency_key,
     has_active_timer_run,
@@ -40,9 +44,13 @@ from packages.database.queries.heartbeat import (
     list_running_run_ids,
     list_runs,
     list_runs_by_status,
+    list_runs_with_pending_terminal_effects,
     list_wakeup_requests_by_status,
+    renew_run_execution_lease,
     update_run,
     update_wakeup_request,
+    fail_run_terminal_effects,
+    transition_run_to_terminal,
 )
 from packages.database.schema import (
     AgentWakeupRequest as AgentWakeupRequestRow,
@@ -224,11 +232,7 @@ class HeartbeatService:
             )
             if existing is not None and existing.run_id:
                 existing_run = await get_run(self._session, existing.run_id)
-                if existing_run is not None and existing_run.status not in {
-                    "failed",
-                    "timed_out",
-                    "cancelled",
-                }:
+                if existing_run is not None:
                     return self._to_run(existing_run)
             if existing is not None and existing.status == "deferred_agent_paused":
                 await update_wakeup_request(
@@ -245,7 +249,7 @@ class HeartbeatService:
                 )
                 return None
         if agent.status == "paused":
-            await create_wakeup_request(
+            await create_wakeup_request_idempotent(
                 self._session,
                 self._wakeup_values(
                     agent,
@@ -270,6 +274,8 @@ class HeartbeatService:
             actor_type=actor_type,
             actor_id=actor_id,
         )
+        if run is None:
+            return None
         if not execute_immediately:
             return self._to_run(run)
         executed = await self._start_if_capacity(agent, run)
@@ -337,7 +343,7 @@ class HeartbeatService:
         deferred_payload[self._DEFERRED_CONTEXT_KEY] = dict(
             payload.get("contextSnapshot") or {}
         )
-        await create_wakeup_request(
+        await create_wakeup_request_idempotent(
             self._session,
             {
                 **self._wakeup_values(
@@ -531,7 +537,7 @@ class HeartbeatService:
         origin_run_id = (
             raw_origin_run_id if isinstance(raw_origin_run_id, str) else previous_run.id
         )
-        wakeup = await create_wakeup_request(
+        wakeup, _ = await create_wakeup_request_idempotent(
             self._session,
             self._wakeup_values(
                 agent,
@@ -800,41 +806,28 @@ class HeartbeatService:
         if cancellation is not None:
             cancellation.set()
         now = datetime.now(UTC)
-        cancelled = await update_run(
+        cancelled = await transition_run_to_terminal(
             self._session,
             run.id,
+            "cancelled",
             {
-                "status": "cancelled",
                 "finished_at": now,
                 "error": "run cancelled",
                 "error_code": "cancelled",
+                **self._finalize_run_log_fields(run),
             },
+            expected_statuses=("queued", "running"),
+            expected_owner_token=(
+                run.execution_owner_token if run.status == "running" else None
+            ),
         )
-        assert cancelled is not None
-        if run.wakeup_request_id:
-            await update_wakeup_request(
-                self._session,
-                run.wakeup_request_id,
-                {
-                    "status": "cancelled",
-                    "finished_at": now,
-                    "error": "run cancelled",
-                },
-            )
-        await self._append_event(
-            cancelled,
-            await self._next_event_sequence(run.id),
-            "lifecycle",
-            message="run cancelled",
-            level="warning",
-        )
+        if cancelled is None:
+            current = await get_run(self._session, run.id)
+            return self._to_run(current) if current is not None else None
         await WorkspaceService(self._session).mark_run_workspace_interrupted(
             run.id, reason="cancelled", message="run cancelled"
         )
-        await self._release_issue_execution(cancelled)
-        agent = await get_agent_by_id(self._session, run.agent_id)
-        if agent is not None and agent.status == "running":
-            await update_agent(self._session, agent.id, {"status": "idle"})
+        cancelled = await self._reconcile_terminal_effects(cancelled)
         return self._to_run(cancelled)
 
     async def retry_run(
@@ -922,12 +915,23 @@ class HeartbeatService:
         self, *, require_process_loss: bool = False
     ) -> list[HeartbeatRun]:
         recovered: list[HeartbeatRun] = []
+        for terminal_run in await list_runs_with_pending_terminal_effects(
+            self._session
+        ):
+            await self._reconcile_terminal_effects(terminal_run)
         active_ids = (
             set().union(*self._active_run_ids.values())
             if self._active_run_ids
             else set()
         )
         for run in await list_runs_by_status(self._session, "running"):
+            now = datetime.now(UTC)
+            lease_expires_at = run.execution_lease_expires_at
+            if lease_expires_at is not None:
+                if lease_expires_at.tzinfo is None:
+                    lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+                if lease_expires_at > now:
+                    continue
             is_marked_active = run.id in active_ids
             agent = await get_agent_by_id(self._session, run.agent_id)
             tracks_local_child = (
@@ -943,6 +947,10 @@ class HeartbeatService:
                     continue
             elif is_marked_active:
                 continue
+            claimed = await claim_expired_run_execution(self._session, run.id, now=now)
+            if claimed is None:
+                continue
+            run = claimed
             if await self._cancel_orphaned_run_if_issue_closed(run):
                 continue
             if is_marked_active:
@@ -953,11 +961,11 @@ class HeartbeatService:
                     f"Detached child pid {run.process_pid} was not terminated during "
                     "server recovery because process ownership cannot be verified"
                 )
-            failed = await update_run(
+            failed = await transition_run_to_terminal(
                 self._session,
                 run.id,
+                "failed",
                 {
-                    "status": "failed",
                     "finished_at": datetime.now(UTC),
                     "error": (
                         f"Process lost -- child pid {run.process_pid} is no longer running"
@@ -965,19 +973,12 @@ class HeartbeatService:
                         else "Run interrupted before server recovery"
                     ),
                     "error_code": "process_lost",
+                    **self._finalize_run_log_fields(run),
                 },
+                expected_owner_token=run.execution_owner_token,
             )
-            assert failed is not None
-            if run.wakeup_request_id:
-                await update_wakeup_request(
-                    self._session,
-                    run.wakeup_request_id,
-                    {
-                        "status": "failed",
-                        "finished_at": datetime.now(UTC),
-                        "error": "Run interrupted before server recovery",
-                    },
-                )
+            if failed is None:
+                continue
             await self._append_event(
                 failed,
                 await self._next_event_sequence(run.id),
@@ -992,13 +993,14 @@ class HeartbeatService:
                     if run.process_pid
                     else {"wasMarkedActive": is_marked_active}
                 ),
+                idempotency_key="recovery:process-lost",
             )
             await WorkspaceService(self._session).mark_run_workspace_interrupted(
                 run.id,
                 reason="process_lost",
                 message="Run interrupted before server recovery",
             )
-            await self._release_issue_execution(failed)
+            failed = await self._reconcile_terminal_effects(failed)
             if detached_message:
                 await self._append_event(
                     failed,
@@ -1035,6 +1037,41 @@ class HeartbeatService:
         await self._session.refresh(run)
         if run.status != "running":
             return True
+        terminal_event_statuses = {
+            event.message.removeprefix("run ")
+            for event in await list_run_events(
+                self._session, run.id, after_seq=-1, limit=10_000
+            )
+            if event.event_type == "lifecycle"
+            and event.message
+            in {"run succeeded", "run failed", "run timed_out", "run cancelled"}
+        }
+        if len(terminal_event_statuses) > 1:
+            await self._append_event(
+                run,
+                await self._next_event_sequence(run.id),
+                "recovery.error",
+                message="Conflicting terminal evidence; automatic recovery skipped",
+                level="error",
+                payload={"terminalStatuses": sorted(terminal_event_statuses)},
+                idempotency_key="recovery:terminal-evidence-conflict",
+            )
+            return True
+        if terminal_event_statuses:
+            recovered_status = terminal_event_statuses.pop()
+            recovered = await transition_run_to_terminal(
+                self._session,
+                run.id,
+                recovered_status,
+                {
+                    "finished_at": run.finished_at or datetime.now(UTC),
+                    **self._finalize_run_log_fields(run),
+                },
+                expected_owner_token=run.execution_owner_token,
+            )
+            if recovered is not None:
+                await self._reconcile_terminal_effects(recovered)
+            return True
         if run.invocation_source != "assignment":
             return False
         issue_id = _issue_id_from_context(run.context_snapshot)
@@ -1044,29 +1081,20 @@ class HeartbeatService:
         if issue.status not in {"done", "cancelled"}:
             return False
         message = f"Run stopped during recovery because issue is already {issue.status}"
-        cancelled = await update_run(
+        cancelled = await transition_run_to_terminal(
             self._session,
             run.id,
+            "cancelled",
             {
-                "status": "cancelled",
                 "finished_at": datetime.now(UTC),
                 "error": message,
                 "error_code": "issue_already_closed",
                 **self._finalize_run_log_fields(run),
             },
+            expected_owner_token=run.execution_owner_token,
         )
         if cancelled is None:
             return True
-        if run.wakeup_request_id:
-            await update_wakeup_request(
-                self._session,
-                run.wakeup_request_id,
-                {
-                    "status": "cancelled",
-                    "finished_at": datetime.now(UTC),
-                    "error": message,
-                },
-            )
         await self._append_event(
             cancelled,
             await self._next_event_sequence(run.id),
@@ -1074,8 +1102,9 @@ class HeartbeatService:
             message=message,
             level="warning",
             payload={"issueId": issue.id, "issueStatus": issue.status},
+            idempotency_key="recovery:issue-already-closed",
         )
-        await self._release_issue_execution(cancelled)
+        await self._reconcile_terminal_effects(cancelled)
         return True
 
     async def resume_queued_runs(self, agent_id: str) -> list[HeartbeatRun]:
@@ -1332,7 +1361,7 @@ class HeartbeatService:
         actor_id: str,
         error: str,
     ) -> None:
-        await create_wakeup_request(
+        await create_wakeup_request_idempotent(
             self._session,
             {
                 **self._wakeup_values(
@@ -1389,8 +1418,8 @@ class HeartbeatService:
         *,
         actor_type: str,
         actor_id: str,
-    ) -> HeartbeatRunRow:
-        wakeup = await create_wakeup_request(
+    ) -> HeartbeatRunRow | None:
+        wakeup, created = await create_wakeup_request_idempotent(
             self._session,
             self._wakeup_values(
                 agent,
@@ -1400,6 +1429,10 @@ class HeartbeatService:
                 status="queued",
             ),
         )
+        if not created:
+            if wakeup.run_id:
+                return await get_run(self._session, wakeup.run_id)
+            return None
         context_snapshot = {
             "triggeredBy": actor_type,
             "actorId": actor_id,
@@ -1534,8 +1567,19 @@ class HeartbeatService:
                 await self._commit_background_runtime_progress()
 
         async def emit_runtime_progress() -> None:
-            nonlocal sequence
+            nonlocal sequence, running
             async with runtime_callback_lock:
+                if running.execution_owner_token:
+                    renewed = await renew_run_execution_lease(
+                        self._session,
+                        running.id,
+                        running.execution_owner_token,
+                    )
+                    if not renewed:
+                        raise RuntimeError("Run execution lease was lost")
+                    refreshed = await get_run(self._session, running.id)
+                    if refreshed is not None:
+                        running = refreshed
                 payload: dict[str, Any] = {
                     "elapsedSeconds": max(
                         0, int((datetime.now(UTC) - adapter_started_at).total_seconds())
@@ -1719,11 +1763,11 @@ class HeartbeatService:
                         f"{_exception_message(wp_exc)}\n"
                     ),
                 )
-            final = await update_run(
+            final = await transition_run_to_terminal(
                 self._session,
                 running.id,
+                final_status,
                 {
-                    "status": final_status,
                     "finished_at": datetime.now(UTC),
                     "error": result.error_message,
                     "error_code": (
@@ -1752,8 +1796,23 @@ class HeartbeatService:
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,
                 },
+                expected_owner_token=running.execution_owner_token,
             )
-            assert final is not None
+            if final is None:
+                current = await get_run(self._session, running.id)
+                if current is None:
+                    raise RuntimeError("Run disappeared during terminal transition")
+                if current.status not in {
+                    "succeeded",
+                    "failed",
+                    "timed_out",
+                    "cancelled",
+                    "waiting_for_children",
+                }:
+                    raise RuntimeError("Run execution lease was lost")
+                final = current
+                final_status = cast(HeartbeatRunStatus, current.status)
+            await self._commit_background_runtime_progress()
             return await self._complete_finalized_run(
                 agent=agent,
                 running=running,
@@ -1766,7 +1825,15 @@ class HeartbeatService:
             if cancellation.is_set():
                 return running
             await self._session.refresh(running)
-            if running.status == "cancelled":
+            if running.status in {
+                "succeeded",
+                "failed",
+                "timed_out",
+                "cancelled",
+                "waiting_for_children",
+            }:
+                if running.terminal_effects_pending:
+                    return await self._reconcile_terminal_effects(running)
                 return running
             message = _exception_message(exc)
             await self._append_run_log(running, stream="stderr", chunk=message)
@@ -1781,11 +1848,11 @@ class HeartbeatService:
                 if isinstance(exc, ProcessLostError)
                 else "adapter_failed"
             )
-            failed = await update_run(
+            failed = await transition_run_to_terminal(
                 self._session,
                 running.id,
+                "failed",
                 {
-                    "status": "failed",
                     "finished_at": datetime.now(UTC),
                     "error": message,
                     "error_code": error_code,
@@ -1793,29 +1860,17 @@ class HeartbeatService:
                     "stdout_excerpt": stdout or None,
                     "stderr_excerpt": stderr or None,
                 },
+                expected_owner_token=running.execution_owner_token,
             )
-            assert failed is not None
-            await update_wakeup_request(
-                self._session,
-                running.wakeup_request_id or "",
-                {
-                    "status": "failed",
-                    "finished_at": datetime.now(UTC),
-                    "error": message,
-                },
+            if failed is None:
+                current = await get_run(self._session, running.id)
+                if current is None:
+                    raise
+                return current
+            await self._commit_background_runtime_progress()
+            return await self._reconcile_terminal_effects(
+                failed, result=None, sequence=sequence
             )
-            await self._update_runtime_state(agent, failed)
-            await update_agent(self._session, agent.id, {"status": "error"})
-            await self._reconcile_failed_done_issue(agent, failed)
-            with contextlib.suppress(Exception):
-                await self._release_issue_execution(failed)
-            await self._append_event(
-                failed, sequence, "error", message=message, level="error"
-            )
-            await WorkspaceService(self._session).release_runtime_services_for_run(
-                failed.id
-            )
-            return failed
         finally:
             self._cancel_events.pop(running.id, None)
 
@@ -1829,7 +1884,49 @@ class HeartbeatService:
         result: Any,
         sequence: int,
     ) -> HeartbeatRunRow:
+        if not final.terminal_effects_pending:
+            compatibility_final = await update_run(
+                self._session,
+                final.id,
+                {
+                    "terminal_effects_pending": True,
+                    "terminal_effects_json": {
+                        "version": 1,
+                        "source": "legacy_complete_finalized_run",
+                    },
+                    "terminal_effects_next_attempt_at": None,
+                    "terminal_effects_claim_token": None,
+                    "terminal_effects_claimed_at": None,
+                    "terminal_effects_last_error": None,
+                },
+            )
+            if compatibility_final is not None:
+                final = compatibility_final
+        return await self._reconcile_terminal_effects(
+            final, result=result, sequence=sequence
+        )
+
+    async def _reconcile_terminal_effects(
+        self,
+        run: HeartbeatRunRow,
+        *,
+        result: Any | None = None,
+        sequence: int | None = None,
+    ) -> HeartbeatRunRow:
+        claimed = await claim_run_terminal_effects(self._session, run.id)
+        if claimed is None:
+            current = await get_run(self._session, run.id)
+            return current or run
+        claim_token = claimed.terminal_effects_claim_token
+        assert claim_token is not None
+        final = claimed
         try:
+            agent = await get_agent_by_id(self._session, final.agent_id)
+            if agent is None:
+                raise RuntimeError("Run agent no longer exists")
+            if sequence is None:
+                sequence = await self._next_event_sequence(final.id)
+            final_status = cast(HeartbeatRunStatus, final.status)
             if final_status == "succeeded":
                 final = await self._enforce_closeout_governance_success(agent, final)
                 final_status = cast(HeartbeatRunStatus, final.status)
@@ -1846,29 +1943,35 @@ class HeartbeatService:
                         "error": _exception_message(exc),
                         "errorType": type(exc).__name__,
                     },
+                    idempotency_key="terminal-effect:cost-collection-failed",
                 )
                 sequence += 1
-            await update_wakeup_request(
-                self._session,
-                running.wakeup_request_id or "",
-                {
-                    "status": "completed"
-                    if final_status in {"succeeded", "waiting_for_children"}
-                    else final_status,
-                    "finished_at": datetime.now(UTC),
-                    "error": final.error or result.error_message,
-                },
-            )
+            if final.wakeup_request_id:
+                await update_wakeup_request(
+                    self._session,
+                    final.wakeup_request_id,
+                    {
+                        "status": "completed"
+                        if final_status in {"succeeded", "waiting_for_children"}
+                        else final_status,
+                        "finished_at": final.finished_at or datetime.now(UTC),
+                        "error": final.error or getattr(result, "error_message", None),
+                    },
+                )
             await self._update_runtime_state(agent, final)
-            await update_agent(
-                self._session,
-                agent.id,
-                {
-                    "status": "idle"
-                    if final_status in {"succeeded", "waiting_for_children"}
-                    else "error"
-                },
-            )
+            if agent.status == "running":
+                await update_agent(
+                    self._session,
+                    agent.id,
+                    {
+                        "status": "idle"
+                        if final_status
+                        in {"succeeded", "waiting_for_children", "cancelled"}
+                        else "error"
+                    },
+                )
+            if final_status == "failed":
+                await self._reconcile_failed_done_issue(agent, final)
             await self._release_issue_execution(final)
             context_after_final = (
                 final.context_snapshot
@@ -1888,26 +1991,48 @@ class HeartbeatService:
             await self._append_event(
                 final,
                 sequence,
-                "lifecycle",
-                message=f"run {final_status}",
+                "error" if final_status == "failed" and result is None else "lifecycle",
+                message=(
+                    final.error
+                    if final_status == "failed" and result is None and final.error
+                    else f"run {final_status}"
+                ),
                 level=(
                     "info"
                     if final_status in {"succeeded", "waiting_for_children"}
                     else "error"
                 ),
+                idempotency_key=f"terminal-effect:outcome:{final_status}",
             )
-            await WorkspaceService(self._session).release_runtime_services_for_run(
-                final.id
+            workspace_service = WorkspaceService(self._session)
+            if final_status in {"failed", "timed_out", "cancelled"}:
+                await workspace_service.mark_run_workspace_interrupted(
+                    final.id,
+                    reason=final.error_code or final_status,
+                    message=final.error or f"run {final_status}",
+                )
+            else:
+                await workspace_service.release_runtime_services_for_run(final.id)
+            completed = await complete_run_terminal_effects(
+                self._session,
+                final.id,
+                claim_token,
+                [
+                    "wakeup",
+                    "runtime_state",
+                    "agent_status",
+                    "issue_release",
+                    "workspace_release",
+                    "lifecycle_event",
+                ],
             )
-            return final
+            return completed or final
         except Exception as exc:
-            if final.status != "succeeded":
-                raise
             message = _exception_message(exc)
             with contextlib.suppress(Exception):
                 await self._append_event(
                     final,
-                    sequence,
+                    sequence or await self._next_event_sequence(final.id),
                     "postprocess.warning",
                     message=message,
                     level="warning",
@@ -1916,24 +2041,14 @@ class HeartbeatService:
                         "errorType": type(exc).__name__,
                         "runStatusPreserved": final.status,
                     },
+                    idempotency_key="terminal-effect:postprocess-warning",
                 )
             with contextlib.suppress(Exception):
-                await update_wakeup_request(
-                    self._session,
-                    running.wakeup_request_id or "",
-                    {
-                        "status": "completed",
-                        "finished_at": datetime.now(UTC),
-                        "error": None,
-                    },
+                await fail_run_terminal_effects(
+                    self._session, final.id, claim_token, message
                 )
-            with contextlib.suppress(Exception):
-                await update_agent(self._session, agent.id, {"status": "idle"})
-            with contextlib.suppress(Exception):
-                await WorkspaceService(self._session).release_runtime_services_for_run(
-                    final.id
-                )
-            return final
+            current = await get_run(self._session, final.id)
+            return current or final
 
     async def _prepare_execution(
         self, agent: AgentRow, running: HeartbeatRunRow
@@ -2133,13 +2248,9 @@ class HeartbeatService:
         existing = await get_wakeup_by_idempotency_key(
             self._session, agent.id, idempotency_key
         )
-        if existing is not None and existing.status not in {
-            "failed",
-            "cancelled",
-            "skipped",
-        }:
+        if existing is not None:
             return
-        await create_wakeup_request(
+        await create_wakeup_request_idempotent(
             self._session,
             self._wakeup_values(
                 agent,
@@ -3480,6 +3591,8 @@ class HeartbeatService:
                 },
             )
             return
+        if state.last_run_id == run.id and state.last_run_status == run.status:
+            return
         await update_runtime_state(
             self._session,
             agent.id,
@@ -3512,6 +3625,7 @@ class HeartbeatService:
         level: str,
         stream: str | None = "system",
         payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         await append_run_event(
             self._session,
@@ -3525,6 +3639,7 @@ class HeartbeatService:
                 "level": level,
                 "message": message,
                 "payload": payload,
+                "idempotency_key": idempotency_key,
             },
         )
 
@@ -3690,6 +3805,23 @@ def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
         "processStartedAt": (
             row.process_started_at.isoformat() if row.process_started_at else None
         ),
+        "processExitedAt": (
+            row.process_exited_at.isoformat() if row.process_exited_at else None
+        ),
+        "executionLeaseExpiresAt": (
+            row.execution_lease_expires_at.isoformat()
+            if row.execution_lease_expires_at
+            else None
+        ),
+        "terminalEffectsPending": row.terminal_effects_pending,
+        "terminalEffectsCompletedJson": row.terminal_effects_completed_json,
+        "terminalEffectsAttemptCount": row.terminal_effects_attempt_count,
+        "terminalEffectsNextAttemptAt": (
+            row.terminal_effects_next_attempt_at.isoformat()
+            if row.terminal_effects_next_attempt_at
+            else None
+        ),
+        "terminalEffectsLastError": row.terminal_effects_last_error,
         "retryOfRunId": row.retry_of_run_id,
         "processLossRetryCount": row.process_loss_retry_count,
         "contextSnapshot": row.context_snapshot,
@@ -3786,6 +3918,7 @@ def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
         "color": row.color,
         "message": row.message,
         "payload": row.payload,
+        "idempotencyKey": row.idempotency_key,
         "createdAt": row.created_at.isoformat(),
     }
 

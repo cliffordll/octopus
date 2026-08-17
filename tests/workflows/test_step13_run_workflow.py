@@ -1306,6 +1306,223 @@ async def test_closed_issue_recovery_does_not_override_finalized_run(
     assert wakeup.status == "completed"
 
 
+async def test_closed_issue_recovery_restores_trusted_success_evidence(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ClosedIssuePartialFinalized")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Already completed before recovery",
+            status="done",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        wakeup = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            payload={"issueId": issue.id},
+            status="completed",
+            run_id=None,
+            claimed_at=datetime.now(UTC),
+        )
+        session.add(wakeup)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            wakeup_request_id=wakeup.id,
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(run)
+        await session.flush()
+        wakeup.run_id = run.id
+        await session.execute(
+            update(HeartbeatRun)
+            .where(HeartbeatRun.id == run.id)
+            .values(
+                finished_at=datetime.now(UTC),
+                exit_code=0,
+                result_json={"summary": "completed"},
+            )
+        )
+        await heartbeat._append_event(
+            run,
+            1,
+            "lifecycle",
+            message="run succeeded",
+            level="info",
+        )
+        handled = await heartbeat._cancel_orphaned_run_if_issue_closed(run)
+
+    assert handled is True
+    await session.refresh(run)
+    await session.refresh(wakeup)
+    assert run.status == "succeeded"
+    assert run.error_code is None
+    assert run.error is None
+    assert run.terminal_effects_pending is False
+    assert wakeup.status == "completed"
+
+
+async def test_recovery_does_not_infer_success_from_result_metadata(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="MetadataIsNotTerminalEvidence")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+            finished_at=datetime.now(UTC),
+            exit_code=0,
+            result_json={"summary": "looks complete but is not authoritative"},
+        )
+        session.add(run)
+        await session.flush()
+        recovered = await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "process_lost"
+    assert recovered and recovered[0]["retryOfRunId"] == run.id
+
+
+async def test_recovery_keeps_valid_execution_lease_running(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ValidLease")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+            execution_owner_token="active-owner",
+            execution_lease_expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        )
+        session.add(run)
+        await session.flush()
+        recovered = await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(run)
+    assert recovered == []
+    assert run.status == "running"
+    assert run.execution_owner_token == "active-owner"
+
+
+async def test_recovery_records_conflicting_terminal_evidence_without_guessing(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ConflictingEvidence")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+        )
+        session.add(run)
+        await session.flush()
+        await heartbeat._append_event(
+            run, 1, "lifecycle", message="run succeeded", level="info"
+        )
+        await heartbeat._append_event(
+            run, 2, "lifecycle", message="run failed", level="error"
+        )
+        recovered = await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(run)
+    errors = (
+        (
+            await session.execute(
+                select(HeartbeatRunEvent).where(
+                    HeartbeatRunEvent.run_id == run.id,
+                    HeartbeatRunEvent.event_type == "recovery.error",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert recovered == []
+    assert run.status == "running"
+    assert len(errors) == 1
+
+
+async def test_recovery_finishes_pending_terminal_effects_idempotently(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="PendingTerminalEffects")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        agent_row = await session.get(AgentRow, agent["id"])
+        assert agent_row is not None
+        agent_row.status = "running"
+        wakeup = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="on_demand",
+            trigger_detail="manual",
+            status="claimed",
+            claimed_at=datetime.now(UTC),
+        )
+        session.add(wakeup)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="succeeded",
+            finished_at=datetime.now(UTC),
+            wakeup_request_id=wakeup.id,
+            terminal_effects_pending=True,
+            terminal_effects_json={"version": 1},
+        )
+        session.add(run)
+        await session.flush()
+        wakeup.run_id = run.id
+        await heartbeat.recover_orphaned_runs()
+        await heartbeat.recover_orphaned_runs()
+
+    await session.refresh(run)
+    await session.refresh(wakeup)
+    await session.refresh(agent_row)
+    terminal_events = (
+        (
+            await session.execute(
+                select(HeartbeatRunEvent).where(
+                    HeartbeatRunEvent.run_id == run.id,
+                    HeartbeatRunEvent.idempotency_key
+                    == "terminal-effect:outcome:succeeded",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert run.status == "succeeded"
+    assert run.terminal_effects_pending is False
+    assert wakeup.status == "completed"
+    assert agent_row.status == "idle"
+    assert len(terminal_events) == 1
+
+
 async def test_process_run_persists_child_process_metadata(
     session: AsyncSession,
 ) -> None:
