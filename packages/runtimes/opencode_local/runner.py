@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
-from ..common import runtime_subprocess_kwargs
+from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
@@ -186,8 +186,7 @@ async def _run_once(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancelled in done:
-                process.kill()
-                await process.wait()
+                await terminate_runtime_process(process)
                 await stdin_task
                 stdout_text = await stdout_task
                 stderr_text = await stderr_task
@@ -208,8 +207,7 @@ async def _run_once(
         else:
             await wait_task
     except TimeoutError:
-        process.kill()
-        await process.wait()
+        await terminate_runtime_process(process)
         await stdin_task
         stdout_text = await stdout_task
         stderr_text = await stderr_task
@@ -223,8 +221,7 @@ async def _run_once(
             loaded_skills=loaded_skills,
         )
     except asyncio.CancelledError:
-        process.kill()
-        await process.wait()
+        await terminate_runtime_process(process)
         for task in (stdin_task, stdout_task, stderr_task, wait_task):
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -310,7 +307,7 @@ async def _execute_with_communicate(
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        process.kill()
+        await terminate_runtime_process(process)
         stdout, stderr = await communication
         return _result(
             getattr(process, "returncode", None),

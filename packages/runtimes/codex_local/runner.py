@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs
+from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
@@ -221,9 +221,8 @@ async def _run_attempt(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancelled in done:
-                process.kill()
+                await terminate_runtime_process(process)
                 stdout, stderr = await communication
-                await process.wait()
                 stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
                 result = RuntimeExecutionResult(
                     exit_code=process.returncode,
@@ -254,9 +253,8 @@ async def _run_attempt(
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        process.kill()
+        await terminate_runtime_process(process)
         stdout, stderr = await communication
-        await process.wait()
         stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
         result = RuntimeExecutionResult(
             exit_code=process.returncode,
@@ -277,9 +275,8 @@ async def _run_attempt(
             raw_stderr=stderr.decode(errors="replace"),
         )
     except asyncio.CancelledError:
-        process.kill()
+        await terminate_runtime_process(process)
         await communication
-        await process.wait()
         raise
 
     return await _completed_process_attempt(

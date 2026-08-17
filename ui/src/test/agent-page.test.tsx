@@ -185,7 +185,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(header!).getByRole("button", { name: "恢复" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "归档" })).toBeInTheDocument();
-  expect(within(header!).getByRole("button", { name: "唤醒" })).toBeInTheDocument();
+  expect(within(header!).getByRole("button", { name: "立即唤醒" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行诊断" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
   const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
@@ -287,7 +287,7 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(await screen.findByText("成功")).toBeInTheDocument();
 
   await userEvent.click(screen.getByRole("button", { name: "暂停" }));
-  await userEvent.click(screen.getByRole("button", { name: "唤醒" }));
+  await userEvent.click(screen.getByRole("button", { name: "立即唤醒" }));
   await userEvent.click(screen.getByRole("button", { name: "运行诊断" }));
   await userEvent.click(screen.getByRole("button", { name: "归档" }));
   expect(fetchMock).toHaveBeenCalledWith(
@@ -336,7 +336,7 @@ it("disables runtime actions for agents pending approval", async () => {
   expect(screen.getByRole("button", { name: "分配任务" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "聊天" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "唤醒" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "立即唤醒" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "运行诊断" })).toBeDisabled();
 });
 

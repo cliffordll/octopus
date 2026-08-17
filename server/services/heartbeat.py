@@ -111,6 +111,10 @@ LOCAL_CHILD_PROCESS_RUNTIMES = {
     "hermes_local",
 }
 
+# Only adapters that report stdout/stderr incrementally can safely use an
+# output-silence watchdog by default. Other adapters may opt in explicitly.
+STREAMING_LOCAL_RUNTIMES = {"opencode_local"}
+
 ISSUE_PASSIVE_FOLLOWUP_REASON = "issue_passive_followup"
 ISSUE_PASSIVE_FOLLOWUP_WAKE_SOURCE = "passive_issue_followup"
 ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
@@ -156,7 +160,10 @@ def _run_purpose(
         return "closeout_followup"
     if invocation_source == "review":
         return "review"
-    if invocation_source == "timer":
+    if (
+        invocation_source == "timer"
+        or context.get("wakeReason") == "runtime_diagnostic"
+    ):
         return "heartbeat"
     return "task_execution"
 
@@ -184,7 +191,9 @@ def _exception_message(exc: BaseException) -> str:
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
     RUNTIME_PROGRESS_INTERVAL_SECONDS = 15.0
+    RUNTIME_NO_OUTPUT_TIMEOUT_SECONDS = 300.0
     _start_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _diagnostic_locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _active_run_ids: ClassVar[dict[str, set[str]]] = {}
     _cancel_events: ClassVar[dict[str, asyncio.Event]] = {}
 
@@ -193,6 +202,7 @@ class HeartbeatService:
     ) -> None:
         self._session = session
         self._commit_process_metadata = commit_process_metadata
+        self.last_wakeup_reused = False
 
     async def wakeup(
         self,
@@ -203,6 +213,7 @@ class HeartbeatService:
         actor_id: str,
         execute_immediately: bool = True,
     ) -> HeartbeatRun | None:
+        self.last_wakeup_reused = False
         agent = await get_agent_by_id(self._session, agent_id)
         if agent is None:
             return None
@@ -231,6 +242,18 @@ class HeartbeatService:
         )
         if block is not None:
             raise ValueError(block.reason)
+        diagnostic = (
+            payload.get("reason") == "runtime_diagnostic"
+            or context.get("wakeReason") == "runtime_diagnostic"
+        )
+        if diagnostic:
+            return await self._wakeup_runtime_diagnostic(
+                agent,
+                payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                execute_immediately=execute_immediately,
+            )
         idempotency_key = payload.get("idempotencyKey")
         if idempotency_key:
             existing = await get_wakeup_by_idempotency_key(
@@ -239,6 +262,7 @@ class HeartbeatService:
             if existing is not None and existing.run_id:
                 existing_run = await get_run(self._session, existing.run_id)
                 if existing_run is not None:
+                    self.last_wakeup_reused = True
                     return self._to_run(existing_run)
             if existing is not None and existing.status == "deferred_agent_paused":
                 await update_wakeup_request(
@@ -273,7 +297,6 @@ class HeartbeatService:
             actor_id=actor_id,
         ):
             return None
-
         run = await self._create_queued_run(
             agent,
             payload,
@@ -286,6 +309,152 @@ class HeartbeatService:
             return self._to_run(run)
         executed = await self._start_if_capacity(agent, run)
         return self._to_run(executed)
+
+    async def _wakeup_runtime_diagnostic(
+        self,
+        agent: AgentRow,
+        payload: WakeAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        execute_immediately: bool,
+    ) -> HeartbeatRun | None:
+        diagnostic_payload: WakeAgentPayload = {
+            **payload,
+            "contextSnapshot": {
+                **self._payload_context_snapshot(payload.get("contextSnapshot")),
+                "wakeReason": "runtime_diagnostic",
+            },
+        }
+        lock = self._diagnostic_locks.setdefault(agent.id, asyncio.Lock())
+        async with lock:
+            if agent.status == "paused":
+                await self._create_skipped_wakeup(
+                    agent,
+                    diagnostic_payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    error="agent.paused",
+                )
+                await self._session.commit()
+                return None
+            # PostgreSQL serializes through the Agent row. SQLite is serialized
+            # by the process-wide lock, held until this transaction commits.
+            await self._session.execute(
+                select(AgentRow.id).where(AgentRow.id == agent.id).with_for_update()
+            )
+            run: HeartbeatRunRow | None = None
+            idempotency_key = diagnostic_payload.get("idempotencyKey")
+            if idempotency_key:
+                existing_wakeup = await get_wakeup_by_idempotency_key(
+                    self._session, agent.id, idempotency_key
+                )
+                if existing_wakeup is not None and existing_wakeup.run_id:
+                    run = await get_run(self._session, existing_wakeup.run_id)
+            if run is None:
+                for existing in await list_runs(self._session, agent.org_id, agent.id):
+                    existing_context = existing.context_snapshot or {}
+                    if (
+                        existing.status in {"queued", "running"}
+                        and existing.invocation_source == "on_demand"
+                        and existing_context.get("wakeReason") == "runtime_diagnostic"
+                    ):
+                        run = existing
+                        break
+            if run is not None:
+                self.last_wakeup_reused = True
+            else:
+                run = await self._create_queued_run(
+                    agent,
+                    diagnostic_payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
+            if run is not None:
+                await self.record_invoked_activity(
+                    self._to_run(run),
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
+            await self._session.commit()
+        if run is None:
+            return None
+        if not execute_immediately:
+            return self._to_run(run)
+        return self._to_run(await self._start_if_capacity(agent, run))
+
+    async def wakeup_if_actionable(
+        self,
+        agent_id: str,
+        payload: WakeAgentPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        execute_immediately: bool = True,
+    ) -> HeartbeatRun | None:
+        agent = await get_agent_by_id(self._session, agent_id)
+        if agent is None:
+            return None
+        if agent.status in ("terminated", "pending_approval"):
+            raise AgentConflictError("Agent is not invokable in its current state")
+        if agent.status == "paused":
+            await self._create_skipped_wakeup(
+                agent,
+                payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                error="agent.paused",
+            )
+            return None
+        checked_at = datetime.now(UTC)
+        recovered = await self._recover_pending_wakeup_for_timer(agent, checked_at)
+        if recovered is not None:
+            await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+            if execute_immediately:
+                recovered = await self._start_if_capacity(agent, recovered)
+            return self._to_run(recovered)
+        preflight = await self._evaluate_timer_preflight(agent, checked_at)
+        if not preflight["shouldRun"]:
+            reason = cast(str, preflight["reason"])
+            skipped_payload: WakeAgentPayload = {
+                **payload,
+                "source": "on_demand",
+                "triggerDetail": "manual",
+                "reason": reason,
+                "payload": {
+                    **self._payload_context(payload.get("payload")),
+                    "preflight": preflight,
+                },
+            }
+            await self._create_skipped_wakeup(
+                agent,
+                skipped_payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                error=reason,
+            )
+            await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+            return None
+        context_snapshot = {
+            **self._payload_context_snapshot(payload.get("contextSnapshot")),
+            "wakeReason": "manual_wakeup",
+            "heartbeatPreflight": preflight,
+        }
+        run = await self.wakeup(
+            agent.id,
+            {
+                **payload,
+                "source": "on_demand",
+                "triggerDetail": "manual",
+                "reason": "manual_wakeup",
+                "contextSnapshot": context_snapshot,
+            },
+            actor_type=actor_type,
+            actor_id=actor_id,
+            execute_immediately=execute_immediately,
+        )
+        await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+        return run
 
     async def _defer_issue_wakeup_if_locked(
         self,
@@ -1703,6 +1872,7 @@ class HeartbeatService:
             ),
         )
         if not created:
+            self.last_wakeup_reused = True
             if wakeup.run_id:
                 return await get_run(self._session, wakeup.run_id)
             return None
@@ -1787,10 +1957,18 @@ class HeartbeatService:
         adapter_operation: object | None = None
         runtime_callback_lock = asyncio.Lock()
         adapter_started_at = datetime.now(UTC)
+        last_runtime_output_at = adapter_started_at
+        silence_timeout_seconds = (
+            self.RUNTIME_NO_OUTPUT_TIMEOUT_SECONDS
+            if agent.agent_runtime_type in STREAMING_LOCAL_RUNTIMES
+            else 0.0
+        )
+        silence_timeout_error: str | None = None
 
         async def on_log(stream: str, chunk: str) -> None:
-            nonlocal sequence, stdout, stderr
+            nonlocal sequence, stdout, stderr, last_runtime_output_at
             async with runtime_callback_lock:
+                last_runtime_output_at = datetime.now(UTC)
                 if stream == "stdout":
                     stdout += chunk
                 else:
@@ -1877,6 +2055,7 @@ class HeartbeatService:
         async def execute_adapter_with_progress(
             context: RuntimeExecutionContext,
         ):
+            nonlocal silence_timeout_error
             interval = self.RUNTIME_PROGRESS_INTERVAL_SECONDS
             if interval <= 0:
                 return await adapter.execute(context)
@@ -1897,6 +2076,18 @@ class HeartbeatService:
                         with contextlib.suppress(asyncio.CancelledError):
                             await task
                         raise ProcessLostError(running.process_pid)
+                    if (
+                        silence_timeout_error is None
+                        and silence_timeout_seconds > 0
+                        and (datetime.now(UTC) - last_runtime_output_at).total_seconds()
+                        >= silence_timeout_seconds
+                    ):
+                        silence_timeout_error = (
+                            "Runtime produced no output for "
+                            f"{silence_timeout_seconds:g}s"
+                        )
+                        cancellation.set()
+                        continue
                     await emit_runtime_progress()
             except asyncio.CancelledError:
                 task.cancel()
@@ -1923,6 +2114,11 @@ class HeartbeatService:
                     ),
                 },
             )
+            configured_silence_timeout = runtime_config.get("noOutputTimeoutSec")
+            if isinstance(configured_silence_timeout, (int, float)) and not isinstance(
+                configured_silence_timeout, bool
+            ):
+                silence_timeout_seconds = max(0.0, float(configured_silence_timeout))
             workspace_env = None
             workspace_payload = None
             if workspace_context is not None:
@@ -1973,19 +2169,26 @@ class HeartbeatService:
             )
             await self._finish_adapter_workspace_operation(
                 adapter_operation,
-                status="succeeded" if not result.error_message else "failed",
+                status=(
+                    "succeeded"
+                    if not result.error_message and silence_timeout_error is None
+                    else "failed"
+                ),
                 exit_code=result.exit_code,
                 stdout_excerpt=stdout or None,
-                stderr_excerpt=stderr or result.error_message,
-                metadata={"adapterExecution": True, "timedOut": result.timed_out},
+                stderr_excerpt=stderr or silence_timeout_error or result.error_message,
+                metadata={
+                    "adapterExecution": True,
+                    "timedOut": result.timed_out or silence_timeout_error is not None,
+                },
             )
-            if cancellation.is_set():
+            if cancellation.is_set() and silence_timeout_error is None:
                 return running
             await self._session.refresh(running)
             if running.status == "cancelled":
                 return running
             final_status: HeartbeatRunStatus
-            if result.timed_out:
+            if result.timed_out or silence_timeout_error is not None:
                 final_status = "timed_out"
             elif result.error_message or (result.exit_code or 0) != 0:
                 final_status = "failed"
@@ -2042,7 +2245,7 @@ class HeartbeatService:
                 final_status,
                 {
                     "finished_at": datetime.now(UTC),
-                    "error": result.error_message,
+                    "error": silence_timeout_error or result.error_message,
                     "error_code": (
                         "timeout"
                         if final_status == "timed_out"
@@ -2067,7 +2270,7 @@ class HeartbeatService:
                     if result.result_json or runtime_services or work_products
                     else None,
                     "stdout_excerpt": stdout or None,
-                    "stderr_excerpt": stderr or None,
+                    "stderr_excerpt": stderr or silence_timeout_error,
                 },
                 expected_owner_token=running.execution_owner_token,
             )
@@ -2194,7 +2397,13 @@ class HeartbeatService:
         assert claim_token is not None
         final = claimed
         try:
-            agent = await get_agent_by_id(self._session, final.agent_id)
+            agent = (
+                await self._session.execute(
+                    select(AgentRow)
+                    .where(AgentRow.id == final.agent_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
             if agent is None:
                 raise RuntimeError("Run agent no longer exists")
             if sequence is None:
@@ -2220,19 +2429,31 @@ class HeartbeatService:
                 )
                 sequence += 1
             if final.wakeup_request_id:
+                final_context = (
+                    final.context_snapshot
+                    if isinstance(final.context_snapshot, dict)
+                    else {}
+                )
+                wakeup_terminal_values: dict[str, Any] = {
+                    "status": (
+                        "completed"
+                        if final_status in {"succeeded", "waiting_for_children"}
+                        else final_status
+                    ),
+                    "finished_at": final.finished_at or datetime.now(UTC),
+                    "error": final.error or getattr(result, "error_message", None),
+                }
+                if final_context.get("wakeReason") == "runtime_diagnostic":
+                    wakeup_terminal_values["idempotency_key"] = None
                 await update_wakeup_request(
                     self._session,
                     final.wakeup_request_id,
-                    {
-                        "status": "completed"
-                        if final_status in {"succeeded", "waiting_for_children"}
-                        else final_status,
-                        "finished_at": final.finished_at or datetime.now(UTC),
-                        "error": final.error or getattr(result, "error_message", None),
-                    },
+                    wakeup_terminal_values,
                 )
             await self._update_runtime_state(agent, final)
-            if agent.status == "running":
+            if agent.status == "running" and not await list_running_run_ids(
+                self._session, agent.id
+            ):
                 await update_agent(
                     self._session,
                     agent.id,
@@ -2327,6 +2548,14 @@ class HeartbeatService:
         self, agent: AgentRow, running: HeartbeatRunRow
     ) -> int:
         now = datetime.now(UTC)
+        locked_agent = (
+            await self._session.execute(
+                select(AgentRow).where(AgentRow.id == agent.id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if locked_agent is None:
+            raise RuntimeError("Run agent no longer exists")
+        agent = locked_agent
         await update_wakeup_request(
             self._session,
             running.wakeup_request_id or "",

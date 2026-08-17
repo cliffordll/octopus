@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import asyncio
 import sys
 import os
 import subprocess
 
 import httpx
+import psutil
 import pytest
 
-from packages.runtimes.common import runtime_subprocess_kwargs
+from packages.runtimes.common import (
+    runtime_subprocess_kwargs,
+    terminate_runtime_process,
+)
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
 from packages.runtimes.http.environment import (
@@ -26,7 +31,7 @@ def test_runtime_subprocesses_are_isolated_from_windows_console_ctrl_c() -> None
     if os.name == "nt":
         assert kwargs == {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
-        assert kwargs == {}
+        assert kwargs == {"start_new_session": True}
 
 
 def test_runtime_subprocess_call_sites_use_shared_creation_kwargs() -> None:
@@ -41,6 +46,33 @@ def test_runtime_subprocess_call_sites_use_shared_creation_kwargs() -> None:
             or "subprocess.run(" in content
         ):
             assert "runtime_subprocess_kwargs" in content, str(path)
+
+
+async def test_runtime_termination_stops_nested_child_process() -> None:
+    parent_code = (
+        "import subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        "print(child.pid, flush=True); time.sleep(30)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        parent_code,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        **runtime_subprocess_kwargs(),
+    )
+    assert process.stdout is not None
+    child_pid = int((await process.stdout.readline()).decode().strip())
+
+    await terminate_runtime_process(process)
+
+    assert process.returncode is not None
+    for _ in range(50):
+        if not psutil.pid_exists(child_pid):
+            break
+        await asyncio.sleep(0.02)
+    assert not psutil.pid_exists(child_pid)
 
 
 async def _noop_on_log(stream: str, chunk: str) -> None:

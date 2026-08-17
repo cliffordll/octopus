@@ -7,7 +7,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..common import runtime_subprocess_kwargs
+from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..context_env import apply_runtime_context_env
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
@@ -193,9 +193,8 @@ async def _run_once(
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancelled in done:
-                process.kill()
+                await terminate_runtime_process(process)
                 stdout, stderr = await communication
-                await process.wait()
                 return _result(
                     process.returncode,
                     stdout,
@@ -215,9 +214,8 @@ async def _run_once(
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        process.kill()
+        await terminate_runtime_process(process)
         stdout, stderr = await communication
-        await process.wait()
         return _result(
             process.returncode,
             stdout,
@@ -227,9 +225,8 @@ async def _run_once(
             loaded_skills=loaded_skills,
         )
     except asyncio.CancelledError:
-        process.kill()
+        await terminate_runtime_process(process)
         await communication
-        await process.wait()
         raise
 
     stdout_text = stdout.decode(errors="replace")

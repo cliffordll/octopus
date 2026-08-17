@@ -219,7 +219,7 @@ async def test_cost_event_crosses_budget_thresholds_and_blocks_new_work(
     wake_code, wake_body = await _request(
         application,
         "POST",
-        f"/api/agents/{agent_id}/wakeup",
+        f"/api/agents/{agent_id}/heartbeat/invoke",
         json={"reason": "manual"},
     )
 

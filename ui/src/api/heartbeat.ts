@@ -5,6 +5,7 @@ import type {
   InstanceSchedulerHeartbeatAgent,
   LogReadResult,
   WakeAgentPayload,
+  WakeupResult,
   WorkspaceOperation,
 } from "./types";
 
@@ -53,8 +54,8 @@ async function readNdjsonStream(response: Response, onLine: (value: unknown) => 
 }
 
 export const heartbeatApi = {
-  wakeup: (agentId: string, options: WakeAgentPayload = {}): Promise<HeartbeatRun> =>
-    jsonRequest<HeartbeatRun>(
+  wakeup: (agentId: string, options: WakeAgentPayload = {}): Promise<WakeupResult> =>
+    jsonRequest<WakeupResult>(
       `/api/agents/${encodeURIComponent(agentId)}/wakeup`,
       "POST",
       options,

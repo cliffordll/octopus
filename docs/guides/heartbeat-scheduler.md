@@ -20,7 +20,8 @@
 | wakeup request | 一次唤醒请求，来源可能是 timer、assignment、review、manual、automation 等 |
 | heartbeat run | 真正进入执行队列的 run，通常由 wakeup 创建 |
 | agent heartbeat policy | agent runtimeConfig 中的 heartbeat 配置 |
-| 定时运行诊断 | 显式开启后，timer 到点才创建真实 agent run；默认关闭 |
+| 立即唤醒 | 立即执行一次与定时心跳相同的任务预检；有可执行工作才创建 run |
+| 运行诊断 | 跳过任务预检，强制启动一次 runtime，用于验证运行环境 |
 
 ## 全局 scheduler 开关
 
@@ -165,6 +166,20 @@ Timer heartbeat 只是唤醒来源之一。
 | automation | 自动化规则触发 |
 
 这些来源通常走 `source !== "timer"` 的路径。
+
+Agent 页面上的两个手动操作有意保持不同语义：
+
+| 操作 | 行为 |
+| --- | --- |
+| `立即唤醒` | 提前执行一次心跳预检；没有可执行任务时只记录 skipped wakeup，不启动 runtime |
+| `运行诊断` | 强制启动 runtime；同一 agent 已有进行中的诊断时复用该 run，不重复启动 |
+
+能够增量上报输出的 `opencode_local` runtime 默认连续 300 秒没有任何输出时会
+结束为 `timed_out`，避免 run 永久停留在 `running`。其他尚未增量上报输出的
+adapter 默认不启用静默超时，避免把合法长任务误判为静默；可以在 agent runtime
+config 中显式设置 `noOutputTimeoutSec`，设置为 `0` 可关闭。取消或超时时，Octopus
+会终止由异步本地 runtime 启动的整个子进程树；无法安全管理进程树的同步 fallback
+不会再用于执行 Runtime。
 
 如果要关闭非 timer wakeup，需要配置：
 
