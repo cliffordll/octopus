@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -3742,6 +3743,104 @@ class HeartbeatService:
             issue.id, expected_org_id=final.org_id
         )
 
+    async def _issue_settlement_cycle_key(self, issue: IssueRow) -> str:
+        """Return a stable identifier for the current terminal-status cycle.
+
+        ``Issue.updated_at`` also changes for lock cleanup and ordinary edits, so it
+        cannot identify a business status transition. Activity IDs are stable across
+        terminal-effect retries and change when a reopened issue settles again.
+        """
+
+        activities = (
+            (
+                await self._session.execute(
+                    select(ActivityLog)
+                    .where(
+                        ActivityLog.org_id == issue.org_id,
+                        ActivityLog.entity_type == "issue",
+                        ActivityLog.entity_id == issue.id,
+                        ActivityLog.action.in_(
+                            (
+                                "issue.created",
+                                "issue.updated",
+                                "issue.review_decision_recorded",
+                            )
+                        ),
+                    )
+                    .order_by(ActivityLog.created_at, ActivityLog.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        current_status: str | None = None
+        terminal_activity_id: str | None = None
+        review_statuses = {
+            "approve": "done",
+            "request_changes": "in_progress",
+            "blocked": "blocked",
+        }
+        terminal_statuses = {"done", "cancelled", "blocked"}
+        for activity in activities:
+            details = activity.details if isinstance(activity.details, dict) else {}
+            status = details.get("status")
+            if activity.action == "issue.review_decision_recorded":
+                decision = details.get("decision")
+                status = (
+                    review_statuses.get(decision) if isinstance(decision, str) else None
+                )
+            elif (
+                not isinstance(status, str)
+                and details.get("reopen") is True
+                and current_status in {"done", "cancelled"}
+            ):
+                status = "todo"
+            if not isinstance(status, str) or status == current_status:
+                continue
+            current_status = status
+            terminal_activity_id = activity.id if status in terminal_statuses else None
+
+        if current_status == issue.status and terminal_activity_id is not None:
+            return f"activity:{terminal_activity_id}"
+
+        # Legacy/imported rows may predate activity events. Their dedicated terminal
+        # timestamps are stable under execution-lock cleanup, unlike updated_at.
+        terminal_at = (
+            issue.completed_at
+            if issue.status == "done"
+            else issue.cancelled_at
+            if issue.status == "cancelled"
+            else None
+        )
+        if terminal_at is not None:
+            if terminal_at.tzinfo is None:
+                terminal_at = terminal_at.replace(tzinfo=UTC)
+            return f"{issue.status}:{terminal_at.isoformat()}"
+        return f"{issue.status}:legacy"
+
+    async def _parent_settlement_cycle_key(self, parent_id: str) -> str | None:
+        children = (
+            (
+                await self._session.execute(
+                    select(IssueRow)
+                    .where(IssueRow.parent_id == parent_id)
+                    .order_by(IssueRow.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        terminal_statuses = {"done", "cancelled", "blocked"}
+        if not children or any(
+            child.status not in terminal_statuses for child in children
+        ):
+            return None
+        parts = [
+            f"{child.id}:{await self._issue_settlement_cycle_key(child)}"
+            for child in children
+        ]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
     async def queue_parent_continuation_for_settled_child(
         self, child_issue_id: str, *, expected_org_id: str | None = None
     ) -> str | None:
@@ -3756,9 +3855,15 @@ class HeartbeatService:
             "blocked",
         }:
             return None
-        if await self._issue_has_active_children(issue.parent_id):
-            return None
-        parent = await self._session.get(IssueRow, issue.parent_id)
+        # Serialize the "last child settled" decision per parent. Without this
+        # lock, two child transactions can each observe the other child as active
+        # and both skip the continuation. PostgreSQL READ COMMITTED takes a fresh
+        # snapshot for the active-child query after the lock waiter resumes.
+        parent = (
+            await self._session.execute(
+                select(IssueRow).where(IssueRow.id == issue.parent_id).with_for_update()
+            )
+        ).scalar_one_or_none()
         if (
             parent is None
             or parent.org_id != issue.org_id
@@ -3766,13 +3871,18 @@ class HeartbeatService:
             or not parent.assignee_agent_id
         ):
             return None
+        settlement_cycle_key = await self._parent_settlement_cycle_key(parent.id)
+        if settlement_cycle_key is None:
+            return None
         continuation = await self.wakeup(
             parent.assignee_agent_id,
             {
                 "source": "assignment",
                 "triggerDetail": "system",
                 "reason": "issue_children_settled",
-                "idempotencyKey": f"issue:{parent.id}:children_settled:{issue.id}",
+                "idempotencyKey": (
+                    f"issue:{parent.id}:children_settled:{settlement_cycle_key}"
+                ),
                 "payload": {
                     "issueId": parent.id,
                     "mutation": "children_settled",
@@ -3798,7 +3908,7 @@ class HeartbeatService:
             actor_id="heartbeat_child_coordination",
             execute_immediately=False,
         )
-        if continuation is not None:
+        if continuation is not None and not self.last_wakeup_reused:
             await insert_activity_log(
                 self._session,
                 org_id=parent.org_id,
@@ -4484,6 +4594,15 @@ async def dispatch_queued_agent(
         if reviewer_agent_id is not None
     }
     next_agent_ids.add(agent_id)
+    # Terminal effects can enqueue more than reviewer work (notably a parent
+    # continuation after the last child settles). Drain every newly queued
+    # agent instead of only recursing into the child/reviewer agents.
+    queued_session = session_factory()
+    try:
+        async with queued_session.begin():
+            next_agent_ids.update(await list_queued_agent_ids(queued_session))
+    finally:
+        await _shielded_session_close(queued_session)
     await asyncio.gather(
         *(
             dispatch_queued_agent(session_factory, next_agent_id)

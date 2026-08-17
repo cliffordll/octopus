@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import importlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,7 @@ from packages.database.queries.workspaces import list_workspace_operations_for_r
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
-from server.services.heartbeat import HeartbeatService
+from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
 from server.services.issues import IssueService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
@@ -2309,7 +2310,15 @@ async def test_settled_children_queue_parent_continuation() -> None:
                 status="done",
                 assignee_agent_id=child_agent.id,
             )
-            session.add(child)
+            settled_sibling = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Settled sibling",
+                status="done",
+                completed_at=datetime.now(UTC),
+                assignee_agent_id=child_agent.id,
+            )
+            session.add_all([child, settled_sibling])
             await session.flush()
             child_run = HeartbeatRun(
                 org_id=org.id,
@@ -2350,6 +2359,443 @@ async def test_settled_children_queue_parent_continuation() -> None:
             assert activity.details["completedChildIssueId"] == child.id
             assert activity.details["reason"] == "issue_children_settled"
     finally:
+        await engine.dispose()
+
+
+async def test_dispatcher_runs_parent_continuation_queued_by_child_closeout(
+    tmp_path: Path,
+) -> None:
+    engine = create_database_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'parent-continuation-dispatch.db'}"
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="parent-continuation-dispatch",
+                name="Parent Continuation Dispatch",
+                issue_prefix="PCD",
+            )
+            session.add(org)
+            await session.flush()
+            runtime_config = {
+                "command": sys.executable,
+                "args": ["-c", "print('continued')"],
+            }
+            parent_agent = Agent(
+                org_id=org.id,
+                name="Parent Agent",
+                agent_runtime_config=runtime_config,
+            )
+            child_agent = Agent(
+                org_id=org.id,
+                name="Child Agent",
+                agent_runtime_config=runtime_config,
+            )
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Child",
+                status="done",
+                completed_at=datetime.now(UTC),
+                assignee_agent_id=child_agent.id,
+            )
+            session.add(child)
+            await session.flush()
+            child_wakeup = AgentWakeupRequest(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                source="assignment",
+                trigger_detail="system",
+                reason="issue_assigned",
+                status="queued",
+            )
+            session.add(child_wakeup)
+            await session.flush()
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                run_purpose="task_execution",
+                trigger_detail="system",
+                status="queued",
+                wakeup_request_id=child_wakeup.id,
+                context_snapshot={
+                    "issueId": child.id,
+                    "wakeReason": "issue_assigned",
+                },
+            )
+            session.add(child_run)
+            await session.flush()
+            child_wakeup.run_id = child_run.id
+            child.execution_run_id = child_run.id
+            child.checkout_run_id = child_run.id
+            child.execution_agent_name_key = child_agent.name.lower()
+            child.execution_locked_at = datetime.now(UTC)
+            parent_runs_before = (
+                (
+                    await session.execute(
+                        select(HeartbeatRun).where(
+                            HeartbeatRun.agent_id == parent_agent.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert parent_runs_before == []
+            await session.commit()
+
+        await dispatch_queued_agent(factory, child_agent.id)
+
+        async with factory() as session:
+            child_after = await session.get(HeartbeatRun, child_run.id)
+            parent_after = (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == parent_agent.id)
+                )
+            ).scalar_one()
+            assert child_after is not None and child_after.status == "succeeded"
+            assert parent_after is not None
+            assert parent_after.status == "failed"
+            assert parent_after.error_code == "closeout_missing"
+            assert parent_after.started_at is not None
+    finally:
+        await engine.dispose()
+
+
+async def test_reopened_child_can_queue_a_new_parent_continuation() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="reopened-child-continuation",
+                name="Reopened Child Continuation",
+                issue_prefix="RCC",
+            )
+            session.add(org)
+            await session.flush()
+            parent_agent = Agent(org_id=org.id, name="Parent Agent")
+            child_agent = Agent(org_id=org.id, name="Child Agent")
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Child",
+                status="todo",
+                assignee_agent_id=child_agent.id,
+            )
+            settled_sibling = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Settled sibling",
+                status="done",
+                completed_at=datetime.now(UTC),
+                assignee_agent_id=child_agent.id,
+            )
+            session.add_all([child, settled_sibling])
+            await session.flush()
+            heartbeat = HeartbeatService(session)
+            issues = IssueService(session)
+
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": child.id},
+            )
+            session.add(child_run)
+            await session.flush()
+            child.execution_run_id = child_run.id
+            child.checkout_run_id = child_run.id
+            child.execution_agent_name_key = child_agent.name.lower()
+            child.execution_locked_at = datetime.now(UTC)
+            await issues.update_issue(
+                child.id,
+                {"status": "done"},
+                actor_type="agent",
+                actor_id=child_agent.id,
+                run_id=child_run.id,
+            )
+            await session.refresh(child)
+
+            first_agent_id = (
+                await heartbeat.queue_parent_continuation_for_settled_child(child.id)
+            )
+            assert first_agent_id == parent_agent.id
+            sibling_agent_id = (
+                await heartbeat.queue_parent_continuation_for_settled_child(
+                    settled_sibling.id
+                )
+            )
+            assert sibling_agent_id == parent_agent.id
+            await heartbeat._release_issue_execution(child_run)
+            first_run = (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == parent_agent.id)
+                )
+            ).scalar_one()
+            first_wakeup = await session.get(
+                AgentWakeupRequest, first_run.wakeup_request_id
+            )
+            assert first_wakeup is not None
+            wakeups_after_retry = (
+                (
+                    await session.execute(
+                        select(AgentWakeupRequest).where(
+                            AgentWakeupRequest.agent_id == parent_agent.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(wakeups_after_retry) == 1
+            first_run.status = "succeeded"
+            first_wakeup.status = "completed"
+            parent.execution_run_id = None
+            parent.checkout_run_id = None
+            parent.execution_agent_name_key = None
+            parent.execution_locked_at = None
+
+            await issues.update_issue(
+                child.id,
+                {"reopen": True},
+                actor_type="user",
+                actor_id="test-user",
+            )
+            await issues.update_issue(
+                child.id,
+                {"status": "done"},
+                actor_type="agent",
+                actor_id=child_agent.id,
+            )
+
+            second_agent_id = (
+                await heartbeat.queue_parent_continuation_for_settled_child(child.id)
+            )
+            await session.refresh(child)
+            child_run_two = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": child.id},
+            )
+            session.add(child_run_two)
+            await session.flush()
+            child.execution_run_id = child_run_two.id
+            child.checkout_run_id = child_run_two.id
+            await heartbeat._release_issue_execution(child_run_two)
+            runs = (
+                (
+                    await session.execute(
+                        select(HeartbeatRun).where(
+                            HeartbeatRun.agent_id == parent_agent.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            assert second_agent_id == parent_agent.id
+            assert len(runs) == 2
+            assert {run.status for run in runs} == {"succeeded", "queued"}
+            wakeups = (
+                (
+                    await session.execute(
+                        select(AgentWakeupRequest).where(
+                            AgentWakeupRequest.agent_id == parent_agent.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(wakeups) == 2
+            settlement_activities = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.entity_id == parent.id,
+                            ActivityLog.action == "issue.children_settled",
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(settlement_activities) == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("OCTOPUS_TEST_POSTGRES_URL"),
+    reason="requires OCTOPUS_TEST_POSTGRES_URL",
+)
+async def test_postgres_concurrent_last_children_queue_one_parent_continuation() -> (
+    None
+):
+    database_url = os.environ["OCTOPUS_TEST_POSTGRES_URL"]
+    engine = create_database_engine(database_url)
+    factory: async_sessionmaker = create_session_factory(engine)
+    schema_name = f"octopus_parent_settlement_{uuid.uuid4().hex}"
+    quoted_schema = f'"{schema_name}"'
+    first_session = None
+    second_session = None
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"CREATE SCHEMA {quoted_schema}"))
+            await connection.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+            await connection.run_sync(Base.metadata.create_all)
+
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+                org = Organization(
+                    url_key=f"pg-parent-settlement-{uuid.uuid4().hex}",
+                    name="PostgreSQL Parent Settlement",
+                    issue_prefix="PPS",
+                )
+                session.add(org)
+                await session.flush()
+                parent_agent = Agent(org_id=org.id, name="Parent Agent")
+                child_agent = Agent(org_id=org.id, name="Child Agent")
+                session.add_all([parent_agent, child_agent])
+                await session.flush()
+                parent = Issue(
+                    org_id=org.id,
+                    title="Parent",
+                    status="in_progress",
+                    assignee_agent_id=parent_agent.id,
+                )
+                session.add(parent)
+                await session.flush()
+                first_child = Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title="First child",
+                    status="in_progress",
+                    assignee_agent_id=child_agent.id,
+                )
+                second_child = Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title="Second child",
+                    status="in_progress",
+                    assignee_agent_id=child_agent.id,
+                )
+                session.add_all([first_child, second_child])
+                await session.flush()
+                org_id = org.id
+                parent_agent_id = parent_agent.id
+                first_child_id = first_child.id
+                second_child_id = second_child.id
+
+        first_session = factory()
+        second_session = factory()
+        await first_session.begin()
+        await second_session.begin()
+        await first_session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+        await second_session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+        first_child = await first_session.get(Issue, first_child_id)
+        second_child = await second_session.get(Issue, second_child_id)
+        assert first_child is not None and second_child is not None
+        first_child.status = "done"
+        first_child.completed_at = datetime.now(UTC)
+        second_child.status = "done"
+        second_child.completed_at = datetime.now(UTC)
+        await first_session.flush()
+        await second_session.flush()
+
+        first_result = await HeartbeatService(
+            first_session
+        ).queue_parent_continuation_for_settled_child(
+            first_child_id, expected_org_id=org_id
+        )
+        assert first_result is None
+
+        second_task = asyncio.create_task(
+            HeartbeatService(
+                second_session
+            ).queue_parent_continuation_for_settled_child(
+                second_child_id, expected_org_id=org_id
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not second_task.done()
+        await first_session.commit()
+        second_result = await asyncio.wait_for(second_task, timeout=5)
+        assert second_result == parent_agent_id
+        await second_session.commit()
+
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+                runs = (
+                    (
+                        await session.execute(
+                            select(HeartbeatRun).where(
+                                HeartbeatRun.agent_id == parent_agent_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                wakeups = (
+                    (
+                        await session.execute(
+                            select(AgentWakeupRequest).where(
+                                AgentWakeupRequest.agent_id == parent_agent_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                assert len(runs) == 1
+                assert len(wakeups) == 1
+                assert wakeups[0].status == "queued"
+                assert wakeups[0].reason == "issue_children_settled"
+    finally:
+        if first_session is not None:
+            await first_session.close()
+        if second_session is not None:
+            await second_session.close()
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(f"DROP SCHEMA IF EXISTS {quoted_schema} CASCADE")
+            )
         await engine.dispose()
 
 
