@@ -332,6 +332,7 @@ async def claim_expired_run_execution(
             execution_lease_expires_at=claimed_at + timedelta(minutes=5),
             updated_at=claimed_at,
         )
+        .execution_options(synchronize_session=False, populate_existing=True)
         .returning(HeartbeatRun)
     )
     return result.scalar_one_or_none()
@@ -470,6 +471,7 @@ async def claim_run_terminal_effects(
             + 1,
             updated_at=claimed_at,
         )
+        .execution_options(synchronize_session=False, populate_existing=True)
         .returning(HeartbeatRun)
     )
     return result.scalar_one_or_none()
