@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import os
 from pathlib import Path
@@ -105,6 +106,18 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     children_parser.add_argument("issue_id")
     children_parser.add_argument("--include-work-products", action="store_true")
     children_parser.set_defaults(handler=list_issue_children)
+
+    create_children_parser = actions.add_parser(
+        "create-children",
+        help="Atomically create the complete delegated child issue set",
+    )
+    create_children_parser.add_argument("issue_id")
+    create_children_parser.add_argument(
+        "--children-json",
+        required=True,
+        help="JSON array of child issue objects",
+    )
+    create_children_parser.set_defaults(handler=create_issue_children)
 
     retry_child_parser = actions.add_parser(
         "retry-child", help="Retry a blocked child issue"
@@ -275,6 +288,20 @@ def get_issue_heartbeat_context(args: argparse.Namespace, client: ApiClient) -> 
 def list_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
     params = {"includeWorkProducts": "true"} if args.include_work_products else None
     return client.request("GET", f"/api/issues/{args.issue_id}/children", params=params)
+
+
+def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
+    try:
+        children = json.loads(args.children_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("--children-json must be valid JSON") from exc
+    if not isinstance(children, list) or not children:
+        raise ValueError("--children-json must be a non-empty JSON array")
+    return client.request(
+        "POST",
+        f"/api/issues/{args.issue_id}/children/batch",
+        json={"children": children},
+    )
 
 
 def retry_child_issue(args: argparse.Namespace, client: ApiClient) -> Any:

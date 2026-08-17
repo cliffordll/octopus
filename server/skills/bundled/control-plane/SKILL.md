@@ -246,11 +246,11 @@ octopus issue update "<issue-id-or-identifier>" ... --json
 
 **Step 9 — Delegate if needed.** When the issue or user asks to split work into
 subtasks, child tasks, or parallel delegated tasks, those product-visible
-subtasks must be real Octopus child issues. Create them with the generic create
-surface before treating the work as delegated:
+subtasks must be real Octopus child issues. Persist the complete split atomically
+before treating the work as delegated:
 
 ```bash
-octopus issue create --org-id "$OCTOPUS_ORG_ID" ... [--label-id "<label-id>"] [--label "<label-name>"] --json
+octopus issue create-children "<parent-id-or-identifier>" --children-json '[{"title":"<subtask title>","description":"<details>","assigneeAgentId":"<agent-id>"}]' --json
 ```
 
 Before delegating child issues, list available agents when you need to choose the executor:
@@ -259,19 +259,18 @@ Before delegating child issues, list available agents when you need to choose th
 octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
-Before creating a child issue, list existing children for the parent and reuse the existing child when the title already matches:
+Before creating child issues, list existing children for the parent. A rerun must
+reuse the persisted split instead of submitting another split:
 
 ```bash
 octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
 ```
 
-Delegated child issues must be assigned explicitly and should be moved into executable work:
-
-```bash
-octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json
-```
-
-When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.
+Every child in `--children-json` must include `assigneeAgentId`; never assign a
+delegated child issue to yourself. If you will do that work inside the parent
+run, do not create a child issue for it. Do not create a summary/merge/report
+child: after all real parallel children settle, the parent run resumes and owns
+the final synthesis and deliverable.
 
 After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent after the children settle. The parent issue must wait for those child issues to run and report back before summarizing their results. Do not poll for children inside the current runtime process. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 

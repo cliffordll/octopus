@@ -151,6 +151,38 @@ def test_issue_child_recovery_commands_call_expected_routes() -> None:
     assert requests[2].read() == b'{"reason":"User accepted"}'
 
 
+def test_issue_create_children_submits_one_atomic_batch() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"created": True, "children": []})
+
+    children = [
+        {
+            "title": "Research Lushan",
+            "description": "Produce source material",
+            "assigneeAgentId": "agent-1",
+        }
+    ]
+    assert (
+        main(
+            [
+                "issue",
+                "create-children",
+                "PARENT-1",
+                "--children-json",
+                json.dumps(children),
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
+    assert json.loads(requests[0].read()) == {"children": children}
+
+
 def test_issue_create_accepts_body_alias_for_description() -> None:
     requests: list[httpx.Request] = []
 

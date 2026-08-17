@@ -19,6 +19,7 @@ from packages.shared.api_paths.issue_attachments import (
 from packages.shared.api_paths.heartbeat import ISSUE_HEARTBEAT_RUNS_PATH
 from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
+    ISSUE_CHILDREN_BATCH_PATH,
     ISSUE_CHILDREN_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DOCUMENT_DETAIL_PATH,
@@ -50,6 +51,7 @@ from packages.shared.types.issue import (
 from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.types.workspace import IssueWorkProduct
 from packages.shared.validators.issue import (
+    validate_create_child_issues,
     validate_create_issue,
     validate_create_issue_comment,
     validate_checkout_issue,
@@ -309,6 +311,71 @@ async def create_issue_route(
     ):
         _schedule_dispatch(request, reviewer_agent_id)
     return issue
+
+
+@router.post(ISSUE_CHILDREN_BATCH_PATH)
+async def create_issue_children_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    body: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        payload = validate_create_child_issues(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    actor = require_actor_identity(request)
+    access_parent = await service.get_by_id(id)
+    if access_parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Parent issue not found",
+        )
+    assert_organization_access(request, access_parent["orgId"])
+    canonical_parent_id = access_parent["id"]
+    await service.end_child_batch_preflight()
+    try:
+        parent, children, created = await service.create_child_issues(
+            canonical_parent_id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+        dispatch_agent_ids: set[str] = set()
+        if created:
+            for child in children:
+                await queue_issue_assignment_wakeup(
+                    heartbeat,
+                    child,
+                    reason="issue_assigned",
+                    mutation="create_children_batch",
+                    context_source="issue.children_batch",
+                    actor_type="agent" if actor.actor_type == "agent" else "user",
+                    actor_id=actor.actor_id,
+                    suppress_errors=False,
+                )
+                assignee_agent_id = child.get("assigneeAgentId")
+                if assignee_agent_id:
+                    dispatch_agent_ids.add(assignee_agent_id)
+        await service.commit_child_issues()
+    except ValueError as exc:
+        status_code = (
+            http_status.HTTP_404_NOT_FOUND
+            if str(exc) == "Parent issue not found"
+            else http_status.HTTP_422_UNPROCESSABLE_CONTENT
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail=str(exc),
+        ) from exc
+    for agent_id in dispatch_agent_ids:
+        _schedule_dispatch(request, agent_id)
+    return {"parent": parent, "children": children, "created": created}
 
 
 @router.get(ISSUE_DETAIL_PATH)
@@ -646,25 +713,26 @@ async def execute_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Reopen the issue before execution",
         )
-    active = await heartbeat.get_active_for_issue(id)
+    canonical_issue_id = detail["id"]
+    active = await heartbeat.get_active_for_issue(canonical_issue_id)
     if active is not None:
         return active
 
     actor = require_actor_identity(request)
-    idempotency_key = f"issue:{id}:execute:{uuid.uuid4()}"
+    idempotency_key = f"issue:{canonical_issue_id}:execute:{uuid.uuid4()}"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
         "reason": "issue_execute",
         "idempotencyKey": idempotency_key,
-        "payload": {"issueId": id, "mutation": "execute"},
+        "payload": {"issueId": canonical_issue_id, "mutation": "execute"},
         "contextSnapshot": {
-            "issueId": id,
+            "issueId": canonical_issue_id,
             "source": "issue.execute",
             "wakeSource": "assignment",
             "wakeReason": "issue_execute",
             "issue": {
-                "id": id,
+                "id": canonical_issue_id,
                 "title": detail["title"],
                 "description": detail.get("description"),
                 "status": detail["status"],
@@ -710,7 +778,7 @@ async def execute_issue_route(
         actor_id=actor.actor_id,
         action="issue.executed",
         entity_type="issue",
-        entity_id=id,
+        entity_id=canonical_issue_id,
         agent_id=assignee_agent_id,
         run_id=enriched["id"],
         details={
@@ -937,7 +1005,7 @@ async def update_issue_route(
         "blocked",
     }:
         parent_agent_id = await heartbeat.queue_parent_continuation_for_settled_child(
-            id
+            updated["id"]
         )
         if parent_agent_id:
             _schedule_dispatch(request, parent_agent_id)

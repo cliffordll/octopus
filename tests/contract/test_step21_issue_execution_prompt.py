@@ -93,11 +93,12 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
 
     assert "## Subtask Coordination" in prompt
     assert "Product-visible subtasks must be Octopus child issues" in prompt
-    assert (
-        'octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "OCT-42"' in prompt
-    )
-    assert "--status todo" in prompt
-    assert "--assignee-agent-id" in prompt
+    assert 'octopus issue create-children "OCT-42"' in prompt
+    assert "--children-json" in prompt
+    assert "assigneeAgentId" in prompt
+    assert "Do not create delegated siblings one at a time" in prompt
+    assert "Do not create a child whose job is to summarize" in prompt
+    assert "parent owns the final synthesis" in prompt
     assert 'octopus agent list --org-id "$OCTOPUS_ORG_ID"' in prompt
     assert (
         "Do not mark the parent issue done while child issues are still open" in prompt
@@ -162,7 +163,8 @@ def test_runtime_prompt_reconciles_existing_children_on_rerun() -> None:
     assert "children_blocked" in prompt
     assert "东海介绍" in prompt
     assert "西海介绍" in prompt
-    assert "Do not ignore existing children" in prompt
+    assert "Reuse the persisted child split" in prompt
+    assert "A normal rerun is reconciliation, not replanning" in prompt
     assert "childKey" not in prompt
     assert "--child-key" not in prompt
 

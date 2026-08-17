@@ -279,6 +279,26 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 - PostgreSQL 双事务并发完成最后两个子任务时，父 continuation 恰好产生一次；
 - 扩展关闭或未使用时，不影响普通 Run、Heartbeat 或 Automation 恢复。
 
+#### Phase 1C 补充：原子拆分与父任务汇总所有权
+
+父子汇合可靠性还要求“拆分结果先落库，再启动子任务”。本扩展不新增 plan/batch 表，也不依赖标题作为幂等键：
+
+- 父 Agent 必须先生成完整的并行子任务集合，再通过一个批量接口在同一事务中写入全部 child Issue 和 assignment wakeup；禁止逐条创建同级子任务；
+- 父 Issue 行锁是创建边界：若父任务已经存在可见子任务，普通重试直接返回已落库集合，不重新规划或补建另一批；单个子任务的重试或替换继续使用显式 retry/replace 流程；
+- 子任务只是实际可并行执行的工作，不创建“汇总、合并、报告”子任务；最后一批子任务结算后，由 parent continuation 读取子任务结果并在父任务中完成最终汇总；
+- 普通 Heartbeat actionable 查询排除已有子任务的父 Issue，避免父任务在等待期间被当成普通工作再次启动；`issue_children_settled` continuation 是父任务恢复执行的主路径；
+- Heartbeat/manual preflight 必须能够发现“父任务仍为 `todo/in_progress`、全部子任务已结算、当前 settlement generation 缺少 continuation”的历史记录，并按同一父级幂等键补建 continuation；
+- Run 上下文和终态收尾统一使用 Issue UUID；identifier 只作为 API/CLI 输入别名，不能直接作为 execution lock、deferred wakeup 或 parent continuation 的数据库关联键。
+
+补充验收：
+
+- 同一父任务的批量创建请求重复执行（即使重试载荷标题变化）也只保留首个完整子任务集合；
+- 批量中的任一 child/wakeup 创建失败时整批回滚，不留下部分子任务；
+- 父任务等待子任务期间不会被 Heartbeat 普通预检重复运行；
+- 全部子任务已结束但 continuation 丢失时，下一次 Heartbeat/manual preflight 能补建且只补建一次；
+- 通过 identifier 执行或关闭子任务时，终态收尾仍能释放正确的 UUID 锁并唤醒父任务；
+- 最终汇总产物属于父任务，不存在仅用于汇总的子 Issue。
+
 ### Phase 2：Heartbeat 语义对齐
 
 目标：timer 到期时有工作才运行，无工作不启动模型。
