@@ -10,6 +10,7 @@ from ..constants.issue import (
 )
 from ..types.issue import (
     CheckoutIssuePayload,
+    CreateChildIssuesPayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
     ListOrgIssuesQuery,
@@ -48,6 +49,14 @@ _CREATE_ISSUE_FIELDS = {
     "originKind",
     "originId",
     "requestDepth",
+}
+
+_CREATE_CHILD_ISSUE_FIELDS = {
+    "title",
+    "description",
+    "priority",
+    "assigneeAgentId",
+    "reviewerAgentId",
 }
 
 _UPDATE_ISSUE_FIELDS = {
@@ -168,6 +177,40 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
             raise ValueError("'requestDepth' must be a non-negative integer")
 
     return cast(CreateIssuePayload, payload)
+
+
+def validate_create_child_issues(
+    payload: Mapping[str, Any],
+) -> CreateChildIssuesPayload:
+    _reject_unknown_fields(payload, allowed_fields={"children"})
+    children = payload.get("children")
+    if not isinstance(children, list) or not children:
+        raise ValueError("'children' is required and must be a non-empty list")
+    if len(children) > 50:
+        raise ValueError("'children' must contain at most 50 entries")
+    validated: list[CreateIssuePayload] = []
+    seen_titles: set[str] = set()
+    for index, child in enumerate(children):
+        if not isinstance(child, Mapping):
+            raise ValueError(f"'children[{index}]' must be an object")
+        _reject_unknown_fields(child, allowed_fields=_CREATE_CHILD_ISSUE_FIELDS)
+        candidate = dict(child)
+        candidate["status"] = "todo"
+        try:
+            validated.append(validate_create_issue(candidate))
+        except ValueError as exc:
+            raise ValueError(f"Invalid children[{index}]: {exc}") from exc
+        if not candidate.get("assigneeAgentId"):
+            raise ValueError(
+                f"'children[{index}].assigneeAgentId' is required for delegated work"
+            )
+        normalized_title = candidate["title"].strip().casefold()
+        if normalized_title in seen_titles:
+            raise ValueError(
+                f"'children[{index}].title' duplicates another child in this batch"
+            )
+        seen_titles.add(normalized_title)
+    return cast(CreateChildIssuesPayload, {"children": validated})
 
 
 def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:

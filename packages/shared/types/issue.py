@@ -112,6 +112,10 @@ class CreateIssuePayload(TypedDict):
     requestDepth: NotRequired[int]
 
 
+class CreateChildIssuesPayload(TypedDict):
+    children: list[CreateIssuePayload]
+
+
 class WorkProductDeclarationPayload(TypedDict, total=False):
     path: str
     isPrimary: bool

@@ -295,8 +295,8 @@ def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
         f"This parent issue already has {total or len(children)} direct child issue(s). Treat this run as a rerun/reconcile pass, not a blank first execution.",
         f"Current parent execution stage: `{stage}`.",
         f'Inspect existing children with `octopus issue children "{issue_ref}" --include-work-products --json` before creating, replacing, cancelling, or completing work.',
-        "You may reuse existing child outputs, retry blocked/failed children, take over missing work in the parent, append new children, replace or cancel old children, or re-split the work if the prior split is wrong.",
-        "If you append, replace, cancel, or re-split, explicitly explain how each existing child issue is handled. Do not ignore existing children or silently create duplicate sibling tasks for the same work.",
+        "Reuse the persisted child split. Retry or explicitly replace blocked work with the dedicated child recovery commands; do not submit another initial split or silently create sibling tasks for the same work.",
+        "A normal rerun is reconciliation, not replanning. Replanning the child set requires an explicit operator action outside this run.",
     ]
     for child in children[:12]:
         if not isinstance(child, dict):
@@ -394,12 +394,14 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             "",
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
             'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
-            f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json` or `octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "{issue_ref}" --json`. Reuse, retry, replace, cancel, or explicitly supersede existing children before creating similar new child issues.',
-            'Create each real subtask with `octopus issue create --org-id "$OCTOPUS_ORG_ID" --parent-id '
-            f'"{issue_ref}" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json` before treating it as delegated.',
+            f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`. Reuse the persisted split on reruns; do not recreate it.',
+            "Submit the complete set of real, parallel subtasks in one atomic call with "
+            f'`octopus issue create-children "{issue_ref}" --children-json \'[{{"title":"<subtask>","description":"<details>","assigneeAgentId":"<agent-id>"}}]\' --json`. '
+            "Do not create delegated siblings one at a time.",
+            "Do not create a child whose job is to summarize, merge, or report on the other children. After all children settle, Octopus wakes this parent issue and the parent owns the final synthesis and deliverable.",
             "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
-            "After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent again after every child is terminal.",
+            "After the atomic child creation succeeds, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent again after every child is terminal.",
             "Do not poll or wait for delegated children inside the current runtime process because that keeps the issue execution slot occupied.",
             "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary.",
             "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. If an existing child is blocked or cancelled, do not recreate the same sibling; retry/reassign it, create an explicit replacement child that references the blocked child, or block the parent with the missing output.",

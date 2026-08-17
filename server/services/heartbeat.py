@@ -11,6 +11,7 @@ from typing import Any, ClassVar, cast
 import psutil
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import (
@@ -25,6 +26,7 @@ from packages.database.queries.agent_state import (
     update_runtime_state,
 )
 from packages.database.queries.issues import (
+    get_issue_by_id,
     list_agent_actionable_heartbeat_issues,
     update_issue,
 )
@@ -408,6 +410,16 @@ class HeartbeatService:
             )
             return None
         checked_at = datetime.now(UTC)
+        recovered_parent = await self._recover_settled_parent_continuation_for_timer(
+            agent
+        )
+        if recovered_parent is not None:
+            await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+            if execute_immediately:
+                recovered_parent = await self._start_if_capacity(
+                    agent, recovered_parent
+                )
+            return self._to_run(recovered_parent)
         recovered = await self._recover_pending_wakeup_for_timer(agent, checked_at)
         if recovered is not None:
             await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
@@ -484,7 +496,7 @@ class HeartbeatService:
             or context.get("wakeReason") == "issue_comment_mentioned"
         ):
             return False
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or issue.org_id != agent.org_id:
             return False
         run_ids = [
@@ -587,7 +599,7 @@ class HeartbeatService:
         return await self._to_run_with_issue_context(row) if row is not None else None
 
     async def list_for_issue(self, issue_id: str) -> list[dict[str, Any]] | None:
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             return None
         rows = await list_runs(self._session, issue.org_id)
@@ -598,7 +610,7 @@ class HeartbeatService:
         ]
 
     async def get_active_for_issue(self, issue_id: str) -> HeartbeatRun | None:
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             return None
         rows = await list_runs(self._session, issue.org_id)
@@ -612,7 +624,7 @@ class HeartbeatService:
     async def request_issue_passive_followup(
         self, issue_id: str, *, actor_type: str, actor_id: str
     ) -> HeartbeatRun | None:
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
             return None
         if issue.status not in {"todo", "in_progress"}:
@@ -743,7 +755,7 @@ class HeartbeatService:
     async def skip_scheduled_issue_passive_followups(
         self, issue_id: str, *, reason: str
     ) -> bool:
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or not issue.assignee_agent_id:
             return False
         skipped = False
@@ -772,7 +784,7 @@ class HeartbeatService:
     async def cancel_open_issue_review_wakeups(
         self, issue_id: str, *, reason: str
     ) -> bool:
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or not issue.reviewer_agent_id:
             return False
         cancelled_any = False
@@ -1251,7 +1263,7 @@ class HeartbeatService:
         if run.invocation_source != "assignment":
             return False
         issue_id = _issue_id_from_context(run.context_snapshot)
-        issue = await self._session.get(IssueRow, issue_id) if issue_id else None
+        issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
         if issue is None or issue.org_id != run.org_id:
             return False
         if issue.status not in {"done", "cancelled"}:
@@ -1346,7 +1358,7 @@ class HeartbeatService:
             issue_id = payload.get("issueId")
             previous_run_id = payload.get("previousRunId")
             issue = (
-                await self._session.get(IssueRow, issue_id)
+                await get_issue_by_id(self._session, issue_id)
                 if isinstance(issue_id, str)
                 else None
             )
@@ -1579,6 +1591,13 @@ class HeartbeatService:
                 continue
             if await has_active_timer_run(self._session, agent.id):
                 continue
+            recovered_parent = (
+                await self._recover_settled_parent_continuation_for_timer(agent)
+            )
+            if recovered_parent is not None:
+                await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
+                triggered.append(self._to_run(recovered_parent))
+                continue
             recovered = await self._recover_pending_wakeup_for_timer(agent, checked_at)
             if recovered is not None:
                 await advance_agent_heartbeat_check(self._session, agent.id, checked_at)
@@ -1649,6 +1668,92 @@ class HeartbeatService:
                 triggered.append(run)
         return triggered
 
+    async def _recover_settled_parent_continuation_for_timer(
+        self, agent: AgentRow
+    ) -> HeartbeatRunRow | None:
+        child = aliased(IssueRow)
+        active_child = aliased(IssueRow)
+        has_children = (
+            select(child.id)
+            .where(
+                child.org_id == IssueRow.org_id,
+                child.parent_id == IssueRow.id,
+                child.hidden_at.is_(None),
+            )
+            .correlate(IssueRow)
+            .exists()
+        )
+        has_active_children = (
+            select(active_child.id)
+            .where(
+                active_child.org_id == IssueRow.org_id,
+                active_child.parent_id == IssueRow.id,
+                active_child.hidden_at.is_(None),
+                active_child.status.in_(
+                    ("backlog", "todo", "in_progress", "in_review")
+                ),
+            )
+            .correlate(IssueRow)
+            .exists()
+        )
+        parents = (
+            (
+                await self._session.execute(
+                    select(IssueRow)
+                    .where(
+                        IssueRow.org_id == agent.org_id,
+                        IssueRow.assignee_agent_id == agent.id,
+                        IssueRow.hidden_at.is_(None),
+                        IssueRow.status.in_(("todo", "in_progress")),
+                        has_children,
+                        ~has_active_children,
+                    )
+                    .order_by(IssueRow.updated_at, IssueRow.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for parent in parents:
+            children = (
+                (
+                    await self._session.execute(
+                        select(IssueRow)
+                        .where(
+                            IssueRow.org_id == parent.org_id,
+                            IssueRow.parent_id == parent.id,
+                            IssueRow.hidden_at.is_(None),
+                        )
+                        .order_by(IssueRow.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not children:
+                continue
+            settlement_cycle_key = await self._parent_settlement_cycle_key(parent.id)
+            if settlement_cycle_key is None:
+                continue
+            idempotency_key = (
+                f"issue:{parent.id}:children_settled:{settlement_cycle_key}"
+            )
+            existing = await get_wakeup_by_idempotency_key(
+                self._session, agent.id, idempotency_key
+            )
+            if existing is None:
+                await self.queue_parent_continuation_for_settled_child(
+                    children[-1].id, expected_org_id=agent.org_id
+                )
+                existing = await get_wakeup_by_idempotency_key(
+                    self._session, agent.id, idempotency_key
+                )
+            if existing is not None and existing.run_id is not None:
+                run = await get_run(self._session, existing.run_id)
+                if run is not None and run.status in {"queued", "running"}:
+                    return run
+        return None
+
     async def _recover_pending_wakeup_for_timer(
         self, agent: AgentRow, checked_at: datetime
     ) -> HeartbeatRunRow | None:
@@ -1663,7 +1768,7 @@ class HeartbeatService:
             payload = dict(wakeup.payload or {})
             issue_id = _issue_id_from_context(payload)
             issue = (
-                await self._session.get(IssueRow, issue_id)
+                await get_issue_by_id(self._session, issue_id)
                 if issue_id is not None
                 else None
             )
@@ -1699,9 +1804,28 @@ class HeartbeatService:
                     and issue is not None
                     and issue.reviewer_agent_id == agent.id
                 )
+                is_current_parent_continuation = False
+                if (
+                    wakeup.source == "assignment"
+                    and wakeup.reason == "issue_children_settled"
+                    and issue is not None
+                    and issue.assignee_agent_id == agent.id
+                ):
+                    settlement_cycle_key = await self._parent_settlement_cycle_key(
+                        issue.id
+                    )
+                    is_current_parent_continuation = (
+                        settlement_cycle_key is not None
+                        and wakeup.idempotency_key
+                        == f"issue:{issue.id}:children_settled:{settlement_cycle_key}"
+                    )
                 if (
                     issue_id is None
-                    or issue_id not in actionable_issue_ids
+                    or issue is None
+                    or (
+                        issue.id not in actionable_issue_ids
+                        and not is_current_parent_continuation
+                    )
                     or not relationship_matches
                 ):
                     await update_wakeup_request(
@@ -2695,7 +2819,7 @@ class HeartbeatService:
         if context.get("wakeReason") == "issue_review_closeout_missing":
             issue_id = _issue_id_from_context(context)
             if issue_id is not None:
-                issue = await self._session.get(IssueRow, issue_id)
+                issue = await get_issue_by_id(self._session, issue_id)
                 if issue is not None and issue.org_id == final.org_id:
                     await self._record_issue_review_closeout_missing(
                         final, issue, context
@@ -2704,7 +2828,7 @@ class HeartbeatService:
         issue_id = _issue_id_from_context(context)
         if issue_id is None:
             return
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or issue.org_id != final.org_id:
             return
         if self._is_reviewer_issue_run(agent, final, issue, context):
@@ -2787,7 +2911,7 @@ class HeartbeatService:
         issue_id = _issue_id_from_context(context)
         if issue_id is None:
             return final
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or issue.org_id != final.org_id:
             return final
         if issue.assignee_agent_id == agent.id and issue.status == "done":
@@ -3154,7 +3278,7 @@ class HeartbeatService:
         issue_id = _issue_id_from_context(context)
         if issue_id is None:
             return
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if (
             issue is None
             or issue.org_id != final.org_id
@@ -3464,7 +3588,11 @@ class HeartbeatService:
     async def _direct_children(self, issue: IssueRow) -> list[IssueRow]:
         result = await self._session.execute(
             select(IssueRow).where(
-                and_(IssueRow.org_id == issue.org_id, IssueRow.parent_id == issue.id)
+                and_(
+                    IssueRow.org_id == issue.org_id,
+                    IssueRow.parent_id == issue.id,
+                    IssueRow.hidden_at.is_(None),
+                )
             )
         )
         return list(result.scalars().all())
@@ -3617,7 +3745,7 @@ class HeartbeatService:
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
-        issue = await self._session.get(IssueRow, issue_id) if issue_id else None
+        issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
         has_active_children = (
             await self._issue_has_active_children(issue.id)
             if issue is not None
@@ -3645,8 +3773,8 @@ class HeartbeatService:
             IssueRow.execution_run_id == final.id,
             IssueRow.checkout_run_id == final.id,
         ]
-        if issue_id is not None:
-            criteria.append(IssueRow.id == issue_id)
+        if issue is not None:
+            criteria.append(IssueRow.id == issue.id)
         values: dict[str, Any] = {
             "updated_at": datetime.now(UTC),
         }
@@ -3714,14 +3842,14 @@ class HeartbeatService:
                     "errorCode": final.error_code,
                 },
             )
-        if issue_id is not None and final.status in {
+        if issue is not None and final.status in {
             "failed",
             "timed_out",
             "cancelled",
             "succeeded",
             "waiting_for_children",
         }:
-            await self._promote_deferred_issue_wakeup(final.org_id, issue_id)
+            await self._promote_deferred_issue_wakeup(final.org_id, issue.id)
         if issue is not None:
             await self._wake_parent_after_child_settled(final, issue)
 
@@ -3730,6 +3858,7 @@ class HeartbeatService:
             select(IssueRow.id)
             .where(
                 IssueRow.parent_id == issue_id,
+                IssueRow.hidden_at.is_(None),
                 IssueRow.status.in_(("backlog", "todo", "in_progress", "in_review")),
             )
             .limit(1)
@@ -3823,7 +3952,10 @@ class HeartbeatService:
             (
                 await self._session.execute(
                     select(IssueRow)
-                    .where(IssueRow.parent_id == parent_id)
+                    .where(
+                        IssueRow.parent_id == parent_id,
+                        IssueRow.hidden_at.is_(None),
+                    )
                     .order_by(IssueRow.id)
                 )
             )
@@ -3844,7 +3976,7 @@ class HeartbeatService:
     async def queue_parent_continuation_for_settled_child(
         self, child_issue_id: str, *, expected_org_id: str | None = None
     ) -> str | None:
-        issue = await self._session.get(IssueRow, child_issue_id)
+        issue = await get_issue_by_id(self._session, child_issue_id)
         if issue is None or (
             expected_org_id is not None and issue.org_id != expected_org_id
         ):
@@ -4112,7 +4244,7 @@ class HeartbeatService:
         issue_id = _issue_id_from_context(context_snapshot)
         if issue_id is None:
             return
-        issue = issue or await self._session.get(IssueRow, issue_id)
+        issue = issue or await get_issue_by_id(self._session, issue_id)
         if (
             issue is None
             or issue.org_id != run.org_id
@@ -4341,7 +4473,7 @@ class HeartbeatService:
         issue_id = _issue_id_from_context(row.context_snapshot)
         if issue_id is None:
             return data
-        issue = await self._session.get(IssueRow, issue_id)
+        issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or issue.org_id != row.org_id:
             data["issueId"] = issue_id
             data["issueIdentifier"] = None
@@ -4570,7 +4702,7 @@ async def dispatch_queued_agent(
                 and final["invocationSource"] == "assignment"
             ):
                 issue_id = _issue_id_from_context(final.get("contextSnapshot"))
-                issue = await session.get(IssueRow, issue_id) if issue_id else None
+                issue = await get_issue_by_id(session, issue_id) if issue_id else None
                 if (
                     issue is not None
                     and issue.status == "in_review"

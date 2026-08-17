@@ -26,6 +26,7 @@ from packages.database.queries.issues import (
 from packages.database.queries.organizations import increment_issue_counter
 from packages.database.schema import (
     ActivityLog,
+    Agent,
     Asset,
     Issue,
     IssueAttachment,
@@ -42,6 +43,7 @@ from packages.shared.constants.issue import (
     DEFAULT_ISSUE_STATUS,
 )
 from packages.shared.types.issue import (
+    CreateChildIssuesPayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
     IssueDetail,
@@ -265,6 +267,138 @@ class IssueService:
             "parentExecutionStage": _parent_execution_stage(child_items),
             "includeWorkProducts": include_work_products,
         }
+
+    async def create_child_issues(
+        self,
+        parent_issue_id: str,
+        payload: CreateChildIssuesPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None = None,
+    ) -> tuple[IssueDetail, list[IssueDetail], bool]:
+        # Take a write lock before reading the child set. PostgreSQL/MySQL lock the
+        # parent row; SQLite begins its single-writer transaction here instead of
+        # relying on its no-op ``FOR UPDATE`` implementation.
+        locked_parent_id = (
+            await self._session.execute(
+                update(Issue)
+                .where(Issue.id == parent_issue_id)
+                .values(updated_at=Issue.updated_at)
+                .returning(Issue.id)
+            )
+        ).scalar_one_or_none()
+        if locked_parent_id is None:
+            locked_parent_id = (
+                await self._session.execute(
+                    update(Issue)
+                    .where(Issue.identifier == parent_issue_id)
+                    .values(updated_at=Issue.updated_at)
+                    .returning(Issue.id)
+                )
+            ).scalar_one_or_none()
+        parent = (
+            await self._session.get(Issue, locked_parent_id)
+            if locked_parent_id is not None
+            else None
+        )
+        if parent is None:
+            raise ValueError("Parent issue not found")
+
+        existing = (
+            (
+                await self._session.execute(
+                    select(Issue)
+                    .where(
+                        Issue.org_id == parent.org_id,
+                        Issue.parent_id == parent.id,
+                        Issue.hidden_at.is_(None),
+                    )
+                    .order_by(Issue.issue_number, Issue.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if existing:
+            return (
+                await self._to_detail(parent),
+                [await self._to_detail(child) for child in existing],
+                False,
+            )
+
+        if parent.status in {"done", "cancelled"}:
+            raise ValueError("Closed parent issue cannot create child issues")
+
+        agent_ids: set[str] = set()
+        for child in payload["children"]:
+            assignee_agent_id = child.get("assigneeAgentId")
+            reviewer_agent_id = child.get("reviewerAgentId")
+            if isinstance(assignee_agent_id, str):
+                agent_ids.add(assignee_agent_id)
+            if isinstance(reviewer_agent_id, str):
+                agent_ids.add(reviewer_agent_id)
+        referenced_agents = (
+            (await self._session.execute(select(Agent).where(Agent.id.in_(agent_ids))))
+            .scalars()
+            .all()
+        )
+        agents_by_id = {agent.id: agent for agent in referenced_agents}
+        invalid_agent_ids = sorted(
+            agent_id
+            for agent_id in agent_ids
+            if agent_id not in agents_by_id
+            or agents_by_id[agent_id].org_id != parent.org_id
+        )
+        if invalid_agent_ids:
+            raise ValueError(
+                "Child agents must exist in the parent organization: "
+                + ", ".join(invalid_agent_ids)
+            )
+
+        children: list[IssueDetail] = []
+        for child in payload["children"]:
+            child_payload: CreateIssuePayload = {
+                **child,
+                "parentId": parent.id,
+                "status": "todo",
+            }
+            children.append(
+                await self.create_issue(
+                    parent.org_id,
+                    child_payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    run_id=run_id,
+                )
+            )
+
+        await insert_activity_log(
+            self._session,
+            org_id=parent.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.children_created",
+            entity_type="issue",
+            entity_id=parent.id,
+            run_id=run_id,
+            details={
+                "childIssueIds": [child["id"] for child in children],
+                "childCount": len(children),
+                "mode": "atomic_batch",
+            },
+        )
+        return await self._to_detail(parent), children, True
+
+    async def commit_child_issues(self) -> None:
+        """Commit a completed child batch before its dispatch tasks are scheduled."""
+
+        await self._session.commit()
+
+    async def end_child_batch_preflight(self) -> None:
+        """End the access-check read transaction before taking the batch write lock."""
+
+        await self._session.rollback()
 
     async def _latest_child_closeout(self, child: Issue) -> dict[str, Any] | None:
         result = await self._session.execute(

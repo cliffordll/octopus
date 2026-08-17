@@ -28,6 +28,7 @@ async def queue_issue_assignment_wakeup(
     actor_id: str,
     extra_payload: dict[str, Any] | None = None,
     extra_context: dict[str, Any] | None = None,
+    suppress_errors: bool = True,
 ) -> None:
     assignee_agent_id = issue.get("assigneeAgentId")
     if not assignee_agent_id or issue["status"] == "backlog":
@@ -71,3 +72,5 @@ async def queue_issue_assignment_wakeup(
             extra={"issue_id": issue["id"]},
             exc_info=True,
         )
+        if not suppress_errors:
+            raise

@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from ..schema import ActivityLog, Issue, IssueApproval
 
@@ -100,6 +101,17 @@ async def list_agent_actionable_heartbeat_issues(
         .correlate(Issue)
         .exists()
     )
+    child = aliased(Issue)
+    has_children = (
+        select(child.id)
+        .where(
+            child.org_id == Issue.org_id,
+            child.parent_id == Issue.id,
+            child.hidden_at.is_(None),
+        )
+        .correlate(Issue)
+        .exists()
+    )
     result = await session.execute(
         select(Issue)
         .where(
@@ -116,6 +128,7 @@ async def list_agent_actionable_heartbeat_issues(
                 (
                     (Issue.assignee_agent_id == agent_id)
                     & Issue.status.in_(("todo", "in_progress", "blocked"))
+                    & ~has_children
                 ),
             ),
         )
@@ -125,9 +138,10 @@ async def list_agent_actionable_heartbeat_issues(
 
 
 async def get_issue_by_id(session: AsyncSession, issue_id: str) -> Issue | None:
-    result = await session.execute(
-        select(Issue).where(or_(Issue.id == issue_id, Issue.identifier == issue_id))
-    )
+    exact = await session.get(Issue, issue_id)
+    if exact is not None:
+        return exact
+    result = await session.execute(select(Issue).where(Issue.identifier == issue_id))
     return result.scalar_one_or_none()
 
 

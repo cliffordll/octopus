@@ -817,6 +817,210 @@ async def test_timer_preflight_creates_one_run_for_actionable_issue(
     assert preflight["actionableIssueIds"] == [issue.id]
 
 
+async def test_timer_preflight_does_not_run_parent_while_child_is_active(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerWaitingParent",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent waiting for children",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        session.add(
+            Issue(
+                org_id=agent["orgId"],
+                parent_id=parent.id,
+                title="Active child",
+                status="in_progress",
+            )
+        )
+
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        triggered = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert triggered == []
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    skipped = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert skipped.reason == "heartbeat.preflight.no_actionable_work"
+
+
+async def test_timer_recovers_missing_parent_continuation_after_children_settle(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerParentRecovery",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    settled_at = datetime.now(UTC)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent missing continuation",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        session.add_all(
+            [
+                Issue(
+                    org_id=agent["orgId"],
+                    parent_id=parent.id,
+                    title="Settled child one",
+                    status="done",
+                    completed_at=settled_at,
+                ),
+                Issue(
+                    org_id=agent["orgId"],
+                    parent_id=parent.id,
+                    title="Settled child two",
+                    status="done",
+                    completed_at=settled_at + timedelta(microseconds=1),
+                ),
+            ]
+        )
+
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        triggered = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert len(triggered) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.invocation_source == "assignment"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["issueId"] == parent.id
+    assert run.context_snapshot["wakeReason"] == "issue_children_settled"
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert wakeup.reason == "issue_children_settled"
+
+
+@pytest.mark.parametrize("pending_status", ["queued", "deferred_issue_execution"])
+async def test_timer_materializes_runless_parent_continuation(
+    session: AsyncSession,
+    pending_status: str,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name=f"RunlessParent{pending_status}",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    checked_at = datetime.now(UTC) + timedelta(seconds=2)
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent with runless continuation",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        child = Issue(
+            org_id=agent["orgId"],
+            parent_id=parent.id,
+            title="Settled child",
+            status="done",
+            completed_at=checked_at - timedelta(seconds=1),
+        )
+        session.add(child)
+        await session.flush()
+        cycle = await heartbeat._parent_settlement_cycle_key(parent.id)
+        assert cycle is not None
+        pending = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            reason="issue_children_settled",
+            idempotency_key=f"issue:{parent.id}:children_settled:{cycle}",
+            payload={"issueId": parent.id, "mutation": "children_settled"},
+            status=pending_status,
+            requested_at=checked_at - timedelta(seconds=1),
+        )
+        session.add(pending)
+        await session.flush()
+
+        triggered = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+
+    assert len(triggered) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.wakeup_request_id == pending.id
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["issueId"] == parent.id
+    assert run.context_snapshot["recoveredPendingWakeup"] is True
+    await session.refresh(pending)
+    assert pending.status == "queued"
+    assert pending.run_id == run.id
+
+
+async def test_timer_recovery_ignores_hidden_active_legacy_child(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerHiddenChildRecovery",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    settled_at = datetime.now(UTC)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent with superseded child",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        session.add_all(
+            [
+                Issue(
+                    org_id=agent["orgId"],
+                    parent_id=parent.id,
+                    title="Superseded active child",
+                    status="in_progress",
+                    hidden_at=settled_at,
+                ),
+                Issue(
+                    org_id=agent["orgId"],
+                    parent_id=parent.id,
+                    title="Visible settled child",
+                    status="done",
+                    completed_at=settled_at,
+                ),
+            ]
+        )
+
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        triggered = await heartbeat.tick_timers(
+            agent["orgId"], now=settled_at + timedelta(seconds=2)
+        )
+
+    assert len(triggered) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["issueId"] == parent.id
+    assert run.context_snapshot["wakeReason"] == "issue_children_settled"
+    assert await heartbeat._issue_has_active_children(parent.id) is False
+    assert [child.title for child in await heartbeat._direct_children(parent)] == [
+        "Visible settled child"
+    ]
+
+
 async def test_timer_preflight_treats_review_assignment_as_actionable(
     session: AsyncSession,
 ) -> None:
@@ -1373,6 +1577,80 @@ async def test_closed_issue_deferred_wakeup_is_skipped_instead_of_promoted(
         .all()
     )
     assert [run.id for run in runs] == [active_run.id]
+
+
+async def test_terminal_effects_resolve_legacy_issue_identifier_and_wake_parent(
+    session: AsyncSession,
+) -> None:
+    parent_agent = await _seed_agent(session, name="IdentifierParent")
+    child_agent_id = str(uuid.uuid4())
+    settled_at = datetime.now(UTC)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        session.add(
+            AgentRow(
+                id=child_agent_id,
+                org_id=parent_agent["orgId"],
+                name="Identifier Child",
+                role="engineer",
+                status="running",
+            )
+        )
+        parent = Issue(
+            org_id=parent_agent["orgId"],
+            identifier="PAR-LEGACY",
+            title="Parent",
+            status="in_progress",
+            assignee_agent_id=parent_agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        child = Issue(
+            org_id=parent_agent["orgId"],
+            identifier="CHD-LEGACY",
+            parent_id=parent.id,
+            title="Child",
+            status="done",
+            completed_at=settled_at,
+            assignee_agent_id=child_agent_id,
+        )
+        session.add(child)
+        await session.flush()
+        final = HeartbeatRun(
+            org_id=parent_agent["orgId"],
+            agent_id=child_agent_id,
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="succeeded",
+            finished_at=settled_at,
+            context_snapshot={
+                "issueId": child.identifier,
+                "wakeSource": "assignment",
+                "wakeReason": "issue_assigned",
+            },
+        )
+        session.add(final)
+        await session.flush()
+        child.checkout_run_id = final.id
+        child.execution_run_id = final.id
+        child.execution_locked_at = settled_at
+
+        await heartbeat._release_issue_execution(final)
+
+    await session.refresh(child)
+    assert child.checkout_run_id is None
+    assert child.execution_run_id is None
+    parent_wakeup = (
+        await session.execute(
+            select(AgentWakeupRequest).where(
+                AgentWakeupRequest.agent_id == parent_agent["id"],
+                AgentWakeupRequest.reason == "issue_children_settled",
+            )
+        )
+    ).scalar_one()
+    assert parent_wakeup.payload is not None
+    assert parent_wakeup.payload["issueId"] == parent.id
 
 
 async def test_recover_orphaned_run_does_not_abort_when_retry_is_unavailable(

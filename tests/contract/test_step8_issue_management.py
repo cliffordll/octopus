@@ -5,6 +5,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,6 +33,7 @@ from packages.database.schema import (
     Organization,
 )
 from server.app import app as fastapi_app
+from server.services.issues import IssueService
 
 
 @pytest.fixture
@@ -168,6 +170,551 @@ async def test_create_issue_route_returns_200_and_persists(
         result = await verify.execute(select(Issue).where(Issue.org_id == org_id))
         rows = result.scalars().all()
     assert len(rows) == 1
+
+
+async def test_create_children_batch_persists_once_and_reuses_on_retry(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    other_org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    agent_id = str(uuid.uuid4())
+    other_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Child Worker",
+                    role="engineer",
+                    status="paused",
+                ),
+                Agent(
+                    id=other_agent_id,
+                    org_id=other_org_id,
+                    name="Other Org Worker",
+                    role="engineer",
+                ),
+            ]
+        )
+
+    payload = {
+        "children": [
+            {
+                "title": "Research Huangshan",
+                "description": "Produce the Huangshan source material.",
+                "assigneeAgentId": agent_id,
+            },
+            {
+                "title": "Research Lushan",
+                "description": "Produce the Lushan source material.",
+                "assigneeAgentId": agent_id,
+            },
+        ]
+    }
+    first_code, first = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json=payload,
+    )
+    retry_code, retry = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {
+                    "title": "Changed retry title",
+                    "assigneeAgentId": agent_id,
+                }
+            ]
+        },
+    )
+    missing_retry_code, missing_retry = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {
+                    "title": "Another changed retry title",
+                    "assigneeAgentId": str(uuid.uuid4()),
+                }
+            ]
+        },
+    )
+    cross_org_retry_code, cross_org_retry = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {
+                    "title": "Cross-org changed retry title",
+                    "assigneeAgentId": other_agent_id,
+                }
+            ]
+        },
+    )
+
+    async with async_transaction(session):
+        persisted_parent = await session.get(Issue, parent_id)
+        assert persisted_parent is not None
+        persisted_parent.status = "done"
+        persisted_parent.completed_at = datetime.now(UTC)
+    closed_retry_code, closed_retry = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {
+                    "title": "Closed parent retry",
+                    "assigneeAgentId": str(uuid.uuid4()),
+                }
+            ]
+        },
+    )
+
+    assert first_code == 200
+    assert first["created"] is True
+    assert len(first["children"]) == 2
+    assert retry_code == 200
+    assert retry["created"] is False
+    assert missing_retry_code == 200
+    assert missing_retry["created"] is False
+    assert cross_org_retry_code == 200
+    assert cross_org_retry["created"] is False
+    assert closed_retry_code == 200
+    assert closed_retry["created"] is False
+    assert {item["id"] for item in retry["children"]} == {
+        item["id"] for item in first["children"]
+    }
+    assert {item["id"] for item in missing_retry["children"]} == {
+        item["id"] for item in first["children"]
+    }
+    assert {item["id"] for item in cross_org_retry["children"]} == {
+        item["id"] for item in first["children"]
+    }
+    assert {item["id"] for item in closed_retry["children"]} == {
+        item["id"] for item in first["children"]
+    }
+
+    async with session_factory() as verify:
+        children = (
+            (await verify.execute(select(Issue).where(Issue.parent_id == parent_id)))
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(children) == 2
+    assert len(wakeups) == 2
+
+
+async def test_create_children_batch_rejects_duplicate_titles(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    agent_id = str(uuid.uuid4())
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {"title": "Research Lushan", "assigneeAgentId": agent_id},
+                {"title": " research lushan ", "assigneeAgentId": agent_id},
+            ]
+        },
+    )
+
+    assert code == 422
+    assert "duplicates another child" in body["detail"]
+    children = (
+        (await session.execute(select(Issue).where(Issue.parent_id == parent_id)))
+        .scalars()
+        .all()
+    )
+    assert children == []
+
+
+async def test_create_children_batch_rejects_missing_or_cross_org_assignee(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    other_org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    other_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=other_agent_id,
+                org_id=other_org_id,
+                name="Other Org Worker",
+                role="engineer",
+            )
+        )
+
+    for assignee_id in (str(uuid.uuid4()), other_agent_id):
+        code, body = await _request(
+            app,
+            "POST",
+            f"/api/issues/{parent_id}/children/batch",
+            json={
+                "children": [
+                    {"title": "Research Lushan", "assigneeAgentId": assignee_id}
+                ]
+            },
+        )
+        assert code == 422
+        assert "parent organization" in body["detail"]
+
+    children = (
+        (await session.execute(select(Issue).where(Issue.parent_id == parent_id)))
+        .scalars()
+        .all()
+    )
+    assert children == []
+
+
+async def test_create_children_batch_checks_org_access_before_write(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    other_org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    other_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=other_agent_id,
+                org_id=other_org_id,
+                name="Other Org Agent",
+                role="engineer",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={
+            "children": [
+                {"title": "Unauthorized child", "assigneeAgentId": other_agent_id}
+            ]
+        },
+        headers={"x-test-agent-id": other_agent_id, "x-test-org-id": other_org_id},
+    )
+
+    assert code == 403
+    assert "another organization" in body["detail"]
+    children = (
+        (await session.execute(select(Issue).where(Issue.parent_id == parent_id)))
+        .scalars()
+        .all()
+    )
+    assert children == []
+
+
+async def test_create_children_batch_is_single_winner_across_sqlite_sessions(
+    tmp_path: Path,
+) -> None:
+    database_path = (tmp_path / "child-batch.db").resolve().as_posix()
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{database_path}", connect_args={"timeout": 10}
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    org_id = str(uuid.uuid4())
+    parent_id = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
+    async with factory() as seed:
+        async with seed.begin():
+            seed.add_all(
+                [
+                    Organization(
+                        id=org_id,
+                        url_key=f"batch-{uuid.uuid4()}",
+                        name="Batch Org",
+                        issue_prefix="BAT",
+                    ),
+                    Agent(
+                        id=agent_id,
+                        org_id=org_id,
+                        name="Batch Worker",
+                        role="engineer",
+                    ),
+                    Issue(
+                        id=parent_id,
+                        org_id=org_id,
+                        title="Concurrent parent",
+                        status="in_progress",
+                    ),
+                ]
+            )
+
+    async def create_batch(title: str) -> tuple[list[str], bool]:
+        async with factory() as current:
+            async with current.begin():
+                _parent, children, created = await IssueService(
+                    current
+                ).create_child_issues(
+                    parent_id,
+                    {"children": [{"title": title, "assigneeAgentId": agent_id}]},
+                    actor_type="board",
+                    actor_id="local-board",
+                )
+            return [child["id"] for child in children], created
+
+    try:
+        first, second = await asyncio.gather(
+            create_batch("First proposed split"),
+            create_batch("Changed retry split"),
+        )
+        assert sorted((first[1], second[1])) == [False, True]
+        assert first[0] == second[0]
+        async with factory() as verify:
+            children = (
+                (
+                    await verify.execute(
+                        select(Issue).where(Issue.parent_id == parent_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(children) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_create_children_batch_rolls_back_if_any_wakeup_fails(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Child Worker",
+                role="engineer",
+                status="paused",
+            )
+        )
+
+    wakeup_calls = 0
+    from server.routes import issues as issue_routes
+
+    original_wakeup = issue_routes.queue_issue_assignment_wakeup
+
+    async def fail_second_wakeup(*args: Any, **kwargs: Any) -> None:
+        nonlocal wakeup_calls
+        wakeup_calls += 1
+        if wakeup_calls == 2:
+            raise RuntimeError("simulated wakeup failure")
+        await original_wakeup(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "server.routes.issues.queue_issue_assignment_wakeup", fail_second_wakeup
+    )
+
+    with pytest.raises(RuntimeError, match="simulated wakeup failure"):
+        await _request(
+            app,
+            "POST",
+            f"/api/issues/{parent_id}/children/batch",
+            json={
+                "children": [
+                    {"title": "Research Huangshan", "assigneeAgentId": agent_id},
+                    {"title": "Research Lushan", "assigneeAgentId": agent_id},
+                ]
+            },
+        )
+
+    async with session_factory() as verify:
+        children = (
+            (await verify.execute(select(Issue).where(Issue.parent_id == parent_id)))
+            .scalars()
+            .all()
+        )
+        wakeups = (await verify.execute(select(AgentWakeupRequest))).scalars().all()
+    assert children == []
+    assert wakeups == []
+    assert wakeup_calls == 2
+
+
+async def test_create_children_batch_commits_before_dispatch_is_scheduled(
+    app: FastAPI,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Child Worker",
+                role="engineer",
+                status="paused",
+            )
+        )
+
+    committed = False
+    scheduled: list[str] = []
+    original_commit = IssueService.commit_child_issues
+
+    async def record_commit(service: IssueService) -> None:
+        nonlocal committed
+        await original_commit(service)
+        committed = True
+
+    def record_schedule(request: Any, scheduled_agent_id: str) -> None:
+        assert committed is True
+        scheduled.append(scheduled_agent_id)
+
+    monkeypatch.setattr(IssueService, "commit_child_issues", record_commit)
+    monkeypatch.setattr("server.routes.issues._schedule_dispatch", record_schedule)
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={"children": [{"title": "Research Lushan", "assigneeAgentId": agent_id}]},
+    )
+
+    assert code == 200
+    assert body["created"] is True
+    assert scheduled == [agent_id]
+
+
+async def test_terminal_child_updated_by_identifier_queues_parent_continuation(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    parent_agent_id = str(uuid.uuid4())
+    child_agent_id = str(uuid.uuid4())
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id=parent_agent_id,
+                    org_id=org_id,
+                    name="Parent Worker",
+                    role="engineer",
+                    status="paused",
+                ),
+                Agent(
+                    id=child_agent_id,
+                    org_id=org_id,
+                    name="Child Worker",
+                    role="engineer",
+                    status="paused",
+                ),
+                Issue(
+                    id=parent_id,
+                    org_id=org_id,
+                    identifier="PAR-1",
+                    title="Parent",
+                    status="in_progress",
+                    assignee_agent_id=parent_agent_id,
+                ),
+                Issue(
+                    id=child_id,
+                    org_id=org_id,
+                    identifier="CHD-1",
+                    parent_id=parent_id,
+                    title="Child",
+                    status="in_progress",
+                    assignee_agent_id=child_agent_id,
+                ),
+            ]
+        )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        "/api/issues/CHD-1",
+        json={"status": "done"},
+    )
+
+    assert code == 200
+    assert body["id"] == child_id
+    async with session_factory() as verify:
+        wakeup = (
+            await verify.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == parent_agent_id,
+                    AgentWakeupRequest.reason == "issue_children_settled",
+                )
+            )
+        ).scalar_one()
+    assert wakeup.payload is not None
+    assert wakeup.payload["issueId"] == parent_id
+
+
+async def test_issue_lookup_prefers_exact_uuid_over_identifier_collision(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    exact_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Issue(
+                    id=exact_id,
+                    org_id=org_id,
+                    identifier="EXACT-1",
+                    title="Exact UUID issue",
+                    status="todo",
+                ),
+                Issue(
+                    org_id=org_id,
+                    identifier=exact_id,
+                    title="Identifier collision",
+                    status="todo",
+                ),
+            ]
+        )
+
+    code, body = await _request(app, "GET", f"/api/issues/{exact_id}")
+
+    assert code == 200
+    assert body["id"] == exact_id
+    assert body["title"] == "Exact UUID issue"
 
 
 async def test_create_assigned_issue_queues_assignment_wakeup(

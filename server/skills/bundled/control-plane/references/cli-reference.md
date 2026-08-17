@@ -102,7 +102,8 @@ Do not rely on a free-form reject or accept comment as the review outcome. The s
 - `octopus agent config list --org-id <id>` — List redacted agent configuration snapshots for an organization.
 - `octopus agent config get <agent-id-or-shortname>` — Read one redacted agent configuration snapshot by id or shortname.
 - `octopus agent icons` — List legacy named agent icons for compatibility/debugging; normal create and hire payloads should omit icon.
-- `octopus issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create a new issue or subtask with the generic issue surface. Delegated subtasks should include `--parent-id`, `--status todo`, and an explicit `--assignee-agent-id <agent-id>`. Before creating delegated subtasks, list existing children with `octopus issue list --org-id <id> --parent-id <parent>` and reuse a matching child title.
+- `octopus issue create --org-id <id> --title <title> [--description <text>|--body <text>] ... [--label-id <id> ...] [--label <name> ...]` — Create one standalone issue with the generic issue surface.
+- `octopus issue create-children <parent> --children-json '<JSON array>'` — Persist the complete delegated child set atomically. Each child requires `title` and `assigneeAgentId`; optional fields are `description`, `priority`, and `reviewerAgentId`. A retry returns the already persisted child set instead of creating another set. Do not include a summary/report child; the parent continuation owns final synthesis.
 - `octopus issue labels list --org-id <id>` — List organization issue labels available for issue creation.
 - `octopus approval create --org-id <id> --type <type> --payload <json>` — Create a new approval request.
 - `octopus approval resubmit <approval-id> [--payload <json>]` — Resubmit a revision-requested approval, optionally with updated payload.
