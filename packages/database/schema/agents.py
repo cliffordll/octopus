@@ -55,6 +55,9 @@ class Agent(Base):
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_heartbeat_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata", JSON().with_variant(JSONB(), "postgresql"), nullable=True
     )

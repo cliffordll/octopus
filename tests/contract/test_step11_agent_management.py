@@ -1022,6 +1022,43 @@ async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
     assert config["runtimeConfig"]["heartbeat"] == created["runtimeConfig"]["heartbeat"]
 
 
+async def test_agent_materializes_legacy_timer_diagnostics_as_disabled_preflight(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="legacy-timer-diagnostics")
+
+    create_code, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Legacy timer diagnostics",
+            "role": "engineer",
+            "runtimeConfig": {
+                "heartbeat": {
+                    "enabled": True,
+                    "intervalSec": 300,
+                    "runDiagnosticsOnTimer": True,
+                }
+            },
+        },
+    )
+    assert create_code == 201
+    heartbeat = created["runtimeConfig"]["heartbeat"]
+    assert heartbeat["runDiagnosticsOnTimer"] is True
+    assert heartbeat["preflightEnabled"] is False
+
+    async with session_factory() as session:
+        persisted = await session.get(Agent, created["id"])
+    assert persisted is not None
+    assert persisted.runtime_config["heartbeat"]["preflightEnabled"] is False
+
+    detail_code, detail = await _request(app, "GET", f"/api/agents/{created['id']}")
+    assert detail_code == 200
+    assert detail["runtimeConfig"]["heartbeat"]["preflightEnabled"] is False
+
+
 async def test_agent_archive_route_terminates_and_hides_agent(
     app: FastAPI,
     session_factory: async_sessionmaker,

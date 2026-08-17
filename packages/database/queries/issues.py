@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schema import Issue, IssueApproval
+from ..schema import ActivityLog, Issue, IssueApproval
 
 
 async def create_issue(session: AsyncSession, fields: Mapping[str, Any]) -> Issue:
@@ -81,6 +81,45 @@ async def list_agent_inbox_issues(
             ),
         )
         .order_by(relationship_rank, priority_rank, Issue.updated_at.desc(), Issue.id)
+    )
+    return result.scalars().all()
+
+
+async def list_agent_actionable_heartbeat_issues(
+    session: AsyncSession, org_id: str, agent_id: str
+) -> Sequence[Issue]:
+    recorded_blocked_review = (
+        select(ActivityLog.id)
+        .where(
+            ActivityLog.org_id == org_id,
+            ActivityLog.entity_type == "issue",
+            ActivityLog.entity_id == Issue.id,
+            ActivityLog.action == "issue.review_decision_recorded",
+            ActivityLog.created_at >= Issue.updated_at,
+        )
+        .correlate(Issue)
+        .exists()
+    )
+    result = await session.execute(
+        select(Issue)
+        .where(
+            Issue.org_id == org_id,
+            Issue.hidden_at.is_(None),
+            or_(
+                (
+                    (Issue.reviewer_agent_id == agent_id)
+                    & or_(
+                        Issue.status == "in_review",
+                        (Issue.status == "blocked") & ~recorded_blocked_review,
+                    )
+                ),
+                (
+                    (Issue.assignee_agent_id == agent_id)
+                    & Issue.status.in_(("todo", "in_progress", "blocked"))
+                ),
+            ),
+        )
+        .order_by(Issue.updated_at.desc(), Issue.id)
     )
     return result.scalars().all()
 

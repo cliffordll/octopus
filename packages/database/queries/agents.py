@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import Agent
@@ -40,3 +40,22 @@ async def update_agent(
         update(Agent).where(Agent.id == agent_id).values(**values).returning(Agent)
     )
     return result.scalar_one_or_none()
+
+
+async def advance_agent_heartbeat_check(
+    session: AsyncSession, agent_id: str, checked_at: datetime
+) -> bool:
+    result = await session.execute(
+        update(Agent)
+        .where(
+            Agent.id == agent_id,
+            or_(
+                Agent.last_heartbeat_check_at.is_(None),
+                Agent.last_heartbeat_check_at < checked_at,
+            ),
+        )
+        .values(last_heartbeat_check_at=checked_at, updated_at=datetime.now(UTC))
+        .returning(Agent.id)
+        .execution_options(synchronize_session=False)
+    )
+    return result.scalar_one_or_none() is not None

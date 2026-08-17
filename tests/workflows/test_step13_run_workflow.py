@@ -15,6 +15,7 @@ from packages.database.clients import (
     create_database_engine,
     create_session_factory,
 )
+from packages.database.queries.agents import advance_agent_heartbeat_check
 from packages.database.schema import (
     ActivityLog,
     Agent as AgentRow,
@@ -587,6 +588,7 @@ async def test_wake_on_demand_false_does_not_block_timer_wakeup(
                 "enabled": True,
                 "intervalSec": 1,
                 "runDiagnosticsOnTimer": True,
+                "preflightEnabled": False,
                 "wakeOnDemand": False,
             }
         },
@@ -606,6 +608,339 @@ async def test_wake_on_demand_false_does_not_block_timer_wakeup(
     assert run.invocation_source == "timer"
 
 
+async def test_timer_preflight_skips_when_agent_has_no_actionable_work(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerNoWork",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    checked_at = datetime.now(UTC) + timedelta(seconds=2)
+
+    async with async_transaction(session):
+        timed = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+
+    assert timed == []
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert wakeup.source == "timer"
+    assert wakeup.status == "skipped"
+    assert wakeup.reason == "heartbeat.preflight.no_actionable_work"
+    assert wakeup.error == "heartbeat.preflight.no_actionable_work"
+    assert wakeup.payload is not None
+    assert wakeup.payload["preflight"]["actionableIssueCount"] == 0
+    refreshed_agent = await session.get(AgentRow, agent["id"])
+    assert refreshed_agent is not None
+    assert refreshed_agent.last_heartbeat_at is None
+    recorded_at = refreshed_agent.last_heartbeat_check_at
+    assert recorded_at is not None
+    if recorded_at.tzinfo is None:
+        recorded_at = recorded_at.replace(tzinfo=UTC)
+    assert recorded_at == checked_at
+
+    advanced = await advance_agent_heartbeat_check(
+        session, agent["id"], checked_at - timedelta(seconds=1)
+    )
+    await session.commit()
+    assert advanced is False
+    await session.refresh(refreshed_agent)
+    recorded_at = refreshed_agent.last_heartbeat_check_at
+    assert recorded_at is not None
+    if recorded_at.tzinfo is None:
+        recorded_at = recorded_at.replace(tzinfo=UTC)
+    assert recorded_at == checked_at
+
+
+async def test_timer_preflight_creates_one_run_for_actionable_issue(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerActionable",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    checked_at = datetime.now(UTC) + timedelta(seconds=2)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Actionable timer work",
+            status="todo",
+            priority="high",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        first = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+        second = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+        first_row = await session.get(HeartbeatRun, first[0]["id"])
+        assert first_row is not None
+        first_row.status = "succeeded"
+        first_row.finished_at = checked_at
+        before_next_interval = await heartbeat.tick_timers(
+            agent["orgId"], now=checked_at + timedelta(milliseconds=500)
+        )
+
+    assert len(first) == 1
+    assert second == []
+    assert before_next_interval == []
+    runs = (await session.execute(select(HeartbeatRun))).scalars().all()
+    assert len(runs) == 1
+    assert runs[0].invocation_source == "timer"
+    assert runs[0].context_snapshot is not None
+    preflight = runs[0].context_snapshot["heartbeatPreflight"]
+    assert preflight["reason"] == "heartbeat.preflight.assignee_issue"
+    assert preflight["actionableIssueIds"] == [issue.id]
+
+
+async def test_timer_preflight_treats_review_assignment_as_actionable(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerReview",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Review timer work",
+            status="in_review",
+            priority="medium",
+            reviewer_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert len(timed) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot is not None
+    preflight = run.context_snapshot["heartbeatPreflight"]
+    assert preflight["reason"] == "heartbeat.preflight.reviewer_issue"
+    assert preflight["actionableIssueIds"] == [issue.id]
+
+
+async def test_timer_preflight_skips_completed_blocked_review_decision(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerBlockedReview",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    decision_at = datetime.now(UTC)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Already reviewed as blocked",
+            status="blocked",
+            priority="medium",
+            reviewer_agent_id=agent["id"],
+            updated_at=decision_at,
+        )
+        session.add(issue)
+        await session.flush()
+        session.add(
+            ActivityLog(
+                org_id=agent["orgId"],
+                actor_type="agent",
+                actor_id=agent["id"],
+                action="issue.review_decision_recorded",
+                entity_type="issue",
+                entity_id=issue.id,
+                agent_id=agent["id"],
+                created_at=decision_at + timedelta(microseconds=1),
+            )
+        )
+        await session.flush()
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=decision_at + timedelta(seconds=2)
+        )
+
+    assert timed == []
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    skipped = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert skipped.reason == "heartbeat.preflight.no_actionable_work"
+
+
+@pytest.mark.parametrize("pending_status", ["queued", "deferred_issue_execution"])
+async def test_timer_preflight_recovers_pending_runless_wakeup(
+    session: AsyncSession, pending_status: str
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerPendingWakeup",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    checked_at = datetime.now(UTC) + timedelta(seconds=2)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Pending wakeup work",
+            status="todo",
+            priority="medium",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        session.add(
+            AgentWakeupRequest(
+                org_id=agent["orgId"],
+                agent_id=agent["id"],
+                source="assignment",
+                trigger_detail="system",
+                reason="issue_assigned",
+                payload={"issueId": issue.id},
+                status=pending_status,
+                requested_at=checked_at - timedelta(seconds=1),
+            )
+        )
+        await session.flush()
+        timed = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+
+    assert len(timed) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.invocation_source == "assignment"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["recoveredPendingWakeup"] is True
+    wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
+    assert wakeup.status == "queued"
+    assert wakeup.run_id == run.id
+
+
+async def test_timer_preflight_skips_stale_assignment_wakeup(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerStaleAssignment",
+        runtime_config={"heartbeat": {"enabled": True, "intervalSec": 1}},
+    )
+    heartbeat = HeartbeatService(session)
+    checked_at = datetime.now(UTC) + timedelta(seconds=2)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="No longer assigned",
+            status="todo",
+            priority="medium",
+            assignee_agent_id=None,
+        )
+        session.add(issue)
+        await session.flush()
+        stale = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            reason="issue_assigned",
+            payload={"issueId": issue.id},
+            status="queued",
+            requested_at=checked_at - timedelta(seconds=1),
+        )
+        session.add(stale)
+        await session.flush()
+        timed = await heartbeat.tick_timers(agent["orgId"], now=checked_at)
+
+    assert timed == []
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    await session.refresh(stale)
+    assert stale.status == "skipped"
+    assert stale.error is not None and "stale" in stale.error
+
+
+async def test_timer_preflight_can_be_explicitly_disabled_for_diagnostics(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerDiagnostics",
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "preflightEnabled": False,
+            }
+        },
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert len(timed) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["heartbeatPreflight"] == {
+        "enabled": False,
+        "shouldRun": True,
+        "reason": "heartbeat.preflight.disabled",
+    }
+
+
+async def test_timer_preflight_new_field_wins_over_legacy_diagnostics_flag(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="TimerExplicitPreflight",
+        runtime_config={
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "preflightEnabled": True,
+                "runDiagnosticsOnTimer": True,
+            }
+        },
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert timed == []
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+
+
+async def test_timer_preflight_supports_legacy_only_diagnostics_config(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="TimerLegacyDiagnostics")
+    async with async_transaction(session):
+        row = await session.get(AgentRow, agent["id"])
+        assert row is not None
+        row.runtime_config = {
+            "heartbeat": {
+                "enabled": True,
+                "intervalSec": 1,
+                "runDiagnosticsOnTimer": True,
+            }
+        }
+
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        timed = await heartbeat.tick_timers(
+            agent["orgId"], now=datetime.now(UTC) + timedelta(seconds=2)
+        )
+
+    assert len(timed) == 1
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["heartbeatPreflight"]["enabled"] is False
+
+
 async def test_timer_wakeup_does_not_stack_when_timer_run_is_active(
     session: AsyncSession,
 ) -> None:
@@ -617,6 +952,7 @@ async def test_timer_wakeup_does_not_stack_when_timer_run_is_active(
                 "enabled": True,
                 "intervalSec": 1,
                 "runDiagnosticsOnTimer": True,
+                "preflightEnabled": False,
             }
         },
     )
@@ -756,6 +1092,7 @@ async def test_cancel_retry_and_timer_preserve_recovery_context(
                 "enabled": True,
                 "intervalSec": 1,
                 "runDiagnosticsOnTimer": True,
+                "preflightEnabled": False,
             }
         },
     )

@@ -307,7 +307,7 @@ export function HeartbeatRunsPage() {
             <div>
               <p className="eyebrow">Recent Activity</p>
               <h2>运行记录</h2>
-              <p>这里只记录真实 agent run：任务执行、自动收口、评审运行、运行诊断或显式开启的定时诊断。</p>
+              <p>这里只记录真实 agent run：任务执行、自动收口、评审运行、运行诊断或心跳。</p>
             </div>
           </div>
           {sortedRuns.length === 0 ? (

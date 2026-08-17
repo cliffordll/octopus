@@ -96,7 +96,7 @@ export function runPurposeLabel(run: Pick<HeartbeatRun, "runPurpose" | "invocati
   if (purpose === "closeout_followup") return "自动收口";
   if (purpose === "review") return "评审运行";
   if (purpose === "heartbeat") {
-    if (run?.invocationSource === "timer") return "定时诊断";
+    if (run?.invocationSource === "timer") return "心跳";
     if (run?.invocationSource === "on_demand") return "运行诊断";
     return issueScoped ? "任务运行" : "无任务运行";
   }

@@ -4702,7 +4702,7 @@ it("explains queued issue runs from the assignee active queue", async () => {
 
   expect(queueRegion).toHaveTextContent("当前任务前面还有 2 个运行");
 
-  expect(queueRegion).toHaveTextContent("定时诊断");
+  expect(queueRegion).toHaveTextContent("心跳");
 
   expect(queueRegion).toHaveTextContent("assignment");
 

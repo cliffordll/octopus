@@ -145,7 +145,7 @@ const SOURCE_LABELS: Record<string, string> = {
   review: "评审",
   system: "系统",
   system_bundled: "内置",
-  timer: "定时诊断",
+  timer: "心跳",
 };
 
 const EN_SOURCE_LABELS: Record<string, string> = {
@@ -165,7 +165,7 @@ const EN_SOURCE_LABELS: Record<string, string> = {
   review: "Review",
   system: "System",
   system_bundled: "Built-in",
-  timer: "Timer",
+  timer: "Heartbeat",
 };
 
 export function displayLabel(value: string | null | undefined): string {

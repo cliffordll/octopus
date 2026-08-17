@@ -583,7 +583,7 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   await userEvent.click(screen.getByRole("link", { name: "运行记录" }));
   const queueRegion = await screen.findByRole("region", { name: "活跃队列" });
   expect(queueRegion).toHaveTextContent("3 个活跃运行");
-  expect(within(queueRegion).getByText("定时诊断")).toBeInTheDocument();
+  expect(within(queueRegion).getByText("心跳")).toBeInTheDocument();
   expect(within(queueRegion).getByText("任务分配")).toBeInTheDocument();
   expect(within(queueRegion).getByRole("link", { name: "OCT-1" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
   const detail = screen.getByTestId("agent-runs-detail-pane");
@@ -602,12 +602,12 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(within(detail).getByText("workspace stderr")).toBeInTheDocument();
   const rail = screen.getByTestId("agent-runs-list-pane");
   expect(within(rail).getAllByText("手动触发").length).toBeGreaterThanOrEqual(1);
-  expect(within(rail).getAllByText("定时诊断").length).toBeGreaterThanOrEqual(1);
+  expect(within(rail).getAllByText("心跳").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("任务分配").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getAllByText("自动化").length).toBeGreaterThanOrEqual(1);
   expect(within(rail).getByText(/issue_passive_followup/)).toBeInTheDocument();
   expect(within(rail).getByText("OCT-1")).toBeInTheDocument();
-  expect(within(rail).getByText("定时运行诊断到点触发；这是显式开启后的真实 agent run，不作为任务调度主链路。")).toBeInTheDocument();
+  expect(within(rail).getByText("心跳到期触发；默认先检查是否有可执行任务，关闭空跑预检查后每次到期均创建真实 agent run。")).toBeInTheDocument();
   expect(within(rail).getByText("任务分配后触发，通常来自 issue 指派给该智能体。")).toBeInTheDocument();
   expect(within(rail).getByText("系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。")).toBeInTheDocument();
   expect(within(rail).getByText("用户在 UI 或 API 中手动触发一次运行。")).toBeInTheDocument();
@@ -701,7 +701,7 @@ it("materializes the default heartbeat policy from the agent configuration form"
   expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
   expect(screen.getByLabelText("状态检测")).toHaveValue("enabled");
-  expect(screen.getByLabelText("定时运行诊断")).toHaveValue("disabled");
+  expect(screen.queryByLabelText("定时运行诊断")).not.toBeInTheDocument();
   expect(screen.getByLabelText("状态检测间隔秒数")).toHaveValue(300);
   expect(screen.getByLabelText("允许手动诊断")).toHaveValue("enabled");
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
@@ -720,6 +720,44 @@ it("materializes the default heartbeat policy from the agent configuration form"
     expect.objectContaining({
       method: "PATCH",
       body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":300,"runDiagnosticsOnTimer":false,"wakeOnDemand":true,"preflightEnabled":true,"maxConcurrentRuns":3}'),
+    }),
+  );
+});
+
+it("maps a legacy timer diagnostic policy to disabled preflight when saving", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "process",
+    agentRuntimeConfig: {},
+    runtimeConfig: { heartbeat: { enabled: true, intervalSec: 300, runDiagnosticsOnTimer: true } },
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    return respond({ ...agent, ...(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>) });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+
+  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  expect(screen.getByLabelText("空跑预检查")).toHaveValue("disabled");
+  expect(screen.queryByLabelText("定时运行诊断")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/agents/agent-1",
+    expect.objectContaining({
+      method: "PATCH",
+      body: expect.stringContaining('"runDiagnosticsOnTimer":true,"wakeOnDemand":true,"preflightEnabled":false'),
     }),
   );
 });
