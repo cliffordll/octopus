@@ -5,11 +5,10 @@ import contextlib
 import json
 import os
 import re
-import subprocess
 from datetime import UTC, datetime
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs
+from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
@@ -427,10 +426,8 @@ async def _run_cli(
             stderr=asyncio.subprocess.PIPE,
             **runtime_subprocess_kwargs(),
         )
-    except (PermissionError, OSError):
-        return await asyncio.to_thread(
-            _run_blocking, command, args, cwd, env, input_text, timeout_sec
-        )
+    except (PermissionError, OSError) as exc:
+        return 1, "", str(exc)
     payload = input_text.encode() if input_text is not None else None
     try:
         stdout, stderr = await asyncio.wait_for(
@@ -438,43 +435,13 @@ async def _run_cli(
             timeout=timeout_sec if timeout_sec > 0 else None,
         )
     except TimeoutError:
-        process.kill()
+        await terminate_runtime_process(process)
         await process.communicate()
         return None, "", "timed out"
     return (
         process.returncode,
         stdout.decode(errors="replace"),
         stderr.decode(errors="replace"),
-    )
-
-
-def _run_blocking(
-    command: str,
-    args: list[str],
-    cwd: str | None,
-    env: dict[str, str],
-    input_text: str | None,
-    timeout_sec: float,
-) -> tuple[int | None, str, str]:
-    try:
-        completed = subprocess.run(
-            [command, *args],
-            cwd=cwd,
-            env=env,
-            input=input_text.encode() if input_text is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            **runtime_subprocess_kwargs(),
-        )
-    except subprocess.TimeoutExpired:
-        return None, "", "timed out"
-    except OSError as exc:
-        return 1, "", str(exc)
-    return (
-        completed.returncode,
-        (completed.stdout or b"").decode(errors="replace"),
-        (completed.stderr or b"").decode(errors="replace"),
     )
 
 
@@ -499,12 +466,7 @@ async def _run_with_lifecycle(
             **runtime_subprocess_kwargs(),
         )
     except (PermissionError, OSError) as exc:
-        rc, out, err = await asyncio.to_thread(
-            _run_blocking, command, args, cwd, env, None, timeout_sec
-        )
-        if not err:
-            err = str(exc)
-        return rc, out, err, False, None
+        return 1, "", str(exc), False, None
 
     pid = getattr(process, "pid", None)
     if context.on_process_started is not None and isinstance(pid, int):
@@ -526,9 +488,8 @@ async def _run_with_lifecycle(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if cancelled is not None and cancelled in done:
-            process.kill()
+            await terminate_runtime_process(process)
             stdout, stderr = await communication
-            await process.wait()
             return (
                 process.returncode,
                 stdout.decode(errors="replace"),
@@ -541,9 +502,8 @@ async def _run_with_lifecycle(
             communication.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await communication
-            process.kill()
+            await terminate_runtime_process(process)
             stdout, stderr = await process.communicate()
-            await process.wait()
             return (
                 process.returncode,
                 stdout.decode(errors="replace"),

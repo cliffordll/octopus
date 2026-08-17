@@ -1027,6 +1027,8 @@ async def _invoke_agent(
     *,
     service: AgentService,
     heartbeat: HeartbeatService,
+    preflight: bool = False,
+    diagnostic: bool = False,
 ) -> HeartbeatRun | dict[str, str]:
     await _get_agent_or_404(id, request=request, service=service)
     actor = require_actor_identity(request)
@@ -1036,8 +1038,14 @@ async def _invoke_agent(
             detail="Agent can only invoke itself",
         )
     try:
-        payload = validate_wake_agent(body)
-        run = await heartbeat.wakeup(
+        request_body = dict(body)
+        if diagnostic:
+            request_body["reason"] = "runtime_diagnostic"
+            request_body["idempotencyKey"] = f"runtime-diagnostic:{id}"
+        payload = validate_wake_agent(request_body)
+        use_preflight = preflight and payload.get("source", "on_demand") == "on_demand"
+        invoke = heartbeat.wakeup_if_actionable if use_preflight else heartbeat.wakeup
+        run = await invoke(
             id,
             payload,
             actor_type=actor.actor_type,
@@ -1054,10 +1062,11 @@ async def _invoke_agent(
         ) from exc
     if run is None:
         return {"status": "skipped"}
-    await heartbeat.record_invoked_activity(
-        run, actor_type=actor.actor_type, actor_id=actor.actor_id
-    )
-    if run["status"] == "queued":
+    if not diagnostic:
+        await heartbeat.record_invoked_activity(
+            run, actor_type=actor.actor_type, actor_id=actor.actor_id
+        )
+    if run["status"] == "queued" and not heartbeat.last_wakeup_reused:
         _schedule_dispatch(request, id)
     return run
 
@@ -1076,6 +1085,7 @@ async def wake_agent_route(
         body,
         service=service,
         heartbeat=heartbeat,
+        preflight=True,
     )
 
 
@@ -1092,6 +1102,7 @@ async def invoke_agent_heartbeat_route(
         {},
         service=service,
         heartbeat=heartbeat,
+        diagnostic=True,
     )
 
 

@@ -1532,7 +1532,7 @@ async def test_agent_runtime_state_sessions_and_reset_routes(
     assert reset["stateJson"] == {"resume": True}
 
 
-async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
+async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run(
     app: FastAPI,
     session_factory: async_sessionmaker,
 ) -> None:
@@ -1555,12 +1555,19 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     wake_code, run = await _request(
         app,
         "POST",
-        f"/api/agents/{created['id']}/wakeup",
-        json={"reason": "contract-run"},
+        f"/api/agents/{created['id']}/heartbeat/invoke",
     )
     assert wake_code == 202
     assert run["status"] == "queued"
     assert run["invocationSource"] == "on_demand"
+    assert run["runPurpose"] == "heartbeat"
+    duplicate_code, duplicate = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/heartbeat/invoke",
+    )
+    assert duplicate_code == 202
+    assert duplicate["id"] == run["id"]
     await _wait_for_dispatch(app)
 
     list_code, runs = await _request(app, "GET", f"/api/orgs/{org_id}/heartbeat-runs")
@@ -1602,6 +1609,117 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state_code == 200
     assert state["lastRunId"] == run["id"]
     assert state["lastRunStatus"] == "succeeded"
+
+    next_code, next_run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/heartbeat/invoke",
+    )
+    assert next_code == 202
+    assert next_run["id"] != run["id"]
+    await _wait_for_dispatch(app)
+
+
+async def test_concurrent_runtime_diagnostics_share_one_sqlite_run(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="diagnostic-single-flight")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Diagnostic Single Flight",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "import time; time.sleep(0.2)"],
+            },
+        },
+    )
+    path = f"/api/agents/{created['id']}/heartbeat/invoke"
+
+    first, second = await asyncio.gather(
+        _request(app, "POST", path),
+        _request(app, "POST", path),
+    )
+
+    assert first[0] == 202
+    assert second[0] == 202
+    assert first[1]["id"] == second[1]["id"]
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == created["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == created["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(runs) == 1
+    assert len(wakeups) == 1
+    await _wait_for_dispatch(app)
+
+
+async def test_agent_wakeup_skips_runtime_when_no_work_is_actionable(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="manual-wakeup-no-work")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "No work"},
+    )
+
+    wake_code, result = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/wakeup",
+    )
+
+    assert wake_code == 202
+    assert result == {"status": "skipped"}
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == created["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == created["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert runs == []
+    assert len(wakeups) == 1
+    assert wakeups[0].status == "skipped"
+    assert wakeups[0].error == "heartbeat.preflight.no_actionable_work"
 
 
 async def test_create_assigned_issue_dispatches_assignee_without_scheduler(

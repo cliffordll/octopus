@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import inspect
 import os
+import signal
 import subprocess
 from typing import Any
 
@@ -9,9 +13,47 @@ from .types import RuntimeEnvironmentTestResult, RuntimeExecutionResult
 
 
 def runtime_subprocess_kwargs() -> dict[str, Any]:
-    if os.name != "nt":
-        return {}
-    return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+async def terminate_runtime_process(process: asyncio.subprocess.Process) -> None:
+    """Terminate a runtime subprocess and every child it spawned."""
+    pid = getattr(process, "pid", None)
+    if (
+        os.name == "nt"
+        and isinstance(pid, int)
+        and isinstance(process, asyncio.subprocess.Process)
+    ):
+        with contextlib.suppress(OSError):
+            terminator = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/PID",
+                str(pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await terminator.wait()
+    elif (
+        os.name != "nt"
+        and isinstance(pid, int)
+        and isinstance(process, asyncio.subprocess.Process)
+    ):
+        kill_process_group = getattr(os, "killpg", None)
+        if callable(kill_process_group):
+            with contextlib.suppress(ProcessLookupError):
+                kill_process_group(pid, getattr(signal, "SIGKILL", 9))
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
+    wait_for_exit = getattr(process, "wait", None)
+    if callable(wait_for_exit):
+        with contextlib.suppress(ProcessLookupError):
+            exit_waiter = wait_for_exit()
+            if inspect.isawaitable(exit_waiter):
+                await exit_waiter
 
 
 class UnavailableRuntimeAdapter:

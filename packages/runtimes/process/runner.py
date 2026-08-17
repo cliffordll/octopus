@@ -4,7 +4,7 @@ import asyncio
 import os
 from datetime import UTC, datetime
 
-from ..common import runtime_subprocess_kwargs
+from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..environment import resolve_runtime_executable
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import args, configured_env
@@ -51,9 +51,8 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if cancelled in done:
-                process.kill()
+                await terminate_runtime_process(process)
                 stdout, stderr = await communication
-                await process.wait()
                 return _result(
                     process.returncode,
                     stdout,
@@ -72,9 +71,8 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         else:
             stdout, stderr = await communication
     except TimeoutError:
-        process.kill()
+        await terminate_runtime_process(process)
         stdout, stderr = await communication
-        await process.wait()
         return _result(
             process.returncode,
             stdout,
@@ -83,9 +81,8 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             error_message=f"Timed out after {timeout_sec:g}s",
         )
     except asyncio.CancelledError:
-        process.kill()
+        await terminate_runtime_process(process)
         await communication
-        await process.wait()
         raise
     stdout_text = stdout.decode(errors="replace")
     stderr_text = stderr.decode(errors="replace")

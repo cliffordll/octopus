@@ -29,6 +29,7 @@ from packages.database.schema import (
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import Agent
+from packages.shared.types.heartbeat import WakeAgentPayload
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
 
@@ -103,6 +104,127 @@ async def test_wakeup_idempotency_reuses_existing_run(session: AsyncSession) -> 
     assert first is not None and second is not None
     assert second["id"] == first["id"]
     assert len((await session.execute(select(HeartbeatRun))).scalars().all()) == 1
+
+
+async def test_runtime_diagnostic_reuses_active_diagnostic_run(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="DiagnosticSingleFlight")
+    heartbeat = HeartbeatService(session)
+    payload: WakeAgentPayload = {
+        "source": "on_demand",
+        "triggerDetail": "manual",
+        "reason": "runtime_diagnostic",
+        "idempotencyKey": f"runtime-diagnostic:{agent['id']}",
+    }
+
+    first = await heartbeat.wakeup(
+        agent["id"],
+        payload,
+        actor_type="board",
+        actor_id="local-board",
+        execute_immediately=False,
+    )
+    second = await heartbeat.wakeup(
+        agent["id"],
+        payload,
+        actor_type="board",
+        actor_id="local-board",
+        execute_immediately=False,
+    )
+
+    assert first is not None and second is not None
+    assert second["id"] == first["id"]
+    first_context = first["contextSnapshot"]
+    assert first_context is not None
+    assert first_context["wakeReason"] == "runtime_diagnostic"
+    assert len((await session.execute(select(HeartbeatRun))).scalars().all()) == 1
+
+
+async def test_manual_wakeup_preflights_actionable_work(session: AsyncSession) -> None:
+    agent = await _seed_agent(session, name="ManualPreflight")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        skipped = await heartbeat.wakeup_if_actionable(
+            agent["id"],
+            {},
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+    assert skipped is None
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    await session.rollback()
+
+    async with async_transaction(session):
+        session.add(
+            Issue(
+                org_id=agent["orgId"],
+                title="Actionable manual wakeup",
+                status="todo",
+                priority="medium",
+                assignee_agent_id=agent["id"],
+            )
+        )
+        await session.flush()
+        run = await heartbeat.wakeup_if_actionable(
+            agent["id"],
+            {},
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert run is not None
+    assert run["status"] == "queued"
+    run_context = run["contextSnapshot"]
+    assert run_context is not None
+    assert run_context["wakeReason"] == "manual_wakeup"
+
+
+async def test_manual_wakeup_does_not_recover_pending_work_while_paused(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="PausedManualPreflight")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        agent_row = await session.get(AgentRow, agent["id"])
+        assert agent_row is not None
+        agent_row.status = "paused"
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Paused pending work",
+            status="todo",
+            priority="medium",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        pending = AgentWakeupRequest(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            source="assignment",
+            trigger_detail="system",
+            reason="issue_assigned",
+            payload={"issueId": issue.id},
+            status="queued",
+        )
+        session.add(pending)
+        await session.flush()
+        result = await heartbeat.wakeup_if_actionable(
+            agent["id"],
+            {},
+            actor_type="board",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert result is None
+    assert (await session.execute(select(HeartbeatRun))).scalars().all() == []
+    await session.refresh(pending)
+    assert pending.status == "queued"
 
 
 async def test_queued_run_resumes_after_concurrency_slot_is_available(
@@ -1940,6 +2062,123 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
+
+
+async def test_silent_runtime_is_timed_out_instead_of_running_forever(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class SilentAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            await asyncio.sleep(0.08)
+            return RuntimeExecutionResult(exit_code=0)
+
+    agent = await _seed_agent(
+        session, name="SilentTimeout", runtime_type="opencode_local"
+    )
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: SilentAdapter(),
+    )
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_NO_OUTPUT_TIMEOUT_SECONDS", 0.02)
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = await heartbeat.wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "timed_out"
+    assert run["errorCode"] == "timeout"
+    assert run["error"] == "Runtime produced no output for 0.02s"
+
+
+async def test_buffered_runtime_does_not_get_default_silence_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    class BufferedAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            await asyncio.sleep(0.04)
+            return RuntimeExecutionResult(exit_code=0)
+
+    agent = await _seed_agent(session, name="BufferedNoDefaultTimeout")
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: BufferedAdapter(),
+    )
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.005)
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_NO_OUTPUT_TIMEOUT_SECONDS", 0.01)
+
+    async with async_transaction(session):
+        run = await HeartbeatService(session).wakeup(
+            agent["id"],
+            {"source": "on_demand", "triggerDetail": "manual"},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    assert run is not None
+    assert run["status"] == "succeeded"
+
+
+async def test_terminal_run_keeps_agent_running_while_another_run_is_active(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ConcurrentAgentState")
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        agent_row = await session.get(AgentRow, agent["id"])
+        assert agent_row is not None
+        agent_row.status = "running"
+        first = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+        )
+        second = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            trigger_detail="manual",
+            status="running",
+        )
+        session.add_all([first, second])
+        await session.flush()
+        cancelled_first = await heartbeat.cancel_run(first.id)
+
+    assert cancelled_first is not None
+    agent_row = await session.get(AgentRow, agent["id"])
+    assert agent_row is not None and agent_row.status == "running"
+
+    async with async_transaction(session):
+        cancelled_second = await heartbeat.cancel_run(second.id)
+
+    assert cancelled_second is not None
+    await session.refresh(agent_row)
+    assert agent_row.status == "idle"
 
 
 async def test_successful_run_stays_succeeded_when_postprocess_cleanup_fails(

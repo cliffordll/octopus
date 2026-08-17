@@ -1408,7 +1408,7 @@ export function AgentPage() {
             <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
             <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
-            <button className="secondary" disabled={operationalDisabled || wakeup.isPending} title="检查并拉起该智能体的待执行任务" type="button" onClick={() => wakeup.mutate()}>唤醒</button>
+            <button className="secondary" disabled={isPaused || operationalDisabled || wakeup.isPending} title="立即执行一次心跳检查，有待办任务时才启动运行" type="button" onClick={() => wakeup.mutate()}>立即唤醒</button>
             <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行诊断</button>
           </div>
         )}

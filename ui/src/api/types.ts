@@ -1368,6 +1368,12 @@ export interface WakeAgentPayload {
   forceFreshSession?: boolean;
 }
 
+export interface WakeupSkippedResult {
+  status: "skipped";
+}
+
+export type WakeupResult = HeartbeatRun | WakeupSkippedResult;
+
 export interface AgentSkillAnalytics {
   agentId?: string;
   orgId?: string;

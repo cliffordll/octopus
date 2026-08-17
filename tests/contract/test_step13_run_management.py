@@ -265,7 +265,12 @@ async def test_cancel_interrupts_active_process_run(
             },
         )
         invocation = asyncio.create_task(
-            _request(application, "POST", f"/api/agents/{agent['id']}/wakeup", json={})
+            _request(
+                application,
+                "POST",
+                f"/api/agents/{agent['id']}/heartbeat/invoke",
+                json={},
+            )
         )
         run_id: str | None = None
         observed_statuses: list[str] = []
