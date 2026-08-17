@@ -1909,6 +1909,52 @@ async def test_periodic_recovery_recovers_stale_active_local_child_loss(
     assert run.id not in HeartbeatService._active_run_ids.get(agent["id"], set())
 
 
+async def test_periodic_recovery_claims_expired_timer_after_sqlite_reload(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: False)
+    agent = await _seed_agent(
+        session,
+        name="ReloadedExpiredTimer",
+        runtime_type="opencode_local",
+    )
+    heartbeat = HeartbeatService(session)
+
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="timer",
+            trigger_detail="system",
+            status="running",
+            process_pid=12345,
+            process_started_at=datetime.now(UTC) - timedelta(minutes=10),
+            execution_owner_token="expired-owner",
+            execution_lease_expires_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        session.add(run)
+        await session.flush()
+        run_id = run.id
+        session.expunge_all()
+
+        recovery = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+        second_recovery = await heartbeat.recover_orphaned_runs(
+            require_process_loss=True
+        )
+
+    persisted = await session.get(HeartbeatRun, run_id)
+    assert persisted is not None
+    assert persisted.status == "failed"
+    assert persisted.error_code == "process_lost"
+    assert recovery[0]["status"] == "queued"
+    assert recovery[0]["retryOfRunId"] == run_id
+    assert recovery[0]["processLossRetryCount"] == 1
+    assert second_recovery == []
+
+
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
     session: AsyncSession,
 ) -> None:
@@ -2230,16 +2276,27 @@ async def test_recovery_finishes_pending_terminal_effects_idempotently(
             wakeup_request_id=wakeup.id,
             terminal_effects_pending=True,
             terminal_effects_json={"version": 1},
+            terminal_effects_next_attempt_at=datetime.now(UTC) - timedelta(minutes=5),
+            terminal_effects_claim_token="stale-claim",
+            terminal_effects_claimed_at=datetime.now(UTC) - timedelta(minutes=10),
         )
         session.add(run)
         await session.flush()
         wakeup.run_id = run.id
+        await session.flush()
+        run_id = run.id
+        wakeup_id = wakeup.id
+        agent_id = agent_row.id
+        session.expunge_all()
         await heartbeat.recover_orphaned_runs()
         await heartbeat.recover_orphaned_runs()
 
-    await session.refresh(run)
-    await session.refresh(wakeup)
-    await session.refresh(agent_row)
+    run = await session.get(HeartbeatRun, run_id)
+    wakeup = await session.get(AgentWakeupRequest, wakeup_id)
+    agent_row = await session.get(AgentRow, agent_id)
+    assert run is not None
+    assert wakeup is not None
+    assert agent_row is not None
     terminal_events = (
         (
             await session.execute(
