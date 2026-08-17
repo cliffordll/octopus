@@ -36,6 +36,17 @@ Octopus 已经具备主干机制：
 主任务创建子任务 -> 子任务执行 -> 子任务收尾 -> 平台唤醒主任务 -> 主任务可以汇总
 ```
 
+### 升级与旧数据恢复
+
+父任务 continuation 以父任务下全部子项的结算代次作为幂等依据。同一轮多个子项并发收尾只创建一个 continuation；任一子项重新打开并再次结算后，才进入新一轮。父 Issue 行锁负责串行判断“最后一个活动子项已经结束”，避免 PostgreSQL 并发事务同时跳过唤醒。
+
+升级前已经漏掉 continuation、仍停在 `todo` 或 `in_progress` 的父任务不会被自动改写状态：
+
+- Agent 处于 active 且 Heartbeat 已启用时，下一次 Heartbeat 预检会发现该父任务；也可以点击“立即唤醒”提前检查。
+- Agent 已暂停时，先恢复 Agent，再点击“立即唤醒”。
+- Heartbeat 已禁用时，使用“立即唤醒”手动恢复。
+- 父任务没有 assignee 时，先分配 Agent，再执行唤醒。
+
 ## 不完善的地方
 
 当前还不能算一个足够稳的 manager workflow：
