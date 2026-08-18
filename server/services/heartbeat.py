@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 import hashlib
+import logging
 import os
 from pathlib import Path
 from typing import Any, ClassVar, cast
@@ -103,6 +104,8 @@ from .logs import (
 from .runtime_providers import inject_runtime_provider_config
 from .workspace_paths import ensure_octopus_run_log_dir
 from .workspaces import WorkspaceService, _expected_work_product_paths
+
+logger = logging.getLogger(__name__)
 
 LOCAL_CHILD_PROCESS_RUNTIMES = {
     "process",
@@ -4650,7 +4653,7 @@ def _dedupe_work_product_payloads(products: list[Any]) -> list[Any]:
 
 
 async def _shielded_session_close(session: AsyncSession) -> None:
-    with contextlib.suppress(BaseException):
+    with contextlib.suppress(asyncio.CancelledError):
         await _run_shielded_cleanup(
             "close heartbeat dispatch database session",
             session.close,
@@ -4659,12 +4662,88 @@ async def _shielded_session_close(session: AsyncSession) -> None:
 
 
 async def _shielded_session_rollback(session: AsyncSession) -> None:
-    with contextlib.suppress(BaseException):
+    with contextlib.suppress(asyncio.CancelledError):
         await _run_shielded_cleanup(
             "roll back heartbeat dispatch database session",
             session.rollback,
             timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
         )
+
+
+async def _commit_session_before_cleanup(session: AsyncSession) -> None:
+    commit_task = asyncio.create_task(session.commit())
+    try:
+        await asyncio.shield(commit_task)
+    except asyncio.CancelledError:
+        with contextlib.suppress(BaseException):
+            await asyncio.shield(commit_task)
+        raise
+
+
+class RunExecution:
+    """Own the database and service lifecycle for one claimed Run."""
+
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        run_id: str,
+        agent_id: str,
+    ) -> None:
+        self._session_factory = session_factory
+        self.run_id = run_id
+        self.agent_id = agent_id
+
+    async def run(self) -> str | None:
+        session = self._session_factory()
+        service = HeartbeatService(session, commit_process_metadata=True)
+        try:
+            final = await service.execute_claimed_run(self.run_id)
+            reviewer_agent_id = await self._reviewer_to_dispatch(session, final)
+            await _commit_session_before_cleanup(session)
+            return reviewer_agent_id
+        except BaseException:
+            await _shielded_session_rollback(session)
+            raise
+        finally:
+            await _shielded_session_close(session)
+
+    async def _reviewer_to_dispatch(
+        self, session: AsyncSession, final: HeartbeatRun | None
+    ) -> str | None:
+        if (
+            final is None
+            or final["status"] != "succeeded"
+            or final["invocationSource"] != "assignment"
+        ):
+            return None
+        issue_id = _issue_id_from_context(final.get("contextSnapshot"))
+        issue = await get_issue_by_id(session, issue_id) if issue_id else None
+        if (
+            issue is None
+            or issue.status != "in_review"
+            or not issue.reviewer_agent_id
+            or issue.reviewer_agent_id == self.agent_id
+        ):
+            return None
+        return issue.reviewer_agent_id
+
+
+def track_dispatch_task(tasks: set[asyncio.Task[Any]], task: asyncio.Task[Any]) -> None:
+    """Keep a dispatch task alive and always observe its terminal exception."""
+
+    tasks.add(task)
+
+    def _observe(completed: asyncio.Task[Any]) -> None:
+        tasks.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except BaseException:
+            logger.exception("heartbeat dispatch task failed")
+
+    task.add_done_callback(_observe)
 
 
 def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
@@ -4699,38 +4778,17 @@ async def dispatch_queued_agent(
     if not run_ids:
         return
 
-    async def execute(run_id: str) -> str | None:
-        session = session_factory()
-        service = HeartbeatService(session, commit_process_metadata=True)
-        try:
-            final = await service.execute_claimed_run(run_id)
-            reviewer_agent_id: str | None = None
-            if (
-                final is not None
-                and final["status"] == "succeeded"
-                and final["invocationSource"] == "assignment"
-            ):
-                issue_id = _issue_id_from_context(final.get("contextSnapshot"))
-                issue = await get_issue_by_id(session, issue_id) if issue_id else None
-                if (
-                    issue is not None
-                    and issue.status == "in_review"
-                    and issue.reviewer_agent_id
-                    and issue.reviewer_agent_id != agent_id
-                ):
-                    reviewer_agent_id = issue.reviewer_agent_id
-            await asyncio.shield(session.commit())
-            return reviewer_agent_id
-        except BaseException:
-            await _shielded_session_rollback(session)
-            raise
-        finally:
-            await _shielded_session_close(session)
-
     next_agent_ids = {
         reviewer_agent_id
         for reviewer_agent_id in await asyncio.gather(
-            *(execute(run_id) for run_id in run_ids)
+            *(
+                RunExecution(
+                    session_factory,
+                    run_id=run_id,
+                    agent_id=agent_id,
+                ).run()
+                for run_id in run_ids
+            )
         )
         if reviewer_agent_id is not None
     }

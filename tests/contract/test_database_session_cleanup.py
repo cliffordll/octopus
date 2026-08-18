@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 import inspect
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -201,6 +201,112 @@ async def test_heartbeat_dispatch_session_close_survives_task_cancellation() -> 
     await task
 
     assert session.close_finished is True
+
+
+async def test_run_execution_rolls_back_and_closes_when_service_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TrackingSession:
+        def __init__(self) -> None:
+            self.rolled_back = False
+            self.closed = False
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FailingHeartbeatService:
+        def __init__(self, _session: object, **_kwargs: object) -> None:
+            return None
+
+        async def execute_claimed_run(self, _run_id: str) -> None:
+            raise RuntimeError("adapter failed")
+
+    session = TrackingSession()
+    monkeypatch.setattr(heartbeat_module, "HeartbeatService", FailingHeartbeatService)
+
+    execution = heartbeat_module.RunExecution(  # type: ignore[arg-type]
+        cast(Any, lambda: session),
+        run_id="run-1",
+        agent_id="agent-1",
+    )
+    with pytest.raises(RuntimeError, match="adapter failed"):
+        await execution.run()
+
+    assert session.rolled_back is True
+    assert session.closed is True
+
+
+async def test_run_execution_waits_for_commit_before_cancel_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit_started = asyncio.Event()
+    allow_commit = asyncio.Event()
+
+    class TrackingSession:
+        def __init__(self) -> None:
+            self.commit_finished = False
+            self.rollback_after_commit = False
+            self.close_after_commit = False
+
+        async def commit(self) -> None:
+            commit_started.set()
+            await allow_commit.wait()
+            self.commit_finished = True
+
+        async def rollback(self) -> None:
+            self.rollback_after_commit = self.commit_finished
+
+        async def close(self) -> None:
+            self.close_after_commit = self.commit_finished
+
+    class SuccessfulHeartbeatService:
+        def __init__(self, _session: object, **_kwargs: object) -> None:
+            return None
+
+        async def execute_claimed_run(self, _run_id: str) -> None:
+            return None
+
+    session = TrackingSession()
+    monkeypatch.setattr(
+        heartbeat_module, "HeartbeatService", SuccessfulHeartbeatService
+    )
+    execution = heartbeat_module.RunExecution(  # type: ignore[arg-type]
+        cast(Any, lambda: session),
+        run_id="run-1",
+        agent_id="agent-1",
+    )
+    task = asyncio.create_task(execution.run())
+    await commit_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert session.rollback_after_commit is False
+    assert session.close_after_commit is False
+
+    allow_commit.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.rollback_after_commit is True
+    assert session.close_after_commit is True
+
+
+async def test_dispatch_task_failure_is_observed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def fail() -> None:
+        raise RuntimeError("dispatch failed")
+
+    tasks: set[asyncio.Task[object]] = set()
+    task = asyncio.create_task(fail())
+    heartbeat_module.track_dispatch_task(tasks, task)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert tasks == set()
+    assert "heartbeat dispatch task failed" in caplog.text
 
 
 async def test_dispose_engine_times_out() -> None:
