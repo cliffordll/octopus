@@ -2160,6 +2160,96 @@ async def test_periodic_recovery_claims_expired_timer_after_sqlite_reload(
     assert second_recovery == []
 
 
+async def test_periodic_recovery_recovers_expired_run_without_process_pid(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ExpiredWithoutPid")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Expired assignment without pid",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            execution_owner_token="expired-owner",
+            execution_lease_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+            context_snapshot={"issueId": issue.id, "projectId": "project-1"},
+        )
+        session.add(run)
+        await session.flush()
+        issue.execution_run_id = run.id
+
+        recovered = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+        retry_row = await session.get(HeartbeatRun, recovered[0]["id"])
+        assert retry_row is not None
+        retry_row.status = "running"
+        retry_row.execution_owner_token = "expired-retry-owner"
+        retry_row.execution_lease_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await session.flush()
+        recovered_again = await heartbeat.recover_orphaned_runs(
+            require_process_loss=True
+        )
+
+    await session.refresh(run)
+    await session.refresh(issue)
+    assert run.status == "failed"
+    assert run.error_code == "process_lost"
+    assert issue.execution_run_id is None
+    assert len(recovered) == 1
+    assert recovered[0]["status"] == "queued"
+    assert recovered[0]["retryOfRunId"] == run.id
+    assert recovered[0]["processLossRetryCount"] == 1
+    assert recovered[0]["contextSnapshot"] is not None
+    assert recovered[0]["contextSnapshot"]["issueId"] == issue.id
+    assert recovered[0]["contextSnapshot"]["projectId"] == "project-1"
+    assert recovered_again == []
+    await session.refresh(retry_row)
+    assert retry_row.status == "failed"
+    runs = (
+        (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == agent["id"])
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(runs) == 2
+
+
+async def test_periodic_recovery_keeps_recent_run_without_lease_or_pid(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="RecentWithoutLeaseOrPid")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            started_at=datetime.now(UTC),
+        )
+        session.add(run)
+        await session.flush()
+
+        recovered = await heartbeat.recover_orphaned_runs(require_process_loss=True)
+
+    await session.refresh(run)
+    assert recovered == []
+    assert run.status == "running"
+
+
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
     session: AsyncSession,
 ) -> None:
