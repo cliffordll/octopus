@@ -56,18 +56,40 @@ class IssueRunRepairService:
     async def repair(self, issue_id: str) -> dict[str, Any]:
         before = await self.inspect(issue_id)
         candidate_ids = set(before["candidateRunIds"])
+        heartbeat = HeartbeatService(self._session)
         recovered = []
         if candidate_ids:
-            recovered = await HeartbeatService(self._session).recovery.recover(
+            recovered = await heartbeat.recovery.recover(
                 require_process_loss=True,
                 run_ids=candidate_ids,
             )
+        restored_issue_ids: list[str] = []
+        root = await get_issue_by_id(self._session, issue_id)
+        assert root is not None
+        issues = await self._issue_tree(root)
+        issue_refs = {
+            ref
+            for issue in issues
+            for ref in (issue.id, issue.identifier)
+            if isinstance(ref, str) and ref
+        }
+        for run in await list_runs(self._session, root.org_id):
+            issue_ref = _run_issue_ref(run)
+            if issue_ref not in issue_refs:
+                continue
+            if await heartbeat.finalizer.restore_system_blocked_issue_after_recovery(
+                run
+            ):
+                restored_issue = await get_issue_by_id(self._session, issue_ref)
+                if restored_issue is not None:
+                    restored_issue_ids.append(restored_issue.id)
         after = await self.inspect(issue_id)
         return {
             "mode": "apply",
             "rootIssue": before["rootIssue"],
             "candidateRunIds": sorted(candidate_ids),
             "recoveryRuns": recovered,
+            "restoredIssueIds": sorted(set(restored_issue_ids)),
             "before": before,
             "after": after,
         }

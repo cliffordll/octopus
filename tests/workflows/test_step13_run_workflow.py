@@ -2261,7 +2261,7 @@ async def test_issue_run_repair_is_dry_run_by_default_and_scoped_to_issue_tree(
         parent = Issue(
             org_id=agent["orgId"],
             title="Repair root",
-            status="in_progress",
+            status="blocked",
             assignee_agent_id=agent["id"],
         )
         unrelated = Issue(
@@ -2281,6 +2281,48 @@ async def test_issue_run_repair_is_dry_run_by_default_and_scoped_to_issue_tree(
         )
         session.add(child)
         await session.flush()
+        original_parent_run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="process_lost",
+            context_snapshot={"issueId": parent.id},
+        )
+        session.add(original_parent_run)
+        await session.flush()
+        session.add(
+            ActivityLog(
+                org_id=parent.org_id,
+                actor_type="agent",
+                actor_id=agent["id"],
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=parent.id,
+                run_id=original_parent_run.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": "in_progress",
+                    "reason": "run_failed",
+                    "runId": original_parent_run.id,
+                },
+                created_at=datetime.now(UTC) - timedelta(minutes=2),
+            )
+        )
+        completed_parent_recovery = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="automation",
+            trigger_detail="system",
+            status="succeeded",
+            retry_of_run_id=original_parent_run.id,
+            context_snapshot={
+                "issueId": parent.id,
+                "recovery": {"originalRunId": original_parent_run.id},
+            },
+        )
+        session.add(completed_parent_recovery)
         target_run = HeartbeatRun(
             org_id=agent["orgId"],
             agent_id=agent["id"],
@@ -2316,10 +2358,14 @@ async def test_issue_run_repair_is_dry_run_by_default_and_scoped_to_issue_tree(
     await session.refresh(unrelated_run)
     assert applied["candidateRunIds"] == [target_run.id]
     assert len(applied["recoveryRuns"]) == 1
+    assert applied["restoredIssueIds"] == [parent.id]
     assert applied_again["candidateRunIds"] == []
     assert applied_again["recoveryRuns"] == []
+    assert applied_again["restoredIssueIds"] == []
     assert target_run.status == "failed"
     assert unrelated_run.status == "running"
+    await session.refresh(parent)
+    assert parent.status == "in_progress"
 
 
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
