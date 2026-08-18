@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import asyncio
+from datetime import datetime
 import sys
 import os
 import subprocess
@@ -15,6 +16,7 @@ from packages.runtimes.common import (
     runtime_subprocess_kwargs,
     terminate_runtime_process,
 )
+from packages.runtimes.local_process import local_process_supervisor
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
 from packages.runtimes.http.environment import (
@@ -73,6 +75,113 @@ async def test_runtime_termination_stops_nested_child_process() -> None:
             break
         await asyncio.sleep(0.02)
     assert not psutil.pid_exists(child_pid)
+
+
+async def test_local_process_supervisor_reports_exit_after_output_is_drained() -> None:
+    events: list[tuple[str, object]] = []
+
+    async def on_started(pid: int, _started_at: datetime) -> None:
+        events.append(("started", pid))
+
+    async def on_stdout(chunk: bytes) -> None:
+        events.append(("stdout", chunk.decode()))
+
+    async def on_exited(pid: int, exit_code: int | None, _exited_at: datetime) -> None:
+        events.append(("exited", (pid, exit_code)))
+
+    result = await local_process_supervisor.run(
+        sys.executable,
+        "-c",
+        "import sys; print('complete', flush=True); sys.exit(0)",
+        on_process_started=on_started,
+        on_process_exited=on_exited,
+        on_stdout_chunk=on_stdout,
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout.decode().strip() == "complete"
+    assert [kind for kind, _ in events] == ["started", "stdout", "exited"]
+
+
+async def test_local_process_supervisor_owns_cancellation_and_exit_collection() -> None:
+    cancellation = asyncio.Event()
+    exited: list[int | None] = []
+
+    async def cancel_after_start() -> None:
+        await asyncio.sleep(0.05)
+        cancellation.set()
+
+    async def on_exited(_pid: int, exit_code: int | None, _exited_at: datetime) -> None:
+        exited.append(exit_code)
+
+    cancellation_task = asyncio.create_task(cancel_after_start())
+    try:
+        result = await local_process_supervisor.run(
+            sys.executable,
+            "-c",
+            "import time; print('ready', flush=True); time.sleep(30)",
+            cancel_event=cancellation,
+            on_process_exited=on_exited,
+        )
+    finally:
+        await cancellation_task
+
+    assert result.cancelled is True
+    assert result.signal == "SIGTERM"
+    assert result.stdout.decode().strip() == "ready"
+    assert len(exited) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows compatibility fallback")
+async def test_local_process_supervisor_fallback_keeps_lifecycle_and_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancellation = asyncio.Event()
+    fallback_errors: list[PermissionError] = []
+    started: list[int] = []
+    exited: list[int | None] = []
+
+    async def deny_async_spawn(*_args: object, **_kwargs: object) -> object:
+        raise PermissionError(5, "Access is denied")
+
+    async def cancel_after_start() -> None:
+        while not started:
+            await asyncio.sleep(0.01)
+        cancellation.set()
+
+    async def on_fallback(error: PermissionError) -> None:
+        fallback_errors.append(error)
+
+    async def on_started(pid: int, _started_at: datetime) -> None:
+        started.append(pid)
+
+    async def on_exited(_pid: int, exit_code: int | None, _exited_at: datetime) -> None:
+        exited.append(exit_code)
+
+    monkeypatch.setattr(
+        "packages.runtimes.local_process.asyncio.create_subprocess_exec",
+        deny_async_spawn,
+    )
+    cancellation_task = asyncio.create_task(cancel_after_start())
+    try:
+        result = await local_process_supervisor.run(
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+            cancel_event=cancellation,
+            on_process_started=on_started,
+            on_process_exited=on_exited,
+            allow_blocking_fallback=True,
+            on_blocking_fallback=on_fallback,
+        )
+    finally:
+        await cancellation_task
+
+    assert len(fallback_errors) == 1
+    assert len(started) == 1
+    assert result.cancelled is True
+    assert result.signal == "SIGTERM"
+    assert len(exited) == 1
 
 
 async def _noop_on_log(stream: str, chunk: str) -> None:

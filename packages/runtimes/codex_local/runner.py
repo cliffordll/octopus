@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import json
 import os
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_process import local_process_supervisor
 from ..local_skills import (
     configure_managed_profile_env,
     desired_skills_from_config,
@@ -165,37 +163,29 @@ async def _run_attempt(
     billing_type: str,
     biller: str,
 ) -> _RunAttempt:
+    async def on_blocking_fallback(startup_error: PermissionError) -> None:
+        await context.on_log(
+            "stderr",
+            (
+                "[octopus] asyncio subprocess startup failed on Windows; "
+                "retrying Codex CLI through the managed process fallback: "
+                f"{startup_error}\n"
+            ),
+        )
+
     try:
-        process = await asyncio.create_subprocess_exec(
+        process_result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
-        )
-    except PermissionError as exc:
-        if _should_retry_with_blocking_subprocess(exc):
-            return await _run_blocking_subprocess_attempt(
-                context=context,
-                command=command,
-                args=args,
-                cwd=cwd,
-                prompt=prompt,
-                env=env,
-                timeout_sec=timeout_sec,
-                loaded_skills=loaded_skills,
-                billing_type=billing_type,
-                biller=biller,
-                startup_error=exc,
-            )
-        return _subprocess_start_error_attempt(
-            exc,
-            loaded_skills=loaded_skills,
-            billing_type=billing_type,
-            biller=biller,
+            input_data=prompt.encode(),
+            timeout_sec=timeout_sec,
+            cancel_event=context.cancel_event,
+            on_process_started=context.on_process_started,
+            on_process_exited=context.on_process_exited,
+            allow_blocking_fallback=True,
+            on_blocking_fallback=on_blocking_fallback,
         )
     except OSError as exc:
         return _subprocess_start_error_attempt(
@@ -204,64 +194,16 @@ async def _run_attempt(
             billing_type=billing_type,
             biller=biller,
         )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
-    try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
+    if process_result.cancelled:
+        stderr_text = _strip_benign_stderr(
+            process_result.stderr.decode(errors="replace")
         )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {communication, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                await terminate_runtime_process(process)
-                stdout, stderr = await communication
-                stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
-                result = RuntimeExecutionResult(
-                    exit_code=process.returncode,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                    result_json={
-                        "stdout": stdout.decode(errors="replace"),
-                        "stderr": stderr_text,
-                        "loadedSkills": loaded_skills,
-                        "billingType": billing_type,
-                        "biller": biller,
-                    },
-                )
-                return _RunAttempt(
-                    result=result,
-                    stdout=stdout.decode(errors="replace"),
-                    stderr=stderr_text,
-                    raw_stderr=stderr.decode(errors="replace"),
-                )
-            cancelled.cancel()
-            if communication not in done:
-                raise TimeoutError
-            stdout, stderr = communication.result()
-        elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        await terminate_runtime_process(process)
-        stdout, stderr = await communication
-        stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
         result = RuntimeExecutionResult(
-            exit_code=process.returncode,
-            timed_out=True,
-            error_message=f"Timed out after {timeout_sec:g}s",
+            exit_code=process_result.exit_code,
+            signal=process_result.signal,
+            error_message="Run cancelled",
             result_json={
-                "stdout": stdout.decode(errors="replace"),
+                "stdout": process_result.stdout.decode(errors="replace"),
                 "stderr": stderr_text,
                 "loadedSkills": loaded_skills,
                 "billingType": billing_type,
@@ -270,20 +212,38 @@ async def _run_attempt(
         )
         return _RunAttempt(
             result=result,
-            stdout=stdout.decode(errors="replace"),
+            stdout=process_result.stdout.decode(errors="replace"),
             stderr=stderr_text,
-            raw_stderr=stderr.decode(errors="replace"),
+            raw_stderr=process_result.stderr.decode(errors="replace"),
         )
-    except asyncio.CancelledError:
-        await terminate_runtime_process(process)
-        await communication
-        raise
+    if process_result.timed_out:
+        stderr_text = _strip_benign_stderr(
+            process_result.stderr.decode(errors="replace")
+        )
+        result = RuntimeExecutionResult(
+            exit_code=process_result.exit_code,
+            timed_out=True,
+            error_message=f"Timed out after {timeout_sec:g}s",
+            result_json={
+                "stdout": process_result.stdout.decode(errors="replace"),
+                "stderr": stderr_text,
+                "loadedSkills": loaded_skills,
+                "billingType": billing_type,
+                "biller": biller,
+            },
+        )
+        return _RunAttempt(
+            result=result,
+            stdout=process_result.stdout.decode(errors="replace"),
+            stderr=stderr_text,
+            raw_stderr=process_result.stderr.decode(errors="replace"),
+        )
 
     return await _completed_process_attempt(
         context=context,
-        returncode=process.returncode,
-        stdout=stdout,
-        stderr=stderr,
+        returncode=process_result.exit_code,
+        stdout=process_result.stdout,
+        stderr=process_result.stderr,
         timed_out=False,
         timeout_sec=timeout_sec,
         loaded_skills=loaded_skills,
@@ -312,85 +272,6 @@ def _subprocess_start_error_attempt(
         },
     )
     return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
-
-
-def _should_retry_with_blocking_subprocess(_: PermissionError) -> bool:
-    return os.name == "nt"
-
-
-async def _run_blocking_subprocess_attempt(
-    *,
-    context: RuntimeExecutionContext,
-    command: str,
-    args: list[str],
-    cwd: str | None,
-    prompt: str,
-    env: dict[str, str],
-    timeout_sec: float,
-    loaded_skills: list[dict[str, str | None]],
-    billing_type: str,
-    biller: str,
-    startup_error: PermissionError,
-) -> _RunAttempt:
-    await context.on_log(
-        "stderr",
-        (
-            "[octopus] asyncio subprocess startup failed on Windows; "
-            f"retrying Codex CLI with blocking subprocess fallback: {startup_error}\n"
-        ),
-    )
-    try:
-        completed = await asyncio.to_thread(
-            subprocess.run,
-            [command, *args],
-            cwd=cwd,
-            env=env,
-            input=prompt.encode(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            **runtime_subprocess_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or b""
-        stderr = exc.stderr or b""
-        return await _completed_process_attempt(
-            context=context,
-            returncode=1,
-            stdout=stdout,
-            stderr=stderr,
-            timed_out=True,
-            timeout_sec=timeout_sec,
-            loaded_skills=loaded_skills,
-            billing_type=billing_type,
-            biller=biller,
-        )
-    except OSError as exc:
-        message = str(exc) or exc.__class__.__name__
-        result = RuntimeExecutionResult(
-            exit_code=1,
-            error_message=f"Failed to start Codex CLI: {message}",
-            result_json={
-                "stdout": "",
-                "stderr": message,
-                "loadedSkills": loaded_skills,
-                "billingType": billing_type,
-                "biller": biller,
-            },
-        )
-        return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
-
-    return await _completed_process_attempt(
-        context=context,
-        returncode=completed.returncode,
-        stdout=completed.stdout or b"",
-        stderr=completed.stderr or b"",
-        timed_out=False,
-        timeout_sec=timeout_sec,
-        loaded_skills=loaded_skills,
-        billing_type=billing_type,
-        biller=biller,
-    )
 
 
 async def _completed_process_attempt(

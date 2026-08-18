@@ -1578,6 +1578,7 @@ async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run
     assert detail_code == 200
     assert detail["status"] == "succeeded"
     assert detail["resultJson"]["stdout"].strip() == "adapter-ok"
+    assert detail["processExitedAt"] is not None
 
     events_code, events = await _request(
         app, "GET", f"/api/heartbeat-runs/{run['id']}/events"
@@ -1589,6 +1590,7 @@ async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run
         "adapter.invoke",
         "workspace.preflight",
         "lifecycle",
+        "lifecycle",
         "log",
         "lifecycle",
     ]
@@ -1599,6 +1601,7 @@ async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run
         "adapter invocation",
         "workspace context prepared",
         events[4]["message"].strip(),
+        "child process exited with code 0",
         "adapter-ok",
         "run succeeded",
     ]

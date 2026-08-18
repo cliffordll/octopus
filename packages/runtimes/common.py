@@ -11,6 +11,8 @@ from typing import Any
 from .skills import skill_snapshot_from_root
 from .types import RuntimeEnvironmentTestResult, RuntimeExecutionResult
 
+_BLOCKING_PROCESS_TYPE = subprocess.Popen
+
 
 def runtime_subprocess_kwargs() -> dict[str, Any]:
     if os.name == "nt":
@@ -18,10 +20,26 @@ def runtime_subprocess_kwargs() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
-async def terminate_runtime_process(process: asyncio.subprocess.Process) -> None:
+async def terminate_runtime_process(
+    process: asyncio.subprocess.Process | subprocess.Popen,
+) -> None:
     """Terminate a runtime subprocess and every child it spawned."""
     pid = getattr(process, "pid", None)
     if (
+        os.name == "nt"
+        and isinstance(pid, int)
+        and isinstance(process, _BLOCKING_PROCESS_TYPE)
+    ):
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            await asyncio.to_thread(
+                subprocess.run,
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+    elif (
         os.name == "nt"
         and isinstance(pid, int)
         and isinstance(process, asyncio.subprocess.Process)
@@ -40,7 +58,7 @@ async def terminate_runtime_process(process: asyncio.subprocess.Process) -> None
     elif (
         os.name != "nt"
         and isinstance(pid, int)
-        and isinstance(process, asyncio.subprocess.Process)
+        and isinstance(process, (asyncio.subprocess.Process, _BLOCKING_PROCESS_TYPE))
     ):
         kill_process_group = getattr(os, "killpg", None)
         if callable(kill_process_group):
@@ -51,9 +69,12 @@ async def terminate_runtime_process(process: asyncio.subprocess.Process) -> None
     wait_for_exit = getattr(process, "wait", None)
     if callable(wait_for_exit):
         with contextlib.suppress(ProcessLookupError):
-            exit_waiter = wait_for_exit()
-            if inspect.isawaitable(exit_waiter):
-                await exit_waiter
+            if isinstance(process, _BLOCKING_PROCESS_TYPE):
+                await asyncio.to_thread(wait_for_exit)
+            else:
+                exit_waiter = wait_for_exit()
+                if inspect.isawaitable(exit_waiter):
+                    await exit_waiter
 
 
 class UnavailableRuntimeAdapter:

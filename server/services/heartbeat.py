@@ -128,12 +128,6 @@ HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
 WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
 
 
-class ProcessLostError(RuntimeError):
-    def __init__(self, pid: int) -> None:
-        super().__init__(f"Process lost -- child pid {pid} is no longer running")
-        self.pid = pid
-
-
 def _is_process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -2142,6 +2136,33 @@ class HeartbeatService:
                     sequence += 1
                 await self._commit_background_runtime_progress()
 
+        async def on_process_exited(
+            pid: int, exit_code: int | None, exited_at: datetime
+        ) -> None:
+            nonlocal sequence, running
+            async with runtime_callback_lock:
+                updated = await update_run(
+                    self._session,
+                    running.id,
+                    {"process_exited_at": exited_at},
+                )
+                if updated is not None:
+                    running = updated
+                    await self._append_event(
+                        updated,
+                        sequence,
+                        "lifecycle",
+                        message=f"child process exited with code {exit_code}",
+                        level="info" if exit_code == 0 else "error",
+                        payload={
+                            "processPid": pid,
+                            "processExitCode": exit_code,
+                            "processExitedAt": exited_at.isoformat(),
+                        },
+                    )
+                    sequence += 1
+                await self._commit_background_runtime_progress()
+
         async def emit_runtime_progress() -> None:
             nonlocal sequence, running
             async with runtime_callback_lock:
@@ -2192,15 +2213,6 @@ class HeartbeatService:
                         return task.result()
                     if cancellation.is_set():
                         continue
-                    if (
-                        agent.agent_runtime_type in LOCAL_CHILD_PROCESS_RUNTIMES
-                        and running.process_pid is not None
-                        and not _is_process_alive(running.process_pid)
-                    ):
-                        task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await task
-                        raise ProcessLostError(running.process_pid)
                     if (
                         silence_timeout_error is None
                         and silence_timeout_seconds > 0
@@ -2290,6 +2302,7 @@ class HeartbeatService:
                     ),
                     cancel_event=cancellation,
                     on_process_started=on_process_started,
+                    on_process_exited=on_process_exited,
                 )
             )
             await self._finish_adapter_workspace_operation(
@@ -2444,11 +2457,7 @@ class HeartbeatService:
                 stderr_excerpt=message,
                 metadata={"error": message},
             )
-            error_code = (
-                "process_lost"
-                if isinstance(exc, ProcessLostError)
-                else "adapter_failed"
-            )
+            error_code = "adapter_failed"
             failed = await transition_run_to_terminal(
                 self._session,
                 running.id,
