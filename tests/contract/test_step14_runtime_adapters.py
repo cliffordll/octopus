@@ -4,7 +4,6 @@ import asyncio
 import importlib
 import json
 import os
-import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator
@@ -44,7 +43,7 @@ def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
             f"Codex runtime test attempted to launch a real subprocess: {command}"
         )
 
-    def blocked_subprocess_run(args: Any, *pargs: Any, **kwargs: Any) -> Any:
+    def blocked_subprocess_popen(args: Any, *pargs: Any, **kwargs: Any) -> Any:
         raise AssertionError(
             f"Codex runtime test attempted to launch a blocking subprocess: {args}"
         )
@@ -54,8 +53,8 @@ def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
         blocked_create_subprocess_exec,
     )
     monkeypatch.setattr(
-        "packages.runtimes.codex_local.runner.subprocess.run",
-        blocked_subprocess_run,
+        "packages.runtimes.local_process.subprocess.Popen",
+        blocked_subprocess_popen,
     )
 
 
@@ -1966,29 +1965,31 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> Any:
         raise PermissionError(5, "Access is denied")
 
-    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        captured["args"] = args
-        captured["input"] = kwargs["input"]
-        return subprocess.CompletedProcess(
-            args=args,
-            returncode=0,
-            stdout=(
+    class FakePopen:
+        pid = 4242
+        returncode = 0
+
+        def communicate(self, payload: bytes | None = None) -> tuple[bytes, bytes]:
+            captured["input"] = payload
+            return (
                 b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
                 b'{"type":"item.completed","item":{"type":"agent_message",'
-                b'"text":"fallback ok"}}\n'
-            ),
-            stderr=b"",
-        )
+                b'"text":"fallback ok"}}\n',
+                b"",
+            )
 
-    monkeypatch.setattr(
-        "packages.runtimes.codex_local.runner._should_retry_with_blocking_subprocess",
-        lambda exc: True,
-    )
+        def poll(self) -> int:
+            return self.returncode
+
+    def fake_popen(args: list[str], **kwargs: Any) -> FakePopen:
+        captured["args"] = args
+        return FakePopen()
+
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
-    monkeypatch.setattr("packages.runtimes.codex_local.runner.subprocess.run", fake_run)
+    monkeypatch.setattr("packages.runtimes.local_process.subprocess.Popen", fake_popen)
 
     result = await execute_codex_local(
         RuntimeExecutionContext(

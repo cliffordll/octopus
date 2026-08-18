@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import mimetypes
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
-from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
@@ -18,6 +15,7 @@ from ..local_skills import (
     materialize_runtime_skills,
     prepare_managed_home,
 )
+from ..local_process import local_process_supervisor
 from ..session import effective_resume_session_id
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
@@ -148,71 +146,54 @@ async def _run_once(
     timeout_sec: float,
     loaded_skills: list[dict[str, str | None]],
 ) -> RuntimeExecutionResult:
-    process = await asyncio.create_subprocess_exec(
+    line_buffer = bytearray()
+
+    async def on_stdout_chunk(chunk: bytes) -> None:
+        await context.on_log("stdout", chunk.decode(errors="replace"))
+        line_buffer.extend(chunk)
+        while True:
+            newline = line_buffer.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(line_buffer[: newline + 1])
+            del line_buffer[: newline + 1]
+            await _emit_opencode_stream_event(context, line.decode(errors="replace"))
+
+    async def on_stderr_chunk(chunk: bytes) -> None:
+        await context.on_log("stderr", chunk.decode(errors="replace"))
+
+    process_result = await local_process_supervisor.run(
         command,
         *args,
         cwd=cwd,
         env=env,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **runtime_subprocess_kwargs(),
+        input_data=prompt.encode(),
+        timeout_sec=timeout_sec,
+        cancel_event=context.cancel_event,
+        on_process_started=context.on_process_started,
+        on_process_exited=context.on_process_exited,
+        on_stdout_chunk=on_stdout_chunk,
+        on_stderr_chunk=on_stderr_chunk,
     )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    if not _supports_streaming_process(process):
-        return await _execute_with_communicate(
-            process=process,
-            context=context,
-            prompt=prompt,
-            timeout_sec=timeout_sec,
+    if line_buffer:
+        await _emit_opencode_stream_event(
+            context, bytes(line_buffer).decode(errors="replace")
+        )
+    stdout_text = process_result.stdout.decode(errors="replace")
+    stderr_text = process_result.stderr.decode(errors="replace")
+    if process_result.cancelled:
+        return _result(
+            process_result.exit_code,
+            stdout_text,
+            stderr_text,
+            signal=process_result.signal,
+            error_message="Run cancelled",
+            model=string(context.config.get("model")),
             loaded_skills=loaded_skills,
         )
-    stdout_task = asyncio.create_task(_read_stdout(process, context))
-    stderr_task = asyncio.create_task(_read_stderr(process, context))
-    stdin_task = asyncio.create_task(_write_stdin(process, prompt))
-    wait_task = asyncio.create_task(process.wait())
-    try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
-        )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {wait_task, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                await terminate_runtime_process(process)
-                await stdin_task
-                stdout_text = await stdout_task
-                stderr_text = await stderr_task
-                return _result(
-                    process.returncode,
-                    stdout_text,
-                    stderr_text,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                    model=string(context.config.get("model")),
-                    loaded_skills=loaded_skills,
-                )
-            cancelled.cancel()
-            if wait_task not in done:
-                raise TimeoutError
-        elif timeout_sec > 0:
-            await asyncio.wait_for(wait_task, timeout=timeout_sec)
-        else:
-            await wait_task
-    except TimeoutError:
-        await terminate_runtime_process(process)
-        await stdin_task
-        stdout_text = await stdout_task
-        stderr_text = await stderr_task
+    if process_result.timed_out:
         return _result(
-            process.returncode,
+            process_result.exit_code,
             stdout_text,
             stderr_text,
             timed_out=True,
@@ -220,22 +201,9 @@ async def _run_once(
             model=string(context.config.get("model")),
             loaded_skills=loaded_skills,
         )
-    except asyncio.CancelledError:
-        await terminate_runtime_process(process)
-        for task in (stdin_task, stdout_task, stderr_task, wait_task):
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(stdin_task, stdout_task, stderr_task, wait_task)
-        raise
-    finally:
-        with contextlib.suppress(asyncio.CancelledError):
-            await stdin_task
-
-    stdout_text = await stdout_task
-    stderr_text = await stderr_task
     parsed = parse_jsonl(stdout_text)
     error = parsed["errorMessage"]
-    exit_code = process.returncode
+    exit_code = process_result.exit_code
     final_error = error
     if error and (exit_code or 0) == 0 and not parsed["summary"]:
         exit_code = 1
@@ -279,73 +247,6 @@ def _result(
         result_json=_result_json(
             stdout_text, stderr_text, parsed, model, error_message, loaded_skills or []
         ),
-    )
-
-
-async def _write_stdin(process: asyncio.subprocess.Process, prompt: str) -> None:
-    if process.stdin is None:
-        return
-    process.stdin.write(prompt.encode())
-    await process.stdin.drain()
-    process.stdin.close()
-
-
-async def _execute_with_communicate(
-    *,
-    process: asyncio.subprocess.Process,
-    context: RuntimeExecutionContext,
-    prompt: str,
-    timeout_sec: float,
-    loaded_skills: list[dict[str, str | None]],
-) -> RuntimeExecutionResult:
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
-    try:
-        if timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        await terminate_runtime_process(process)
-        stdout, stderr = await communication
-        return _result(
-            getattr(process, "returncode", None),
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
-            timed_out=True,
-            error_message=f"Timed out after {timeout_sec:g}s",
-            model=string(context.config.get("model")),
-            loaded_skills=loaded_skills,
-        )
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
-    if stdout_text:
-        await _emit_opencode_stream_events_from_text(context, stdout_text)
-        await context.on_log("stdout", stdout_text)
-    if stderr_text:
-        await context.on_log("stderr", stderr_text)
-    parsed = parse_jsonl(stdout_text)
-    error = parsed["errorMessage"]
-    exit_code = getattr(process, "returncode", None)
-    final_error = error
-    if error and (exit_code or 0) == 0 and not parsed["summary"]:
-        exit_code = 1
-    elif error and (exit_code or 0) == 0 and parsed["summary"]:
-        final_error = None
-    if (exit_code or 0) != 0 and not error:
-        error = first_line(stderr_text) or f"OpenCode exited with code {exit_code}"
-        final_error = error
-    model = string(context.config.get("model"))
-    return RuntimeExecutionResult(
-        exit_code=exit_code,
-        error_message=final_error,
-        usage_json=parsed["usage"],
-        session_id_after=parsed["sessionId"],
-        result_json=_result_json(
-            stdout_text, stderr_text, parsed, model, error, loaded_skills
-        ),
-        work_products=_work_products_from_opencode_writes(context, parsed),
     )
 
 
@@ -409,24 +310,6 @@ async def _emit_opencode_stream_event(
     text = part.get("text")
     if isinstance(text, str) and text:
         await context.on_stream_event({"type": "assistant_delta", "delta": text})
-
-
-async def _emit_opencode_stream_events_from_text(
-    context: RuntimeExecutionContext, stdout_text: str
-) -> None:
-    if context.on_stream_event is None:
-        return
-    for raw_line in stdout_text.splitlines():
-        await _emit_opencode_stream_event(context, raw_line)
-
-
-def _supports_streaming_process(process: object) -> bool:
-    return (
-        getattr(process, "stdin", None) is not None
-        and getattr(process, "stdout", None) is not None
-        and getattr(process, "stderr", None) is not None
-        and callable(getattr(process, "wait", None))
-    )
 
 
 def _materialize_runtime_provider_config(

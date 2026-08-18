@@ -177,9 +177,14 @@ Agent 页面上的两个手动操作有意保持不同语义：
 能够增量上报输出的 `opencode_local` runtime 默认连续 300 秒没有任何输出时会
 结束为 `timed_out`，避免 run 永久停留在 `running`。其他尚未增量上报输出的
 adapter 默认不启用静默超时，避免把合法长任务误判为静默；可以在 agent runtime
-config 中显式设置 `noOutputTimeoutSec`，设置为 `0` 可关闭。取消或超时时，Octopus
-会终止由异步本地 runtime 启动的整个子进程树；无法安全管理进程树的同步 fallback
-不会再用于执行 Runtime。
+config 中显式设置 `noOutputTimeoutSec`，设置为 `0` 可关闭。
+
+本地 runtime 的进程生命周期统一由 Adapter 侧的公共进程监管层管理：负责启动、
+增量或最终输出收集、取消、超时、退出确认和整个子进程树清理。Heartbeat 只维护
+Run lease、业务取消和终态副作用；Adapter 仍在收集输出时，不会因为 PID 已退出就
+提前把 Run 判为 `process_lost`。只有 server 重启后已经没有活跃 Adapter 的孤儿 Run，
+恢复流程才使用 PID/lease 证据判断进程丢失。Windows 的 Codex 兼容 fallback 也经过
+同一监管层，不再绕过取消和进程树清理。
 
 如果要关闭非 timer wakeup，需要配置：
 

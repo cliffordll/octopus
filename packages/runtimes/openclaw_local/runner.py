@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import json
 import os
 import re
-from datetime import UTC, datetime
+import subprocess
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs, terminate_runtime_process
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_process import local_process_supervisor
 from ..local_skills import (
     desired_skills_from_config,
     ensure_octopus_cli_shim,
@@ -416,32 +415,22 @@ async def _run_cli(
 ) -> tuple[int | None, str, str]:
     """Simple blocking-capable CLI run (used for config patch)."""
     try:
-        process = await asyncio.create_subprocess_exec(
+        result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
+            input_data=input_text.encode() if input_text is not None else None,
+            timeout_sec=timeout_sec,
         )
     except (PermissionError, OSError) as exc:
         return 1, "", str(exc)
-    payload = input_text.encode() if input_text is not None else None
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(payload),
-            timeout=timeout_sec if timeout_sec > 0 else None,
-        )
-    except TimeoutError:
-        await terminate_runtime_process(process)
-        await process.communicate()
+    if result.timed_out:
         return None, "", "timed out"
     return (
-        process.returncode,
-        stdout.decode(errors="replace"),
-        stderr.decode(errors="replace"),
+        result.exit_code,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
     )
 
 
@@ -455,75 +444,26 @@ async def _run_with_lifecycle(
     timeout_sec: float,
 ) -> tuple[int | None, str, str, bool, str | None]:
     try:
-        process = await asyncio.create_subprocess_exec(
+        result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
+            stdin=subprocess.DEVNULL,
+            timeout_sec=timeout_sec,
+            cancel_event=context.cancel_event,
+            on_process_started=context.on_process_started,
+            on_process_exited=context.on_process_exited,
         )
     except (PermissionError, OSError) as exc:
         return 1, "", str(exc), False, None
-
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-
-    communication = asyncio.create_task(process.communicate())
-    cancelled = (
-        asyncio.create_task(context.cancel_event.wait())
-        if context.cancel_event is not None
-        else None
+    return (
+        result.exit_code,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+        result.timed_out,
+        result.signal,
     )
-    try:
-        waiters: set[asyncio.Task[Any]] = {communication}
-        if cancelled is not None:
-            waiters.add(cancelled)
-        done, _pending = await asyncio.wait(
-            waiters,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if cancelled is not None and cancelled in done:
-            await terminate_runtime_process(process)
-            stdout, stderr = await communication
-            return (
-                process.returncode,
-                stdout.decode(errors="replace"),
-                stderr.decode(errors="replace"),
-                False,
-                "SIGTERM",
-            )
-        if communication not in done:
-            # timeout
-            communication.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await communication
-            await terminate_runtime_process(process)
-            stdout, stderr = await process.communicate()
-            return (
-                process.returncode,
-                stdout.decode(errors="replace"),
-                stderr.decode(errors="replace"),
-                True,
-                None,
-            )
-        stdout, stderr = communication.result()
-        return (
-            process.returncode,
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
-            False,
-            None,
-        )
-    finally:
-        if cancelled is not None and not cancelled.done():
-            cancelled.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await cancelled
 
 
 def _string(value: Any) -> str | None:

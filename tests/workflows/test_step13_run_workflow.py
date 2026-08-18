@@ -2576,13 +2576,13 @@ async def test_successful_run_stays_succeeded_when_postprocess_cleanup_fails(
     assert warning_events[0].message == "AssertionError"
 
 
-async def test_running_local_child_loss_fails_before_adapter_returns(
+async def test_adapter_result_remains_authoritative_after_local_process_exits(
     monkeypatch: pytest.MonkeyPatch,
     session: AsyncSession,
 ) -> None:
     from server.services import heartbeat as heartbeat_module
 
-    class LostChildAdapter:
+    class CompletedChildAdapter:
         type = "process"
 
         async def execute(
@@ -2590,17 +2590,20 @@ async def test_running_local_child_loss_fails_before_adapter_returns(
         ) -> RuntimeExecutionResult:
             if context.on_process_started is not None:
                 await context.on_process_started(999_999, datetime.now(UTC))
+            if context.on_process_exited is not None:
+                await context.on_process_exited(999_999, 0, datetime.now(UTC))
+            # The adapter still needs time to drain and parse the process output.
             await asyncio.sleep(0.05)
             return RuntimeExecutionResult(
                 exit_code=0,
-                result_json={"summary": "should not complete"},
+                result_json={"summary": "completed after output collection"},
             )
 
-    agent = await _seed_agent(session, name="LostChild")
+    agent = await _seed_agent(session, name="CompletedChild")
     monkeypatch.setattr(
         heartbeat_module,
         "get_runtime_adapter",
-        lambda _runtime_type: LostChildAdapter(),
+        lambda _runtime_type: CompletedChildAdapter(),
     )
     monkeypatch.setattr(
         heartbeat_module,
@@ -2620,9 +2623,9 @@ async def test_running_local_child_loss_fails_before_adapter_returns(
         )
 
     assert run is not None
-    assert run["status"] == "failed"
-    assert run["errorCode"] == "process_lost"
-    assert "999999" in (run["error"] or "")
+    assert run["status"] == "succeeded"
+    assert run["errorCode"] is None
+    assert run["processExitedAt"] is not None
 
 
 async def test_orphaned_running_run_does_not_terminate_tracked_child_process(
