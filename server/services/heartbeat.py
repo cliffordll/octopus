@@ -253,10 +253,14 @@ class RunRecovery:
         self._heartbeat = heartbeat
 
     async def recover(
-        self, *, require_process_loss: bool = False
+        self,
+        *,
+        require_process_loss: bool = False,
+        run_ids: set[str] | None = None,
     ) -> list[HeartbeatRun]:
         return await self._heartbeat._recover_orphaned_runs_impl(
-            require_process_loss=require_process_loss
+            require_process_loss=require_process_loss,
+            run_ids=run_ids,
         )
 
 
@@ -1181,12 +1185,17 @@ class HeartbeatService:
         return await self.recovery.recover(require_process_loss=require_process_loss)
 
     async def _recover_orphaned_runs_impl(
-        self, *, require_process_loss: bool = False
+        self,
+        *,
+        require_process_loss: bool = False,
+        run_ids: set[str] | None = None,
     ) -> list[HeartbeatRun]:
         recovered: list[HeartbeatRun] = []
         for terminal_run in await list_runs_with_pending_terminal_effects(
             self._session
         ):
+            if run_ids is not None and terminal_run.id not in run_ids:
+                continue
             await self._reconcile_terminal_effects(terminal_run)
         active_ids = (
             set().union(*self._active_run_ids.values())
@@ -1194,6 +1203,8 @@ class HeartbeatService:
             else set()
         )
         for run in await list_runs_by_status(self._session, "running"):
+            if run_ids is not None and run.id not in run_ids:
+                continue
             now = datetime.now(UTC)
             lease_expires_at = run.execution_lease_expires_at
             if lease_expires_at is not None:

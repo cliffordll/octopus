@@ -96,4 +96,13 @@ blocked、并发 Run 状态均有工作流测试。
 
 ## 提交记录
 
-各批次完成后在此补充 commit hash、聚焦验证和残余风险。
+- 批次一：`496b9c3 refactor run execution lifecycle`；74 个 Run workflow / Session
+  cleanup 相关测试通过，聚焦 Ruff、Pyright 和 diff check 通过。
+- 批次二：`3815d16 refactor run terminal finalization`；61 个 Step 13 workflow、
+  68 个 Run/Agent contract 测试通过，聚焦静态检查通过。
+- 批次三：`cb342a7 fix expired run recovery without process metadata`；63 个 Step 13
+  workflow、22 个 Scheduler/Run contract 测试通过，聚焦静态检查通过。
+- 批次四：随维护命令实现所在提交交付；目标任务 dry-run 只命中
+  `c99f545a-c219-415f-822d-794bc0202bf4` 与
+  `1a817bd4-7614-4077-8314-984c1857cf36` 两个租约过期且无 PID 的 Run。现场
+  `--apply` 必须在服务重启并加载本轮代码后执行，避免新旧恢复逻辑混用。
