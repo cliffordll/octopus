@@ -245,6 +245,11 @@ class RunFinalizer:
             sequence=sequence,
         )
 
+    async def restore_system_blocked_issue_after_recovery(
+        self, run: HeartbeatRunRow
+    ) -> bool:
+        return await self._heartbeat._restore_system_blocked_issue_after_recovery(run)
+
 
 class RunRecovery:
     """Coordinate evidence-based recovery for persisted Run state."""
@@ -2736,7 +2741,7 @@ class HeartbeatService:
                 )
             if final_status == "failed":
                 await self._reconcile_failed_done_issue(agent, final)
-            await self._restore_system_blocked_issue_after_recovery(final)
+            await self.finalizer.restore_system_blocked_issue_after_recovery(final)
             await self._release_issue_execution(final)
             context_after_final = (
                 final.context_snapshot
@@ -3891,19 +3896,19 @@ class HeartbeatService:
 
     async def _restore_system_blocked_issue_after_recovery(
         self, final: HeartbeatRunRow
-    ) -> None:
+    ) -> bool:
         if final.status not in {"succeeded", "waiting_for_children"}:
-            return
+            return False
         recovery = (
             final.context_snapshot.get("recovery")
             if isinstance(final.context_snapshot, dict)
             else None
         )
         if not isinstance(recovery, dict):
-            return
+            return False
         original_run_id = recovery.get("originalRunId") or final.retry_of_run_id
         if not isinstance(original_run_id, str) or not original_run_id:
-            return
+            return False
         original = await get_run(self._session, original_run_id)
         if (
             original is None
@@ -3911,11 +3916,11 @@ class HeartbeatService:
             or original.error_code != "process_lost"
             or original.invocation_source != "assignment"
         ):
-            return
+            return False
         issue_id = _issue_id_from_context(final.context_snapshot)
         issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
         if issue is None or issue.org_id != final.org_id or issue.status != "blocked":
-            return
+            return False
         status_activities = (
             (
                 await self._session.execute(
@@ -3942,7 +3947,7 @@ class HeartbeatService:
             None,
         )
         if latest_status_activity is None:
-            return
+            return False
         details = latest_status_activity.details
         assert isinstance(details, dict)
         restore_status = details.get("fromStatus")
@@ -3953,7 +3958,7 @@ class HeartbeatService:
             or details.get("runId") != original.id
             or restore_status not in {"todo", "in_progress"}
         ):
-            return
+            return False
         issue.status = cast(str, restore_status)
         issue.updated_at = datetime.now(UTC)
         await self._session.flush()
@@ -3974,6 +3979,7 @@ class HeartbeatService:
                 "originalRunId": original.id,
             },
         )
+        return True
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
