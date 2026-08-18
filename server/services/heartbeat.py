@@ -127,6 +127,7 @@ ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
 ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
 ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV = "OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS"
 ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
+RUN_RECOVERY_GRACE_SECONDS = 5 * 60
 HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
 WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
 
@@ -245,6 +246,20 @@ class RunFinalizer:
         )
 
 
+class RunRecovery:
+    """Coordinate evidence-based recovery for persisted Run state."""
+
+    def __init__(self, heartbeat: HeartbeatService) -> None:
+        self._heartbeat = heartbeat
+
+    async def recover(
+        self, *, require_process_loss: bool = False
+    ) -> list[HeartbeatRun]:
+        return await self._heartbeat._recover_orphaned_runs_impl(
+            require_process_loss=require_process_loss
+        )
+
+
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
     RUNTIME_PROGRESS_INTERVAL_SECONDS = 15.0
@@ -264,6 +279,10 @@ class HeartbeatService:
     @property
     def finalizer(self) -> RunFinalizer:
         return RunFinalizer(self)
+
+    @property
+    def recovery(self) -> RunRecovery:
+        return RunRecovery(self)
 
     async def wakeup(
         self,
@@ -1159,6 +1178,11 @@ class HeartbeatService:
     async def recover_orphaned_runs(
         self, *, require_process_loss: bool = False
     ) -> list[HeartbeatRun]:
+        return await self.recovery.recover(require_process_loss=require_process_loss)
+
+    async def _recover_orphaned_runs_impl(
+        self, *, require_process_loss: bool = False
+    ) -> list[HeartbeatRun]:
         recovered: list[HeartbeatRun] = []
         for terminal_run in await list_runs_with_pending_terminal_effects(
             self._session
@@ -1185,11 +1209,22 @@ class HeartbeatService:
                 and run.process_pid is not None
             )
             if require_process_loss:
-                if not tracks_local_child:
-                    continue
-                assert run.process_pid is not None
-                if _is_process_alive(run.process_pid):
-                    continue
+                if tracks_local_child:
+                    assert run.process_pid is not None
+                    if _is_process_alive(run.process_pid):
+                        continue
+                elif lease_expires_at is None:
+                    recovery_baseline = (
+                        run.started_at or run.updated_at or run.created_at
+                    )
+                    if recovery_baseline.tzinfo is None:
+                        recovery_baseline = recovery_baseline.replace(tzinfo=UTC)
+                    if (
+                        recovery_baseline
+                        + timedelta(seconds=RUN_RECOVERY_GRACE_SECONDS)
+                        > now
+                    ):
+                        continue
             elif is_marked_active:
                 continue
             claimed = await claim_expired_run_execution(self._session, run.id, now=now)
@@ -1206,8 +1241,7 @@ class HeartbeatService:
                     f"Detached child pid {run.process_pid} was not terminated during "
                     "server recovery because process ownership cannot be verified"
                 )
-            failed = await transition_run_to_terminal(
-                self._session,
+            failed = await self.finalizer.transition(
                 run.id,
                 "failed",
                 {
@@ -1303,9 +1337,8 @@ class HeartbeatService:
             )
             return True
         if terminal_event_statuses:
-            recovered_status = terminal_event_statuses.pop()
-            recovered = await transition_run_to_terminal(
-                self._session,
+            recovered_status = cast(HeartbeatRunStatus, terminal_event_statuses.pop())
+            recovered = await self.finalizer.transition(
                 run.id,
                 recovered_status,
                 {
@@ -1326,8 +1359,7 @@ class HeartbeatService:
         if issue.status not in {"done", "cancelled"}:
             return False
         message = f"Run stopped during recovery because issue is already {issue.status}"
-        cancelled = await transition_run_to_terminal(
-            self._session,
+        cancelled = await self.finalizer.transition(
             run.id,
             "cancelled",
             {
