@@ -264,7 +264,9 @@ class IssueService:
             "settledChildCount": settled_count,
             "blockedChildCount": blocked_count,
             "totalChildCount": len(children),
-            "parentExecutionStage": _parent_execution_stage(child_items),
+            "parentExecutionStage": _parent_execution_stage(
+                child_items, parent_status=parent.status
+            ),
             "includeWorkProducts": include_work_products,
         }
 
@@ -1131,7 +1133,11 @@ class IssueService:
 _ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT = 12_000
 
 
-def _parent_execution_stage(children: Sequence[Mapping[str, Any]]) -> str:
+def _parent_execution_stage(
+    children: Sequence[Mapping[str, Any]], *, parent_status: str | None = None
+) -> str:
+    if parent_status in {"done", "blocked", "cancelled"}:
+        return f"parent_{parent_status}"
     if not children:
         return "no_children"
     statuses = {str(child.get("status") or "") for child in children}

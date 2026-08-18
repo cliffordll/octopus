@@ -22,6 +22,7 @@ from packages.database.schema import (
 from server.app import create_app
 from server.services.documents import DocumentService
 from server.services.heartbeat import HeartbeatService
+from server.services.issues import IssueService
 
 
 @pytest.fixture
@@ -904,6 +905,55 @@ async def test_parent_issue_lists_child_primary_work_products(
     assert child_outputs["children"][0]["id"] == child_id
     assert child_outputs["children"][0]["lastCloseout"]["action"] == "issue.updated"
     assert child_outputs["children"][0]["workProducts"][0]["title"] == "西施.md"
+
+
+async def test_done_parent_stage_takes_precedence_over_cancelled_child() -> None:
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org_id = str(uuid.uuid4())
+            parent_id = str(uuid.uuid4())
+            child_id = str(uuid.uuid4())
+            session.add(
+                Organization(
+                    id=org_id,
+                    url_key="terminal-parent-stage",
+                    name="Terminal Parent Stage",
+                    issue_prefix="TPS",
+                )
+            )
+            session.add_all(
+                [
+                    Issue(
+                        id=parent_id,
+                        org_id=org_id,
+                        title="Completed parent",
+                        status="done",
+                        priority="medium",
+                    ),
+                    Issue(
+                        id=child_id,
+                        org_id=org_id,
+                        parent_id=parent_id,
+                        title="Accepted incomplete child",
+                        status="cancelled",
+                        priority="medium",
+                    ),
+                ]
+            )
+            await session.commit()
+
+            outputs = await IssueService(session).get_child_outputs(parent_id)
+
+            assert outputs is not None
+            assert outputs["parent"]["status"] == "done"
+            assert outputs["blockedChildCount"] == 1
+            assert outputs["parentExecutionStage"] == "parent_done"
+    finally:
+        await engine.dispose()
 
 
 async def test_issue_documents_are_injected_into_heartbeat_context() -> None:

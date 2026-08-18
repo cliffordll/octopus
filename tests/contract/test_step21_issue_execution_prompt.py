@@ -94,7 +94,8 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert "## Subtask Coordination" in prompt
     assert "Product-visible subtasks must be Octopus child issues" in prompt
     assert 'octopus issue create-children "OCT-42"' in prompt
-    assert "--children-json" in prompt
+    assert "--children-file" in prompt
+    assert "never test the command by creating a placeholder child" in prompt
     assert "assigneeAgentId" in prompt
     assert "Do not create delegated siblings one at a time" in prompt
     assert "Do not create a child whose job is to summarize" in prompt

@@ -112,10 +112,15 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         help="Atomically create the complete delegated child issue set",
     )
     create_children_parser.add_argument("issue_id")
-    create_children_parser.add_argument(
+    children_source = create_children_parser.add_mutually_exclusive_group(required=True)
+    children_source.add_argument(
         "--children-json",
-        required=True,
         help="JSON array of child issue objects",
+    )
+    children_source.add_argument(
+        "--children-file",
+        type=Path,
+        help="UTF-8 JSON file containing the child issue array",
     )
     create_children_parser.set_defaults(handler=create_issue_children)
 
@@ -291,12 +296,20 @@ def list_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
+    source = "--children-json"
+    raw_children = args.children_json
+    if args.children_file is not None:
+        source = f"--children-file {args.children_file}"
+        try:
+            raw_children = args.children_file.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise ValueError(f"Unable to read {source}: {exc}") from exc
     try:
-        children = json.loads(args.children_json)
+        children = json.loads(raw_children)
     except json.JSONDecodeError as exc:
-        raise ValueError("--children-json must be valid JSON") from exc
+        raise ValueError(f"{source} must contain valid JSON") from exc
     if not isinstance(children, list) or not children:
-        raise ValueError("--children-json must be a non-empty JSON array")
+        raise ValueError(f"{source} must contain a non-empty JSON array")
     return client.request(
         "POST",
         f"/api/issues/{args.issue_id}/children/batch",

@@ -249,9 +249,13 @@ subtasks, child tasks, or parallel delegated tasks, those product-visible
 subtasks must be real Octopus child issues. Persist the complete split atomically
 before treating the work as delegated:
 
+Write the complete child array as a UTF-8 JSON file first, then submit the file without shell-escaping the JSON. The CLI validates the complete file before sending any write request:
+
 ```bash
-octopus issue create-children "<parent-id-or-identifier>" --children-json '[{"title":"<subtask title>","description":"<details>","assigneeAgentId":"<agent-id>"}]' --json
+octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" --json
 ```
+
+Never test this write command by creating a placeholder child on the real parent issue.
 
 Before delegating child issues, list available agents when you need to choose the executor:
 
@@ -266,7 +270,7 @@ reuse the persisted split instead of submitting another split:
 octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
 ```
 
-Every child in `--children-json` must include `assigneeAgentId`; never assign a
+Every child in the JSON file must include `assigneeAgentId`; never assign a
 delegated child issue to yourself. If you will do that work inside the parent
 run, do not create a child issue for it. Do not create a summary/merge/report
 child: after all real parallel children settle, the parent run resumes and owns

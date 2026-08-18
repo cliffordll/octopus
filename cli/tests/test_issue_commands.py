@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -173,6 +174,48 @@ def test_issue_create_children_submits_one_atomic_batch() -> None:
                 "PARENT-1",
                 "--children-json",
                 json.dumps(children),
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+
+    assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
+    assert json.loads(requests[0].read()) == {"children": children}
+
+
+def test_issue_create_children_reads_atomic_batch_from_utf8_file(
+    tmp_path: Path,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"created": True, "children": []})
+
+    children = [
+        {
+            "title": "介绍西安",
+            "description": "整理历史资料",
+            "assigneeAgentId": "agent-1",
+        },
+        {
+            "title": "介绍南京",
+            "description": "整理文化遗产",
+            "assigneeAgentId": "agent-2",
+        },
+    ]
+    children_file = tmp_path / "children.json"
+    children_file.write_text(json.dumps(children, ensure_ascii=False), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "issue",
+                "create-children",
+                "PARENT-1",
+                "--children-file",
+                str(children_file),
             ],
             client=ApiClient(transport=httpx.MockTransport(handler)),
         )

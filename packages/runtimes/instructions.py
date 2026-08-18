@@ -395,11 +395,11 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
             'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
             f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`. Reuse the persisted split on reruns; do not recreate it.',
-            "Submit the complete set of real, parallel subtasks in one atomic call with "
-            f'`octopus issue create-children "{issue_ref}" --children-json \'[{{"title":"<subtask>","description":"<details>","assigneeAgentId":"<agent-id>"}}]\' --json`. '
-            "Do not create delegated siblings one at a time.",
+            "Write the complete set of real, parallel subtasks to a UTF-8 JSON file, then submit it in one atomic call; the CLI validates the whole file before sending any write request: "
+            f'`octopus issue create-children "{issue_ref}" --children-file "<children.json>" --json`. '
+            "Each JSON array entry must contain `title` and `assigneeAgentId`. Do not create delegated siblings one at a time, and never test the command by creating a placeholder child on the real parent issue.",
             "Do not create a child whose job is to summarize, merge, or report on the other children. After all children settle, Octopus wakes this parent issue and the parent owns the final synthesis and deliverable.",
-            "Set `--assignee-agent-id` explicitly for every delegated child issue. Prefer a suitable agent other than yourself when one is available.",
+            "Set `assigneeAgentId` explicitly in every delegated child entry. Prefer a suitable agent other than yourself when one is available.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
             "After the atomic child creation succeeds, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent again after every child is terminal.",
             "Do not poll or wait for delegated children inside the current runtime process because that keeps the issue execution slot occupied.",
