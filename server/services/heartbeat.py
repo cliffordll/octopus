@@ -7,7 +7,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, Sequence, cast
 
 import psutil
 from sqlalchemy import and_, or_, select, update
@@ -188,6 +188,63 @@ def _exception_message(exc: BaseException) -> str:
     return message or type(exc).__name__
 
 
+class RunFinalizer:
+    """Provide the shared terminal transition and terminal-effects boundary."""
+
+    def __init__(self, heartbeat: HeartbeatService) -> None:
+        self._heartbeat = heartbeat
+
+    async def transition(
+        self,
+        run_id: str,
+        status: HeartbeatRunStatus,
+        values: dict[str, Any],
+        *,
+        expected_statuses: Sequence[str] = ("running",),
+        expected_owner_token: str | None = None,
+    ) -> HeartbeatRunRow | None:
+        return await transition_run_to_terminal(
+            self._heartbeat._session,
+            run_id,
+            status,
+            values,
+            expected_statuses=expected_statuses,
+            expected_owner_token=expected_owner_token,
+        )
+
+    async def complete(
+        self,
+        *,
+        agent: AgentRow,
+        running: HeartbeatRunRow,
+        final: HeartbeatRunRow,
+        final_status: HeartbeatRunStatus,
+        result: Any,
+        sequence: int,
+    ) -> HeartbeatRunRow:
+        return await self._heartbeat._complete_finalized_run_impl(
+            agent=agent,
+            running=running,
+            final=final,
+            final_status=final_status,
+            result=result,
+            sequence=sequence,
+        )
+
+    async def reconcile(
+        self,
+        run: HeartbeatRunRow,
+        *,
+        result: Any | None = None,
+        sequence: int | None = None,
+    ) -> HeartbeatRunRow:
+        return await self._heartbeat._reconcile_terminal_effects_impl(
+            run,
+            result=result,
+            sequence=sequence,
+        )
+
+
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
     RUNTIME_PROGRESS_INTERVAL_SECONDS = 15.0
@@ -203,6 +260,10 @@ class HeartbeatService:
         self._session = session
         self._commit_process_metadata = commit_process_metadata
         self.last_wakeup_reused = False
+
+    @property
+    def finalizer(self) -> RunFinalizer:
+        return RunFinalizer(self)
 
     async def wakeup(
         self,
@@ -991,8 +1052,7 @@ class HeartbeatService:
         if cancellation is not None:
             cancellation.set()
         now = datetime.now(UTC)
-        cancelled = await transition_run_to_terminal(
-            self._session,
+        cancelled = await self.finalizer.transition(
             run.id,
             "cancelled",
             {
@@ -2380,8 +2440,7 @@ class HeartbeatService:
                         f"{_exception_message(wp_exc)}\n"
                     ),
                 )
-            final = await transition_run_to_terminal(
-                self._session,
+            final = await self.finalizer.transition(
                 running.id,
                 final_status,
                 {
@@ -2461,8 +2520,7 @@ class HeartbeatService:
                 metadata={"error": message},
             )
             error_code = "adapter_failed"
-            failed = await transition_run_to_terminal(
-                self._session,
+            failed = await self.finalizer.transition(
                 running.id,
                 "failed",
                 {
@@ -2497,6 +2555,25 @@ class HeartbeatService:
         result: Any,
         sequence: int,
     ) -> HeartbeatRunRow:
+        return await self.finalizer.complete(
+            agent=agent,
+            running=running,
+            final=final,
+            final_status=final_status,
+            result=result,
+            sequence=sequence,
+        )
+
+    async def _complete_finalized_run_impl(
+        self,
+        *,
+        agent: AgentRow,
+        running: HeartbeatRunRow,
+        final: HeartbeatRunRow,
+        final_status: HeartbeatRunStatus,
+        result: Any,
+        sequence: int,
+    ) -> HeartbeatRunRow:
         if not final.terminal_effects_pending:
             compatibility_final = await update_run(
                 self._session,
@@ -2520,6 +2597,19 @@ class HeartbeatService:
         )
 
     async def _reconcile_terminal_effects(
+        self,
+        run: HeartbeatRunRow,
+        *,
+        result: Any | None = None,
+        sequence: int | None = None,
+    ) -> HeartbeatRunRow:
+        return await self.finalizer.reconcile(
+            run,
+            result=result,
+            sequence=sequence,
+        )
+
+    async def _reconcile_terminal_effects_impl(
         self,
         run: HeartbeatRunRow,
         *,
@@ -2603,6 +2693,7 @@ class HeartbeatService:
                 )
             if final_status == "failed":
                 await self._reconcile_failed_done_issue(agent, final)
+            await self._restore_system_blocked_issue_after_recovery(final)
             await self._release_issue_execution(final)
             context_after_final = (
                 final.context_snapshot
@@ -3755,6 +3846,92 @@ class HeartbeatService:
                 return True
         return False
 
+    async def _restore_system_blocked_issue_after_recovery(
+        self, final: HeartbeatRunRow
+    ) -> None:
+        if final.status not in {"succeeded", "waiting_for_children"}:
+            return
+        recovery = (
+            final.context_snapshot.get("recovery")
+            if isinstance(final.context_snapshot, dict)
+            else None
+        )
+        if not isinstance(recovery, dict):
+            return
+        original_run_id = recovery.get("originalRunId") or final.retry_of_run_id
+        if not isinstance(original_run_id, str) or not original_run_id:
+            return
+        original = await get_run(self._session, original_run_id)
+        if (
+            original is None
+            or original.org_id != final.org_id
+            or original.error_code != "process_lost"
+            or original.invocation_source != "assignment"
+        ):
+            return
+        issue_id = _issue_id_from_context(final.context_snapshot)
+        issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
+        if issue is None or issue.org_id != final.org_id or issue.status != "blocked":
+            return
+        status_activities = (
+            (
+                await self._session.execute(
+                    select(ActivityLog)
+                    .where(
+                        ActivityLog.org_id == issue.org_id,
+                        ActivityLog.entity_type == "issue",
+                        ActivityLog.entity_id == issue.id,
+                        ActivityLog.action == "issue.updated",
+                    )
+                    .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        latest_status_activity = next(
+            (
+                activity
+                for activity in status_activities
+                if isinstance(activity.details, dict)
+                and isinstance(activity.details.get("status"), str)
+            ),
+            None,
+        )
+        if latest_status_activity is None:
+            return
+        details = latest_status_activity.details
+        assert isinstance(details, dict)
+        restore_status = details.get("fromStatus")
+        if (
+            latest_status_activity.run_id != original.id
+            or details.get("status") != "blocked"
+            or details.get("reason") != "run_failed"
+            or details.get("runId") != original.id
+            or restore_status not in {"todo", "in_progress"}
+        ):
+            return
+        issue.status = cast(str, restore_status)
+        issue.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="run_finalizer",
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=issue.id,
+            run_id=final.id,
+            details={
+                "status": restore_status,
+                "fromStatus": "blocked",
+                "reason": "process_loss_recovered",
+                "runId": final.id,
+                "originalRunId": original.id,
+            },
+        )
+
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
         issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
@@ -3780,6 +3957,7 @@ class HeartbeatService:
             and issue.org_id == final.org_id
             and issue.assignee_agent_id == final.agent_id
             and issue.status in {"todo", "in_progress"}
+            and not has_active_children
         )
         criteria = [
             IssueRow.execution_run_id == final.id,

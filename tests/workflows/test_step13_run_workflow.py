@@ -1653,6 +1653,211 @@ async def test_terminal_effects_resolve_legacy_issue_identifier_and_wake_parent(
     assert parent_wakeup.payload["issueId"] == parent.id
 
 
+async def test_failed_parent_run_with_active_child_does_not_block_parent(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ParentFailureWithActiveChild")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        child = Issue(
+            org_id=agent["orgId"],
+            parent_id=parent.id,
+            title="Child",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(child)
+        failed = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error="process disappeared",
+            error_code="process_lost",
+            context_snapshot={"issueId": parent.id},
+        )
+        session.add(failed)
+        await session.flush()
+        parent.execution_run_id = failed.id
+
+        await heartbeat._release_issue_execution(failed)
+
+    await session.refresh(parent)
+    assert parent.status == "in_progress"
+    assert parent.execution_run_id is None
+    blocked_events = (
+        (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == parent.id,
+                    ActivityLog.action == "issue.updated",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert not any(
+        isinstance(event.details, dict) and event.details.get("status") == "blocked"
+        for event in blocked_events
+    )
+
+
+async def test_successful_recovery_restores_only_matching_system_block(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="SystemBlockRecovery")
+    heartbeat = HeartbeatService(session)
+    blocked_at = datetime.now(UTC) - timedelta(minutes=1)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Recover parent",
+            status="blocked",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        original = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="process_lost",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(original)
+        await session.flush()
+        session.add(
+            ActivityLog(
+                org_id=issue.org_id,
+                actor_type="agent",
+                actor_id=agent["id"],
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                run_id=original.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": "in_progress",
+                    "reason": "run_failed",
+                    "runId": original.id,
+                },
+                created_at=blocked_at,
+            )
+        )
+        recovery = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="automation",
+            trigger_detail="system",
+            status="succeeded",
+            retry_of_run_id=original.id,
+            context_snapshot={
+                "issueId": issue.id,
+                "recovery": {"originalRunId": original.id},
+            },
+        )
+        session.add(recovery)
+        await session.flush()
+
+        await heartbeat._restore_system_blocked_issue_after_recovery(recovery)
+
+    await session.refresh(issue)
+    assert issue.status == "in_progress"
+
+
+async def test_successful_recovery_preserves_newer_manual_block(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ManualBlockRecovery")
+    heartbeat = HeartbeatService(session)
+    blocked_at = datetime.now(UTC) - timedelta(minutes=2)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Keep manual block",
+            status="blocked",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        original = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="process_lost",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(original)
+        await session.flush()
+        session.add_all(
+            [
+                ActivityLog(
+                    org_id=issue.org_id,
+                    actor_type="agent",
+                    actor_id=agent["id"],
+                    action="issue.updated",
+                    entity_type="issue",
+                    entity_id=issue.id,
+                    run_id=original.id,
+                    details={
+                        "status": "blocked",
+                        "fromStatus": "in_progress",
+                        "reason": "run_failed",
+                        "runId": original.id,
+                    },
+                    created_at=blocked_at,
+                ),
+                ActivityLog(
+                    org_id=issue.org_id,
+                    actor_type="user",
+                    actor_id="local-board",
+                    action="issue.updated",
+                    entity_type="issue",
+                    entity_id=issue.id,
+                    details={
+                        "status": "blocked",
+                        "fromStatus": "in_progress",
+                        "reason": "manual",
+                    },
+                    created_at=blocked_at + timedelta(minutes=1),
+                ),
+            ]
+        )
+        recovery = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="automation",
+            trigger_detail="system",
+            status="succeeded",
+            retry_of_run_id=original.id,
+            context_snapshot={
+                "issueId": issue.id,
+                "recovery": {"originalRunId": original.id},
+            },
+        )
+        session.add(recovery)
+        await session.flush()
+
+        await heartbeat._restore_system_blocked_issue_after_recovery(recovery)
+
+    await session.refresh(issue)
+    assert issue.status == "blocked"
+
+
 async def test_recover_orphaned_run_does_not_abort_when_retry_is_unavailable(
     session: AsyncSession,
 ) -> None:
