@@ -80,7 +80,11 @@ from ..dependencies.issues import get_issue_service
 from ..dependencies.documents import get_document_service
 from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
-from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.heartbeat import (
+    HeartbeatService,
+    dispatch_queued_agent,
+    track_dispatch_task,
+)
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
 from ..services.agents import AgentService
@@ -102,9 +106,8 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
-    tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
-    task.add_done_callback(tasks.discard)
+    track_dispatch_task(tasks, task)
 
 
 def _mentioned_tokens(body: str) -> set[str]:

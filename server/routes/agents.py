@@ -124,7 +124,11 @@ from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
 from ..services.agent_instructions import AgentInstructionsService
 from ..services.agent_memory import AgentMemoryService
-from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.heartbeat import (
+    HeartbeatService,
+    dispatch_queued_agent,
+    track_dispatch_task,
+)
 from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["agents"])
@@ -137,9 +141,8 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
-    tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
-    task.add_done_callback(tasks.discard)
+    track_dispatch_task(tasks, task)
 
 
 async def _get_agent_or_404(
