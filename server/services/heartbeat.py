@@ -2832,6 +2832,7 @@ class HeartbeatService:
         if locked_agent is None:
             raise RuntimeError("Run agent no longer exists")
         agent = locked_agent
+        await self.finalizer.restore_system_blocked_issue_after_recovery(running)
         await update_wakeup_request(
             self._session,
             running.wakeup_request_id or "",
@@ -3897,7 +3898,7 @@ class HeartbeatService:
     async def _restore_system_blocked_issue_after_recovery(
         self, final: HeartbeatRunRow
     ) -> bool:
-        if final.status not in {"succeeded", "waiting_for_children"}:
+        if final.status not in {"running", "succeeded", "waiting_for_children"}:
             return False
         recovery = (
             final.context_snapshot.get("recovery")
@@ -3918,8 +3919,22 @@ class HeartbeatService:
         ):
             return False
         issue_id = _issue_id_from_context(final.context_snapshot)
-        issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
-        if issue is None or issue.org_id != final.org_id or issue.status != "blocked":
+        resolved_issue = (
+            await get_issue_by_id(self._session, issue_id) if issue_id else None
+        )
+        if resolved_issue is None or resolved_issue.org_id != final.org_id:
+            return False
+        issue = (
+            await self._session.execute(
+                select(IssueRow)
+                .where(
+                    IssueRow.id == resolved_issue.id,
+                    IssueRow.org_id == final.org_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if issue is None or issue.status != "blocked":
             return False
         status_activities = (
             (
@@ -3962,6 +3977,11 @@ class HeartbeatService:
         issue.status = cast(str, restore_status)
         issue.updated_at = datetime.now(UTC)
         await self._session.flush()
+        recovery_reason = (
+            "process_loss_retry_started"
+            if final.status == "running"
+            else "process_loss_recovered"
+        )
         await insert_activity_log(
             self._session,
             org_id=issue.org_id,
@@ -3974,7 +3994,7 @@ class HeartbeatService:
             details={
                 "status": restore_status,
                 "fromStatus": "blocked",
-                "reason": "process_loss_recovered",
+                "reason": recovery_reason,
                 "runId": final.id,
                 "originalRunId": original.id,
             },
@@ -4196,6 +4216,7 @@ class HeartbeatService:
                         IssueRow.hidden_at.is_(None),
                     )
                     .order_by(IssueRow.id)
+                    .execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -4206,6 +4227,25 @@ class HeartbeatService:
             child.status not in terminal_statuses for child in children
         ):
             return None
+        child_run_ids = {
+            run_id
+            for child in children
+            for run_id in (child.execution_run_id, child.checkout_run_id)
+            if run_id
+        }
+        if child_run_ids:
+            active_child_run = (
+                await self._session.execute(
+                    select(HeartbeatRunRow.id)
+                    .where(
+                        HeartbeatRunRow.id.in_(child_run_ids),
+                        HeartbeatRunRow.status.in_(("queued", "running")),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if active_child_run is not None:
+                return None
         parts = [
             f"{child.id}:{await self._issue_settlement_cycle_key(child)}"
             for child in children

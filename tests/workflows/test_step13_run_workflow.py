@@ -1778,7 +1778,85 @@ async def test_successful_recovery_restores_only_matching_system_block(
     assert issue.status == "in_progress"
 
 
-async def test_successful_recovery_preserves_newer_manual_block(
+async def test_recovery_claim_restores_system_block_before_adapter_execution(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ClaimSystemBlockRecovery")
+    heartbeat = HeartbeatService(session)
+    blocked_at = datetime.now(UTC) - timedelta(minutes=1)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Restore when retry starts",
+            status="blocked",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        original = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="process_lost",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(original)
+        await session.flush()
+        session.add(
+            ActivityLog(
+                org_id=issue.org_id,
+                actor_type="agent",
+                actor_id=agent["id"],
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                run_id=original.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": "in_progress",
+                    "reason": "run_failed",
+                    "runId": original.id,
+                },
+                created_at=blocked_at,
+            )
+        )
+        retry = await heartbeat.retry_run(
+            original.id,
+            actor_type="system",
+            actor_id="run_recovery",
+            execute_immediately=False,
+            recovery_trigger="automatic",
+        )
+
+    assert retry is not None and retry["status"] == "queued"
+    async with async_transaction(session):
+        claimed_ids = await heartbeat.claim_queued_for_dispatch(agent["id"])
+
+    await session.refresh(issue)
+    claimed = await session.get(HeartbeatRun, retry["id"])
+    assert claimed_ids == [retry["id"]]
+    assert claimed is not None and claimed.status == "running"
+    assert issue.status == "in_progress"
+    restored = (
+        (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue.id,
+                    ActivityLog.run_id == retry["id"],
+                    ActivityLog.action == "issue.updated",
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert isinstance(restored.details, dict)
+    assert restored.details["reason"] == "process_loss_retry_started"
+
+
+async def test_recovery_claim_preserves_newer_manual_block(
     session: AsyncSession,
 ) -> None:
     agent = await _seed_agent(session, name="ManualBlockRecovery")
@@ -1838,24 +1916,20 @@ async def test_successful_recovery_preserves_newer_manual_block(
                 ),
             ]
         )
-        recovery = HeartbeatRun(
-            org_id=agent["orgId"],
-            agent_id=agent["id"],
-            invocation_source="automation",
-            trigger_detail="system",
-            status="succeeded",
-            retry_of_run_id=original.id,
-            context_snapshot={
-                "issueId": issue.id,
-                "recovery": {"originalRunId": original.id},
-            },
+        retry = await heartbeat.retry_run(
+            original.id,
+            actor_type="system",
+            actor_id="run_recovery",
+            execute_immediately=False,
+            recovery_trigger="automatic",
         )
-        session.add(recovery)
-        await session.flush()
 
-        await heartbeat._restore_system_blocked_issue_after_recovery(recovery)
+    assert retry is not None and retry["status"] == "queued"
+    async with async_transaction(session):
+        claimed_ids = await heartbeat.claim_queued_for_dispatch(agent["id"])
 
     await session.refresh(issue)
+    assert claimed_ids == [retry["id"]]
     assert issue.status == "blocked"
 
 

@@ -30,6 +30,7 @@ from packages.database.schema import (
     HeartbeatRunEvent,
     Issue,
     IssueComment,
+    IssueWorkProduct,
     Organization,
 )
 from server.app import app as fastapi_app
@@ -683,6 +684,57 @@ async def test_terminal_child_updated_by_identifier_queues_parent_continuation(
         ).scalar_one()
     assert wakeup.payload is not None
     assert wakeup.payload["issueId"] == parent_id
+
+
+async def test_replace_child_rejects_stale_request_for_completed_work_product(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    child_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Issue(
+                id=child_id,
+                org_id=org_id,
+                parent_id=parent_id,
+                title="Completed child",
+                status="done",
+                completed_at=datetime.now(UTC),
+            )
+        )
+        session.add(
+            IssueWorkProduct(
+                org_id=org_id,
+                issue_id=child_id,
+                type="document",
+                provider="octopus",
+                title="reports/child.md",
+                status="active",
+                is_primary=True,
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{child_id}/replace-child",
+        json={"title": "Stale replacement"},
+    )
+
+    assert code == 409
+    assert body["detail"] == (
+        "Completed child issue already has registered work products"
+    )
+    async with session_factory() as verify:
+        children = (
+            (await verify.execute(select(Issue).where(Issue.parent_id == parent_id)))
+            .scalars()
+            .all()
+        )
+    assert [child.id for child in children] == [child_id]
 
 
 async def test_issue_lookup_prefers_exact_uuid_over_identifier_collision(

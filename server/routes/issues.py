@@ -485,6 +485,16 @@ async def replace_child_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Issue is not a child issue",
         )
+    if old_child.get("executionRunId") or old_child.get("checkoutRunId"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Child issue execution is still active or being finalized",
+        )
+    if old_child["status"] == "done" and old_child.get("workProducts"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Completed child issue already has registered work products",
+        )
     title = body.get("title") or f"Replacement for {old_child['title']}"
     description = body.get("description") or old_child.get("description")
     payload = validate_create_issue(
