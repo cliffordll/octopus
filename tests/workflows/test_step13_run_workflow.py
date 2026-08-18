@@ -32,6 +32,7 @@ from packages.shared.types.agent import Agent
 from packages.shared.types.heartbeat import WakeAgentPayload
 from server.services.agents import AgentService
 from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
+from server.services.run_repair import IssueRunRepairService
 
 
 async def _closeout_signal_exists(*args: object, **kwargs: object) -> bool:
@@ -2248,6 +2249,77 @@ async def test_periodic_recovery_keeps_recent_run_without_lease_or_pid(
     await session.refresh(run)
     assert recovered == []
     assert run.status == "running"
+
+
+async def test_issue_run_repair_is_dry_run_by_default_and_scoped_to_issue_tree(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ScopedIssueRunRepair")
+    repair = IssueRunRepairService(session)
+    expired_at = datetime.now(UTC) - timedelta(minutes=1)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Repair root",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        unrelated = Issue(
+            org_id=agent["orgId"],
+            title="Unrelated",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add_all([parent, unrelated])
+        await session.flush()
+        child = Issue(
+            org_id=agent["orgId"],
+            parent_id=parent.id,
+            title="Repair child",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(child)
+        await session.flush()
+        target_run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            execution_owner_token="target-owner",
+            execution_lease_expires_at=expired_at,
+            context_snapshot={"issueId": child.id},
+        )
+        unrelated_run = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            execution_owner_token="unrelated-owner",
+            execution_lease_expires_at=expired_at,
+            context_snapshot={"issueId": unrelated.id},
+        )
+        session.add_all([target_run, unrelated_run])
+        await session.flush()
+
+        report = await repair.inspect(parent.id)
+        assert report["candidateRunIds"] == [target_run.id]
+        assert target_run.status == "running"
+        assert unrelated_run.status == "running"
+
+        applied = await repair.repair(parent.id)
+        applied_again = await repair.repair(parent.id)
+
+    await session.refresh(target_run)
+    await session.refresh(unrelated_run)
+    assert applied["candidateRunIds"] == [target_run.id]
+    assert len(applied["recoveryRuns"]) == 1
+    assert applied_again["candidateRunIds"] == []
+    assert applied_again["recoveryRuns"] == []
+    assert target_run.status == "failed"
+    assert unrelated_run.status == "running"
 
 
 async def test_orphaned_opencode_run_with_lost_child_enqueues_automatic_recovery(
