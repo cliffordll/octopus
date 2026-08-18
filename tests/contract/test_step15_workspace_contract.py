@@ -2362,6 +2362,102 @@ async def test_settled_children_queue_parent_continuation() -> None:
         await engine.dispose()
 
 
+async def test_done_child_waits_for_run_finalization_before_parent_continuation() -> (
+    None
+):
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="child-finalization-barrier",
+                name="Child Finalization Barrier",
+                issue_prefix="CFB",
+            )
+            session.add(org)
+            await session.flush()
+            parent_agent = Agent(org_id=org.id, name="Parent Agent")
+            child_agent = Agent(org_id=org.id, name="Child Agent")
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Child",
+                status="done",
+                completed_at=datetime.now(UTC),
+                assignee_agent_id=child_agent.id,
+            )
+            session.add(child)
+            await session.flush()
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="running",
+                context_snapshot={"issueId": child.id},
+            )
+            session.add(child_run)
+            await session.flush()
+            child.execution_run_id = child_run.id
+            child.checkout_run_id = child_run.id
+            await session.flush()
+
+            heartbeat = HeartbeatService(session)
+            parent_agent_id = (
+                await heartbeat.queue_parent_continuation_for_settled_child(child.id)
+            )
+            assert parent_agent_id is None
+            assert (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == parent_agent.id)
+                )
+            ).scalar_one_or_none() is None
+
+            await WorkspaceService(session).create_work_product_for_issue(
+                org_id=org.id,
+                issue_id=child.id,
+                project_id=None,
+                payload={
+                    "type": "document",
+                    "provider": "octopus",
+                    "title": "child-report.md",
+                    "status": "active",
+                    "isPrimary": True,
+                    "createdByRunId": child_run.id,
+                },
+            )
+            child_run.status = "succeeded"
+            child_run.finished_at = datetime.now(UTC)
+            child.execution_run_id = None
+            child.checkout_run_id = None
+            await session.flush()
+
+            parent_agent_id = (
+                await heartbeat.queue_parent_continuation_for_settled_child(child.id)
+            )
+            assert parent_agent_id == parent_agent.id
+            continuation = (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == parent_agent.id)
+                )
+            ).scalar_one()
+            assert continuation.status == "queued"
+    finally:
+        await engine.dispose()
+
+
 async def test_dispatcher_runs_parent_continuation_queued_by_child_closeout(
     tmp_path: Path,
 ) -> None:
