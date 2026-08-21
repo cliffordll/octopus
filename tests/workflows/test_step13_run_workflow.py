@@ -1856,6 +1856,163 @@ async def test_recovery_claim_restores_system_block_before_adapter_execution(
     assert restored.details["reason"] == "process_loss_retry_started"
 
 
+async def test_comment_assignment_claim_restores_adapter_failure_block(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="CommentAssignmentRecovery")
+    heartbeat = HeartbeatService(session)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Resume from comment",
+            status="blocked",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        failed = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="adapter_failed",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(failed)
+        await session.flush()
+        session.add(
+            ActivityLog(
+                org_id=issue.org_id,
+                actor_type="agent",
+                actor_id=agent["id"],
+                action="issue.updated",
+                entity_type="issue",
+                entity_id=issue.id,
+                run_id=failed.id,
+                details={
+                    "status": "blocked",
+                    "fromStatus": "in_progress",
+                    "reason": "run_failed",
+                    "runId": failed.id,
+                },
+            )
+        )
+        resumed = await heartbeat.wakeup(
+            agent["id"],
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "reason": "issue_comment_added",
+                "contextSnapshot": {
+                    "issueId": issue.id,
+                    "wakeReason": "issue_comment_added",
+                },
+            },
+            actor_type="user",
+            actor_id="local-board",
+            execute_immediately=False,
+        )
+
+    assert resumed is not None and resumed["status"] == "queued"
+    async with async_transaction(session):
+        claimed_ids = await heartbeat.claim_queued_for_dispatch(agent["id"])
+
+    await session.refresh(issue)
+    assert claimed_ids == [resumed["id"]]
+    assert issue.status == "in_progress"
+    restored = (
+        (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue.id,
+                    ActivityLog.run_id == resumed["id"],
+                    ActivityLog.action == "issue.updated",
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert isinstance(restored.details, dict)
+    assert restored.details["reason"] == "system_failure_retry_started"
+    assert restored.details["originalErrorCode"] == "adapter_failed"
+
+
+async def test_assignment_claim_preserves_newer_review_block(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(session, name="ReviewBlockExecution")
+    heartbeat = HeartbeatService(session)
+    blocked_at = datetime.now(UTC) - timedelta(minutes=1)
+    async with async_transaction(session):
+        issue = Issue(
+            org_id=agent["orgId"],
+            title="Keep review block",
+            status="blocked",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(issue)
+        await session.flush()
+        failed = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="failed",
+            error_code="adapter_failed",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(failed)
+        await session.flush()
+        session.add_all(
+            [
+                ActivityLog(
+                    org_id=issue.org_id,
+                    actor_type="agent",
+                    actor_id=agent["id"],
+                    action="issue.updated",
+                    entity_type="issue",
+                    entity_id=issue.id,
+                    run_id=failed.id,
+                    details={
+                        "status": "blocked",
+                        "fromStatus": "in_progress",
+                        "reason": "run_failed",
+                        "runId": failed.id,
+                    },
+                    created_at=blocked_at,
+                ),
+                ActivityLog(
+                    org_id=issue.org_id,
+                    actor_type="agent",
+                    actor_id="reviewer-agent",
+                    action="issue.review_decision_recorded",
+                    entity_type="issue",
+                    entity_id=issue.id,
+                    details={"decision": "blocked", "comment": "Needs review"},
+                    created_at=blocked_at + timedelta(seconds=1),
+                ),
+            ]
+        )
+        running = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="assignment",
+            trigger_detail="system",
+            status="running",
+            context_snapshot={"issueId": issue.id},
+        )
+        session.add(running)
+        await session.flush()
+
+        restored = await heartbeat._restore_system_blocked_issue_for_execution(running)
+
+    await session.refresh(issue)
+    assert restored is False
+    assert issue.status == "blocked"
+
+
 async def test_recovery_claim_preserves_newer_manual_block(
     session: AsyncSession,
 ) -> None:

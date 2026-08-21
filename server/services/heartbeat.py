@@ -2832,7 +2832,9 @@ class HeartbeatService:
         if locked_agent is None:
             raise RuntimeError("Run agent no longer exists")
         agent = locked_agent
-        await self.finalizer.restore_system_blocked_issue_after_recovery(running)
+        restored_issue = await self._restore_system_blocked_issue_for_execution(running)
+        if not restored_issue:
+            await self.finalizer.restore_system_blocked_issue_after_recovery(running)
         await update_wakeup_request(
             self._session,
             running.wakeup_request_id or "",
@@ -3918,57 +3920,20 @@ class HeartbeatService:
             or original.invocation_source != "assignment"
         ):
             return False
-        issue_id = _issue_id_from_context(final.context_snapshot)
-        resolved_issue = (
-            await get_issue_by_id(self._session, issue_id) if issue_id else None
-        )
-        if resolved_issue is None or resolved_issue.org_id != final.org_id:
-            return False
-        issue = (
-            await self._session.execute(
-                select(IssueRow)
-                .where(
-                    IssueRow.id == resolved_issue.id,
-                    IssueRow.org_id == final.org_id,
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
+        issue = await self._lock_run_issue(final)
         if issue is None or issue.status != "blocked":
             return False
-        status_activities = (
-            (
-                await self._session.execute(
-                    select(ActivityLog)
-                    .where(
-                        ActivityLog.org_id == issue.org_id,
-                        ActivityLog.entity_type == "issue",
-                        ActivityLog.entity_id == issue.id,
-                        ActivityLog.action == "issue.updated",
-                    )
-                    .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        latest_status_activity = next(
-            (
-                activity
-                for activity in status_activities
-                if isinstance(activity.details, dict)
-                and isinstance(activity.details.get("status"), str)
-            ),
-            None,
-        )
-        if latest_status_activity is None:
+        latest_status_change = await self._latest_issue_status_change(issue)
+        if latest_status_change is None:
             return False
+        latest_status_activity, latest_status = latest_status_change
         details = latest_status_activity.details
         assert isinstance(details, dict)
         restore_status = details.get("fromStatus")
         if (
-            latest_status_activity.run_id != original.id
-            or details.get("status") != "blocked"
+            latest_status_activity.action != "issue.updated"
+            or latest_status_activity.run_id != original.id
+            or latest_status != "blocked"
             or details.get("reason") != "run_failed"
             or details.get("runId") != original.id
             or restore_status not in {"todo", "in_progress"}
@@ -4000,6 +3965,127 @@ class HeartbeatService:
             },
         )
         return True
+
+    async def _restore_system_blocked_issue_for_execution(
+        self, running: HeartbeatRunRow
+    ) -> bool:
+        if running.status != "running" or running.invocation_source != "assignment":
+            return False
+        issue = await self._lock_run_issue(running)
+        if (
+            issue is None
+            or issue.status != "blocked"
+            or issue.assignee_agent_id != running.agent_id
+        ):
+            return False
+        latest_status_change = await self._latest_issue_status_change(issue)
+        if latest_status_change is None:
+            return False
+        blocked_activity, blocked_status = latest_status_change
+        details = (
+            blocked_activity.details
+            if isinstance(blocked_activity.details, dict)
+            else {}
+        )
+        failed_run_id = blocked_activity.run_id
+        if (
+            blocked_activity.action != "issue.updated"
+            or blocked_status != "blocked"
+            or details.get("reason") != "run_failed"
+            or not isinstance(failed_run_id, str)
+            or details.get("runId") != failed_run_id
+        ):
+            return False
+        failed_run = await get_run(self._session, failed_run_id)
+        if (
+            failed_run is None
+            or failed_run.org_id != running.org_id
+            or failed_run.agent_id != running.agent_id
+            or failed_run.invocation_source != "assignment"
+            or failed_run.status not in {"failed", "timed_out"}
+            or _issue_id_from_context(failed_run.context_snapshot) != issue.id
+        ):
+            return False
+        now = datetime.now(UTC)
+        issue.status = "in_progress"
+        issue.started_at = issue.started_at or now
+        issue.updated_at = now
+        await self._session.flush()
+        await insert_activity_log(
+            self._session,
+            org_id=issue.org_id,
+            actor_type="system",
+            actor_id="run_execution",
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=issue.id,
+            run_id=running.id,
+            details={
+                "status": "in_progress",
+                "fromStatus": "blocked",
+                "reason": "system_failure_retry_started",
+                "runId": running.id,
+                "originalRunId": failed_run.id,
+                "originalErrorCode": failed_run.error_code,
+            },
+        )
+        return True
+
+    async def _lock_run_issue(self, run: HeartbeatRunRow) -> IssueRow | None:
+        issue_id = _issue_id_from_context(run.context_snapshot)
+        resolved_issue = (
+            await get_issue_by_id(self._session, issue_id) if issue_id else None
+        )
+        if resolved_issue is None or resolved_issue.org_id != run.org_id:
+            return None
+        return (
+            await self._session.execute(
+                select(IssueRow)
+                .where(
+                    IssueRow.id == resolved_issue.id,
+                    IssueRow.org_id == run.org_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+
+    async def _latest_issue_status_change(
+        self, issue: IssueRow
+    ) -> tuple[ActivityLog, str] | None:
+        activities = (
+            (
+                await self._session.execute(
+                    select(ActivityLog)
+                    .where(
+                        ActivityLog.org_id == issue.org_id,
+                        ActivityLog.entity_type == "issue",
+                        ActivityLog.entity_id == issue.id,
+                        ActivityLog.action.in_(
+                            ("issue.updated", "issue.review_decision_recorded")
+                        ),
+                    )
+                    .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        review_statuses = {
+            "approve": "done",
+            "request_changes": "in_progress",
+            "blocked": "blocked",
+        }
+        for activity in activities:
+            details = activity.details if isinstance(activity.details, dict) else {}
+            status = details.get("status")
+            if activity.action == "issue.review_decision_recorded":
+                decision = details.get("decision")
+                status = (
+                    review_statuses.get(decision) if isinstance(decision, str) else None
+                )
+            if isinstance(status, str):
+                return activity, status
+        return None
 
     async def _release_issue_execution(self, final: HeartbeatRunRow) -> None:
         issue_id = _issue_id_from_context(final.context_snapshot)
