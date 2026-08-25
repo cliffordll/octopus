@@ -329,6 +329,10 @@ OCTOPUS_WORKSPACE_CWD=D:\projects\shop-app
 
 shared 模式下，Octopus 不应为了“保护共享工作区”而在整个任务执行周期持有 workspace 写锁，也不应把任务产物强行转移到 issue 私有目录来伪装隔离。
 
+运行前的 Workspace 准备属于例外：解析/复用 execution workspace、更新数据库记录和写入 preflight operation 必须在一个独立短事务中完成。同一项目工作区通过数据库行锁和进程内协调按顺序提交，提交后立即释放协调锁，再启动 Adapter。因此 4 个子任务可能依次完成 4 次很短的数据库准备，但 4 个 Adapter 仍可并行执行。
+
+SQLite 遇到临时 `database is locked` 时只做有限重试；重试耗尽后，Run 必须立即以 `workspace_prepare_failed` 收口，不得保持 `running` 等待 Run Recovery。Run Recovery 只负责进程崩溃等兜底恢复。
+
 原因：
 
 - 上游 upstream reference 的 shared workspace 对应 `project_primary`；在 Octopus 多工作区模型中，它表示“所选 project workspace”，不会为 shared 注入 managed `workspaceStrategy`。
@@ -392,6 +396,8 @@ Issue B -> octopus/ISSUE-B
 不同 issue 的 isolated execution workspace 可以并行，因为它们写不同 cwd。
 
 同一 issue 的多个 run 必须串行或复用同一个 issue execution workspace，因为它们写同一个 cwd。
+
+创建 Git worktree 会短暂修改共同源仓库的 Git 元数据，因此不同 issue 的 worktree 准备仍按源项目工作区串行；worktree 创建并提交数据库记录后，各 issue 的 Adapter 在各自 cwd 中并行。
 
 ### 5.5 Git 来源要求
 
@@ -489,6 +495,7 @@ Octopus 已实现 operator branch 的固定 worktree 创建和复用。它的执
 当前边界：
 
 - 同一 operator branch 复用一个固定 operator cwd。
+- Workspace 数据库准备和固定 worktree 创建按“项目工作区 + operator branch”串行，准备事务提交后才进入 Adapter。
 - 这个 cwd 的写入风险属于 operator execution workspace，不属于项目主 shared cwd。
 - operator branch 自动创建和 checkout 已纳入执行链路。
 - push、PR、merge、cleanup 仍必须作为后续显式用户动作单独验收。
@@ -538,6 +545,8 @@ work products 用于记录：
 - runtime service lease：复用和释放 dev server 等服务。
 
 shared workspace 不应再新增 workspace 级长锁或 workspace lease 队列。
+
+父子任务交接属于 Run 执行权协调，也不是 workspace 长锁：父 Run 创建 child 后，child wakeup 先暂缓；父 Agent 完成短暂评论并让出执行权时，平台先记录让出请求并停止父 Adapter，确认进程退出后才结束父 Run 的活跃执行、释放 Issue/Run 资源并把 child 入队。子 Adapter 启动后仍可并行执行，只有短数据库事务和必须共享的写操作需要协调。父 Agent 未主动让出时由 Run Recovery 在协调宽限期后发起同一两阶段交接。
 
 | 情况 | 是否需要写队列 |
 | --- | --- |

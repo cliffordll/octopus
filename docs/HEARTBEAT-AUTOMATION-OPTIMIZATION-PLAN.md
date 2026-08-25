@@ -1,8 +1,8 @@
-# Heartbeat 与 Automation 优化计划
+# Heartbeat 与 Run Recovery 优化计划（Automation 已拆分）
 
-状态：实施准备就绪（必须从 Phase 0 开始）  
-日期：2026-08-13  
-范围：Agent Heartbeat、wakeup/run 调度内核、Automation 独立领域  
+状态：Run/Heartbeat 计划；Automation 已暂缓并拆入 `docs/AUTOMATION-TODO.md`
+日期：2026-08-13
+范围：Agent Heartbeat、wakeup/run 调度内核；Automation 仅保留架构边界说明
 实施基线：Octopus `step-29-plugins` @ `58202426e54faf93b512954fa18fed3295305b9e`，对照当前上游控制面实现 `2d519f17fe6bcab33206cf7007411d780305a0a8`
 
 ## 1. 目标
@@ -11,9 +11,9 @@
 
 1. Run 恢复必须能把已经产生明确终态、但仍显示为 `running` 的记录恢复到正确终态，并补齐相关清理动作。
 2. Heartbeat 应在保留任务遗漏兜底能力的同时，避免没有可执行工作时启动 Agent Runtime、调用模型和消耗资源。
-3. Automation 应成为独立、持久化、可审计的自动化工作领域，而不是继续依赖 `heartbeat` 中的 `source="automation"` 字符串表达业务身份。
+3. Automation 应成为独立、持久化、可审计的自动化工作领域，而不是继续依赖 `heartbeat` 中的 `source="automation"` 字符串表达业务身份；该工作已经暂缓，后续待办统一维护在 `docs/AUTOMATION-TODO.md`。
 
-实施顺序固定为：先完成 Run 终态与恢复，再优化 Heartbeat，最后实现 Automation。三者可以放在同一总体计划中，但不得在同一个实现批次中混合交付。
+当前计划只继续维护 Run 终态、恢复和 Heartbeat。Automation 不属于当前交付范围，恢复实施时必须从 `docs/AUTOMATION-TODO.md` 建立独立实施批次。
 
 目标状态：
 
@@ -56,17 +56,7 @@ Run 恢复是两者共同依赖的基础。如果 Run 已实际完成却永久�
 
 ### 2.2 Automation
 
-当前 Octopus 只有 `automation` invocation source 和内部 passive follow-up，不具备正式 Automation 领域。
-
-当前缺失：
-
-- Automation definition、trigger、run 三类持久化对象；
-- Automation 管理 API、权限与 activity；
-- Cron、时区、next-run、catch-up 和并发策略；
-- 手动/API/Webhook 触发；
-- tracked Issue 与 Chat 两种输出路由；
-- Automation run 历史、跳过、合并、失败和恢复证据；
-- Webhook 密钥、签名、重放窗口和幂等边界。
+正式 Automation 领域尚未实现，并且不属于当前计划的交付范围。全部功能待办、前置条件和验收标准见 `docs/AUTOMATION-TODO.md`。
 
 ## 3. 设计原则
 
@@ -89,7 +79,6 @@ Scheduler Host
 ├─ materialize_due_scheduled_wakeups(now)
 ├─ dispatch_queued_runs(now)
 ├─ tick_agent_heartbeats(now)
-└─ tick_automation_triggers(now)
 ```
 
 要求：
@@ -152,25 +141,9 @@ Agent Runtime
 - reviewer Issue：`in_review`、`blocked`，排除已经记录过阻塞审核决定的重复工作；
 - 已到期但尚未关联 Run 的 queued/deferred wakeup 不重复创建 timer Run，应优先恢复或跳过 timer 请求。
 
-### 4.4 Automation 流程
+### 4.4 Automation 边界
 
-```text
-Schedule / Manual / API / Webhook
-              ↓
-         automation_runs
-              ↓
-      concurrency / idempotency gate
-              ↓
-       output routing decision
-          ├─ track_issue
-          │    ↓
-          │  创建 Issue → assignment wakeup → Agent Run
-          └─ chat_output
-               ↓
-             创建每次运行独立 Chat → Chat Agent execution
-```
-
-`agent_wakeup_requests.source="automation"` 只表示下游 Agent 唤醒来源；Automation 的身份、触发和终态必须以 `automation_runs` 为准。
+Automation 已暂缓，目标流程和实施细节见 `docs/AUTOMATION-TODO.md`。当前只保留一条兼容边界：`agent_wakeup_requests.source="automation"` 是内部 Run 来源标记，不代表正式 Automation 产品对象。
 
 ## 5. 实施阶段
 
@@ -186,7 +159,6 @@ Schedule / Manual / API / Webhook
 - 明确 `runDiagnosticsOnTimer` 是 Octopus 扩展或旧配置兼容项，不将其描述为当前上游契约；再决定保留、迁移或弃用策略；
 - 将 `waiting_for_children`、`issue_children_settled` 和 parent continuation 明确记录为 Octopus 本地扩展；
 - 明确 Heartbeat 优化属于 Step 13 follow-up；
-- 在开始 Automation 实施前，先更新 `docs/FEATURE.md`，新增独立 Step 和目录映射。建议在 Step 30 之后建立 `step-31-automations/`，因为完整 Webhook/secret/actor 能力依赖 Step 30；如果只先做 schedule/manual core，则在 Step 31 中显式记录 Webhook 后置依赖。
 
 旧损坏 Run 的兼容恢复必须按以下证据优先级处理：
 
@@ -284,7 +256,11 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 父子汇合可靠性还要求“拆分结果先落库，再启动子任务”。本扩展不新增 plan/batch 表，也不依赖标题作为幂等键：
 
 - 父 Agent 必须先生成完整的并行子任务集合，再通过一个批量接口在同一事务中写入全部 child Issue 和 assignment wakeup；禁止逐条创建同级子任务；
+- 由活跃父 Run 创建的 child wakeup 先以 `deferred_parent_yield` 持久化，不生成或启动可执行 child Run；父 Agent 可以完成短暂评论和协调，再显式调用 `yield-children`；
+- 父任务让出采用两阶段协议：第一阶段只持久化 `yield_requested_at`，父 Run 仍为 `running` 并继续持有执行租约和工作区锁；执行层通知 Adapter 停止并确认进程退出后，第二阶段才原子完成 `running → waiting_for_children`、终态副作用、父 Issue 执行锁释放和 deferred child wakeup 入队；事务提交后才允许 Dispatcher 启动子任务；
+- 父协调窗口有固定上限。父 Adapter 未主动让出时，Run Recovery 先持久化同一让出请求；租约过期且 Runtime 已消失后才代为完成第二阶段。不能依赖模型自行退出，也不能在父进程仍存活时提前释放资源；
 - 父 Issue 行锁是创建边界：若父任务已经存在可见子任务，普通重试直接返回已落库集合，不重新规划或补建另一批；单个子任务的重试或替换继续使用显式 retry/replace 流程；
+- 父 continuation 发起 retry/replace 时，新执行同样先 deferred，父任务再次让出后才进入队列；replacement 必须隐藏旧 child，使旧 blocked/cancelled 记录不再参与当前父级汇合；
 - 子任务只是实际可并行执行的工作，不创建“汇总、合并、报告”子任务；最后一批子任务结算后，由 parent continuation 读取子任务结果并在父任务中完成最终汇总；
 - 普通 Heartbeat actionable 查询排除已有子任务的父 Issue，避免父任务在等待期间被当成普通工作再次启动；`issue_children_settled` continuation 是父任务恢复执行的主路径；
 - Heartbeat/manual preflight 必须能够发现“父任务仍为 `todo/in_progress`、全部子任务已结算、当前 settlement generation 缺少 continuation”的历史记录，并按同一父级幂等键补建 continuation；
@@ -294,6 +270,8 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 
 - 同一父任务的批量创建请求重复执行（即使重试载荷标题变化）也只保留首个完整子任务集合；
 - 批量中的任一 child/wakeup 创建失败时整批回滚，不留下部分子任务；
+- 父任务让出前没有 child Run 可被 Dispatcher 领取；让出事务完成后 child Run 才统一进入 queued；父任务未主动让出时 Recovery 能在协调宽限期后完成同样交接；
+- blocked child 的 retry/replace 不会在父 continuation 仍持有执行权时启动，replacement 后旧 child 不再计入 active/settled 汇合集合；
 - 父任务等待子任务期间不会被 Heartbeat 普通预检重复运行；
 - 全部子任务已结束但 continuation 丢失时，下一次 Heartbeat/manual preflight 能补建且只补建一次；
 - 通过 identifier 执行或关闭子任务时，终态收尾仍能释放正确的 UUID 锁并唤醒父任务；
@@ -322,129 +300,24 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 - timer 与已有 queued/deferred wakeup 不产生重复执行；
 - Heartbeat 创建的 Run 能通过 Phase 1A 和 Phase 1B 的恢复、lease 与幂等测试。
 
-### Phase 3：Automation 数据与共享契约
+### Automation：已拆分并暂缓
 
-目标：建立独立、兼容、可审计的 Automation 领域基础。
+Automation 的 Phase 3～Phase 7、数据模型、触发方式、输出路由、Webhook、安全、UI、测试和发布边界已经统一迁移到 `docs/AUTOMATION-TODO.md`。
 
-任务：
-
-- 新增 `automations`、`automation_triggers`、`automation_runs` schema 和 migrations；
-- 在 `packages/shared/` 增加 API paths、types、constants 和 validators；
-- 保持 organization、project、goal、parent Issue、assignee Agent 关联边界；
-- 定义 Automation 状态、trigger kind、run status、output mode、concurrency policy 和 catch-up policy；
-- 为 trigger/idempotency、public webhook id、next-run 扫描建立索引和唯一约束；
-- Goal dependency query 返回真实 Automation 依赖，而不是固定空数组。
-
-验收：
-
-- schema/API shape 与锁定的上游版本一致；
-- migration 在 SQLite、PostgreSQL、MySQL 支持范围内通过；
-- 跨 organization 引用被拒绝；
-- 删除或修改关联对象时遵循明确的阻止、级联或置空契约。
-
-### Phase 4：Automation 定义、触发与调度
-
-目标：完成 schedule、manual/API 的最小可靠闭环。
-
-建议服务边界：
-
-```text
-server/services/automations/
-├─ definitions.py
-├─ triggers.py
-├─ scheduler.py
-├─ dispatch.py
-├─ output_routing.py
-└─ recovery.py
-```
-
-任务：
-
-- 实现 Automation CRUD、pause/resume 和 trigger CRUD；
-- 实现 Cron validation、timezone 和 `nextRunAt` 计算；
-- 使用条件更新原子领取到期 trigger；
-- 实现 `skip_missed` 和有上限的 missed-run catch-up；
-- 实现 manual/API trigger 和调用方 idempotency key；
-- 实现 `coalesce_if_active`、`skip_if_active`、`always_enqueue`；
-- skipped/coalesced 也必须持久化 Automation Run 和原因；
-- 独立 tick 失败不得阻断 Heartbeat 和 queued dispatch。
-
-验收：
-
-- 相同 schedule tick 在并发 scheduler 下只触发一次；
-- 服务重启后 `nextRunAt` 正确恢复；
-- DST、无效时区、错过周期和 catch-up 上限有确定性测试；
-- active work 下三种并发策略分别留下正确运行证据。
-
-### Phase 5：Automation 输出路由
-
-目标：Automation 结果进入真实 Issue 或 Chat 工作闭环。
-
-任务：
-
-- `track_issue`：创建带 Automation origin metadata 的 Issue，保存 `linkedIssueId`，再复用普通 assignment wakeup；
-- `chat_output`：每个真实 Automation Run 创建独立 conversation，保存 `linkedChatConversationId`，通过 Chat assistant/runtime 路径执行；
-- coalesced/skipped Run 不创建空 Issue 或空 Chat；
-- 同步 Automation Run 与关联 Issue/Chat/Agent Run 的终态；
-- 失败时保留可见错误和部分输出，不生成无证据的成功状态；
-- activity 中记录定义变更、触发、跳过、合并、输出创建和终态。
-
-验收：
-
-- tracked Issue 可从 Automation Run 导航并完成普通执行/审核闭环；
-- chat output 每次运行使用独立 Chat，刷新后仍可读取结果；
-- Agent paused、预算阻断、并发饱和和 Runtime失败都有正确 Automation Run 状态；
-- Automation 不绕过 Agent、Issue、Chat、预算或organization权限。
-
-### Phase 6：Webhook 与安全边界
-
-前置：Step 30 的真实 actor/access/secret 能力可用。
-
-任务：
-
-- 创建不可预测 public id；
-- 使用 organization secret 保存 Bearer/HMAC材料；
-- 实现 timestamp/replay window、常量时间签名比较和请求大小限制；
-- 支持外部 idempotency key；
-- 旋转密钥时保留必要审计，不回传旧密钥；
-- rate limit、失败日志和敏感字段脱敏。
-
-验收：
-
-- 正确签名触发一次；重复请求幂等；
-- 过期、篡改、跨organization和已禁用trigger均被拒绝；
-- 日志、activity、API响应不泄漏secret。
-
-### Phase 7：UI、可观测性与迁移
-
-任务：
-
-- Heartbeat设置页分别解释 timer enabled、interval、preflight 和 on-demand，不使用“总开关”误导用户；
-- Automation 列表/详情展示定义、trigger、next run、最近运行、跳过/合并原因和输出链接；
-- Run详情区分 invocation source 与 Automation业务身份；
-- 为旧 `runDiagnosticsOnTimer` 配置提供一次性迁移或兼容读取，并记录弃用策略；
-- 对已有 `source="automation"` passive follow-up 保持兼容，但UI标记为系统收尾，不伪装成用户Automation；
-- 增加scheduler tick、due count、skip reason、queue latency和run outcome指标。
-
-验收：
-
-- 用户可以明确看出“定时检查但未运行”“因无工作跳过”“Automation触发但合并”等不同状态；
-- 重启、刷新和重新打开后状态与运行历史一致；
-- 旧数据不被错误归类成Automation定义或Automation Run。
+Automation 不属于当前 Run/Heartbeat 交付范围。恢复实施前必须重新确认产品场景、前置能力和首个版本范围，并作为独立开发批次验收。
 
 ## 5.1 交付版本拆分
 
-本计划按三个可独立实施、测试、验收和回滚的版本交付：
+本计划按两个可独立实施、测试、验收和回滚的版本交付：
 
 | 版本 | 包含阶段 | 核心结果 | 进入下一版的条件 |
 | --- | --- | --- | --- |
 | 第一版：Run 恢复安全 | Phase 0、Phase 1A、Phase 1B | Run 原子终态、可恢复 terminal effects、execution lease、claim 和 wakeup 幂等可靠 | 旧损坏 Run 可按证据安全恢复，新 Run 不再产生部分终态；并发与崩溃恢复验收通过 |
 | 第二版：Heartbeat 节省资源 | Phase 2 | 有可执行工作才创建 Run；无工作记录 skipped，不启动 Runtime 或调用模型 | Heartbeat preflight、竞争和重启恢复验收通过 |
-| 第三版：Automation | Phase 3～Phase 7 | 独立 Automation definition、trigger、run、输出、安全、UI 和可观测性闭环 | Automation 各阶段验收、PostgreSQL 并发和真实 Runtime E2E 通过 |
 
-每一版完成后必须单独汇报改动、验证和残余风险，并由用户确认后才能进入下一版。三个版本不得合并成一次大改动或一次统一验收。
+Run 恢复安全与 Heartbeat 节省资源必须分别汇报改动、验证和残余风险。Automation 已从本计划拆出，不再作为当前计划的“下一版”。
 
-Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于以上三个主版本，也不阻塞第二版或第三版。它应单独排期、测试和验收；不得为了顺手处理而并入第一版 Run 恢复安全。
+Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于以上两个主版本，也不阻塞第二版。它应单独排期、测试和验收；不得为了顺手处理而并入第一版 Run 恢复安全。
 
 ## 6. 测试矩阵
 
@@ -476,31 +349,14 @@ Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于�
 | assignment 与timer竞争 | 同一Issue不重复执行 |
 | server重启 | queued/scheduled/orphan状态可恢复 |
 
-### 6.3 Automation
-
-| 场景 | 期望 |
-| --- | --- |
-| Cron正常到期 | 一个Automation Run |
-| 两个scheduler领取同一tick | 恰好一个有效trigger claim |
-| active + coalesce | 新Run记录coalesced并指向活动Run |
-| active + skip | 新Run记录skipped和原因 |
-| active + always enqueue | 新Run正常排队 |
-| missed schedule | 按catch-up policy跳过或有限补跑 |
-| tracked Issue输出 | 创建Issue并走assignment执行链 |
-| Chat输出 | 创建独立conversation并保存结果 |
-| Webhook重复 | 同一幂等键只执行一次 |
-| Webhook签名/时间错误 | 拒绝且不产生有效Run |
-| 跨organization引用 | 422/403，且无跨域写入 |
-| Runtime失败/进程丢失 | Run失败可读，恢复策略明确 |
-
-### 6.4 验证层级
+### 6.3 验证层级
 
 1. Shared contract/validator tests。
 2. Schema/migration tests，覆盖SQLite、PostgreSQL及项目承诺的MySQL范围。
-3. Service tests，使用可控时间验证Cron、preflight、catch-up和状态机。
+3. Service tests，使用可控时间验证 preflight 和状态机。
 4. PostgreSQL双连接并发测试，分别验证上游兼容的 claim/幂等，以及 Octopus 扩展的父子汇合。
 5. API workflow tests，覆盖organization/permission/output路径。
-6. 真实Runtime E2E，证明无任务不启动、任务可执行、Automation可产出Issue/Chat。
+6. 真实Runtime E2E，证明无任务不启动且任务可执行。
 7. UI E2E，覆盖创建、暂停、触发、运行历史、错误和刷新恢复。
 
 ## 7. 发布与回滚策略
@@ -508,17 +364,15 @@ Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于�
 - Schema迁移先于功能开关发布，新增字段/表保持向后兼容；
 - Heartbeat新preflight先提供实例级灰度开关和诊断日志，再成为默认；
 - Octopus 扩展/旧配置 `runDiagnosticsOnTimer` 迁移期间只读兼容，禁止无提示改变现有Agent执行频率；
-- Automation scheduler初始默认关闭，完成数据迁移和真实环境验收后再启用；
-- Webhook最后启用，且必须依赖secret和actor边界完成；
-- 回滚时可关闭Heartbeat timer或Automation scheduler，但不得删除定义、Run和审计证据；
+- 回滚时可关闭 Heartbeat timer，但不得删除 Run 和审计证据；
 - 已创建的queued Run按明确策略继续、取消或保留，不允许静默丢弃。
 
 ## 8. 风险与待确认决策
 
 1. **兼容目标：** `runDiagnosticsOnTimer` 明确属于 Octopus 扩展或旧配置兼容项；待 Phase 0 对照后决定保留、迁移或弃用。建议只做迁移兼容，不继续扩展产品含义。
 2. **Heartbeat时间字段：** 是否新增独立scheduler checked字段，需先对照上游schema；如上游无字段，应优先保持外部schema并在内部runtime state或调度记录中保存。
-3. **Automation排期：** 完整Webhook依赖Step 30；schedule/manual core可以先实现，但必须在Step映射中声明拆分边界。
-4. **多数据库承诺：** MySQL的Cron claim、partial unique index和JSON索引实现需要独立兼容设计，不能直接复制PostgreSQL DDL。
+3. **Automation排期：** 已暂缓并迁移到 `docs/AUTOMATION-TODO.md`；重新启动时再确认 Step、Webhook 前置依赖和首个交付范围。
+4. **多数据库承诺：** MySQL 的 partial unique index 和 JSON 索引实现需要独立兼容设计，不能直接复制 PostgreSQL DDL。
 5. **父子汇合并发：** `waiting_for_children`、`issue_children_settled` 和 parent continuation 是 Octopus 本地扩展，在 Phase 1C 独立加固；它们不是 Heartbeat 或 Automation 的前置条件。
 6. **多实例部署：** 如果短期仍只承诺单实例，应在文档中明确；数据库约束仍应提前建立，避免未来迁移成本。
 
@@ -533,10 +387,8 @@ Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于�
 - 无可执行任务时不会启动Agent Runtime；
 - Issue assignment/review等实时事件不依赖timer；
 - queued/deferred/orphan工作可在重启后恢复；
-- 并发scheduler不会重复执行同一wakeup、Run或Automation tick；
-- Automation具有独立definition、trigger、run和输出证据；
-- schedule/manual/API/Webhook及两种输出模式符合锁定的上游契约；
-- organization、permission、budget、Agent状态、Issue lease和secret边界通过测试；
+- 并发 scheduler 不会重复执行同一 wakeup 或 Run；
+- organization、permission、budget、Agent 状态和 Issue lease 边界通过测试；
 - PostgreSQL真实并发测试和真实Runtime E2E通过；
 - `uv run ruff check .`、`uv run ruff format --check .`、`uv run pytest`、`uv run pyright .` 全部通过；
 - `docs/FEATURE.md`、对应Step `TASK.md`、指南和实施记录已同步；
@@ -551,11 +403,11 @@ Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于�
 第二版：Heartbeat节省资源
   Phase 2 → 独立验收
 
-第三版：Automation
-  Phase 3 → Phase 4 → Phase 5 → Phase 6 → Phase 7 → 独立验收
+Automation（暂缓）：
+  见 docs/AUTOMATION-TODO.md，重新立项后独立实施和验收
 
 独立维护批次（非前置）：
   Phase 1C：Octopus父子汇合扩展并发加固
 ```
 
-不建议先开发 Heartbeat preflight 或 Automation UI，也不建议直接把 Automation 逻辑继续加入现有大型 `heartbeat.py`。先交付并验收第一版 Run 恢复安全，再实施第二版 Heartbeat 节省资源，最后实施第三版 Automation。Phase 1C 是 Octopus 父子任务扩展，始终独立排期。
+Automation 不属于当前计划的后续开发步骤，也不应把相关逻辑继续加入现有大型 `heartbeat.py`。当前只维护 Run/Heartbeat 与独立的 Phase 1C 父子任务扩展；Automation 重新启动时按 `docs/AUTOMATION-TODO.md` 独立立项。
