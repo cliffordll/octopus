@@ -96,6 +96,11 @@ from ..services.parent_child_control import (
     ParentChildControlDenied,
 )
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
+from ..services.run_admission import (
+    DirectRunCreationDenied,
+    RunAdmissionPolicy,
+    RunAdoptionDenied,
+)
 from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..services.documents import DocumentService
@@ -664,14 +669,27 @@ async def checkout_issue_route(
     if actor.actor_type == "agent" and actor.actor_id != payload["agentId"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Agent actor cannot checkout for another agent",
+            detail="Agent cannot checkout for another agent",
         )
+    try:
+        checkout_run_id = await RunAdmissionPolicy(heartbeat).checkout_run_id(
+            issue_id=detail["id"],
+            requested_agent_id=payload["agentId"],
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            actor_run_id=actor.run_id,
+        )
+    except RunAdoptionDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     try:
         updated = await service.checkout_issue(
             id,
             payload,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            checkout_run_id=checkout_run_id,
         )
     except IssueCheckoutConflictError as exc:
         raise HTTPException(
@@ -683,18 +701,19 @@ async def checkout_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await queue_issue_assignment_wakeup(
-        heartbeat,
-        updated,
-        reason="issue_checked_out",
-        mutation="checkout",
-        context_source="issue.checkout",
-        actor_type="agent" if actor.actor_type == "agent" else "user",
-        actor_id=actor.actor_id,
-    )
-    assignee_agent_id = updated.get("assigneeAgentId")
-    if assignee_agent_id and updated["status"] != "backlog":
-        _schedule_dispatch(request, assignee_agent_id)
+    if checkout_run_id is None:
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            updated,
+            reason="issue_checked_out",
+            mutation="checkout",
+            context_source="issue.checkout",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id and updated["status"] != "backlog":
+            _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 
@@ -713,6 +732,15 @@ async def execute_issue_route(
             detail="Issue not found",
         )
     assert_organization_access(request, detail["orgId"])
+    actor = require_actor_identity(request)
+    try:
+        RunAdmissionPolicy(heartbeat).require_direct_creation_authority(
+            actor_type=actor.actor_type
+        )
+    except DirectRunCreationDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
     assignee_agent_id = detail.get("assigneeAgentId")
     if not assignee_agent_id:
         raise HTTPException(
@@ -729,7 +757,6 @@ async def execute_issue_route(
     if active is not None:
         return active
 
-    actor = require_actor_identity(request)
     idempotency_key = f"issue:{canonical_issue_id}:execute:{uuid.uuid4()}"
     payload: WakeAgentPayload = {
         "source": "assignment",

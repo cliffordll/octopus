@@ -77,7 +77,9 @@ def _parent_control_issue() -> IssueDetail:
 
 async def test_parent_child_control_requires_active_parent_run_for_agents() -> None:
     context = ParentChildControlContext(parent=_parent_control_issue())
-    inactive = ParentChildControlAuthorizer(cast(HeartbeatService, _ParentRunProbe(False)))
+    inactive = ParentChildControlAuthorizer(
+        cast(HeartbeatService, _ParentRunProbe(False))
+    )
     with pytest.raises(ParentChildControlDenied, match="active parent Run"):
         await inactive.authorize(
             context,
@@ -2201,6 +2203,84 @@ async def test_issue_checkout_route_atomically_claims_issue_for_agent(
     assert "checkout conflict" in conflict["detail"].lower()
 
 
+async def test_agent_checkout_adopts_current_run_without_creating_another_run(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Adopt current run",
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Current Run Agent",
+                role="engineer",
+                status="working",
+            )
+        )
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                status="running",
+                invocation_source="timer",
+                trigger_detail="scheduled",
+                context_snapshot={},
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/checkout",
+        json={"agentId": agent_id, "expectedStatuses": ["todo"]},
+        headers={
+            "x-test-agent-id": agent_id,
+            "x-test-org-id": org_id,
+            "x-test-run-id": run_id,
+        },
+    )
+
+    assert code == 200
+    assert body["status"] == "in_progress"
+    assert body["checkoutRunId"] == run_id
+    assert body["executionRunId"] == run_id
+    async with session_factory() as verify:
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [run.id for run in runs] == [run_id]
+    assert wakeups == []
+
+
 async def test_issue_execute_route_queues_assigned_issue_idempotently(
     app: FastAPI,
     session: AsyncSession,
@@ -2270,6 +2350,41 @@ async def test_issue_execute_route_queues_assigned_issue_idempotently(
     assert activity_rows[0].details is not None
     assert activity_rows[0].details["runId"] == run["id"]
     assert activity_rows[0].details["agentId"] == agent_id
+
+
+async def test_agent_cannot_execute_issue_to_create_run(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="No Direct Execute",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="System scheduled only",
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/execute",
+        headers={"x-test-agent-id": agent_id, "x-test-org-id": org_id},
+    )
+
+    assert code == 403
+    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
 
 
 async def test_issue_execute_route_rejects_completed_issue(

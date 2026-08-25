@@ -3785,7 +3785,26 @@ async def test_agent_actor_cannot_invoke_another_agent(
         headers={"x-test-agent-id": caller["id"], "x-test-org-id": org_id},
     )
     assert code == 403
-    assert body["detail"] == "Agent can only invoke itself"
+    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
+
+
+async def test_agent_actor_cannot_wakeup_itself(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-self-wakeup")
+    _, agent = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"name": "Caller"}
+    )
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={},
+        headers={"x-test-agent-id": agent["id"], "x-test-org-id": org_id},
+    )
+    assert code == 403
+    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
 
 
 async def test_agent_cannot_list_other_organization(
