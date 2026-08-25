@@ -967,6 +967,16 @@ class IssueService:
         actor_id: str,
         run_id: str | None = None,
     ) -> None:
+        replaced_at = datetime.now(UTC)
+        await self._session.execute(
+            update(Issue)
+            .where(
+                Issue.id == old_child["id"],
+                Issue.org_id == old_child["orgId"],
+                Issue.hidden_at.is_(None),
+            )
+            .values(hidden_at=replaced_at, updated_at=replaced_at)
+        )
         await insert_activity_log(
             self._session,
             org_id=old_child["orgId"],
@@ -976,8 +986,41 @@ class IssueService:
             entity_type="issue",
             entity_id=old_child["id"],
             run_id=run_id,
-            details={"replacementIssueId": replacement["id"], "reason": reason},
+            details={
+                "replacementIssueId": replacement["id"],
+                "reason": reason,
+                "retiredAt": replaced_at.isoformat(),
+            },
         )
+
+    async def lock_and_get_child_replacement(
+        self, child_id: str, org_id: str
+    ) -> IssueDetail | None:
+        """Serialize replacement creation and replay an existing replacement."""
+
+        await self._session.execute(
+            update(Issue)
+            .where(Issue.id == child_id, Issue.org_id == org_id)
+            .values(updated_at=Issue.updated_at)
+        )
+        result = await self._session.execute(
+            select(ActivityLog.details)
+            .where(
+                ActivityLog.org_id == org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == child_id,
+                ActivityLog.action == "issue.child_replaced",
+            )
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(1)
+        )
+        details = result.scalar_one_or_none()
+        replacement_id = (
+            details.get("replacementIssueId") if isinstance(details, dict) else None
+        )
+        if not isinstance(replacement_id, str):
+            return None
+        return await self.get_by_id(replacement_id)
 
     async def record_incomplete_accepted(
         self,

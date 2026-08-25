@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, BinaryIO
 import os
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -21,10 +22,15 @@ class ApiClient:
         *,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        hostname = (urlsplit(api_base).hostname or "").lower()
         self._client = httpx.Client(
             base_url=api_base.rstrip("/"),
             transport=transport,
             headers=_runtime_actor_headers(),
+            # Local control-plane calls must never traverse HTTP(S)_PROXY. A
+            # proxied loopback write can commit on the server while the agent
+            # sees ReadTimeout and retries the mutation.
+            trust_env=hostname not in {"127.0.0.1", "localhost", "::1"},
         )
 
     def request(

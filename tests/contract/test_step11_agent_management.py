@@ -1587,8 +1587,8 @@ async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run
     assert [event["eventType"] for event in events] == [
         "lifecycle",
         "lifecycle",
-        "adapter.invoke",
         "workspace.preflight",
+        "adapter.invoke",
         "lifecycle",
         "lifecycle",
         "log",
@@ -1598,8 +1598,8 @@ async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run
     assert [event["message"].strip() for event in events] == [
         "run queued",
         "run started",
-        "adapter invocation",
         "workspace context prepared",
+        "adapter invocation",
         events[4]["message"].strip(),
         "child process exited with code 0",
         "adapter-ok",

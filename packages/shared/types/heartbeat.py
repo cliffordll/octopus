@@ -53,6 +53,7 @@ class HeartbeatRun(TypedDict):
     processPid: int | None
     processStartedAt: str | None
     processExitedAt: str | None
+    yieldRequestedAt: str | None
     executionLeaseExpiresAt: str | None
     terminalEffectsPending: bool
     terminalEffectsCompletedJson: list[str] | None

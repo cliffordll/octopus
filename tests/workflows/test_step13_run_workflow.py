@@ -5,6 +5,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
@@ -31,8 +32,15 @@ from packages.shared.constants.agent import AgentRuntimeType
 from packages.shared.types.agent import Agent
 from packages.shared.types.heartbeat import WakeAgentPayload
 from server.services.agents import AgentService
-from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
+from server.services.heartbeat import (
+    HeartbeatService,
+    RunFinalizer,
+    WorkspacePreparationCoordinator,
+    dispatch_queued_agent,
+)
+from server.services.projects import ProjectService
 from server.services.run_repair import IssueRunRepairService
+from server.services.workspaces import WorkspaceService
 
 
 async def _closeout_signal_exists(*args: object, **kwargs: object) -> bool:
@@ -105,6 +113,33 @@ async def test_wakeup_idempotency_reuses_existing_run(session: AsyncSession) -> 
     assert first is not None and second is not None
     assert second["id"] == first["id"]
     assert len((await session.execute(select(HeartbeatRun))).scalars().all()) == 1
+
+
+async def test_claim_queued_run_refreshes_loaded_sqlite_identity(
+    session: AsyncSession,
+) -> None:
+    from packages.database.queries.heartbeat import claim_queued_run
+
+    agent = await _seed_agent(session, name="ClaimRefresh")
+    async with async_transaction(session):
+        queued = HeartbeatRun(
+            org_id=agent["orgId"],
+            agent_id=agent["id"],
+            invocation_source="on_demand",
+            run_purpose="task_execution",
+            trigger_detail="manual",
+            status="queued",
+        )
+        session.add(queued)
+        await session.flush()
+        loaded = await session.get(HeartbeatRun, queued.id)
+        assert loaded is queued
+        claimed = await claim_queued_run(session, queued.id, datetime.now(UTC))
+
+    assert claimed is not None
+    assert claimed.status == "running"
+    assert claimed.execution_owner_token is not None
+    assert claimed.execution_lease_expires_at is not None
 
 
 async def test_runtime_diagnostic_reuses_active_diagnostic_run(
@@ -649,7 +684,13 @@ async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
                     )
                 )
             ).scalar_one()
-            assert reviewer_run.status == "failed"
+            wakeup = await verify.get(AgentWakeupRequest, reviewer_run.wakeup_request_id)
+            reviewer_row = await verify.get(AgentRow, reviewer["id"])
+            assert reviewer_run.status == "failed", {
+                "wakeupStatus": wakeup.status if wakeup else None,
+                "agentStatus": reviewer_row.status if reviewer_row else None,
+                "executionLease": reviewer_run.execution_lease_expires_at,
+            }
             assert reviewer_run.error_code == "closeout_missing"
             assert reviewer_run.started_at is not None
             assert reviewer_run.finished_at is not None
@@ -662,6 +703,340 @@ async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
                 )
             ).scalars()
             assert list(queued_reviewer_runs) == []
+    finally:
+        await engine.dispose()
+
+
+async def test_dispatch_workspace_prepare_failure_uses_clean_finalization_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    original_transition = RunFinalizer.transition
+    transition_attempts = 0
+
+    async def fail_workspace_prepare(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("database is locked")
+
+    async def fail_first_terminal_transition(
+        self: RunFinalizer,
+        run_id: str,
+        status: str,
+        values: dict,
+        **kwargs: object,
+    ) -> object:
+        nonlocal transition_attempts
+        transition_attempts += 1
+        if transition_attempts == 1:
+            raise RuntimeError("transaction is no longer usable")
+        return await original_transition(
+            self,
+            run_id,
+            status,  # type: ignore[arg-type]
+            values,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        WorkspaceService,
+        "prepare_runtime_context_for_heartbeat",
+        fail_workspace_prepare,
+    )
+    monkeypatch.setattr(RunFinalizer, "transition", fail_first_terminal_transition)
+    try:
+        async with factory() as session:
+            agent = await _seed_agent(session, name="WorkspacePrepareFailure")
+            heartbeat = HeartbeatService(session)
+            async with async_transaction(session):
+                run = await heartbeat.wakeup(
+                    agent["id"],
+                    {"source": "assignment", "triggerDetail": "system"},
+                    actor_type="board",
+                    actor_id="local-board",
+                    execute_immediately=False,
+                )
+
+        assert run is not None
+        await dispatch_queued_agent(factory, agent["id"])
+
+        async with factory() as verify:
+            stored = await verify.get(HeartbeatRun, run["id"])
+            assert stored is not None
+            assert stored.status == "failed"
+            assert stored.error_code == "workspace_prepare_failed"
+            assert stored.finished_at is not None
+            assert stored.terminal_effects_pending is False
+            events = (
+                await verify.execute(
+                    select(HeartbeatRunEvent).where(
+                        HeartbeatRunEvent.run_id == stored.id
+                    )
+                )
+            ).scalars()
+            event_types = [event.event_type for event in events]
+            assert "adapter.invoke" not in event_types
+            assert "workspace.preflight" not in event_types
+        assert transition_attempts == 2
+    finally:
+        await engine.dispose()
+
+
+async def test_four_runs_serialize_workspace_prepare_then_execute_in_parallel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    database_path = tmp_path / "workspace-concurrency.sqlite3"
+    engine: AsyncEngine = create_database_engine(
+        f"sqlite+aiosqlite:///{database_path.as_posix()}"
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    original_prepare = WorkspaceService.prepare_runtime_context_for_heartbeat
+    active_prepares = 0
+    max_active_prepares = 0
+    active_adapters = 0
+    max_active_adapters = 0
+    all_adapters_started = asyncio.Event()
+
+    async def observed_prepare(
+        self: WorkspaceService, *args: object, **kwargs: object
+    ) -> dict:
+        nonlocal active_prepares, max_active_prepares
+        active_prepares += 1
+        max_active_prepares = max(max_active_prepares, active_prepares)
+        try:
+            await asyncio.sleep(0.02)
+            return await original_prepare(self, *args, **kwargs)  # type: ignore[arg-type]
+        finally:
+            active_prepares -= 1
+
+    class ParallelAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            nonlocal active_adapters, max_active_adapters
+            active_adapters += 1
+            max_active_adapters = max(max_active_adapters, active_adapters)
+            if active_adapters == 4:
+                all_adapters_started.set()
+            try:
+                await asyncio.wait_for(all_adapters_started.wait(), timeout=2)
+                return RuntimeExecutionResult(exit_code=0)
+            finally:
+                active_adapters -= 1
+
+    monkeypatch.setattr(
+        WorkspaceService,
+        "prepare_runtime_context_for_heartbeat",
+        observed_prepare,
+    )
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: ParallelAdapter(),
+    )
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="workspace-concurrency",
+                name="Workspace Concurrency",
+                issue_prefix="WSC",
+            )
+            session.add(org)
+            await session.flush()
+            project_cwd = tmp_path / "shared-project"
+            project_cwd.mkdir()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": "Shared Workspace Project"},
+                actor_type="board",
+                actor_id="local-board",
+            )
+            await project_service.create_workspace(
+                project["id"],
+                {"name": "Primary", "cwd": str(project_cwd)},
+                actor_type="board",
+                actor_id="local-board",
+            )
+            issue = Issue(
+                org_id=org.id,
+                project_id=project["id"],
+                title="Parallel shared workspace work",
+            )
+            session.add(issue)
+            await session.flush()
+            agent = await AgentService(session).create_agent(
+                org.id,
+                {
+                    "name": "Workspace Agent",
+                    "agentRuntimeType": "process",
+                    "runtimeConfig": {"heartbeat": {"maxConcurrentRuns": 4}},
+                    "agentRuntimeConfig": {
+                        "command": sys.executable,
+                        "args": ["-c", "print('ok')"],
+                    },
+                },
+                actor_type="board",
+                actor_id="local-board",
+            )
+            await session.commit()
+            run_ids = []
+            async with async_transaction(session):
+                for _ in range(4):
+                    queued = HeartbeatRun(
+                        org_id=org.id,
+                        agent_id=agent["id"],
+                        invocation_source="on_demand",
+                        trigger_detail="manual",
+                        status="queued",
+                        context_snapshot={"issueId": issue.id},
+                    )
+                    session.add(queued)
+                    await session.flush()
+                    run_ids.append(queued.id)
+
+        await dispatch_queued_agent(factory, agent["id"])
+
+        async with factory() as verify:
+            runs = (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.id.in_(run_ids))
+                )
+            ).scalars()
+            assert {run.status for run in runs} == {"succeeded"}
+        assert max_active_prepares == 1
+        assert max_active_adapters == 4
+    finally:
+        await engine.dispose()
+
+
+async def test_workspace_prepare_retries_transient_sqlite_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    original_prepare = WorkspaceService.prepare_runtime_context_for_heartbeat
+    attempts = 0
+
+    async def transient_lock(
+        self: WorkspaceService, *args: object, **kwargs: object
+    ) -> dict:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise RuntimeError("database is locked")
+        return await original_prepare(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        WorkspaceService,
+        "prepare_runtime_context_for_heartbeat",
+        transient_lock,
+    )
+    try:
+        async with factory() as session:
+            agent = await _seed_agent(session, name="WorkspaceRetry")
+            heartbeat = HeartbeatService(session)
+            async with async_transaction(session):
+                run = await heartbeat.wakeup(
+                    agent["id"],
+                    {"source": "on_demand", "triggerDetail": "manual"},
+                    actor_type="board",
+                    actor_id="local-board",
+                    execute_immediately=False,
+                )
+
+        assert run is not None
+        await dispatch_queued_agent(factory, agent["id"])
+
+        async with factory() as verify:
+            stored = await verify.get(HeartbeatRun, run["id"])
+            assert stored is not None and stored.status == "succeeded"
+        assert attempts == 3
+    finally:
+        await engine.dispose()
+
+
+async def test_run_cancelled_during_workspace_prepare_never_invokes_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
+    adapter_invoked = False
+
+    async def cancel_during_prepare(
+        self: WorkspacePreparationCoordinator,
+        *,
+        agent_id: str,
+        run_id: str,
+        org_id: str,
+    ) -> None:
+        del agent_id, org_id
+        async with factory() as cancel_session:
+            await HeartbeatService(cancel_session).cancel_run(run_id)
+            await cancel_session.commit()
+
+    class UnexpectedAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            nonlocal adapter_invoked
+            adapter_invoked = True
+            return RuntimeExecutionResult(exit_code=0)
+
+    monkeypatch.setattr(
+        WorkspacePreparationCoordinator,
+        "prepare",
+        cancel_during_prepare,
+    )
+    monkeypatch.setattr(
+        heartbeat_module,
+        "get_runtime_adapter",
+        lambda _runtime_type: UnexpectedAdapter(),
+    )
+    try:
+        async with factory() as session:
+            agent = await _seed_agent(session, name="CancelDuringWorkspacePrepare")
+            heartbeat = HeartbeatService(session)
+            async with async_transaction(session):
+                run = await heartbeat.wakeup(
+                    agent["id"],
+                    {"source": "on_demand", "triggerDetail": "manual"},
+                    actor_type="board",
+                    actor_id="local-board",
+                    execute_immediately=False,
+                )
+
+        assert run is not None
+        await dispatch_queued_agent(factory, agent["id"])
+
+        async with factory() as verify:
+            stored = await verify.get(HeartbeatRun, run["id"])
+            assert stored is not None and stored.status == "cancelled"
+            invoked_events = (
+                await verify.execute(
+                    select(HeartbeatRunEvent).where(
+                        HeartbeatRunEvent.run_id == run["id"],
+                        HeartbeatRunEvent.event_type == "adapter.invoke",
+                    )
+                )
+            ).scalars()
+            assert list(invoked_events) == []
+        assert adapter_invoked is False
     finally:
         await engine.dispose()
 
@@ -907,6 +1282,145 @@ async def test_timer_recovers_missing_parent_continuation_after_children_settle(
     assert run.context_snapshot["wakeReason"] == "issue_children_settled"
     wakeup = (await session.execute(select(AgentWakeupRequest))).scalar_one()
     assert wakeup.reason == "issue_children_settled"
+
+
+async def test_run_recovery_repairs_missing_parent_continuation_without_timer(
+    session: AsyncSession,
+) -> None:
+    agent = await _seed_agent(
+        session,
+        name="RecoveryParentContinuation",
+        runtime_config={"heartbeat": {"enabled": False}},
+    )
+    settled_at = datetime.now(UTC)
+    async with async_transaction(session):
+        parent = Issue(
+            org_id=agent["orgId"],
+            title="Parent recovered without heartbeat",
+            status="in_progress",
+            assignee_agent_id=agent["id"],
+        )
+        session.add(parent)
+        await session.flush()
+        session.add(
+            Issue(
+                org_id=agent["orgId"],
+                parent_id=parent.id,
+                title="Already settled child",
+                status="done",
+                completed_at=settled_at,
+            )
+        )
+
+    async with async_transaction(session):
+        await HeartbeatService(session).recover_orphaned_runs()
+
+    run = (await session.execute(select(HeartbeatRun))).scalar_one()
+    assert run.status == "queued"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["issueId"] == parent.id
+    assert run.context_snapshot["wakeReason"] == "issue_children_settled"
+
+
+async def test_recovery_does_not_release_children_while_parent_pid_is_alive(
+    monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    parent_agent = await _seed_agent(session, name="LiveDetachedParent")
+    child_agent_id = str(uuid.uuid4())
+    parent_id = str(uuid.uuid4())
+    child_id = str(uuid.uuid4())
+    parent_run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                AgentRow(
+                    id=child_agent_id,
+                    org_id=parent_agent["orgId"],
+                    name="Deferred While Parent Lives",
+                    role="engineer",
+                    status="idle",
+                    agent_runtime_type="process",
+                    runtime_config={},
+                ),
+                Issue(
+                    id=parent_id,
+                    org_id=parent_agent["orgId"],
+                    title="Parent with detached process",
+                    status="in_progress",
+                    assignee_agent_id=parent_agent["id"],
+                    execution_run_id=parent_run_id,
+                ),
+                Issue(
+                    id=child_id,
+                    org_id=parent_agent["orgId"],
+                    parent_id=parent_id,
+                    title="Child held behind live parent",
+                    status="todo",
+                    assignee_agent_id=child_agent_id,
+                ),
+                HeartbeatRun(
+                    id=parent_run_id,
+                    org_id=parent_agent["orgId"],
+                    agent_id=parent_agent["id"],
+                    invocation_source="assignment",
+                    run_purpose="task_execution",
+                    trigger_detail="system",
+                    status="running",
+                    execution_owner_token="expired-owner",
+                    execution_lease_expires_at=datetime.now(UTC) - timedelta(seconds=1),
+                    yield_requested_at=datetime.now(UTC) - timedelta(seconds=2),
+                    process_pid=424242,
+                    process_started_at=datetime.now(UTC) - timedelta(minutes=1),
+                    context_snapshot={"issueId": parent_id},
+                ),
+            ]
+        )
+        await session.flush()
+        await HeartbeatService(session).defer_wakeup_until_parent_yield(
+            child_agent_id,
+            {
+                "source": "assignment",
+                "triggerDetail": "system",
+                "payload": {"issueId": child_id},
+                "contextSnapshot": {"issueId": child_id},
+            },
+            parent_run_id=parent_run_id,
+            actor_type="system",
+            actor_id="test",
+        )
+
+    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        heartbeat_module,
+        "_terminate_verified_run_process_tree",
+        lambda _pid, _started_at: False,
+    )
+    async with async_transaction(session):
+        await HeartbeatService(session).recover_orphaned_runs()
+
+    parent_run = await session.get(HeartbeatRun, parent_run_id)
+    child_runs = (
+        (
+            await session.execute(
+                select(HeartbeatRun).where(HeartbeatRun.agent_id == child_agent_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    wakeup = (
+        await session.execute(
+            select(AgentWakeupRequest).where(
+                AgentWakeupRequest.agent_id == child_agent_id
+            )
+        )
+    ).scalar_one()
+    assert parent_run is not None and parent_run.status == "running"
+    assert child_runs == []
+    assert wakeup.status == "deferred_parent_yield"
 
 
 @pytest.mark.parametrize("pending_status", ["queued", "deferred_issue_execution"])
@@ -3041,6 +3555,155 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
+
+
+async def test_parent_handoff_stops_adapter_before_child_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from server.services import heartbeat as heartbeat_module
+
+    engine = create_database_engine(
+        f"sqlite+aiosqlite:///{(tmp_path / 'parent-handoff.db').as_posix()}"
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = create_session_factory(engine)
+    parent_stopped = asyncio.Event()
+    child_started = asyncio.Event()
+    parent_issue_id = str(uuid.uuid4())
+    child_issue_id = str(uuid.uuid4())
+    parent_agent_id = ""
+    child_agent_id = ""
+
+    class HandoffAdapter:
+        type = "process"
+
+        async def execute(
+            self, context: RuntimeExecutionContext
+        ) -> RuntimeExecutionResult:
+            if context.agent_id == parent_agent_id:
+                async with factory() as request_session:
+                    async with async_transaction(request_session):
+                        requester = HeartbeatService(request_session)
+                        await requester.yield_parent_to_children(
+                            parent_issue_id,
+                            context.run_id,
+                            actor_agent_id=parent_agent_id,
+                        )
+                    requester.signal_run_stop(context.run_id)
+                assert context.cancel_event is not None
+                await asyncio.wait_for(context.cancel_event.wait(), timeout=1)
+                parent_stopped.set()
+                return RuntimeExecutionResult(exit_code=0, signal="parent_yield")
+            assert parent_stopped.is_set()
+            child_started.set()
+            return RuntimeExecutionResult(exit_code=0)
+
+    monkeypatch.setattr(
+        heartbeat_module, "get_runtime_adapter", lambda _runtime_type: HandoffAdapter()
+    )
+    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.005)
+    try:
+        async with factory() as session:
+            parent_agent = await _seed_agent(session, name="HandoffParent")
+            parent_agent_id = parent_agent["id"]
+            child_agent_id = str(uuid.uuid4())
+            async with async_transaction(session):
+                session.add_all(
+                    [
+                        AgentRow(
+                            id=child_agent_id,
+                            org_id=parent_agent["orgId"],
+                            name="Handoff Child",
+                            role="engineer",
+                            status="idle",
+                            agent_runtime_type="process",
+                            runtime_config={
+                                "command": sys.executable,
+                                "args": ["-c", "print('child')"],
+                            },
+                        ),
+                        Issue(
+                            id=parent_issue_id,
+                            org_id=parent_agent["orgId"],
+                            title="Parent handoff",
+                            status="in_progress",
+                            assignee_agent_id=parent_agent_id,
+                        ),
+                        Issue(
+                            id=child_issue_id,
+                            org_id=parent_agent["orgId"],
+                            parent_id=parent_issue_id,
+                            title="Deferred child",
+                            status="todo",
+                            assignee_agent_id=child_agent_id,
+                        ),
+                    ]
+                )
+                await session.flush()
+                heartbeat = HeartbeatService(session)
+                parent_run = await heartbeat.wakeup(
+                    parent_agent_id,
+                    {
+                        "source": "assignment",
+                        "triggerDetail": "system",
+                        "payload": {"issueId": parent_issue_id},
+                        "contextSnapshot": {"issueId": parent_issue_id},
+                    },
+                    actor_type="system",
+                    actor_id="test",
+                    execute_immediately=False,
+                )
+                assert parent_run is not None
+                await heartbeat.defer_wakeup_until_parent_yield(
+                    child_agent_id,
+                    {
+                        "source": "assignment",
+                        "triggerDetail": "system",
+                        "payload": {"issueId": child_issue_id},
+                        "contextSnapshot": {"issueId": child_issue_id},
+                    },
+                    parent_run_id=parent_run["id"],
+                    actor_type="system",
+                    actor_id="test",
+                )
+
+            async with factory() as execute_parent:
+                resumed_parent = await HeartbeatService(
+                    execute_parent, commit_process_metadata=True
+                ).resume_queued_runs(parent_agent_id)
+                await execute_parent.commit()
+            assert resumed_parent
+            assert resumed_parent[0]["status"] == "waiting_for_children", resumed_parent[0]
+            assert parent_stopped.is_set()
+            assert not child_started.is_set()
+            async with factory() as execute_child:
+                resumed_child = await HeartbeatService(
+                    execute_child, commit_process_metadata=True
+                ).resume_queued_runs(child_agent_id)
+                await execute_child.commit()
+            assert resumed_child
+        assert child_started.is_set()
+        async with factory() as verify:
+            parent_run_row = await verify.get(HeartbeatRun, parent_run["id"])
+            assert parent_run_row is not None
+            assert parent_run_row.status == "waiting_for_children"
+            assert parent_run_row.process_exited_at is None
+            child_runs = (
+                (
+                    await verify.execute(
+                        select(HeartbeatRun).where(
+                            HeartbeatRun.agent_id == child_agent_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(child_runs) == 1
+    finally:
+        await engine.dispose()
 
 
 async def test_silent_runtime_is_timed_out_instead_of_running_forever(

@@ -124,6 +124,13 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     create_children_parser.set_defaults(handler=create_issue_children)
 
+    yield_children_parser = actions.add_parser(
+        "yield-children",
+        help="Yield the active parent run and release deferred child work",
+    )
+    yield_children_parser.add_argument("issue_id")
+    yield_children_parser.set_defaults(handler=yield_issue_children)
+
     retry_child_parser = actions.add_parser(
         "retry-child", help="Retry a blocked child issue"
     )
@@ -314,6 +321,12 @@ def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
         "POST",
         f"/api/issues/{args.issue_id}/children/batch",
         json={"children": children},
+    )
+
+
+def yield_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request(
+        "POST", f"/api/issues/{args.issue_id}/yield-children", json={}
     )
 
 

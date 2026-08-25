@@ -28,6 +28,7 @@ async def queue_issue_assignment_wakeup(
     actor_id: str,
     extra_payload: dict[str, Any] | None = None,
     extra_context: dict[str, Any] | None = None,
+    defer_until_parent_run_id: str | None = None,
     suppress_errors: bool = True,
 ) -> None:
     assignee_agent_id = issue.get("assigneeAgentId")
@@ -59,13 +60,22 @@ async def queue_issue_assignment_wakeup(
         },
     }
     try:
-        await heartbeat.wakeup(
-            assignee_agent_id,
-            payload,
-            actor_type=actor_type,
-            actor_id=actor_id,
-            execute_immediately=False,
-        )
+        if defer_until_parent_run_id:
+            await heartbeat.defer_wakeup_until_parent_yield(
+                assignee_agent_id,
+                payload,
+                parent_run_id=defer_until_parent_run_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+        else:
+            await heartbeat.wakeup(
+                assignee_agent_id,
+                payload,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                execute_immediately=False,
+            )
     except Exception:
         logger.warning(
             "failed to wake assignee on issue assignment",

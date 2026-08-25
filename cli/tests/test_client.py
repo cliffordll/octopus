@@ -30,3 +30,28 @@ def test_client_reports_api_detail() -> None:
         client.request("POST", "/api/approvals/a-1/approve", json={})
 
     assert raised.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("api_base", "expected_trust_env"),
+    [
+        ("http://127.0.0.1:8000", False),
+        ("http://localhost:8000/api", False),
+        ("http://[::1]:8000", False),
+        ("https://octopus.example.test", True),
+    ],
+)
+def test_client_bypasses_environment_proxy_only_for_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+    api_base: str,
+    expected_trust_env: bool,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("cli.client.httpx.Client", CapturingClient)
+    ApiClient(api_base)
+    assert captured["trust_env"] is expected_trust_env
