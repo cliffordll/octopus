@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 import inspect
+import logging
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -237,7 +238,7 @@ async def test_run_execution_rolls_back_and_closes_when_service_fails(
     session = TrackingSession()
     monkeypatch.setattr(heartbeat_module, "HeartbeatService", FailingHeartbeatService)
 
-    execution = heartbeat_module.RunExecution(  # type: ignore[arg-type]
+    execution = heartbeat_module.RunExecutionService(  # type: ignore[arg-type]
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
@@ -283,7 +284,7 @@ async def test_run_execution_waits_for_commit_before_cancel_cleanup(
     monkeypatch.setattr(
         heartbeat_module, "HeartbeatService", SuccessfulHeartbeatService
     )
-    execution = heartbeat_module.RunExecution(  # type: ignore[arg-type]
+    execution = heartbeat_module.RunExecutionService(  # type: ignore[arg-type]
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
@@ -306,6 +307,8 @@ async def test_run_execution_waits_for_commit_before_cancel_cleanup(
 async def test_dispatch_task_failure_is_observed(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.ERROR, logger=heartbeat_module.logger.name)
+
     async def fail() -> None:
         raise RuntimeError("dispatch failed")
 

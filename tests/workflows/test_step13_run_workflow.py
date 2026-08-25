@@ -34,10 +34,10 @@ from packages.shared.types.heartbeat import WakeAgentPayload
 from server.services.agents import AgentService
 from server.services.heartbeat import (
     HeartbeatService,
-    RunFinalizer,
     WorkspacePreparationCoordinator,
     dispatch_queued_agent,
 )
+from server.services.run_lifecycle import RunFinalizationService
 from server.services.projects import ProjectService
 from server.services.run_repair import IssueRunRepairService
 from server.services.workspaces import WorkspaceService
@@ -714,14 +714,14 @@ async def test_dispatch_workspace_prepare_failure_uses_clean_finalization_sessio
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
-    original_transition = RunFinalizer.transition
+    original_transition = RunFinalizationService.transition
     transition_attempts = 0
 
     async def fail_workspace_prepare(*args: object, **kwargs: object) -> object:
         raise RuntimeError("database is locked")
 
     async def fail_first_terminal_transition(
-        self: RunFinalizer,
+        self: RunFinalizationService,
         run_id: str,
         status: str,
         values: dict,
@@ -744,7 +744,9 @@ async def test_dispatch_workspace_prepare_failure_uses_clean_finalization_sessio
         "prepare_runtime_context_for_heartbeat",
         fail_workspace_prepare,
     )
-    monkeypatch.setattr(RunFinalizer, "transition", fail_first_terminal_transition)
+    monkeypatch.setattr(
+        RunFinalizationService, "transition", fail_first_terminal_transition
+    )
     try:
         async with factory() as session:
             agent = await _seed_agent(session, name="WorkspacePrepareFailure")
@@ -1320,108 +1322,6 @@ async def test_run_recovery_repairs_missing_parent_continuation_without_timer(
     assert run.context_snapshot is not None
     assert run.context_snapshot["issueId"] == parent.id
     assert run.context_snapshot["wakeReason"] == "issue_children_settled"
-
-
-async def test_recovery_does_not_release_children_while_parent_pid_is_alive(
-    monkeypatch: pytest.MonkeyPatch,
-    session: AsyncSession,
-) -> None:
-    from server.services import heartbeat as heartbeat_module
-
-    parent_agent = await _seed_agent(session, name="LiveDetachedParent")
-    child_agent_id = str(uuid.uuid4())
-    parent_id = str(uuid.uuid4())
-    child_id = str(uuid.uuid4())
-    parent_run_id = str(uuid.uuid4())
-    async with async_transaction(session):
-        session.add_all(
-            [
-                AgentRow(
-                    id=child_agent_id,
-                    org_id=parent_agent["orgId"],
-                    name="Deferred While Parent Lives",
-                    role="engineer",
-                    status="idle",
-                    agent_runtime_type="process",
-                    runtime_config={},
-                ),
-                Issue(
-                    id=parent_id,
-                    org_id=parent_agent["orgId"],
-                    title="Parent with detached process",
-                    status="in_progress",
-                    assignee_agent_id=parent_agent["id"],
-                    execution_run_id=parent_run_id,
-                ),
-                Issue(
-                    id=child_id,
-                    org_id=parent_agent["orgId"],
-                    parent_id=parent_id,
-                    title="Child held behind live parent",
-                    status="todo",
-                    assignee_agent_id=child_agent_id,
-                ),
-                HeartbeatRun(
-                    id=parent_run_id,
-                    org_id=parent_agent["orgId"],
-                    agent_id=parent_agent["id"],
-                    invocation_source="assignment",
-                    run_purpose="task_execution",
-                    trigger_detail="system",
-                    status="running",
-                    execution_owner_token="expired-owner",
-                    execution_lease_expires_at=datetime.now(UTC) - timedelta(seconds=1),
-                    yield_requested_at=datetime.now(UTC) - timedelta(seconds=2),
-                    process_pid=424242,
-                    process_started_at=datetime.now(UTC) - timedelta(minutes=1),
-                    context_snapshot={"issueId": parent_id},
-                ),
-            ]
-        )
-        await session.flush()
-        await HeartbeatService(session).defer_wakeup_until_parent_yield(
-            child_agent_id,
-            {
-                "source": "assignment",
-                "triggerDetail": "system",
-                "payload": {"issueId": child_id},
-                "contextSnapshot": {"issueId": child_id},
-            },
-            parent_run_id=parent_run_id,
-            actor_type="system",
-            actor_id="test",
-        )
-
-    monkeypatch.setattr(heartbeat_module, "_is_process_alive", lambda _pid: True)
-    monkeypatch.setattr(
-        heartbeat_module,
-        "_terminate_verified_run_process_tree",
-        lambda _pid, _started_at: False,
-    )
-    async with async_transaction(session):
-        await HeartbeatService(session).recover_orphaned_runs()
-
-    parent_run = await session.get(HeartbeatRun, parent_run_id)
-    child_runs = (
-        (
-            await session.execute(
-                select(HeartbeatRun).where(HeartbeatRun.agent_id == child_agent_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    wakeup = (
-        await session.execute(
-            select(AgentWakeupRequest).where(
-                AgentWakeupRequest.agent_id == child_agent_id
-            )
-        )
-    ).scalar_one()
-    assert parent_run is not None and parent_run.status == "running"
-    assert child_runs == []
-    assert wakeup.status == "deferred_parent_yield"
-
 
 @pytest.mark.parametrize("pending_status", ["queued", "deferred_issue_execution"])
 async def test_timer_materializes_runless_parent_continuation(
@@ -3555,157 +3455,7 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
-
-
-async def test_parent_handoff_stops_adapter_before_child_dispatch(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from server.services import heartbeat as heartbeat_module
-
-    engine = create_database_engine(
-        f"sqlite+aiosqlite:///{(tmp_path / 'parent-handoff.db').as_posix()}"
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = create_session_factory(engine)
-    parent_stopped = asyncio.Event()
-    child_started = asyncio.Event()
-    parent_issue_id = str(uuid.uuid4())
-    child_issue_id = str(uuid.uuid4())
-    parent_agent_id = ""
-    child_agent_id = ""
-
-    class HandoffAdapter:
-        type = "process"
-
-        async def execute(
-            self, context: RuntimeExecutionContext
-        ) -> RuntimeExecutionResult:
-            if context.agent_id == parent_agent_id:
-                async with factory() as request_session:
-                    async with async_transaction(request_session):
-                        requester = HeartbeatService(request_session)
-                        await requester.yield_parent_to_children(
-                            parent_issue_id,
-                            context.run_id,
-                            actor_agent_id=parent_agent_id,
-                        )
-                    requester.signal_run_stop(context.run_id)
-                assert context.cancel_event is not None
-                await asyncio.wait_for(context.cancel_event.wait(), timeout=1)
-                parent_stopped.set()
-                return RuntimeExecutionResult(exit_code=0, signal="parent_yield")
-            assert parent_stopped.is_set()
-            child_started.set()
-            return RuntimeExecutionResult(exit_code=0)
-
-    monkeypatch.setattr(
-        heartbeat_module, "get_runtime_adapter", lambda _runtime_type: HandoffAdapter()
-    )
-    monkeypatch.setattr(HeartbeatService, "RUNTIME_PROGRESS_INTERVAL_SECONDS", 0.005)
-    try:
-        async with factory() as session:
-            parent_agent = await _seed_agent(session, name="HandoffParent")
-            parent_agent_id = parent_agent["id"]
-            child_agent_id = str(uuid.uuid4())
-            async with async_transaction(session):
-                session.add_all(
-                    [
-                        AgentRow(
-                            id=child_agent_id,
-                            org_id=parent_agent["orgId"],
-                            name="Handoff Child",
-                            role="engineer",
-                            status="idle",
-                            agent_runtime_type="process",
-                            runtime_config={
-                                "command": sys.executable,
-                                "args": ["-c", "print('child')"],
-                            },
-                        ),
-                        Issue(
-                            id=parent_issue_id,
-                            org_id=parent_agent["orgId"],
-                            title="Parent handoff",
-                            status="in_progress",
-                            assignee_agent_id=parent_agent_id,
-                        ),
-                        Issue(
-                            id=child_issue_id,
-                            org_id=parent_agent["orgId"],
-                            parent_id=parent_issue_id,
-                            title="Deferred child",
-                            status="todo",
-                            assignee_agent_id=child_agent_id,
-                        ),
-                    ]
-                )
-                await session.flush()
-                heartbeat = HeartbeatService(session)
-                parent_run = await heartbeat.wakeup(
-                    parent_agent_id,
-                    {
-                        "source": "assignment",
-                        "triggerDetail": "system",
-                        "payload": {"issueId": parent_issue_id},
-                        "contextSnapshot": {"issueId": parent_issue_id},
-                    },
-                    actor_type="system",
-                    actor_id="test",
-                    execute_immediately=False,
-                )
-                assert parent_run is not None
-                await heartbeat.defer_wakeup_until_parent_yield(
-                    child_agent_id,
-                    {
-                        "source": "assignment",
-                        "triggerDetail": "system",
-                        "payload": {"issueId": child_issue_id},
-                        "contextSnapshot": {"issueId": child_issue_id},
-                    },
-                    parent_run_id=parent_run["id"],
-                    actor_type="system",
-                    actor_id="test",
-                )
-
-            async with factory() as execute_parent:
-                resumed_parent = await HeartbeatService(
-                    execute_parent, commit_process_metadata=True
-                ).resume_queued_runs(parent_agent_id)
-                await execute_parent.commit()
-            assert resumed_parent
-            assert resumed_parent[0]["status"] == "waiting_for_children", resumed_parent[0]
-            assert parent_stopped.is_set()
-            assert not child_started.is_set()
-            async with factory() as execute_child:
-                resumed_child = await HeartbeatService(
-                    execute_child, commit_process_metadata=True
-                ).resume_queued_runs(child_agent_id)
-                await execute_child.commit()
-            assert resumed_child
-        assert child_started.is_set()
-        async with factory() as verify:
-            parent_run_row = await verify.get(HeartbeatRun, parent_run["id"])
-            assert parent_run_row is not None
-            assert parent_run_row.status == "waiting_for_children"
-            assert parent_run_row.process_exited_at is None
-            child_runs = (
-                (
-                    await verify.execute(
-                        select(HeartbeatRun).where(
-                            HeartbeatRun.agent_id == child_agent_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            assert len(child_runs) == 1
-    finally:
-        await engine.dispose()
-
-
+@pytest.mark.asyncio
 async def test_silent_runtime_is_timed_out_instead_of_running_forever(
     monkeypatch: pytest.MonkeyPatch,
     session: AsyncSession,

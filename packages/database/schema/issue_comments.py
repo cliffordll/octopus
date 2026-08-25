@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ._base import Base, new_uuid
@@ -26,6 +26,15 @@ class IssueComment(Base):
             "issue_id",
             "created_at",
         ),
+        Index(
+            "issue_comments_org_issue_request_id_uq",
+            "org_id",
+            "issue_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text("request_id is not null"),
+            sqlite_where=text("request_id is not null"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
@@ -38,6 +47,7 @@ class IssueComment(Base):
     author_agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     author_user_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

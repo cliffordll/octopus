@@ -7,7 +7,7 @@ import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, Sequence, cast
+from typing import Any, ClassVar, cast
 
 import psutil
 from sqlalchemy import and_, or_, select, update
@@ -38,7 +38,6 @@ from packages.database.queries.heartbeat import (
     claim_expired_run_execution,
     claim_run_terminal_effects,
     claim_due_wakeup_request,
-    claim_parent_deferred_wakeup,
     claim_queued_run,
     complete_run_terminal_effects,
     create_run,
@@ -58,11 +57,9 @@ from packages.database.queries.heartbeat import (
     list_runs_with_pending_terminal_effects,
     list_wakeup_requests_by_status,
     renew_run_execution_lease,
-    request_run_yield,
     update_run,
     update_wakeup_request,
     fail_run_terminal_effects,
-    transition_run_to_terminal,
 )
 from packages.database.schema import (
     AgentWakeupRequest as AgentWakeupRequestRow,
@@ -108,9 +105,11 @@ from .logs import (
     read_local_file_log,
 )
 from .runtime_providers import inject_runtime_provider_config
+from .run_lifecycle import RunFinalizationService, RunRecoveryService
+from .run_execution import RunExecutionService
 from .workspace_paths import ensure_octopus_run_log_dir
+from .workspace_access import workspace_access_strategy
 from .workspaces import (
-    WorkspacePreparationPlan,
     WorkspaceService,
     _expected_work_product_paths,
 )
@@ -179,8 +178,15 @@ def _terminate_verified_run_process_tree(
                 candidate.kill()
         psutil.wait_procs(alive, timeout=3)
         return not _is_process_alive(pid)
-    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, ValueError):
+    except (
+        psutil.AccessDenied,
+        psutil.NoSuchProcess,
+        psutil.ZombieProcess,
+        ValueError,
+    ):
         return not _is_process_alive(pid)
+
+
 def _issue_passive_followup_delay() -> timedelta:
     raw_value = os.environ.get(ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV)
     if raw_value is None:
@@ -228,68 +234,6 @@ def _exception_message(exc: BaseException) -> str:
     return message or type(exc).__name__
 
 
-class RunFinalizer:
-    """Provide the shared terminal transition and terminal-effects boundary."""
-
-    def __init__(self, heartbeat: HeartbeatService) -> None:
-        self._heartbeat = heartbeat
-
-    async def transition(
-        self,
-        run_id: str,
-        status: HeartbeatRunStatus,
-        values: dict[str, Any],
-        *,
-        expected_statuses: Sequence[str] = ("running",),
-        expected_owner_token: str | None = None,
-    ) -> HeartbeatRunRow | None:
-        return await transition_run_to_terminal(
-            self._heartbeat._session,
-            run_id,
-            status,
-            values,
-            expected_statuses=expected_statuses,
-            expected_owner_token=expected_owner_token,
-        )
-
-    async def complete(
-        self,
-        *,
-        agent: AgentRow,
-        running: HeartbeatRunRow,
-        final: HeartbeatRunRow,
-        final_status: HeartbeatRunStatus,
-        result: Any,
-        sequence: int,
-    ) -> HeartbeatRunRow:
-        return await self._heartbeat._complete_finalized_run_impl(
-            agent=agent,
-            running=running,
-            final=final,
-            final_status=final_status,
-            result=result,
-            sequence=sequence,
-        )
-
-    async def reconcile(
-        self,
-        run: HeartbeatRunRow,
-        *,
-        result: Any | None = None,
-        sequence: int | None = None,
-    ) -> HeartbeatRunRow:
-        return await self._heartbeat._reconcile_terminal_effects_impl(
-            run,
-            result=result,
-            sequence=sequence,
-        )
-
-    async def restore_system_blocked_issue_after_recovery(
-        self, run: HeartbeatRunRow
-    ) -> bool:
-        return await self._heartbeat._restore_system_blocked_issue_after_recovery(run)
-
-
 class WorkspacePreparationError(RuntimeError):
     """Marks a failure that happened before the runtime adapter was invoked."""
 
@@ -303,27 +247,8 @@ class RunExecutionFinalizationError(RuntimeError):
         self.error_code = error_code
 
 
-class RunRecovery:
-    """Coordinate evidence-based recovery for persisted Run state."""
-
-    def __init__(self, heartbeat: HeartbeatService) -> None:
-        self._heartbeat = heartbeat
-
-    async def recover(
-        self,
-        *,
-        require_process_loss: bool = False,
-        run_ids: set[str] | None = None,
-    ) -> list[HeartbeatRun]:
-        return await self._heartbeat._recover_orphaned_runs_impl(
-            require_process_loss=require_process_loss,
-            run_ids=run_ids,
-        )
-
-
 class HeartbeatService:
     _DEFERRED_CONTEXT_KEY = "__deferredContextSnapshot"
-    _PARENT_YIELD_RUN_KEY = "__releaseAfterParentRunId"
     _RETRY_OF_RUN_KEY = "__retryOfRunId"
     _RETRY_PURPOSE_KEY = "__retryRunPurpose"
     _RETRY_PROCESS_LOSS_COUNT_KEY = "__retryProcessLossCount"
@@ -347,15 +272,14 @@ class HeartbeatService:
         self._commit_process_metadata = commit_process_metadata
         self._session_factory = session_factory
         self.last_wakeup_reused = False
-        self.last_deferred_wakeup_id: str | None = None
 
     @property
-    def finalizer(self) -> RunFinalizer:
-        return RunFinalizer(self)
+    def finalizer(self) -> RunFinalizationService:
+        return RunFinalizationService(self)
 
     @property
-    def recovery(self) -> RunRecovery:
-        return RunRecovery(self)
+    def recovery(self) -> RunRecoveryService:
+        return RunRecoveryService(self)
 
     async def wakeup(
         self,
@@ -462,378 +386,6 @@ class HeartbeatService:
             return self._to_run(run)
         executed = await self._start_if_capacity(agent, run)
         return self._to_run(executed)
-
-    async def defer_wakeup_until_parent_yield(
-        self,
-        agent_id: str,
-        payload: WakeAgentPayload,
-        *,
-        parent_run_id: str,
-        actor_type: str,
-        actor_id: str,
-    ) -> None:
-        """Persist child work without making it runnable before the parent yields."""
-
-        agent = await get_agent_by_id(self._session, agent_id)
-        if agent is None:
-            raise ValueError("Child assignee agent not found")
-        if agent.status in {"terminated", "pending_approval"}:
-            raise AgentConflictError("Agent is not invokable in its current state")
-        policy = self._heartbeat_policy(agent)
-        if not policy["wakeOnDemand"]:
-            raise AgentConflictError(
-                "Child assignee has on-demand wakeup disabled"
-            )
-        from .budgets import BudgetService
-
-        context = {
-            **self._payload_context(payload.get("payload")),
-            **self._payload_context_snapshot(payload.get("contextSnapshot")),
-        }
-        block = await BudgetService(self._session).get_invocation_block(
-            agent.org_id,
-            agent.id,
-            project_id=cast(str | None, context.get("projectId")),
-        )
-        if block is not None:
-            raise ValueError(block.reason)
-        deferred_payload = dict(payload.get("payload") or {})
-        deferred_payload[self._DEFERRED_CONTEXT_KEY] = dict(
-            payload.get("contextSnapshot") or {}
-        )
-        deferred_payload[self._PARENT_YIELD_RUN_KEY] = parent_run_id
-        issue_id = _issue_id_from_context(deferred_payload) or _issue_id_from_context(
-            payload.get("contextSnapshot")
-        )
-        idempotency_key = payload.get("idempotencyKey")
-        if not idempotency_key and issue_id:
-            idempotency_key = (
-                f"parent-yield:{parent_run_id}:issue:{issue_id}:"
-                f"source:{payload.get('source', 'assignment')}"
-            )
-        await create_wakeup_request_idempotent(
-            self._session,
-            self._wakeup_values(
-                agent,
-                {
-                    **payload,
-                    "payload": deferred_payload,
-                    "idempotencyKey": idempotency_key,
-                },
-                actor_type=actor_type,
-                actor_id=actor_id,
-                status="deferred_parent_yield",
-            ),
-        )
-
-    async def yield_parent_to_children(
-        self,
-        parent_issue_id: str,
-        parent_run_id: str,
-        *,
-        actor_agent_id: str | None = None,
-    ) -> tuple[HeartbeatRunRow, set[str]]:
-        """Request a two-phase handoff; child work stays deferred until exit."""
-
-        parent = await get_issue_by_id(self._session, parent_issue_id)
-        running = await get_run(self._session, parent_run_id)
-        if parent is None:
-            raise ValueError("Parent issue not found")
-        if running is None or running.org_id != parent.org_id:
-            raise ValueError("Parent Run not found")
-        if actor_agent_id is not None and running.agent_id != actor_agent_id:
-            raise ValueError("Only the parent Run owner can yield execution")
-        if running.status == "waiting_for_children":
-            return running, set()
-        if running.status != "running":
-            raise ValueError("Parent Run is not running")
-        if _issue_id_from_context(running.context_snapshot) != parent.id:
-            raise ValueError("Parent Run does not execute this issue")
-        if running.yield_requested_at is not None:
-            return running, set()
-        has_deferred_child_work = False
-        for wakeup in (
-            (
-                await self._session.execute(
-                    select(AgentWakeupRequestRow).where(
-                        AgentWakeupRequestRow.org_id == parent.org_id,
-                        AgentWakeupRequestRow.status == "deferred_parent_yield",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        ):
-            wakeup_payload = wakeup.payload if isinstance(wakeup.payload, dict) else {}
-            if wakeup_payload.get(self._PARENT_YIELD_RUN_KEY) == running.id:
-                has_deferred_child_work = True
-                break
-        if not has_deferred_child_work:
-            raise ValueError("Parent Run has no deferred child work to yield to")
-        if not running.execution_owner_token:
-            raise ValueError("Parent Run has no active execution owner")
-        requested = await request_run_yield(
-            self._session,
-            running.id,
-            running.execution_owner_token,
-            datetime.now(UTC),
-        )
-        created_request = requested is not None
-        if requested is None:
-            current = await get_run(self._session, running.id)
-            if current is None or current.status != "running":
-                raise ValueError("Parent Run could not yield execution")
-            await self._session.refresh(current)
-            if current.yield_requested_at is None:
-                raise ValueError("Parent Run could not persist its yield request")
-            requested = current
-        if created_request:
-            await insert_activity_log(
-                self._session,
-                org_id=parent.org_id,
-                actor_type="system",
-                actor_id="heartbeat_child_coordination",
-                action="issue.parent_yield_requested",
-                entity_type="issue",
-                entity_id=parent.id,
-                agent_id=running.agent_id,
-                run_id=running.id,
-                details={"runId": running.id, "reason": "parent_yield_requested"},
-            )
-        return requested, set()
-
-    async def _finalize_parent_yield(
-        self, running: HeartbeatRunRow
-    ) -> HeartbeatRunRow:
-        """Park a parent only after its Adapter has stopped."""
-
-        issue_id = _issue_id_from_context(running.context_snapshot)
-        parent = await get_issue_by_id(self._session, issue_id) if issue_id else None
-        if parent is None or parent.org_id != running.org_id:
-            raise ValueError("Parent issue not found for yielded Run")
-        waiting = await self.finalizer.transition(
-            running.id,
-            "waiting_for_children",
-            {
-                "finished_at": datetime.now(UTC),
-                "error": None,
-                "error_code": None,
-                **self._finalize_run_log_fields(running),
-            },
-            expected_owner_token=running.execution_owner_token,
-        )
-        if waiting is None:
-            current = await get_run(self._session, running.id)
-            if current is None or current.status != "waiting_for_children":
-                raise ValueError("Parent Run could not complete its yield")
-            return current
-        await insert_activity_log(
-            self._session,
-            org_id=parent.org_id,
-            actor_type="system",
-            actor_id="heartbeat_child_coordination",
-            action="issue.waiting_for_children",
-            entity_type="issue",
-            entity_id=parent.id,
-            agent_id=running.agent_id,
-            run_id=running.id,
-            details={"runId": running.id, "reason": "parent_adapter_stopped"},
-        )
-        return await self._reconcile_terminal_effects(waiting)
-
-    async def _release_parent_deferred_wakeups(
-        self, parent: IssueRow, parent_run_id: str
-    ) -> set[str]:
-        dispatch_agent_ids: set[str] = set()
-        newly_settled_children: list[IssueRow] = []
-        deferred = (
-            (
-                await self._session.execute(
-                    select(AgentWakeupRequestRow).where(
-                        AgentWakeupRequestRow.org_id == parent.org_id,
-                        AgentWakeupRequestRow.status == "deferred_parent_yield",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for wakeup in deferred:
-            unclaimed_payload = dict(wakeup.payload or {})
-            if unclaimed_payload.get(self._PARENT_YIELD_RUN_KEY) != parent_run_id:
-                continue
-            claimed = await claim_parent_deferred_wakeup(
-                self._session, wakeup.id, datetime.now(UTC)
-            )
-            if claimed is None:
-                continue
-            wakeup = claimed
-            payload = dict(wakeup.payload or {})
-            payload.pop(self._PARENT_YIELD_RUN_KEY, None)
-            agent = await get_agent_by_id(self._session, wakeup.agent_id)
-            deferred_context = payload.get(self._DEFERRED_CONTEXT_KEY)
-            issue_id = _issue_id_from_context(
-                deferred_context if isinstance(deferred_context, dict) else payload
-            ) or _issue_id_from_context(payload)
-            child = await get_issue_by_id(self._session, issue_id) if issue_id else None
-            stale_reason: str | None = None
-            if child is None or child.org_id != parent.org_id:
-                stale_reason = "child_issue.missing"
-            elif child.hidden_at is not None:
-                stale_reason = "child_issue.hidden"
-            elif child.status in {"done", "cancelled"}:
-                stale_reason = f"child_issue.{child.status}"
-                newly_settled_children.append(child)
-            elif child.assignee_agent_id != wakeup.agent_id:
-                stale_reason = "child_issue.reassigned"
-            if stale_reason is not None:
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {
-                        "status": "skipped",
-                        "payload": payload,
-                        "finished_at": datetime.now(UTC),
-                        "error": stale_reason,
-                    },
-                )
-                if (
-                    child is not None
-                    and child.hidden_at is None
-                    and child.status not in {"done", "blocked", "cancelled"}
-                    and stale_reason == "child_issue.reassigned"
-                ):
-                    updated_child = await update_issue(
-                        self._session,
-                        child.id,
-                        {"status": "blocked"},
-                    )
-                    if updated_child is not None:
-                        newly_settled_children.append(updated_child)
-                continue
-            if agent is None or agent.status in {"terminated", "pending_approval"}:
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {
-                        "status": "skipped",
-                        "payload": payload,
-                        "finished_at": datetime.now(UTC),
-                        "error": "agent.not_invokable",
-                    },
-                )
-                if child is not None and child.status not in {
-                    "done",
-                    "blocked",
-                    "cancelled",
-                }:
-                    updated_child = await update_issue(
-                        self._session,
-                        child.id,
-                        {"status": "blocked"},
-                    )
-                    if updated_child is not None:
-                        newly_settled_children.append(updated_child)
-                continue
-            if agent.status == "paused":
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {"status": "deferred_agent_paused", "payload": payload},
-                )
-                continue
-            if wakeup.run_id is not None:
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {"status": "queued", "payload": payload, "error": None},
-                )
-                dispatch_agent_ids.add(agent.id)
-                continue
-            await self._materialize_deferred_wakeup(agent, wakeup, payload)
-            dispatch_agent_ids.add(agent.id)
-        for child in newly_settled_children:
-            await self.queue_parent_continuation_for_settled_child(child.id)
-        return dispatch_agent_ids
-
-    async def _discard_parent_deferred_wakeups(
-        self,
-        parent: IssueRow,
-        parent_run_id: str,
-        *,
-        reason: str,
-        child_status: str,
-        hide_children: bool = False,
-    ) -> None:
-        deferred = (
-            (
-                await self._session.execute(
-                    select(AgentWakeupRequestRow).where(
-                        AgentWakeupRequestRow.org_id == parent.org_id,
-                        AgentWakeupRequestRow.status == "deferred_parent_yield",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for wakeup in deferred:
-            payload = dict(wakeup.payload or {})
-            if payload.get(self._PARENT_YIELD_RUN_KEY) != parent_run_id:
-                continue
-            deferred_context = payload.get(self._DEFERRED_CONTEXT_KEY)
-            issue_id = _issue_id_from_context(
-                deferred_context if isinstance(deferred_context, dict) else payload
-            ) or _issue_id_from_context(payload)
-            child = await get_issue_by_id(self._session, issue_id) if issue_id else None
-            await update_wakeup_request(
-                self._session,
-                wakeup.id,
-                {
-                    "status": "cancelled",
-                    "finished_at": datetime.now(UTC),
-                    "error": reason,
-                },
-            )
-            if (
-                child is None
-                or child.org_id != parent.org_id
-                or child.hidden_at is not None
-                or child.status in {"done", "cancelled"}
-            ):
-                continue
-            from_status = child.status
-            changed_at = datetime.now(UTC)
-            child_values: dict[str, Any] = {"status": child_status}
-            if child_status == "cancelled":
-                child_values["cancelled_at"] = changed_at
-            if hide_children:
-                child_values["hidden_at"] = changed_at
-            updated_child = await update_issue(
-                self._session, child.id, child_values
-            )
-            if updated_child is not None:
-                await insert_activity_log(
-                    self._session,
-                    org_id=child.org_id,
-                    actor_type="system",
-                    actor_id="heartbeat_child_coordination",
-                    action="issue.updated",
-                    entity_type="issue",
-                    entity_id=child.id,
-                    run_id=parent_run_id,
-                    details={
-                        "status": child_status,
-                        "fromStatus": from_status,
-                        "reason": reason,
-                        "parentRunId": parent_run_id,
-                    },
-                )
-
-    def signal_run_stop(self, run_id: str) -> None:
-        cancellation = self._cancel_events.get(run_id)
-        if cancellation is not None:
-            cancellation.set()
 
     async def is_active_parent_run(
         self,
@@ -1030,11 +582,6 @@ class HeartbeatService:
             or payload.get("reason") == "issue_review_requested"
             or context.get("wakeReason") == "issue_review_requested"
             or context.get("role") == "reviewer"
-        ):
-            return False
-        if (
-            payload.get("reason") == "issue_comment_mentioned"
-            or context.get("wakeReason") == "issue_comment_mentioned"
         ):
             return False
         issue = await get_issue_by_id(self._session, issue_id)
@@ -1566,7 +1113,6 @@ class HeartbeatService:
         actor_id: str,
         execute_immediately: bool = True,
         recovery_trigger: str = "manual",
-        defer_until_parent_run_id: str | None = None,
     ) -> HeartbeatRun | None:
         original = await get_run(self._session, run_id)
         if original is None:
@@ -1600,18 +1146,6 @@ class HeartbeatService:
             else "on_demand"
         )
         trigger_detail = "system" if recovery_trigger == "automatic" else "manual"
-        wakeup_payload: dict[str, Any] | None = None
-        wakeup_status = "queued"
-        if defer_until_parent_run_id:
-            wakeup_status = "deferred_parent_yield"
-            wakeup_payload = {
-                self._PARENT_YIELD_RUN_KEY: defer_until_parent_run_id,
-                self._DEFERRED_CONTEXT_KEY: context_snapshot,
-                self._RETRY_OF_RUN_KEY: original.id,
-                self._RETRY_PURPOSE_KEY: original.run_purpose,
-                self._RETRY_PROCESS_LOSS_COUNT_KEY: original.process_loss_retry_count,
-                "issueId": _issue_id_from_context(context_snapshot),
-            }
         retry_idempotency_key = f"run:{original.id}:retry"
         wakeup, created = await create_wakeup_request_idempotent(
             self._session,
@@ -1621,20 +1155,17 @@ class HeartbeatService:
                     "source": invocation_source,
                     "triggerDetail": trigger_detail,
                     "reason": f"{recovery_trigger}_retry",
-                    "payload": wakeup_payload,
+                    "payload": None,
                     "idempotencyKey": retry_idempotency_key,
                 },
                 actor_type=actor_type,
                 actor_id=actor_id,
-                status=wakeup_status,
+                status="queued",
             ),
         )
         if not created and wakeup.run_id:
             existing = await get_run(self._session, wakeup.run_id)
             return self._to_run(existing) if existing is not None else None
-        if defer_until_parent_run_id:
-            self.last_deferred_wakeup_id = wakeup.id
-            return None
         context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
@@ -1673,7 +1204,6 @@ class HeartbeatService:
         run_ids: set[str] | None = None,
     ) -> list[HeartbeatRun]:
         recovered: list[HeartbeatRun] = []
-        await self._recover_deferred_parent_yields()
         await self._recover_all_settled_parent_continuations()
         for terminal_run in await list_runs_with_pending_terminal_effects(
             self._session
@@ -1726,46 +1256,6 @@ class HeartbeatService:
             if claimed is None:
                 continue
             run = claimed
-            if run.yield_requested_at is not None:
-                if (
-                    tracks_local_child
-                    and run.process_pid is not None
-                    and _is_process_alive(run.process_pid)
-                ):
-                    stopped = await asyncio.to_thread(
-                        _terminate_verified_run_process_tree,
-                        run.process_pid,
-                        run.process_started_at,
-                    )
-                    if not stopped:
-                        await update_run(
-                            self._session,
-                            run.id,
-                            {"execution_lease_expires_at": now},
-                        )
-                        await self._append_event(
-                            run,
-                            await self._next_event_sequence(run.id),
-                            "recovery.warning",
-                            message=(
-                                "Parent handoff remains pending because the detached "
-                                "runtime process is still alive"
-                            ),
-                            level="warning",
-                            payload={"processPid": run.process_pid},
-                            idempotency_key="recovery:parent-yield-process-alive",
-                        )
-                        continue
-                    updated = await update_run(
-                        self._session,
-                        run.id,
-                        {"process_exited_at": datetime.now(UTC)},
-                    )
-                    if updated is not None:
-                        run = updated
-                waiting = await self._finalize_parent_yield(run)
-                recovered.append(self._to_run(waiting))
-                continue
             if await self._cancel_orphaned_run_if_issue_closed(run):
                 continue
             if is_marked_active:
@@ -1861,72 +1351,6 @@ class HeartbeatService:
                     "settled parent continuation recovery skipped",
                     extra={"agent_id": agent.id},
                     exc_info=True,
-                )
-
-    async def _recover_deferred_parent_yields(self) -> None:
-        """Release child work if a parent forgot to yield or stopped mid-handoff."""
-
-        deferred = (
-            (
-                await self._session.execute(
-                    select(AgentWakeupRequestRow)
-                    .where(
-                        AgentWakeupRequestRow.status == "deferred_parent_yield"
-                    )
-                    .order_by(AgentWakeupRequestRow.requested_at)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        now = datetime.now(UTC)
-        handled_run_ids: set[str] = set()
-        for wakeup in deferred:
-            payload = dict(wakeup.payload or {})
-            parent_run_id = payload.get(self._PARENT_YIELD_RUN_KEY)
-            if not isinstance(parent_run_id, str) or parent_run_id in handled_run_ids:
-                continue
-            handled_run_ids.add(parent_run_id)
-            run = await get_run(self._session, parent_run_id)
-            if run is None:
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {
-                        "status": "skipped",
-                        "finished_at": now,
-                        "error": "Deferred child wakeup has no parent Run",
-                    },
-                )
-                continue
-            issue_id = _issue_id_from_context(run.context_snapshot)
-            parent = (
-                await get_issue_by_id(self._session, issue_id) if issue_id else None
-            )
-            if parent is None or parent.org_id != run.org_id:
-                continue
-            requested_at = wakeup.requested_at
-            if requested_at.tzinfo is None:
-                requested_at = requested_at.replace(tzinfo=UTC)
-            if run.status == "running":
-                if now - requested_at < timedelta(
-                    seconds=self.PARENT_COORDINATION_GRACE_SECONDS
-                ):
-                    continue
-                await self.yield_parent_to_children(parent.id, run.id)
-                self.signal_run_stop(run.id)
-                continue
-            if run.status in {"succeeded", "waiting_for_children"}:
-                await self._release_parent_deferred_wakeups(parent, run.id)
-            elif run.status in {"failed", "timed_out", "cancelled"}:
-                await self._discard_parent_deferred_wakeups(
-                    parent,
-                    run.id,
-                    reason=f"Parent Run ended as {run.status} before child handoff",
-                    child_status=(
-                        "cancelled" if run.status == "cancelled" else "blocked"
-                    ),
-                    hide_children=run.status == "cancelled",
                 )
 
     async def _cancel_orphaned_run_if_issue_closed(self, run: HeartbeatRunRow) -> bool:
@@ -2704,9 +2128,7 @@ class HeartbeatService:
         deferred_context = payload.pop(self._DEFERRED_CONTEXT_KEY, {})
         retry_of_run_id = payload.pop(self._RETRY_OF_RUN_KEY, None)
         retry_run_purpose = payload.pop(self._RETRY_PURPOSE_KEY, None)
-        retry_process_loss_count = payload.pop(
-            self._RETRY_PROCESS_LOSS_COUNT_KEY, 0
-        )
+        retry_process_loss_count = payload.pop(self._RETRY_PROCESS_LOSS_COUNT_KEY, 0)
         context_snapshot = {
             "triggeredBy": wakeup.requested_by_actor_type or "system",
             "actorId": wakeup.requested_by_actor_id or "parent_yield",
@@ -2715,9 +2137,7 @@ class HeartbeatService:
             **self._payload_context(payload),
             **(deferred_context if isinstance(deferred_context, dict) else {}),
         }
-        context_snapshot = await self._enrich_issue_context_snapshot(
-            context_snapshot
-        )
+        context_snapshot = await self._enrich_issue_context_snapshot(context_snapshot)
         run = await create_run(
             self._session,
             {
@@ -2758,9 +2178,7 @@ class HeartbeatService:
             },
         )
         issue_id = _issue_id_from_context(context_snapshot)
-        issue = (
-            await get_issue_by_id(self._session, issue_id) if issue_id else None
-        )
+        issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
         await self._claim_issue_execution_for_assignment_run(
             agent,
             run,
@@ -2979,9 +2397,6 @@ class HeartbeatService:
             async with runtime_callback_lock:
                 if running.execution_owner_token:
                     await self._session.refresh(running)
-                    if running.yield_requested_at is not None:
-                        cancellation.set()
-                        return
                     renewed = await renew_run_execution_lease(
                         self._session,
                         running.id,
@@ -2989,10 +2404,7 @@ class HeartbeatService:
                     )
                     if not renewed:
                         await self._session.refresh(running)
-                        if running.status in {
-                            "cancelled",
-                            "waiting_for_children",
-                        }:
+                        if running.status == "cancelled":
                             cancellation.set()
                             return
                         raise RuntimeError("Run execution lease was lost")
@@ -3171,8 +2583,6 @@ class HeartbeatService:
                 },
             )
             await self._session.refresh(running)
-            if running.status == "running" and running.yield_requested_at is not None:
-                return await self._finalize_parent_yield(running)
             if cancellation.is_set() and silence_timeout_error is None:
                 return running
             if running.status == "cancelled":
@@ -3272,7 +2682,6 @@ class HeartbeatService:
                     "failed",
                     "timed_out",
                     "cancelled",
-                    "waiting_for_children",
                 }:
                     raise RuntimeError("Run execution lease was lost")
                 final = current
@@ -3302,7 +2711,6 @@ class HeartbeatService:
                     "failed",
                     "timed_out",
                     "cancelled",
-                    "waiting_for_children",
                 }:
                     if running.terminal_effects_pending:
                         return await self._reconcile_terminal_effects(running)
@@ -3464,11 +2872,7 @@ class HeartbeatService:
                     else {}
                 )
                 wakeup_terminal_values: dict[str, Any] = {
-                    "status": (
-                        "completed"
-                        if final_status in {"succeeded", "waiting_for_children"}
-                        else final_status
-                    ),
+                    "status": "completed" if final_status == "succeeded" else final_status,
                     "finished_at": final.finished_at or datetime.now(UTC),
                     "error": final.error or getattr(result, "error_message", None),
                 }
@@ -3488,8 +2892,7 @@ class HeartbeatService:
                     agent.id,
                     {
                         "status": "idle"
-                        if final_status
-                        in {"succeeded", "waiting_for_children", "cancelled"}
+                        if final_status in {"succeeded", "cancelled"}
                         else "error"
                     },
                 )
@@ -3497,38 +2900,6 @@ class HeartbeatService:
                 await self._reconcile_failed_done_issue(agent, final)
             await self.finalizer.restore_system_blocked_issue_after_recovery(final)
             await self._release_issue_execution(final)
-            if final_status in {
-                "waiting_for_children",
-                "failed",
-                "timed_out",
-                "cancelled",
-            }:
-                parent_issue_id = _issue_id_from_context(final.context_snapshot)
-                parent_issue = (
-                    await get_issue_by_id(self._session, parent_issue_id)
-                    if parent_issue_id
-                    else None
-                )
-                if parent_issue is not None and parent_issue.org_id == final.org_id:
-                    if final_status == "waiting_for_children":
-                        await self._release_parent_deferred_wakeups(
-                            parent_issue, final.id
-                        )
-                    else:
-                        await self._discard_parent_deferred_wakeups(
-                            parent_issue,
-                            final.id,
-                            reason=(
-                                f"Parent Run ended as {final_status} before child "
-                                "handoff"
-                            ),
-                            child_status=(
-                                "cancelled"
-                                if final_status == "cancelled"
-                                else "blocked"
-                            ),
-                            hide_children=final_status == "cancelled",
-                        )
             context_after_final = (
                 final.context_snapshot
                 if isinstance(final.context_snapshot, dict)
@@ -3555,7 +2926,7 @@ class HeartbeatService:
                 ),
                 level=(
                     "info"
-                    if final_status in {"succeeded", "waiting_for_children"}
+                    if final_status == "succeeded"
                     else "error"
                 ),
                 idempotency_key=f"terminal-effect:outcome:{final_status}",
@@ -3648,7 +3019,6 @@ class HeartbeatService:
             "failed",
             "timed_out",
             "cancelled",
-            "waiting_for_children",
         }:
             if running.terminal_effects_pending:
                 reconciled = await self._reconcile_terminal_effects(running)
@@ -3967,24 +3337,14 @@ class HeartbeatService:
                 org_id=issue.org_id,
                 actor_type="system",
                 actor_id="heartbeat_child_coordination",
-                action="issue.waiting_for_children",
+                action="issue.children_running",
                 entity_type="issue",
                 entity_id=issue.id,
                 agent_id=final.agent_id,
                 run_id=final.id,
                 details={"runId": final.id},
             )
-            waiting = await update_run(
-                self._session,
-                final.id,
-                {
-                    "status": "waiting_for_children",
-                    "error": None,
-                    "error_code": None,
-                },
-            )
-            assert waiting is not None
-            return waiting
+            return final
         if (
             wake_reason == "issue_children_settled"
             and await self._block_parent_for_unresolved_blocked_children(final, issue)
@@ -4739,7 +4099,7 @@ class HeartbeatService:
     async def _restore_system_blocked_issue_after_recovery(
         self, final: HeartbeatRunRow
     ) -> bool:
-        if final.status not in {"running", "succeeded", "waiting_for_children"}:
+        if final.status not in {"running", "succeeded"}:
             return False
         recovery = (
             final.context_snapshot.get("recovery")
@@ -4967,7 +4327,6 @@ class HeartbeatService:
             "timed_out",
             "cancelled",
             "succeeded",
-            "waiting_for_children",
         }:
             values.update(
                 {
@@ -5031,7 +4390,6 @@ class HeartbeatService:
             "timed_out",
             "cancelled",
             "succeeded",
-            "waiting_for_children",
         }:
             await self._promote_deferred_issue_wakeup(final.org_id, issue.id)
         if issue is not None:
@@ -5765,9 +5123,6 @@ def heartbeat_run_to_data(row: HeartbeatRunRow) -> HeartbeatRun:
         "processExitedAt": (
             row.process_exited_at.isoformat() if row.process_exited_at else None
         ),
-        "yieldRequestedAt": (
-            row.yield_requested_at.isoformat() if row.yield_requested_at else None
-        ),
         "executionLeaseExpiresAt": (
             row.execution_lease_expires_at.isoformat()
             if row.execution_lease_expires_at
@@ -5908,7 +5263,7 @@ class WorkspacePreparationCoordinator:
             )
         finally:
             await _shielded_session_close(plan_session)
-        strategy = _workspace_preparation_strategy(plan)
+        strategy = workspace_access_strategy(plan)
         # The lock covers only the short Workspace transaction. It is released
         # before Adapter startup, so safe execution work can still run in parallel.
         lock = self._locks.setdefault(strategy.lock_key(plan), asyncio.Lock())
@@ -5938,127 +5293,6 @@ class WorkspacePreparationCoordinator:
                 finally:
                     await _shielded_session_close(session)
         return None
-
-
-class WorkspacePreparationStrategy:
-    prefix = "workspace"
-
-    def lock_key(self, plan: WorkspacePreparationPlan) -> str:
-        return f"{self.prefix}:{plan.coordination_key}"
-
-
-class SharedWorkspacePreparationStrategy(WorkspacePreparationStrategy):
-    prefix = "shared"
-
-
-class IsolatedWorkspacePreparationStrategy(WorkspacePreparationStrategy):
-    # Git mutates the source repository metadata while adding worktrees, so
-    # different issue worktrees coordinate on their common project workspace.
-    prefix = "isolated-source-repo"
-
-
-class OperatorBranchWorkspacePreparationStrategy(WorkspacePreparationStrategy):
-    prefix = "operator-branch"
-
-
-class AgentWorkspacePreparationStrategy(WorkspacePreparationStrategy):
-    prefix = "agent-workspace"
-
-
-def _workspace_preparation_strategy(
-    plan: WorkspacePreparationPlan,
-) -> WorkspacePreparationStrategy:
-    if plan.mode == "shared_workspace":
-        return SharedWorkspacePreparationStrategy()
-    if plan.mode == "isolated_workspace":
-        return IsolatedWorkspacePreparationStrategy()
-    if plan.mode == "operator_branch":
-        return OperatorBranchWorkspacePreparationStrategy()
-    return AgentWorkspacePreparationStrategy()
-
-
-class RunExecution:
-    """Own the database and service lifecycle for one claimed Run."""
-
-    def __init__(
-        self,
-        session_factory: async_sessionmaker[AsyncSession],
-        *,
-        run_id: str,
-        agent_id: str,
-    ) -> None:
-        self._session_factory = session_factory
-        self.run_id = run_id
-        self.agent_id = agent_id
-
-    async def run(self) -> str | None:
-        session = self._session_factory()
-        service = HeartbeatService(
-            session,
-            commit_process_metadata=True,
-            session_factory=self._session_factory,
-        )
-        session_closed = False
-        try:
-            final = await service.execute_claimed_run(self.run_id)
-            reviewer_agent_id = await self._reviewer_to_dispatch(session, final)
-            await _commit_session_before_cleanup(session)
-            return reviewer_agent_id
-        except RunExecutionFinalizationError as failure:
-            await _shielded_session_rollback(session)
-            await _shielded_session_close(session)
-            session_closed = True
-            for attempt in range(
-                1, WorkspacePreparationCoordinator.MAX_SQLITE_ATTEMPTS + 1
-            ):
-                clean_session = self._session_factory()
-                try:
-                    clean_service = HeartbeatService(
-                        clean_session, commit_process_metadata=True
-                    )
-                    await clean_service.finalize_unhandled_execution_failure(failure)
-                    return None
-                except Exception as exc:
-                    await _shielded_session_rollback(clean_session)
-                    if (
-                        not _is_sqlite_database_locked_error(exc)
-                        or attempt
-                        >= WorkspacePreparationCoordinator.MAX_SQLITE_ATTEMPTS
-                    ):
-                        raise
-                    await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
-                except BaseException:
-                    await _shielded_session_rollback(clean_session)
-                    raise
-                finally:
-                    await _shielded_session_close(clean_session)
-            return None
-        except BaseException:
-            await _shielded_session_rollback(session)
-            raise
-        finally:
-            if not session_closed:
-                await _shielded_session_close(session)
-
-    async def _reviewer_to_dispatch(
-        self, session: AsyncSession, final: HeartbeatRun | None
-    ) -> str | None:
-        if (
-            final is None
-            or final["status"] != "succeeded"
-            or final["invocationSource"] != "assignment"
-        ):
-            return None
-        issue_id = _issue_id_from_context(final.get("contextSnapshot"))
-        issue = await get_issue_by_id(session, issue_id) if issue_id else None
-        if (
-            issue is None
-            or issue.status != "in_review"
-            or not issue.reviewer_agent_id
-            or issue.reviewer_agent_id == self.agent_id
-        ):
-            return None
-        return issue.reviewer_agent_id
 
 
 def track_dispatch_task(tasks: set[asyncio.Task[Any]], task: asyncio.Task[Any]) -> None:
@@ -6114,7 +5348,7 @@ async def dispatch_queued_agent(
         reviewer_agent_id
         for reviewer_agent_id in await asyncio.gather(
             *(
-                RunExecution(
+                RunExecutionService(
                     session_factory,
                     run_id=run_id,
                     agent_id=agent_id,

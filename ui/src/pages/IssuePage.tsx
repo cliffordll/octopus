@@ -212,7 +212,7 @@ function isRerunnableRun(status?: string | null): boolean {
 }
 
 function isTerminalRun(status?: string | null): boolean {
-  return status === "succeeded" || status === "waiting_for_children" || isRerunnableRun(status);
+  return status === "succeeded" || isRerunnableRun(status);
 }
 
 function heartbeatRunId(run: HeartbeatRun | null | undefined): string {
@@ -1570,7 +1570,7 @@ function issueRunCostSummary(runs: HeartbeatRun[]): {
 
         summary.reportedRuns += 1;
 
-      } else if (run.usageJson || ["waiting_for_children", "succeeded", "failed", "cancelled", "timed_out"].includes(run.status)) {
+      } else if (run.usageJson || ["succeeded", "failed", "cancelled", "timed_out"].includes(run.status)) {
         summary.unreportedRuns += 1;
 
       }

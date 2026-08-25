@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import uuid
 from typing import Any, cast
 
@@ -21,7 +20,6 @@ from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
     ISSUE_CHILDREN_BATCH_PATH,
     ISSUE_CHILDREN_PATH,
-    ISSUE_YIELD_CHILDREN_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DOCUMENT_DETAIL_PATH,
     ISSUE_DOCUMENT_REVISIONS_PATH,
@@ -40,7 +38,6 @@ from packages.shared.api_paths.issues import (
     WORK_PRODUCT_DETAIL_PATH,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
-from packages.shared.types.agent import Agent
 from packages.shared.types.issue import (
     DocumentRevision,
     IssueDetail,
@@ -87,6 +84,8 @@ from ..services.heartbeat import (
     track_dispatch_task,
 )
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
+from ..services.child_dispatch import ChildDispatchCoordinator
+from ..services.issue_comment_wakeup import IssueCommentWakeupCoordinator
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
 from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
@@ -95,7 +94,6 @@ from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
-_MENTION_PATTERN = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -109,10 +107,6 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
     request.app.state.heartbeat_dispatch_tasks = tasks
     track_dispatch_task(tasks, task)
-
-
-def _mentioned_tokens(body: str) -> set[str]:
-    return {match.group(1).strip().lower() for match in _MENTION_PATTERN.finditer(body)}
 
 
 def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
@@ -136,69 +130,6 @@ def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
     if wakeup.status == "skipped" and wakeup.error:
         return f"Issue execution was skipped: {wakeup.error}"
     return "Issue assignee is not invokable"
-
-
-async def _mentioned_agents(
-    agent_service: AgentService, org_id: str, body: str
-) -> list[Agent]:
-    tokens = _mentioned_tokens(body)
-    if not tokens:
-        return []
-    agents = await agent_service.list_for_org(org_id)
-    mentioned: list[Agent] = []
-    for agent in agents:
-        aliases = {
-            value.lower()
-            for value in (agent["id"], agent["name"], agent["urlKey"])
-            if isinstance(value, str) and value
-        }
-        if tokens & aliases:
-            mentioned.append(agent)
-    return mentioned
-
-
-async def _queue_issue_comment_mention_wakeup(
-    heartbeat: HeartbeatService,
-    issue: IssueDetail,
-    *,
-    mentioned_agent_id: str,
-    comment_id: str,
-    comment_body: str,
-    actor_type: str,
-    actor_id: str,
-) -> None:
-    payload: WakeAgentPayload = {
-        "source": "on_demand",
-        "triggerDetail": "system",
-        "reason": "issue_comment_mentioned",
-        "payload": {
-            "issueId": issue["id"],
-            "mutation": "comment_mention",
-            "commentId": comment_id,
-        },
-        "contextSnapshot": {
-            "issueId": issue["id"],
-            "source": "issue.comment",
-            "wakeSource": "mention",
-            "wakeReason": "issue_comment_mentioned",
-            "commentId": comment_id,
-            "commentBody": comment_body,
-            "issue": {
-                "id": issue["id"],
-                "title": issue["title"],
-                "description": issue.get("description"),
-                "status": issue["status"],
-                "priority": issue["priority"],
-            },
-        },
-    }
-    await heartbeat.wakeup(
-        mentioned_agent_id,
-        payload,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        execute_immediately=False,
-    )
 
 
 @router.get(ISSUE_LIST_MISSING_ORG_PATH)
@@ -343,18 +274,6 @@ async def create_issue_children_route(
     canonical_parent_id = access_parent["id"]
     await service.end_child_batch_preflight()
     try:
-        parent_run_id = (
-            actor.run_id
-            if await heartbeat.is_active_parent_run(
-                canonical_parent_id,
-                actor.run_id,
-                expected_org_id=access_parent["orgId"],
-                expected_agent_id=(
-                    actor.actor_id if actor.actor_type == "agent" else None
-                ),
-            )
-            else None
-        )
         parent, children, created = await service.create_child_issues(
             canonical_parent_id,
             payload,
@@ -362,25 +281,15 @@ async def create_issue_children_route(
             actor_id=actor.actor_id,
             run_id=actor.run_id,
         )
-        dispatch_agent_ids: set[str] = set()
-        if created or parent_run_id is not None:
-            for child in children:
-                if not created and child["status"] not in {"todo", "in_progress"}:
-                    continue
-                await queue_issue_assignment_wakeup(
-                    heartbeat,
-                    child,
-                    reason="issue_assigned",
-                    mutation="create_children_batch",
-                    context_source="issue.children_batch",
-                    actor_type="agent" if actor.actor_type == "agent" else "user",
-                    actor_id=actor.actor_id,
-                    defer_until_parent_run_id=parent_run_id,
-                    suppress_errors=False,
-                )
-                assignee_agent_id = child.get("assigneeAgentId")
-                if assignee_agent_id and parent_run_id is None:
-                    dispatch_agent_ids.add(assignee_agent_id)
+        dispatch = await ChildDispatchCoordinator(
+            heartbeat,
+            queue_assignment=queue_issue_assignment_wakeup,
+        ).materialize(
+            children,
+            created=created,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
         await service.commit_child_issues()
     except ValueError as exc:
         status_code = (
@@ -392,57 +301,13 @@ async def create_issue_children_route(
             status_code=status_code,
             detail=str(exc),
         ) from exc
-    for agent_id in dispatch_agent_ids:
+    for agent_id in dispatch.agent_ids:
         _schedule_dispatch(request, agent_id)
     return {
         "parent": parent,
         "children": children,
         "created": created,
-        "yieldRequired": parent_run_id is not None,
-        "yieldCommand": (
-            f"octopus issue yield-children {parent['identifier'] or parent['id']}"
-            if parent_run_id is not None
-            else None
-        ),
-    }
-
-
-@router.post(ISSUE_YIELD_CHILDREN_PATH)
-async def yield_issue_children_route(
-    id: str,
-    request: Request,
-    service: IssueService = Depends(get_issue_service),
-    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
-) -> dict[str, Any]:
-    actor = require_actor_identity(request)
-    parent = await service.get_by_id(id)
-    if parent is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND,
-            detail="Parent issue not found",
-        )
-    assert_organization_access(request, parent["orgId"])
-    if actor.actor_type != "agent" or not actor.run_id:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail="Only the active parent Run can yield to child issues",
-        )
-    await service.end_child_batch_preflight()
-    try:
-        yielding, _ = await heartbeat.yield_parent_to_children(
-            parent["id"], actor.run_id, actor_agent_id=actor.actor_id
-        )
-        await service.commit_child_issues()
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=http_status.HTTP_409_CONFLICT,
-            detail=str(exc),
-        ) from exc
-    heartbeat.signal_run_stop(actor.run_id)
-    return {
-        "status": "yield_requested",
-        "runId": yielding.id,
-        "releasedChildAgentIds": [],
+        "dispatchAgentIds": list(dispatch.agent_ids),
     }
 
 
@@ -542,30 +407,14 @@ async def retry_child_issue_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
-    parent_run_id = None
-    parent_id = detail.get("parentId")
-    if isinstance(parent_id, str) and await heartbeat.is_active_parent_run(
-        parent_id,
-        actor.run_id,
-        expected_org_id=detail["orgId"],
-        expected_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
-    ):
-        parent_run_id = actor.run_id
     retried = await heartbeat.retry_run(
         str(failed["runId"]),
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         execute_immediately=False,
         recovery_trigger="manual",
-        defer_until_parent_run_id=parent_run_id,
     )
     if retried is None:
-        if parent_run_id and heartbeat.last_deferred_wakeup_id:
-            return {
-                "status": "deferred_parent_yield",
-                "wakeupRequestId": heartbeat.last_deferred_wakeup_id,
-                "retryOfRunId": str(failed["runId"]),
-            }
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found"
         )
@@ -638,16 +487,6 @@ async def replace_child_issue_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
-    parent_run_id = (
-        actor.run_id
-        if await heartbeat.is_active_parent_run(
-            parent_id,
-            actor.run_id,
-            expected_org_id=old_child["orgId"],
-            expected_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
-        )
-        else None
-    )
     await queue_issue_assignment_wakeup(
         heartbeat,
         replacement,
@@ -656,11 +495,10 @@ async def replace_child_issue_route(
         context_source="issue.replace_child",
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
-        defer_until_parent_run_id=parent_run_id,
         suppress_errors=False,
     )
     assignee_agent_id = replacement.get("assigneeAgentId")
-    if assignee_agent_id and parent_run_id is None:
+    if assignee_agent_id:
         _schedule_dispatch(request, assignee_agent_id)
     return replacement
 
@@ -1198,6 +1036,7 @@ async def create_issue_comment_route(
     service: IssueService = Depends(get_issue_service),
     agent_service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    session: AsyncSession = Depends(get_session),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     detail = await service.get_by_id(id)
@@ -1215,66 +1054,37 @@ async def create_issue_comment_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    comment = await service.add_comment(
-        id,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-        run_id=actor.run_id,
-    )
-    user_intervention_stopped_followup = (
-        actor.actor_type != "agent"
-        and await heartbeat.skip_scheduled_issue_passive_followups(
+    try:
+        comment = await service.add_comment(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if actor.actor_type != "agent":
+        await heartbeat.skip_scheduled_issue_passive_followups(
             id,
             reason="Issue has user comment after missing closeout",
         )
+    wakeup_result = await IssueCommentWakeupCoordinator(
+        session,
+        heartbeat,
+        agent_service,
+    ).process(
+        issue=detail,
+        comment_id=comment.id,
+        comment_body=comment.body,
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
     )
-    mentioned_agents = await _mentioned_agents(
-        agent_service, detail["orgId"], comment.body
-    )
-    mentioned_agent_ids = {mentioned["id"] for mentioned in mentioned_agents}
-    assignee_agent_id = detail.get("assigneeAgentId")
-    issue_status = detail.get("status")
-    skip_assignee_comment_wakeup = issue_status in {"backlog", "done", "cancelled"}
-    comment_targets_assignee = not mentioned_agent_ids or (
-        assignee_agent_id is not None and assignee_agent_id in mentioned_agent_ids
-    )
-    queued_assignee_wakeup = not (
-        user_intervention_stopped_followup
-        or skip_assignee_comment_wakeup
-        or not comment_targets_assignee
-        or (actor.actor_type == "agent" and actor.actor_id == assignee_agent_id)
-    )
-    if queued_assignee_wakeup:
-        await queue_issue_assignment_wakeup(
-            heartbeat,
-            detail,
-            reason="issue_comment_added",
-            mutation="comment",
-            context_source="issue.comment",
-            actor_type="agent" if actor.actor_type == "agent" else "user",
-            actor_id=actor.actor_id,
-            extra_payload={"commentId": comment.id},
-            extra_context={"commentId": comment.id, "commentBody": comment.body},
-        )
-        if assignee_agent_id:
-            _schedule_dispatch(request, assignee_agent_id)
-    for mentioned in mentioned_agents:
-        mentioned_agent_id = mentioned["id"]
-        if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
-            continue
-        if queued_assignee_wakeup and mentioned_agent_id == assignee_agent_id:
-            continue
-        await _queue_issue_comment_mention_wakeup(
-            heartbeat,
-            detail,
-            mentioned_agent_id=mentioned_agent_id,
-            comment_id=comment.id,
-            comment_body=comment.body,
-            actor_type="agent" if actor.actor_type == "agent" else "user",
-            actor_id=actor.actor_id,
-        )
-        _schedule_dispatch(request, mentioned_agent_id)
+    for agent_id in wakeup_result.dispatch_agent_ids:
+        _schedule_dispatch(request, agent_id)
     return {
         "id": comment.id,
         "issueId": comment.issue_id,

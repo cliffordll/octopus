@@ -268,7 +268,6 @@ def test_heartbeat_contract_modules_define_execution_boundary() -> None:
     assert constants.HEARTBEAT_RUN_STATUSES == (
         "queued",
         "running",
-        "waiting_for_children",
         "succeeded",
         "failed",
         "cancelled",
@@ -2625,7 +2624,7 @@ async def test_scheduled_passive_followup_skips_after_user_comment(
     assert runs == []
 
 
-async def test_issue_comment_skips_scheduled_passive_followup_without_assignment_wakeup(
+async def test_issue_comment_skips_passive_followup_and_queues_comment_instruction(
     app: FastAPI,
     session_factory: async_sessionmaker,
     monkeypatch: pytest.MonkeyPatch,
@@ -2704,7 +2703,8 @@ async def test_issue_comment_skips_scheduled_passive_followup_without_assignment
     assert len(closeout_wakeups) == 1
     assert closeout_wakeups[0].status == "skipped"
     assert closeout_wakeups[0].error == "Issue has user comment after missing closeout"
-    assert comment_wakeups == []
+    assert len(comment_wakeups) == 1
+    assert comment_wakeups[0].status == "queued"
 
 
 async def test_issue_passive_followup_endpoint_rejects_after_user_comment(

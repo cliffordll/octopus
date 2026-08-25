@@ -3035,7 +3035,7 @@ async def test_postgres_concurrent_last_children_queue_one_parent_continuation()
         await engine.dispose()
 
 
-async def test_parent_run_with_active_children_is_valid_stage_closeout() -> None:
+async def test_parent_run_with_active_children_finishes_without_closing_issue() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3106,11 +3106,12 @@ async def test_parent_run_with_active_children_is_valid_stage_closeout() -> None
             await session.refresh(agent)
             await session.refresh(parent)
 
-            assert final.status == "waiting_for_children"
+            assert final.status == "succeeded"
             assert final.error_code is None
             assert wakeup.status == "completed"
             assert agent.status == "idle"
             assert parent.execution_run_id is None
+            assert parent.status == "in_progress"
     finally:
         await engine.dispose()
 

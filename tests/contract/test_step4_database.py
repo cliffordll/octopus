@@ -270,11 +270,10 @@ async def test_run_recovery_migration_repairs_partially_materialized_schema(
             "select id, idempotency_key from agent_wakeup_requests order by id"
         ).fetchall()
 
-    assert revision == ("20260824_000028",)
+    assert revision == ("20260825_000029",)
     assert "process_exited_at" in run_columns
     assert "execution_owner_token" in run_columns
     assert "terminal_effects_pending" in run_columns
-    assert "yield_requested_at" in run_columns
     assert "last_heartbeat_check_at" in agent_columns
     assert wakeup_keys == [
         ("newer-wakeup", "duplicate-key"),

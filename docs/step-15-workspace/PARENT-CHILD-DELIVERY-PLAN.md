@@ -24,7 +24,7 @@ Octopus 已经具备主干机制：
 - 子任务会继承父任务的 project 和 workspace preference。
 - runtime prompt 已要求产品可见的拆分工作必须创建真实 Octopus child issue。
 - 父任务在子任务仍 open 时不能 `done`。
-- 父任务可以进入 `waiting_for_children`。
+- 父 Run 创建子任务后可以继续执行并正常结束；父 Issue 在子任务活动期间保持 `in_progress`。
 - 子任务进入 `done`、`blocked`、`cancelled` 后，平台会检查父任务下是否仍有 active child。
 - 如果没有 active child，平台会用 `wakeReason=issue_children_settled` 唤醒父任务。
 - 每个 issue 都可以持久化自己的 work products。
@@ -273,8 +273,8 @@ issue run 只有留下真实 control-plane closeout 信号，才可以视为完�
 
 1. 主任务被派发。
 2. 主任务创建 4 个 child issues。
-3. 主任务 comment 进展并退出。
-4. 主任务进入 `waiting_for_children`。
+3. 主任务可以继续 comment、处理用户指令或正常结束当前 Run。
+4. 子任务立即并发执行，父 Issue 保持 `in_progress`。
 5. 每个 child 在共享约定路径或 artifacts 中生成自己的报告，并登记为各自 work product 后 `done`。
 6. 最后一个 child settle 后，平台用 `issue_children_settled` 唤醒主任务。
 7. 主任务读取 child outputs，生成最终汇总报告，并标记为父任务 primary deliverable。

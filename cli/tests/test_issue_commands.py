@@ -226,22 +226,6 @@ def test_issue_create_children_reads_atomic_batch_from_utf8_file(
     assert json.loads(requests[0].read()) == {"children": children}
 
 
-def test_issue_yield_children_releases_parent_run() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json={"status": "waiting_for_children", "runId": "run-parent"},
-        )
-
-    client = ApiClient(transport=httpx.MockTransport(handler))
-    assert main(["issue", "yield-children", "PARENT-1"], client=client) == 0
-    assert requests[0].method == "POST"
-    assert requests[0].url.path == "/api/issues/PARENT-1/yield-children"
-
-
 def test_issue_create_accepts_body_alias_for_description() -> None:
     requests: list[httpx.Request] = []
 
@@ -640,6 +624,9 @@ def test_api_client_attaches_runtime_actor_headers(
         assert request.headers["x-test-agent-id"] == "agent-1"
         assert request.headers["x-test-org-id"] == "org-1"
         assert request.headers["x-octopus-run-id"] == "run-1"
+        payload = json.loads(request.read())
+        assert payload["body"] == "Progress"
+        assert payload["requestId"].startswith("run-comment:")
         return httpx.Response(200, json={"id": "issue-1"})
 
     assert (
