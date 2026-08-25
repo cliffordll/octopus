@@ -33,6 +33,8 @@ from packages.database.schema import (
     IssueComment,
 )
 from packages.shared.constants.issue import (
+    DEFAULT_DELEGATION_CLOSEOUT_MODE,
+    DelegationCloseoutMode,
     IssueOriginKind,
     IssuePriority,
     IssueStatus,
@@ -54,6 +56,7 @@ from packages.shared.types.issue_attachment import (
     IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
+from .delegation_closeout import DELEGATION_ORIGIN_KIND, DelegationBatchStore
 from .documents import DocumentService
 from .goals import GoalService
 
@@ -201,21 +204,31 @@ class IssueService:
         return await self._to_detail(row)
 
     async def get_child_outputs(
-        self, issue_id: str, *, include_work_products: bool = False
+        self,
+        issue_id: str,
+        *,
+        include_work_products: bool = False,
+        delegation_origin_run_id: str | None = None,
     ) -> dict[str, Any] | None:
         parent = await get_issue_by_id(self._session, issue_id)
         if parent is None:
             return None
+        criteria = [
+            Issue.org_id == parent.org_id,
+            Issue.parent_id == parent.id,
+            Issue.hidden_at.is_(None),
+        ]
+        if delegation_origin_run_id is not None:
+            criteria.extend(
+                (
+                    Issue.origin_kind == DELEGATION_ORIGIN_KIND,
+                    Issue.origin_run_id == delegation_origin_run_id,
+                )
+            )
         children = (
             (
                 await self._session.execute(
-                    select(Issue)
-                    .where(
-                        Issue.org_id == parent.org_id,
-                        Issue.parent_id == parent.id,
-                        Issue.hidden_at.is_(None),
-                    )
-                    .order_by(Issue.created_at, Issue.id)
+                    select(Issue).where(*criteria).order_by(Issue.created_at, Issue.id)
                 )
             )
             .scalars()
@@ -230,6 +243,8 @@ class IssueService:
             item.update(
                 {
                     "parentId": child.parent_id,
+                    "originRunId": child.origin_run_id,
+                    "closeoutMode": child.closeout_mode,
                     "assigneeUserId": child.assignee_user_id,
                     "reviewerAgentId": child.reviewer_agent_id,
                     "reviewerUserId": child.reviewer_user_id,
@@ -268,6 +283,8 @@ class IssueService:
                 child_items, parent_status=parent.status
             ),
             "includeWorkProducts": include_work_products,
+            "delegationOriginRunId": delegation_origin_run_id,
+            "closeoutMode": (children[0].closeout_mode if children else None),
         }
 
     async def create_child_issues(
@@ -307,25 +324,13 @@ class IssueService:
         if parent is None:
             raise ValueError("Parent issue not found")
 
-        existing = (
-            (
-                await self._session.execute(
-                    select(Issue)
-                    .where(
-                        Issue.org_id == parent.org_id,
-                        Issue.parent_id == parent.id,
-                        Issue.hidden_at.is_(None),
-                    )
-                    .order_by(Issue.issue_number, Issue.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if existing:
+        existing_batch = await DelegationBatchStore(
+            self._session
+        ).existing_for_creation(parent, origin_run_id=run_id)
+        if existing_batch is not None:
             return (
                 await self._to_detail(parent),
-                [await self._to_detail(child) for child in existing],
+                [await self._to_detail(child) for child in existing_batch.children],
                 False,
             )
 
@@ -359,6 +364,7 @@ class IssueService:
             )
 
         children: list[IssueDetail] = []
+        closeout_mode = payload.get("closeoutMode", DEFAULT_DELEGATION_CLOSEOUT_MODE)
         for child in payload["children"]:
             child_payload: CreateIssuePayload = {
                 **child,
@@ -372,6 +378,9 @@ class IssueService:
                     actor_type=actor_type,
                     actor_id=actor_id,
                     run_id=run_id,
+                    origin_run_id=run_id,
+                    closeout_mode=closeout_mode,
+                    origin_kind=DELEGATION_ORIGIN_KIND,
                 )
             )
 
@@ -388,6 +397,8 @@ class IssueService:
                 "childIssueIds": [child["id"] for child in children],
                 "childCount": len(children),
                 "mode": "atomic_batch",
+                "originRunId": run_id,
+                "closeoutMode": closeout_mode,
             },
         )
         return await self._to_detail(parent), children, True
@@ -464,6 +475,9 @@ class IssueService:
         actor_type: str,
         actor_id: str,
         run_id: str | None = None,
+        origin_run_id: str | None = None,
+        closeout_mode: DelegationCloseoutMode | None = None,
+        origin_kind: IssueOriginKind | None = None,
     ) -> IssueDetail:
         values = {
             ISSUE_CREATE_TO_COLUMN[key]: value
@@ -471,6 +485,12 @@ class IssueService:
             if key in ISSUE_CREATE_TO_COLUMN
         }
         values["org_id"] = org_id
+        if origin_run_id is not None:
+            values["origin_run_id"] = origin_run_id
+        if closeout_mode is not None:
+            values["closeout_mode"] = closeout_mode
+        if origin_kind is not None:
+            values["origin_kind"] = origin_kind
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
@@ -763,16 +783,21 @@ class IssueService:
         title = values.get("title")
         if actor_type != "agent" or not parent_id or not isinstance(title, str):
             return None
-        result = await self._session.execute(
-            select(Issue)
-            .where(
-                Issue.org_id == values["org_id"],
-                Issue.parent_id == parent_id,
-                Issue.title == title,
-                Issue.hidden_at.is_(None),
+        criteria = [
+            Issue.org_id == values["org_id"],
+            Issue.parent_id == parent_id,
+            Issue.title == title,
+            Issue.hidden_at.is_(None),
+        ]
+        if values.get("origin_kind") == DELEGATION_ORIGIN_KIND:
+            criteria.extend(
+                (
+                    Issue.origin_kind == DELEGATION_ORIGIN_KIND,
+                    Issue.origin_run_id == values.get("origin_run_id"),
+                )
             )
-            .order_by(Issue.created_at, Issue.id)
-            .limit(1)
+        result = await self._session.execute(
+            select(Issue).where(*criteria).order_by(Issue.created_at, Issue.id).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -896,7 +921,12 @@ class IssueService:
         )
         return await self._to_detail(row)
 
-    async def get_heartbeat_context(self, issue_id: str) -> dict[str, Any] | None:
+    async def get_heartbeat_context(
+        self,
+        issue_id: str,
+        *,
+        delegation_origin_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
         detail = await self.get_by_id(issue_id)
         if detail is None:
             return None
@@ -913,11 +943,24 @@ class IssueService:
         child_primary_work_products = _child_primary_work_products(
             aggregated_work_products
         )
-        child_work_products_prompt = _build_child_work_products_prompt(
-            child_primary_work_products
-        )
         child_outputs = await self.get_child_outputs(
-            issue_id, include_work_products=True
+            issue_id,
+            include_work_products=True,
+            delegation_origin_run_id=delegation_origin_run_id,
+        )
+        closeout_mode = child_outputs.get("closeoutMode") if child_outputs else None
+        if delegation_origin_run_id is not None and child_outputs is not None:
+            batch_child_ids = {
+                str(child.get("id")) for child in child_outputs.get("children", [])
+            }
+            child_primary_work_products = [
+                product
+                for product in child_primary_work_products
+                if str(product.get("sourceIssueId")) in batch_child_ids
+            ]
+        child_work_products_prompt = _build_child_work_products_prompt(
+            child_primary_work_products,
+            closeout_mode=closeout_mode,
         )
         blocked_child_issues = _blocked_child_issues(
             child_outputs.get("children", []) if child_outputs else []
@@ -954,6 +997,8 @@ class IssueService:
             if child_outputs
             else "no_children",
             "blockedChildIssues": blocked_child_issues,
+            "delegationOriginRunId": delegation_origin_run_id,
+            "closeoutMode": closeout_mode,
             "wakeComment": None,
         }
 
@@ -1258,13 +1303,15 @@ def _child_primary_work_products(
 
 def _build_child_work_products_prompt(
     child_primary_work_products: Sequence[Mapping[str, Any]],
+    *,
+    closeout_mode: object = None,
 ) -> str:
     if not child_primary_work_products:
         return ""
     lines = [
         "## Child Primary Work Products",
         "",
-        "Direct child issues have completed and exposed these primary deliverables. Use them as source material for the parent issue's final deliverable.",
+        "Direct child issues have completed and exposed these primary deliverables.",
     ]
     for product in child_primary_work_products:
         child_label = str(
@@ -1282,13 +1329,22 @@ def _build_child_work_products_prompt(
         if location:
             line += f" ({location})"
         lines.append(line)
-    lines.extend(
-        [
-            "",
-            "Create a parent-owned final report or deliverable that synthesizes these child outputs. Do not merely point the user at child task artifacts.",
-            "Write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md` so Octopus can register it as this parent issue's own primary work product. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work. Then close out the parent issue.",
-        ]
-    )
+    if closeout_mode == "child_outputs":
+        lines.extend(
+            [
+                "",
+                "These child deliverables are the final outputs for this delegation batch. Verify them and close the parent issue without creating a duplicate parent summary artifact.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Use them as source material for the parent issue's final deliverable.",
+                "Create a parent-owned final report or deliverable that synthesizes these child outputs. Do not merely point the user at child task artifacts.",
+                "Write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md` so Octopus can register it as this parent issue's own primary work product. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work. Then close out the parent issue.",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -1423,6 +1479,8 @@ def _to_detail(row: Issue) -> IssueDetail:
         parentId=row.parent_id,
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
+        originRunId=row.origin_run_id,
+        closeoutMode=cast(DelegationCloseoutMode | None, row.closeout_mode),
         issueNumber=row.issue_number,
         requestDepth=row.request_depth,
         startedAt=row.started_at.isoformat() if row.started_at else None,

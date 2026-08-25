@@ -181,7 +181,10 @@ def test_issue_create_children_submits_one_atomic_batch() -> None:
     )
 
     assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
-    assert json.loads(requests[0].read()) == {"children": children}
+    assert json.loads(requests[0].read()) == {
+        "children": children,
+        "closeoutMode": "parent_summary",
+    }
 
 
 def test_issue_create_children_reads_atomic_batch_from_utf8_file(
@@ -223,7 +226,35 @@ def test_issue_create_children_reads_atomic_batch_from_utf8_file(
     )
 
     assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
-    assert json.loads(requests[0].read()) == {"children": children}
+    assert json.loads(requests[0].read()) == {
+        "children": children,
+        "closeoutMode": "parent_summary",
+    }
+
+
+def test_issue_create_children_accepts_child_outputs_closeout_mode() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"created": True, "children": []})
+
+    assert (
+        main(
+            [
+                "issue",
+                "create-children",
+                "PARENT-1",
+                "--children-json",
+                '[{"title":"Guide","assigneeAgentId":"agent-1"}]',
+                "--closeout-mode",
+                "child_outputs",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+    assert json.loads(requests[0].read())["closeoutMode"] == "child_outputs"
 
 
 def test_issue_create_accepts_body_alias_for_description() -> None:

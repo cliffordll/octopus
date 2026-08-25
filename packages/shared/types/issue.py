@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-from ..constants.issue import IssueOriginKind, IssuePriority, IssueStatus
+from ..constants.issue import (
+    DelegationCloseoutMode,
+    IssueOriginKind,
+    IssuePriority,
+    IssueStatus,
+)
 from .workspace import IssueWorkProduct
 
 
@@ -68,6 +73,8 @@ class IssueDetail(IssueListItem):
     parentId: str | None
     originKind: IssueOriginKind
     originId: str | None
+    originRunId: str | None
+    closeoutMode: DelegationCloseoutMode | None
     issueNumber: int | None
     requestDepth: int
     startedAt: str | None
@@ -113,6 +120,7 @@ class CreateIssuePayload(TypedDict):
 
 
 class CreateChildIssuesPayload(TypedDict):
+    closeoutMode: DelegationCloseoutMode
     children: list[CreateIssuePayload]
 
 

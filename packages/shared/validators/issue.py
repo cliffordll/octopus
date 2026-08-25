@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from ..constants.issue import (
+    DEFAULT_DELEGATION_CLOSEOUT_MODE,
+    DELEGATION_CLOSEOUT_MODES,
     ISSUE_ORIGIN_KINDS,
     ISSUE_PRIORITIES,
     ISSUE_STATUSES,
@@ -182,7 +184,12 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
 def validate_create_child_issues(
     payload: Mapping[str, Any],
 ) -> CreateChildIssuesPayload:
-    _reject_unknown_fields(payload, allowed_fields={"children"})
+    _reject_unknown_fields(payload, allowed_fields={"children", "closeoutMode"})
+    closeout_mode = payload.get("closeoutMode", DEFAULT_DELEGATION_CLOSEOUT_MODE)
+    if closeout_mode not in DELEGATION_CLOSEOUT_MODES:
+        raise ValueError(
+            f"'closeoutMode' must be one of {list(DELEGATION_CLOSEOUT_MODES)}"
+        )
     children = payload.get("children")
     if not isinstance(children, list) or not children:
         raise ValueError("'children' is required and must be a non-empty list")
@@ -210,7 +217,10 @@ def validate_create_child_issues(
                 f"'children[{index}].title' duplicates another child in this batch"
             )
         seen_titles.add(normalized_title)
-    return cast(CreateChildIssuesPayload, {"children": validated})
+    return cast(
+        CreateChildIssuesPayload,
+        {"closeoutMode": closeout_mode, "children": validated},
+    )
 
 
 def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:

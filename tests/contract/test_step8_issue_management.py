@@ -610,6 +610,67 @@ async def test_create_children_batch_is_single_winner_across_sqlite_sessions(
         await engine.dispose()
 
 
+async def test_create_children_batch_scopes_retries_to_parent_run(
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="Worker",
+                role="engineer",
+            )
+        )
+
+    payload = {
+        "closeoutMode": "child_outputs",
+        "children": [{"title": "Same title", "assigneeAgentId": agent_id}],
+    }
+    first_parent_run_id = str(uuid.uuid4())
+    second_parent_run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        _parent, first, first_created = await IssueService(session).create_child_issues(
+            parent_id,
+            payload,
+            actor_type="agent",
+            actor_id=str(uuid.uuid4()),
+            run_id=first_parent_run_id,
+        )
+    async with async_transaction(session):
+        _parent, replay, replay_created = await IssueService(
+            session
+        ).create_child_issues(
+            parent_id,
+            payload,
+            actor_type="agent",
+            actor_id=str(uuid.uuid4()),
+            run_id=first_parent_run_id,
+        )
+    async with async_transaction(session):
+        _parent, second, second_created = await IssueService(
+            session
+        ).create_child_issues(
+            parent_id,
+            payload,
+            actor_type="agent",
+            actor_id=str(uuid.uuid4()),
+            run_id=second_parent_run_id,
+        )
+
+    assert first_created is True
+    assert replay_created is False
+    assert second_created is True
+    assert replay[0]["id"] == first[0]["id"]
+    assert second[0]["id"] != first[0]["id"]
+    assert first[0]["originRunId"] == first_parent_run_id
+    assert second[0]["originRunId"] == second_parent_run_id
+    assert first[0]["closeoutMode"] == "child_outputs"
+
+
 async def test_create_children_batch_rolls_back_if_any_wakeup_fails(
     app: FastAPI,
     session: AsyncSession,
@@ -787,6 +848,7 @@ async def test_parent_run_and_children_are_dispatchable_concurrently(
         f"/api/issues/{parent_id}/children/batch",
         headers=headers,
         json={
+            "closeoutMode": "child_outputs",
             "children": [
                 {
                     "title": "Child A",
@@ -796,11 +858,13 @@ async def test_parent_run_and_children_are_dispatchable_concurrently(
                     "title": "Child B",
                     "assigneeAgentId": child_agent_ids[1],
                 },
-            ]
+            ],
         },
     )
 
     assert create_code == 200
+    assert {child["originRunId"] for child in created["children"]} == {parent_run_id}
+    assert {child["closeoutMode"] for child in created["children"]} == {"child_outputs"}
     assert created["dispatchAgentIds"] == sorted(child_agent_ids)
     assert set(scheduled) == set(child_agent_ids)
     async with session_factory() as verify:
@@ -2818,6 +2882,175 @@ async def test_issue_comment_on_closed_issue_does_not_queue_assignee_wakeup(
             .scalars()
             .all()
         )
+    assert wakeups == []
+
+
+async def test_user_mention_reopens_done_issue_and_queues_assignee_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="closed-owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="done",
+        assignee_agent_id=agent_id,
+    )
+    async with async_transaction(session):
+        issue = await session.get(Issue, issue_id)
+        assert issue is not None
+        issue.completed_at = datetime.now(UTC)
+
+    create_code, create_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@closed-owner 请继续补充旅游计划"},
+    )
+
+    assert create_code == 200
+    async with session_factory() as verify:
+        issue = await verify.get(Issue, issue_id)
+        wakeup = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.reason == "issue_comment_mentioned",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        run = (
+            await verify.execute(
+                select(HeartbeatRun).where(HeartbeatRun.wakeup_request_id == wakeup.id)
+            )
+        ).scalar_one()
+    assert issue is not None
+    assert issue.status != "done"
+    assert issue.completed_at is None
+    assert wakeup.source == "on_demand"
+    assert wakeup.payload == {
+        "issueId": issue_id,
+        "mutation": "comment_mention",
+        "commentId": create_body["id"],
+    }
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["commentBody"] == ("@closed-owner 请继续补充旅游计划")
+
+
+async def test_user_mention_does_not_reopen_cancelled_issue(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="cancelled-owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="cancelled",
+        assignee_agent_id=agent_id,
+    )
+
+    code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@cancelled-owner 请继续执行"},
+    )
+
+    assert code == 200
+    async with session_factory() as verify:
+        issue = await verify.get(Issue, issue_id)
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert issue is not None
+    assert issue.status == "cancelled"
+    assert wakeups == []
+
+
+async def test_agent_mention_cannot_reopen_its_done_issue(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="agent-closed-owner",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="done",
+        assignee_agent_id=agent_id,
+    )
+
+    code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@agent-closed-owner 再执行一次"},
+        headers={"x-test-agent-id": agent_id, "x-test-org-id": org_id},
+    )
+
+    assert code == 200
+    async with session_factory() as verify:
+        issue = await verify.get(Issue, issue_id)
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert issue is not None
+    assert issue.status == "done"
     assert wakeups == []
 
 

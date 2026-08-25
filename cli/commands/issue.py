@@ -123,6 +123,15 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         type=Path,
         help="UTF-8 JSON file containing the child issue array",
     )
+    create_children_parser.add_argument(
+        "--closeout-mode",
+        choices=("parent_summary", "child_outputs"),
+        default="parent_summary",
+        help=(
+            "How the parent closes this batch: create a parent summary or use "
+            "the child outputs directly"
+        ),
+    )
     create_children_parser.set_defaults(handler=create_issue_children)
 
     retry_child_parser = actions.add_parser(
@@ -315,7 +324,10 @@ def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request(
         "POST",
         f"/api/issues/{args.issue_id}/children/batch",
-        json={"children": children},
+        json={
+            "children": children,
+            "closeoutMode": args.closeout_mode,
+        },
     )
 
 

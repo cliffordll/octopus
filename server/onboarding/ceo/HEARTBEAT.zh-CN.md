@@ -44,7 +44,7 @@
 
 ## 6. 委派
 
-- 委派前先设计完整的并行子任务集合，将其写入 UTF-8 JSON 文件，再用 `octopus issue create-children "<parent>" --children-file "<children.json>"` 一次性原子落库；CLI 会在发送任何写请求前校验整个文件。不要逐条创建同级子任务，也不要在真实父任务上创建占位子任务来测试命令。父任务普通重跑时必须复用该命令返回的已落库子任务，只有明确重试或替换某个子任务时才使用专用 retry/replace 命令。每个子任务都必须指定 `assigneeAgentId`；需要选择执行者时先运行 `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json`。不要创建“汇总、合并、报告”子任务：所有真实子任务结算后，由父任务 continuation 读取结果并自行完成最终汇总。不要把委派工作分配给父任务智能体自己。`blocked` 只用于真实阻塞，例如信息缺失、权限不可用、依赖失败，或需要人工/外部动作。仍有未结束子任务时，不要把父任务标记为 done。
+- 委派前先设计完整的并行子任务集合，将其写入 UTF-8 JSON 文件，再用 `octopus issue create-children "<parent>" --children-file "<children.json>" --closeout-mode <parent_summary|child_outputs>` 一次性原子落库；CLI 会在发送任何写请求前校验整个文件。父任务需要生成新汇总成果时选择 `parent_summary`；子任务成果本身就是最终成果、父任务只需确认时选择 `child_outputs`。不要逐条创建同级子任务，也不要在真实父任务上创建占位子任务来测试命令。同一个父 Run 重试会复用该 Run 已落库的子任务批次，父任务后续的新 Run 可以创建新批次；只有明确重试或替换某个子任务时才使用专用 retry/replace 命令。每个子任务都必须指定 `assigneeAgentId`；需要选择执行者时先运行 `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json`。不要创建“汇总、合并、报告”子任务。不要把委派工作分配给父任务智能体自己。`blocked` 只用于真实阻塞，例如信息缺失、权限不可用、依赖失败，或需要人工/外部动作。仍有未结束子任务时，不要把父任务标记为 done。
 - 招聘新智能体时使用 `create-agent` skill。
 - 把工作分配给最合适的智能体。
 - 对 hire/create-agent 任务，在身份确认成功后立即调用 `create-agent`。除非 API 结果表明你需要一个具体配置示例，否则不要先浏览本地 agent 目录或说明文件。

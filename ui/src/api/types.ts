@@ -165,7 +165,8 @@ export type IssueStatus =
   | "blocked"
   | "cancelled";
 export type IssuePriority = "critical" | "high" | "medium" | "low";
-export type IssueOriginKind = "manual" | "automation_execution";
+export type IssueOriginKind = "manual" | "automation_execution" | "delegation";
+export type DelegationCloseoutMode = "parent_summary" | "child_outputs";
 export type IssueReviewDecision = "approve" | "request_changes" | "blocked" | "needs_followup";
 
 export interface IssueListItem {
@@ -324,6 +325,8 @@ export interface IssueDetail extends IssueListItem {
   reviewerAgentId: string | null;
   reviewerUserId: string | null;
   parentId: string | null;
+  originRunId: string | null;
+  closeoutMode: DelegationCloseoutMode | null;
   issueNumber: number | null;
   requestDepth: number;
   startedAt: string | null;
@@ -337,6 +340,8 @@ export interface IssueDetail extends IssueListItem {
 
 export interface IssueChildOutput extends IssueListItem {
   parentId: string | null;
+  originRunId: string | null;
+  closeoutMode: DelegationCloseoutMode | null;
   assigneeUserId: string | null;
   reviewerAgentId: string | null;
   reviewerUserId: string | null;
@@ -356,6 +361,8 @@ export interface IssueChildrenResponse {
   totalChildCount: number;
   parentExecutionStage: string;
   includeWorkProducts: boolean;
+  delegationOriginRunId: string | null;
+  closeoutMode: DelegationCloseoutMode | null;
 }
 
 export interface IssueDocumentSummary {
