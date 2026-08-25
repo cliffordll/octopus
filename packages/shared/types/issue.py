@@ -120,7 +120,7 @@ class CreateIssuePayload(TypedDict):
 
 
 class CreateChildIssuesPayload(TypedDict):
-    closeoutMode: DelegationCloseoutMode
+    closeoutMode: NotRequired[DelegationCloseoutMode]
     children: list[CreateIssuePayload]
 
 

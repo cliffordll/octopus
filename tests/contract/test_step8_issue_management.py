@@ -33,7 +33,7 @@ from packages.database.schema import (
     IssueWorkProduct,
     Organization,
 )
-from packages.shared.types.issue import IssueDetail
+from packages.shared.types.issue import CreateChildIssuesPayload, IssueDetail
 from server.app import app as fastapi_app
 from server.services.heartbeat import HeartbeatService
 from server.services.child_recovery import (
@@ -626,7 +626,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
             )
         )
 
-    payload = {
+    payload: CreateChildIssuesPayload = {
         "closeoutMode": "child_outputs",
         "children": [{"title": "Same title", "assigneeAgentId": agent_id}],
     }

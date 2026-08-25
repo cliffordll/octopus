@@ -40,9 +40,7 @@ class CoordinatedAsyncSession(AsyncSession):
         await self._coordinate_database_operation(statement)
         return await super().stream(statement, *args, **kwargs)
 
-    async def stream_scalars(
-        self, statement: Any, *args: Any, **kwargs: Any
-    ) -> Any:
+    async def stream_scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         await self._coordinate_database_operation(statement)
         return await super().stream_scalars(statement, *args, **kwargs)
 

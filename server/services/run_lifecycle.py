@@ -16,7 +16,14 @@ class RunLifecycleHost(Protocol):
     _session: Any
 
     async def _complete_finalized_run_impl(
-        self, **kwargs: Any
+        self,
+        *,
+        agent: AgentRow,
+        running: HeartbeatRunRow,
+        final: HeartbeatRunRow,
+        final_status: HeartbeatRunStatus,
+        result: Any,
+        sequence: int,
     ) -> HeartbeatRunRow: ...
 
     async def _reconcile_terminal_effects_impl(
@@ -28,7 +35,7 @@ class RunLifecycleHost(Protocol):
     ) -> HeartbeatRunRow: ...
 
     async def _restore_system_blocked_issue_after_recovery(
-        self, run: HeartbeatRunRow
+        self, final: HeartbeatRunRow
     ) -> bool: ...
 
     async def _recover_orphaned_runs_impl(

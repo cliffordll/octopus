@@ -39,7 +39,6 @@ async def queue_issue_assignment_wakeup(
         "source": source,
         "triggerDetail": "system",
         "reason": reason,
-        **({"idempotencyKey": idempotency_key} if idempotency_key else {}),
         "payload": {
             "issueId": issue["id"],
             "mutation": mutation,
@@ -60,6 +59,8 @@ async def queue_issue_assignment_wakeup(
             },
         },
     }
+    if idempotency_key:
+        payload["idempotencyKey"] = idempotency_key
     try:
         run = await heartbeat.wakeup(
             assignee_agent_id,

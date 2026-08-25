@@ -222,7 +222,7 @@ def test_validate_create_issue_comment_happy() -> None:
         {"body": "Looks good", "requestId": "request-1"}
     )
     assert payload["body"] == "Looks good"
-    assert payload["requestId"] == "request-1"
+    assert payload.get("requestId") == "request-1"
 
 
 def test_validate_create_issue_comment_blank_body_raises() -> None:
