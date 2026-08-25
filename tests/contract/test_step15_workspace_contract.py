@@ -36,7 +36,11 @@ from packages.database.queries.workspaces import list_workspace_operations_for_r
 from packages.runtimes.types import RuntimeExecutionContext, RuntimeExecutionResult
 import packages.runtimes.registry as runtime_registry
 from server.services.agents import AgentService
-from server.services.heartbeat import HeartbeatService, dispatch_queued_agent
+from server.services.heartbeat import (
+    HeartbeatService,
+    WorkspacePreparationCoordinator,
+    dispatch_queued_agent,
+)
 from server.services.issues import IssueService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
@@ -1402,6 +1406,142 @@ async def test_operator_branch_reuses_fixed_project_worktree_for_multiple_issues
         _git_path_text(Path(workspace_one["cwd"]))
         in _git(project_cwd, "worktree", "list", "--porcelain").stdout
     )
+
+
+@pytest.mark.parametrize("mode", ["isolated_workspace", "operator_branch"])
+async def test_git_workspace_preparation_is_serialized_by_strategy(
+    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_cwd = tmp_path / f"{mode}-source"
+    _init_repo_with_branch(project_cwd, "main")
+    database_path = tmp_path / f"{mode}.sqlite3"
+    org_root = tmp_path / f"{mode}-org"
+    monkeypatch.setattr(
+        "server.services.workspaces.organization_workspace_root",
+        lambda org_id: org_root,
+    )
+    engine = create_database_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    original_prepare = WorkspaceService.prepare_runtime_context_for_heartbeat
+    active_prepares = 0
+    max_active_prepares = 0
+
+    async def observed_prepare(
+        self: WorkspaceService, *args: object, **kwargs: object
+    ) -> dict[str, Any]:
+        nonlocal active_prepares, max_active_prepares
+        active_prepares += 1
+        max_active_prepares = max(max_active_prepares, active_prepares)
+        try:
+            await asyncio.sleep(0.02)
+            return await original_prepare(self, *args, **kwargs)  # type: ignore[arg-type]
+        finally:
+            active_prepares -= 1
+
+    monkeypatch.setattr(
+        WorkspaceService,
+        "prepare_runtime_context_for_heartbeat",
+        observed_prepare,
+    )
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key=f"step15-{mode}",
+                name=f"Step 15 {mode}",
+                issue_prefix="GIT",
+            )
+            session.add(org)
+            await session.flush()
+            project_service = ProjectService(session)
+            project = await project_service.create_project(
+                org.id,
+                {"name": f"{mode} project"},
+                actor_type="user",
+                actor_id="dev",
+            )
+            strategy: dict[str, Any] = {
+                "type": "git_worktree",
+                "baseRef": "main",
+            }
+            if mode == "operator_branch":
+                strategy["operatorBranch"] = "feature/coordinated"
+            await project_service.create_workspace(
+                project["id"],
+                {
+                    "name": "Primary",
+                    "cwd": str(project_cwd),
+                    "defaultRef": "main",
+                    "executionWorkspacePolicy": {
+                        "enabled": True,
+                        "defaultMode": mode,
+                        "workspaceStrategy": strategy,
+                    },
+                },
+                actor_type="user",
+                actor_id="dev",
+            )
+            agents = []
+            for index in range(2):
+                agents.append(
+                    await AgentService(session).create_agent(
+                        org.id,
+                        {
+                            "name": f"Git Workspace Agent {index}",
+                            "agentRuntimeType": "process",
+                            "agentRuntimeConfig": {
+                                "command": sys.executable,
+                                "args": ["-c", "print('ok')"],
+                            },
+                        },
+                        actor_type="board",
+                        actor_id="local-board",
+                    )
+                )
+            issues = [
+                Issue(
+                    org_id=org.id,
+                    project_id=project["id"],
+                    title=f"Concurrent Git workspace {index}",
+                )
+                for index in range(2)
+            ]
+            session.add_all(issues)
+            await session.flush()
+            runs = []
+            for agent, issue in zip(agents, issues, strict=True):
+                run = HeartbeatRun(
+                    org_id=org.id,
+                    agent_id=agent["id"],
+                    invocation_source="on_demand",
+                    trigger_detail="manual",
+                    status="running",
+                    context_snapshot={"issueId": issue.id},
+                )
+                session.add(run)
+                runs.append(run)
+            await session.commit()
+
+        contexts = await asyncio.gather(
+            *(
+                WorkspacePreparationCoordinator(factory).prepare(
+                    agent_id=agent["id"], run_id=run.id, org_id=org.id
+                )
+                for agent, run in zip(agents, runs, strict=True)
+            )
+        )
+
+        assert max_active_prepares == 1
+        workspace_ids = {
+            context["executionWorkspaceId"]
+            for context in contexts
+            if context is not None
+        }
+        expected_workspace_count = 2 if mode == "isolated_workspace" else 1
+        assert len(workspace_ids) == expected_workspace_count
+    finally:
+        await engine.dispose()
 
 
 async def test_repo_url_only_shared_workspace_creates_managed_checkout(

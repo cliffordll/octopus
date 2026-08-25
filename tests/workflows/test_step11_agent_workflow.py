@@ -430,8 +430,8 @@ async def test_wakeup_executes_process_runtime_and_records_failed_run(
     assert [event.event_type for event in events] == [
         "lifecycle",
         "lifecycle",
-        "adapter.invoke",
         "workspace.preflight",
+        "adapter.invoke",
         "error",
     ]
     assert [activity.action for activity in activities] == [

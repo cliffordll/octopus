@@ -82,6 +82,7 @@ class HeartbeatRun(Base):
     process_pid: Mapped[int | None] = mapped_column(Integer)
     process_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     process_exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    yield_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     execution_owner_token: Mapped[str | None] = mapped_column(Text)
     execution_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)

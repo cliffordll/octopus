@@ -226,6 +226,22 @@ def test_issue_create_children_reads_atomic_batch_from_utf8_file(
     assert json.loads(requests[0].read()) == {"children": children}
 
 
+def test_issue_yield_children_releases_parent_run() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"status": "waiting_for_children", "runId": "run-parent"},
+        )
+
+    client = ApiClient(transport=httpx.MockTransport(handler))
+    assert main(["issue", "yield-children", "PARENT-1"], client=client) == 0
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api/issues/PARENT-1/yield-children"
+
+
 def test_issue_create_accepts_body_alias_for_description() -> None:
     requests: list[httpx.Request] = []
 

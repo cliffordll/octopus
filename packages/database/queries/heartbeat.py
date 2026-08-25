@@ -147,6 +147,22 @@ async def claim_due_wakeup_request(
     return result.scalar_one_or_none()
 
 
+async def claim_parent_deferred_wakeup(
+    session: AsyncSession, wakeup_id: str, claimed_at: datetime
+) -> AgentWakeupRequest | None:
+    result = await session.execute(
+        update(AgentWakeupRequest)
+        .where(
+            AgentWakeupRequest.id == wakeup_id,
+            AgentWakeupRequest.status == "deferred_parent_yield",
+        )
+        .values(status="claimed", claimed_at=claimed_at, updated_at=claimed_at)
+        .returning(AgentWakeupRequest)
+        .execution_options(synchronize_session=False, populate_existing=True)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_run(session: AsyncSession, fields: Mapping[str, Any]) -> HeartbeatRun:
     row = HeartbeatRun(**dict(fields))
     session.add(row)
@@ -245,7 +261,10 @@ async def list_queued_runs(
             HeartbeatRun.status == "queued",
             or_(
                 HeartbeatRun.wakeup_request_id.is_(None),
-                AgentWakeupRequest.requested_at <= now,
+                and_(
+                    AgentWakeupRequest.status == "queued",
+                    AgentWakeupRequest.requested_at <= now,
+                ),
             ),
         )
         .order_by(HeartbeatRun.created_at, HeartbeatRun.id)
@@ -264,7 +283,10 @@ async def list_queued_agent_ids(session: AsyncSession) -> set[str]:
             HeartbeatRun.status == "queued",
             or_(
                 HeartbeatRun.wakeup_request_id.is_(None),
-                AgentWakeupRequest.requested_at <= datetime.now(UTC),
+                and_(
+                    AgentWakeupRequest.status == "queued",
+                    AgentWakeupRequest.requested_at <= datetime.now(UTC),
+                ),
             ),
         )
         .distinct()
@@ -287,6 +309,7 @@ async def claim_queued_run(
             updated_at=started_at,
         )
         .returning(HeartbeatRun)
+        .execution_options(synchronize_session=False, populate_existing=True)
     )
     return result.scalar_one_or_none()
 
@@ -310,6 +333,32 @@ async def renew_run_execution_lease(
         .returning(HeartbeatRun.id)
     )
     return result.scalar_one_or_none() is not None
+
+
+async def request_run_yield(
+    session: AsyncSession,
+    run_id: str,
+    owner_token: str,
+    requested_at: datetime,
+) -> HeartbeatRun | None:
+    """Persist a parent handoff request without releasing its execution lease."""
+
+    result = await session.execute(
+        update(HeartbeatRun)
+        .where(
+            HeartbeatRun.id == run_id,
+            HeartbeatRun.status == "running",
+            HeartbeatRun.execution_owner_token == owner_token,
+            HeartbeatRun.yield_requested_at.is_(None),
+        )
+        .values(
+            yield_requested_at=requested_at,
+            updated_at=requested_at,
+        )
+        .returning(HeartbeatRun)
+        .execution_options(synchronize_session=False, populate_existing=True)
+    )
+    return result.scalar_one_or_none()
 
 
 async def claim_expired_run_execution(

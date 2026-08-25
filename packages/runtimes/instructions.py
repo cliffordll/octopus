@@ -401,10 +401,12 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             "Do not create a child whose job is to summarize, merge, or report on the other children. After all children settle, Octopus wakes this parent issue and the parent owns the final synthesis and deliverable.",
             "Set `assigneeAgentId` explicitly in every delegated child entry. Prefer a suitable agent other than yourself when one is available.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
-            "After the atomic child creation succeeds, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent again after every child is terminal.",
+            "After the atomic child creation succeeds, the children remain deferred while you finish brief coordination. Add the progress comment, then explicitly yield with "
+            f'`octopus issue yield-children "{issue_ref}" --json`. '
+            "Octopus stops this parent runtime, releases its execution ownership, queues the children, and wakes the parent after every child is terminal.",
             "Do not poll or wait for delegated children inside the current runtime process because that keeps the issue execution slot occupied.",
             "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary.",
-            "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. If an existing child is blocked or cancelled, do not recreate the same sibling; retry/reassign it, create an explicit replacement child that references the blocked child, or block the parent with the missing output.",
+            "Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action. If an existing child is blocked or cancelled, do not recreate the same sibling; retry/reassign it, create an explicit replacement child that references the blocked child, or block the parent with the missing output. After retrying or replacing child work from a parent continuation, add the coordination comment and run `octopus issue yield-children` again.",
             "Do not mark the parent issue done while child issues are still open; wait for child issues to finish, or explicitly close/cancel them with a reason.",
             "Do not treat a runtime-local planning list, todo item, or internal `task` subagent call as an Octopus subtask. Those are execution helpers only and do not appear in the board.",
             "If the work should stay inside the parent run, do not create delegated child issues for it; say that explicitly in the close-out comment.",

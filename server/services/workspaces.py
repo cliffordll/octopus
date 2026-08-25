@@ -46,6 +46,7 @@ from packages.database.schema import (
     ExecutionWorkspace,
     Issue,
     IssueWorkProduct,
+    ProjectWorkspace,
     WorkspaceOperation,
     WorkspaceRuntimeService,
 )
@@ -79,6 +80,13 @@ from .workspace_paths import (
     ensure_octopus_workspace_operation_log_dir,
     organization_workspace_root,
 )
+
+
+@dataclass(frozen=True)
+class WorkspacePreparationPlan:
+    mode: str
+    coordination_key: str
+    project_workspace_id: str | None = None
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -1455,6 +1463,86 @@ class WorkspaceService:
             patch["metadata_json"] = fields.get("metadata")
         row = await update_execution_workspace(self._session, workspace_id, patch)
         return self._to_execution_workspace(row) if row is not None else None
+
+    async def preparation_plan(
+        self,
+        *,
+        context_snapshot: dict[str, Any] | None,
+        org_id: str,
+        agent_id: str,
+    ) -> WorkspacePreparationPlan:
+        snapshot = context_snapshot or {}
+        issue_id = snapshot.get("issueId") or snapshot.get("primaryIssueId")
+        if not isinstance(issue_id, str) or not issue_id:
+            return WorkspacePreparationPlan(
+                mode="agent_default",
+                coordination_key=f"agent:{agent_id}",
+            )
+        issue = await self._session.get(Issue, issue_id)
+        if issue is None or issue.org_id != org_id or issue.project_id is None:
+            return WorkspacePreparationPlan(
+                mode="shared_workspace",
+                coordination_key=f"org:{org_id}",
+            )
+        requested_workspace_id = issue.project_workspace_id
+        if requested_workspace_id is None and issue.execution_workspace_id:
+            existing = await get_execution_workspace_by_id(
+                self._session, issue.execution_workspace_id
+            )
+            if (
+                existing is not None
+                and existing.org_id == org_id
+                and existing.project_id == issue.project_id
+            ):
+                requested_workspace_id = existing.project_workspace_id
+        project_workspace = await self._resolve_project_workspace(
+            project_id=issue.project_id,
+            requested_id=requested_workspace_id,
+        )
+        if project_workspace is None:
+            return WorkspacePreparationPlan(
+                mode="shared_workspace",
+                coordination_key=f"org:{org_id}",
+            )
+        workspace_policy = _parse_workspace_policy(
+            project_workspace.execution_workspace_policy
+        )
+        issue_settings = _parse_issue_settings(issue.execution_workspace_settings)
+        mode = _resolve_mode(
+            workspace_policy=workspace_policy,
+            issue_settings=issue_settings,
+            issue_preference=issue.execution_workspace_preference,
+        )
+        base_key = f"project-workspace:{project_workspace.id}"
+        if mode == "operator_branch":
+            branch = _operator_branch_name(
+                workspace_policy=workspace_policy,
+                strategy=_strategy_record(
+                    workspace_policy=workspace_policy,
+                    issue_settings=issue_settings,
+                ),
+            )
+            return WorkspacePreparationPlan(
+                mode=mode,
+                coordination_key=f"{base_key}:branch:{branch}",
+                project_workspace_id=project_workspace.id,
+            )
+        return WorkspacePreparationPlan(
+            mode=mode,
+            coordination_key=base_key,
+            project_workspace_id=project_workspace.id,
+        )
+
+    async def lock_preparation_plan(self, plan: WorkspacePreparationPlan) -> None:
+        """Serialize preparation across service instances on PostgreSQL."""
+
+        if plan.project_workspace_id is None:
+            return
+        await self._session.execute(
+            select(ProjectWorkspace.id)
+            .where(ProjectWorkspace.id == plan.project_workspace_id)
+            .with_for_update()
+        )
 
     async def resolve_for_issue(self, issue: Issue) -> ExecutionWorkspaceData | None:
         existing: ExecutionWorkspace | None = None

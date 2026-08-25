@@ -21,6 +21,7 @@ from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
     ISSUE_CHILDREN_BATCH_PATH,
     ISSUE_CHILDREN_PATH,
+    ISSUE_YIELD_CHILDREN_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DOCUMENT_DETAIL_PATH,
     ISSUE_DOCUMENT_REVISIONS_PATH,
@@ -342,6 +343,18 @@ async def create_issue_children_route(
     canonical_parent_id = access_parent["id"]
     await service.end_child_batch_preflight()
     try:
+        parent_run_id = (
+            actor.run_id
+            if await heartbeat.is_active_parent_run(
+                canonical_parent_id,
+                actor.run_id,
+                expected_org_id=access_parent["orgId"],
+                expected_agent_id=(
+                    actor.actor_id if actor.actor_type == "agent" else None
+                ),
+            )
+            else None
+        )
         parent, children, created = await service.create_child_issues(
             canonical_parent_id,
             payload,
@@ -350,8 +363,10 @@ async def create_issue_children_route(
             run_id=actor.run_id,
         )
         dispatch_agent_ids: set[str] = set()
-        if created:
+        if created or parent_run_id is not None:
             for child in children:
+                if not created and child["status"] not in {"todo", "in_progress"}:
+                    continue
                 await queue_issue_assignment_wakeup(
                     heartbeat,
                     child,
@@ -360,10 +375,11 @@ async def create_issue_children_route(
                     context_source="issue.children_batch",
                     actor_type="agent" if actor.actor_type == "agent" else "user",
                     actor_id=actor.actor_id,
+                    defer_until_parent_run_id=parent_run_id,
                     suppress_errors=False,
                 )
                 assignee_agent_id = child.get("assigneeAgentId")
-                if assignee_agent_id:
+                if assignee_agent_id and parent_run_id is None:
                     dispatch_agent_ids.add(assignee_agent_id)
         await service.commit_child_issues()
     except ValueError as exc:
@@ -378,7 +394,56 @@ async def create_issue_children_route(
         ) from exc
     for agent_id in dispatch_agent_ids:
         _schedule_dispatch(request, agent_id)
-    return {"parent": parent, "children": children, "created": created}
+    return {
+        "parent": parent,
+        "children": children,
+        "created": created,
+        "yieldRequired": parent_run_id is not None,
+        "yieldCommand": (
+            f"octopus issue yield-children {parent['identifier'] or parent['id']}"
+            if parent_run_id is not None
+            else None
+        ),
+    }
+
+
+@router.post(ISSUE_YIELD_CHILDREN_PATH)
+async def yield_issue_children_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> dict[str, Any]:
+    actor = require_actor_identity(request)
+    parent = await service.get_by_id(id)
+    if parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Parent issue not found",
+        )
+    assert_organization_access(request, parent["orgId"])
+    if actor.actor_type != "agent" or not actor.run_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Only the active parent Run can yield to child issues",
+        )
+    await service.end_child_batch_preflight()
+    try:
+        yielding, _ = await heartbeat.yield_parent_to_children(
+            parent["id"], actor.run_id, actor_agent_id=actor.actor_id
+        )
+        await service.commit_child_issues()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    heartbeat.signal_run_stop(actor.run_id)
+    return {
+        "status": "yield_requested",
+        "runId": yielding.id,
+        "releasedChildAgentIds": [],
+    }
 
 
 @router.get(ISSUE_DETAIL_PATH)
@@ -422,7 +487,7 @@ async def retry_child_issue_route(
     request: Request,
     service: IssueService = Depends(get_issue_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
-) -> HeartbeatRun:
+) -> dict[str, Any]:
     actor = require_actor_identity(request)
     detail = await service.get_by_id(id)
     if detail is None:
@@ -444,6 +509,32 @@ async def retry_child_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Child issue has no failed, timed out, or cancelled run to retry",
         )
+    runs_by_id = {
+        str(run["runId"]): run
+        for run in runs or []
+        if isinstance(run.get("runId"), str)
+    }
+    retry_attempts = 0
+    cursor = failed
+    seen_run_ids: set[str] = set()
+    while isinstance(cursor.get("retryOfRunId"), str):
+        retry_attempts += 1
+        retry_of = str(cursor["retryOfRunId"])
+        if retry_of in seen_run_ids:
+            break
+        seen_run_ids.add(retry_of)
+        previous = runs_by_id.get(retry_of)
+        if previous is None:
+            break
+        cursor = previous
+    if retry_attempts >= 1:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=(
+                "Child retry limit reached; replace the child, accept the "
+                "incomplete result, or block the parent."
+            ),
+        )
     await service.update_issue(
         id,
         {"status": "in_progress", "comment": "Retrying blocked child issue."},
@@ -451,18 +542,34 @@ async def retry_child_issue_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
+    parent_run_id = None
+    parent_id = detail.get("parentId")
+    if isinstance(parent_id, str) and await heartbeat.is_active_parent_run(
+        parent_id,
+        actor.run_id,
+        expected_org_id=detail["orgId"],
+        expected_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
+    ):
+        parent_run_id = actor.run_id
     retried = await heartbeat.retry_run(
         str(failed["runId"]),
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         execute_immediately=False,
         recovery_trigger="manual",
+        defer_until_parent_run_id=parent_run_id,
     )
     if retried is None:
+        if parent_run_id and heartbeat.last_deferred_wakeup_id:
+            return {
+                "status": "deferred_parent_yield",
+                "wakeupRequestId": heartbeat.last_deferred_wakeup_id,
+                "retryOfRunId": str(failed["runId"]),
+            }
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found"
         )
-    return retried
+    return dict(retried)
 
 
 @router.post(ISSUE_REPLACE_CHILD_PATH, status_code=http_status.HTTP_201_CREATED)
@@ -471,6 +578,7 @@ async def replace_child_issue_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> IssueDetail:
     actor = require_actor_identity(request)
     old_child = await service.get_by_id(id)
@@ -479,6 +587,12 @@ async def replace_child_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
     assert_organization_access(request, old_child["orgId"])
+    await service.end_child_batch_preflight()
+    existing_replacement = await service.lock_and_get_child_replacement(
+        old_child["id"], old_child["orgId"]
+    )
+    if existing_replacement is not None:
+        return existing_replacement
     parent_id = old_child.get("parentId")
     if not parent_id:
         raise HTTPException(
@@ -524,6 +638,30 @@ async def replace_child_issue_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
     )
+    parent_run_id = (
+        actor.run_id
+        if await heartbeat.is_active_parent_run(
+            parent_id,
+            actor.run_id,
+            expected_org_id=old_child["orgId"],
+            expected_agent_id=actor.actor_id if actor.actor_type == "agent" else None,
+        )
+        else None
+    )
+    await queue_issue_assignment_wakeup(
+        heartbeat,
+        replacement,
+        reason="issue_assigned",
+        mutation="replace_child",
+        context_source="issue.replace_child",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        defer_until_parent_run_id=parent_run_id,
+        suppress_errors=False,
+    )
+    assignee_agent_id = replacement.get("assigneeAgentId")
+    if assignee_agent_id and parent_run_id is None:
+        _schedule_dispatch(request, assignee_agent_id)
     return replacement
 
 
