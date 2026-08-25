@@ -615,10 +615,11 @@ async def test_create_children_batch_commits_before_dispatch_is_scheduled(
 
     assert code == 200
     assert body["created"] is True
-    assert scheduled == [agent_id]
+    assert body["dispatchAgentIds"] == []
+    assert scheduled == []
 
 
-async def test_parent_run_yields_before_deferred_children_are_queued(
+async def test_parent_run_and_children_are_dispatchable_concurrently(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -700,21 +701,11 @@ async def test_parent_run_yields_before_deferred_children_are_queued(
     )
 
     assert create_code == 200
-    assert created["yieldRequired"] is True
-    assert "yield-children" in created["yieldCommand"]
-    assert scheduled == []
+    assert created["dispatchAgentIds"] == sorted(child_agent_ids)
+    assert set(scheduled) == set(child_agent_ids)
     async with session_factory() as verify:
-        deferred = (
-            (
-                await verify.execute(
-                    select(AgentWakeupRequest).where(
-                        AgentWakeupRequest.status == "deferred_parent_yield"
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
+        parent_run = await verify.get(HeartbeatRun, parent_run_id)
+        wakeups = (await verify.execute(select(AgentWakeupRequest))).scalars().all()
         child_runs = (
             (
                 await verify.execute(
@@ -724,8 +715,11 @@ async def test_parent_run_yields_before_deferred_children_are_queued(
             .scalars()
             .all()
         )
-    assert len(deferred) == 2
-    assert child_runs == []
+    assert parent_run is not None and parent_run.status == "running"
+    assert len(wakeups) == 2
+    assert {wakeup.status for wakeup in wakeups} == {"queued"}
+    assert len(child_runs) == 2
+    assert {run.status for run in child_runs} == {"queued"}
 
     replay_code, replayed = await _request(
         app,
@@ -751,79 +745,15 @@ async def test_parent_run_yields_before_deferred_children_are_queued(
         child["id"] for child in created["children"]
     ]
     async with session_factory() as verify:
-        deferred_after_replay = (
-            (
-                await verify.execute(
-                    select(AgentWakeupRequest).where(
-                        AgentWakeupRequest.status == "deferred_parent_yield"
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        wakeups_after_replay = (
+            (await verify.execute(select(AgentWakeupRequest))).scalars().all()
         )
-    assert len(deferred_after_replay) == 2
-
-    comment_code, _comment = await _request(
-        app,
-        "POST",
-        f"/api/issues/{parent_id}/comments",
-        headers=headers,
-        json={"body": "Children created; yielding execution now."},
-    )
-    assert comment_code == 200
-
-    yield_code, yielded = await _request(
-        app,
-        "POST",
-        f"/api/issues/{parent_id}/yield-children",
-        headers=headers,
-        json={},
-    )
-    assert yield_code == 200
-    assert yielded["status"] == "yield_requested"
-    assert yielded["releasedChildAgentIds"] == []
-    assert scheduled == []
-    repeated_code, repeated = await _request(
-        app,
-        "POST",
-        f"/api/issues/{parent_id}/yield-children",
-        headers=headers,
-        json={},
-    )
-    assert repeated_code == 200
-    assert repeated["status"] == "yield_requested"
-
-    async with session_factory() as stopping:
-        async with async_transaction(stopping):
-            stopping_run = await stopping.get(HeartbeatRun, parent_run_id)
-            assert stopping_run is not None
-            assert stopping_run.status == "running"
-            assert stopping_run.yield_requested_at is not None
-            await HeartbeatService(stopping)._finalize_parent_yield(stopping_run)
-
-    async with session_factory() as verify:
-        parent = await verify.get(Issue, parent_id)
         parent_run = await verify.get(HeartbeatRun, parent_run_id)
-        wakeups = (await verify.execute(select(AgentWakeupRequest))).scalars().all()
-        child_runs = (
-            (
-                await verify.execute(
-                    select(HeartbeatRun).where(HeartbeatRun.id != parent_run_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-    assert parent is not None and parent.execution_run_id is None
-    assert parent_run is not None and parent_run.status == "waiting_for_children"
-    assert parent_run.terminal_effects_pending is False
-    assert {wakeup.status for wakeup in wakeups} == {"queued"}
-    assert len(child_runs) == 2
-    assert {run.status for run in child_runs} == {"queued"}
+    assert len(wakeups_after_replay) == 2
+    assert parent_run is not None and parent_run.status == "running"
 
 
-async def test_recovery_auto_yields_parent_after_coordination_grace(
+async def test_recovery_does_not_block_already_dispatched_children(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -871,9 +801,7 @@ async def test_recovery_auto_yields_parent_after_coordination_grace(
                 ),
             ]
         )
-    monkeypatch.setattr(
-        "server.routes.issues._schedule_dispatch", lambda *_args: None
-    )
+    monkeypatch.setattr("server.routes.issues._schedule_dispatch", lambda *_args: None)
     headers = {
         "x-test-agent-id": parent_agent_id,
         "x-test-org-id": org_id,
@@ -885,12 +813,11 @@ async def test_recovery_auto_yields_parent_after_coordination_grace(
         f"/api/issues/{parent_id}/children/batch",
         headers=headers,
         json={
-            "children": [
-                {"title": "Deferred child", "assigneeAgentId": child_agent_id}
-            ]
+            "children": [{"title": "Deferred child", "assigneeAgentId": child_agent_id}]
         },
     )
-    assert create_code == 200 and created["yieldRequired"] is True
+    assert create_code == 200
+    assert created["dispatchAgentIds"] == [child_agent_id]
 
     monkeypatch.setattr(HeartbeatService, "PARENT_COORDINATION_GRACE_SECONDS", 0)
     async with session_factory() as recovery_session:
@@ -912,9 +839,14 @@ async def test_recovery_auto_yields_parent_after_coordination_grace(
         )
         wakeups = (await verify.execute(select(AgentWakeupRequest))).scalars().all()
     assert parent_run is not None and parent_run.status == "running"
-    assert parent_run.yield_requested_at is not None
-    assert child_runs == []
-    assert len(wakeups) == 1 and wakeups[0].status == "deferred_parent_yield"
+    child_issue_id = created["children"][0]["id"]
+    assert any(
+        run.status == "queued"
+        and isinstance(run.context_snapshot, dict)
+        and run.context_snapshot.get("issueId") == child_issue_id
+        for run in child_runs
+    )
+    assert len(wakeups) == 1 and wakeups[0].status == "queued"
 
     async with session_factory() as expire_session:
         async with async_transaction(expire_session):
@@ -937,8 +869,13 @@ async def test_recovery_auto_yields_parent_after_coordination_grace(
             .scalars()
             .all()
         )
-    assert parent_run is not None and parent_run.status == "waiting_for_children"
-    assert len(child_runs) == 1 and child_runs[0].status == "queued"
+    assert parent_run is not None and parent_run.status in {"failed", "timed_out"}
+    assert any(
+        run.status == "queued"
+        and isinstance(run.context_snapshot, dict)
+        and run.context_snapshot.get("issueId") == child_issue_id
+        for run in child_runs
+    )
 
 
 async def test_parent_yield_without_child_work_is_rejected(
@@ -994,15 +931,14 @@ async def test_parent_yield_without_child_work_is_rejected(
         json={},
     )
 
-    assert code == 409
-    assert response["detail"] == "Parent Run has no deferred child work to yield to"
+    assert code == 404
+    assert response["detail"] == "Not Found"
     async with session_factory() as verify:
         parent_run = await verify.get(HeartbeatRun, run_id)
     assert parent_run is not None and parent_run.status == "running"
-    assert parent_run.yield_requested_at is None
 
 
-async def test_parent_child_retry_stays_deferred_until_parent_yields(
+async def test_parent_child_retry_is_queued_while_parent_runs(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -1092,7 +1028,7 @@ async def test_parent_child_retry_stays_deferred_until_parent_yields(
         json={},
     )
     assert retry_code == 200
-    assert retried["status"] == "deferred_parent_yield"
+    assert retried["status"] == "queued"
     repeated_retry_code, repeated_retry = await _request(
         app,
         "POST",
@@ -1101,134 +1037,20 @@ async def test_parent_child_retry_stays_deferred_until_parent_yields(
         json={},
     )
     assert repeated_retry_code == 200
-    assert repeated_retry["wakeupRequestId"] == retried["wakeupRequestId"]
-    async with session_factory() as verify:
-        retry_wakeup = await verify.get(
-            AgentWakeupRequest, retried["wakeupRequestId"]
-        )
-        resumed = await HeartbeatService(verify).resume_all_queued_runs()
-    assert retry_wakeup is not None
-    assert retry_wakeup.status == "deferred_parent_yield"
-    assert resumed == []
-    assert scheduled == []
-
-    yield_code, _yielded = await _request(
-        app,
-        "POST",
-        f"/api/issues/{parent_id}/yield-children",
-        headers=headers,
-        json={},
+    assert repeated_retry.get("runId", repeated_retry.get("id")) == retried.get(
+        "runId", retried.get("id")
     )
-    assert yield_code == 200
-    async with session_factory() as stopping:
-        async with async_transaction(stopping):
-            stopping_run = await stopping.get(HeartbeatRun, parent_run_id)
-            assert stopping_run is not None
-            await HeartbeatService(stopping)._finalize_parent_yield(stopping_run)
     async with session_factory() as verify:
-        retry_wakeup = await verify.get(
-            AgentWakeupRequest, retried["wakeupRequestId"]
+        retry_run = await verify.get(
+            HeartbeatRun, retried.get("runId", retried.get("id"))
         )
-    assert retry_wakeup is not None and retry_wakeup.status == "queued"
+        parent_run = await verify.get(HeartbeatRun, parent_run_id)
+    assert retry_run is not None and retry_run.status == "queued"
+    assert parent_run is not None and parent_run.status == "running"
     assert scheduled == []
 
 
-async def test_cancelled_parent_does_not_release_deferred_child_work(
-    session: AsyncSession,
-) -> None:
-    org_id = await _seed_org(session)
-    parent_agent_id = str(uuid.uuid4())
-    child_agent_id = str(uuid.uuid4())
-    parent_id = str(uuid.uuid4())
-    child_id = str(uuid.uuid4())
-    parent_run_id = str(uuid.uuid4())
-    async with async_transaction(session):
-        session.add_all(
-            [
-                Agent(
-                    id=parent_agent_id,
-                    org_id=org_id,
-                    name="Cancelled Parent",
-                    role="manager",
-                    status="running",
-                ),
-                Agent(
-                    id=child_agent_id,
-                    org_id=org_id,
-                    name="Deferred Child",
-                    role="engineer",
-                ),
-                Issue(
-                    id=parent_id,
-                    org_id=org_id,
-                    title="Parent cancelled before handoff",
-                    status="in_progress",
-                    assignee_agent_id=parent_agent_id,
-                    execution_run_id=parent_run_id,
-                ),
-                Issue(
-                    id=child_id,
-                    org_id=org_id,
-                    parent_id=parent_id,
-                    title="Child that must not start",
-                    status="todo",
-                    assignee_agent_id=child_agent_id,
-                ),
-                HeartbeatRun(
-                    id=parent_run_id,
-                    org_id=org_id,
-                    agent_id=parent_agent_id,
-                    invocation_source="assignment",
-                    run_purpose="task_execution",
-                    trigger_detail="system",
-                    status="running",
-                    execution_owner_token="cancel-owner",
-                    context_snapshot={"issueId": parent_id},
-                ),
-            ]
-        )
-        await session.flush()
-        heartbeat = HeartbeatService(session)
-        await heartbeat.defer_wakeup_until_parent_yield(
-            child_agent_id,
-            {
-                "source": "assignment",
-                "triggerDetail": "system",
-                "payload": {"issueId": child_id},
-                "contextSnapshot": {"issueId": child_id},
-            },
-            parent_run_id=parent_run_id,
-            actor_type="agent",
-            actor_id=parent_agent_id,
-        )
-        cancelled = await heartbeat.cancel_run(parent_run_id)
-        child_wakeup = await heartbeat.wakeup_if_actionable(
-            child_agent_id,
-            {"source": "on_demand", "triggerDetail": "manual"},
-            actor_type="user",
-            actor_id="operator",
-            execute_immediately=False,
-        )
-
-    assert cancelled is not None and cancelled["status"] == "cancelled"
-    assert child_wakeup is None
-    wakeups = (await session.execute(select(AgentWakeupRequest))).scalars().all()
-    child = await session.get(Issue, child_id)
-    child_runs = (
-        (
-            await session.execute(
-                select(HeartbeatRun).where(HeartbeatRun.agent_id == child_agent_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert child is not None and child.status == "cancelled"
-    assert child.hidden_at is not None
-    assert not any(wakeup.status == "queued" for wakeup in wakeups)
-    assert child_runs == []
-
-async def test_parent_replacement_retires_old_child_and_waits_for_yield(
+async def test_parent_replacement_retires_old_child_and_dispatches_immediately(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -1328,22 +1150,8 @@ async def test_parent_replacement_retires_old_child_and_waits_for_yield(
             .all()
         )
     assert old_child is not None and old_child.hidden_at is not None
-    assert len(wakeups) == 1 and wakeups[0].status == "deferred_parent_yield"
-    assert scheduled == []
-
-    yield_code, _yielded = await _request(
-        app,
-        "POST",
-        f"/api/issues/{parent_id}/yield-children",
-        headers=headers,
-        json={},
-    )
-    assert yield_code == 200
-    async with session_factory() as stopping:
-        async with async_transaction(stopping):
-            stopping_run = await stopping.get(HeartbeatRun, parent_run_id)
-            assert stopping_run is not None
-            await HeartbeatService(stopping)._finalize_parent_yield(stopping_run)
+    assert len(wakeups) == 1 and wakeups[0].status == "queued"
+    assert scheduled == [child_agent_id]
     async with session_factory() as verify:
         replacement_runs = (
             (
@@ -1359,7 +1167,7 @@ async def test_parent_replacement_retires_old_child_and_waits_for_yield(
         )
     assert len(replacement_runs) == 1
     assert replacement_runs[0].status == "queued"
-    assert scheduled == []
+    assert scheduled == [child_agent_id]
 
 
 async def test_terminal_child_updated_by_identifier_queues_parent_continuation(
@@ -2663,7 +2471,7 @@ async def test_issue_comment_routes_create_and_list(
     assert len(rows) == 1
 
 
-async def test_issue_comment_queues_assignee_wakeup(
+async def test_plain_issue_comment_queues_assignee_wakeup(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -2773,7 +2581,7 @@ async def test_issue_comment_on_closed_issue_does_not_queue_assignee_wakeup(
     assert wakeups == []
 
 
-async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
+async def test_issue_comment_keeps_control_with_assignee_despite_other_mention(
     app: FastAPI,
     session: AsyncSession,
     session_factory: async_sessionmaker[AsyncSession],
@@ -2816,7 +2624,7 @@ async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
 
     assert create_code == 200
     async with session_factory() as verify:
-        mentioned_wakeup = (
+        mentioned_wakeups = (
             (
                 await verify.execute(
                     select(AgentWakeupRequest).where(
@@ -2826,15 +2634,8 @@ async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
                 )
             )
             .scalars()
-            .one()
+            .all()
         )
-        run = (
-            await verify.execute(
-                select(HeartbeatRun).where(
-                    HeartbeatRun.wakeup_request_id == mentioned_wakeup.id
-                )
-            )
-        ).scalar_one()
         assignee_wakeups = (
             (
                 await verify.execute(
@@ -2848,17 +2649,14 @@ async def test_issue_comment_only_queues_mentioned_non_assignee_wakeup(
             .all()
         )
 
-    assert assignee_wakeups == []
-    assert mentioned_wakeup.source == "on_demand"
-    assert mentioned_wakeup.payload == {
+    assert mentioned_wakeups == []
+    assert len(assignee_wakeups) == 1
+    assert assignee_wakeups[0].source == "assignment"
+    assert assignee_wakeups[0].payload == {
         "issueId": issue_id,
-        "mutation": "comment_mention",
+        "mutation": "comment",
         "commentId": create_body["id"],
     }
-    assert run.context_snapshot is not None
-    assert run.context_snapshot["wakeSource"] == "mention"
-    assert run.context_snapshot["wakeReason"] == "issue_comment_mentioned"
-    assert run.context_snapshot["commentId"] == create_body["id"]
 
 
 async def test_issue_comment_mentioning_assignee_queues_assignee_wakeup_once(
@@ -2913,6 +2711,234 @@ async def test_issue_comment_mentioning_assignee_queues_assignee_wakeup_once(
         "mutation": "comment",
         "commentId": create_body["id"],
     }
+
+
+async def test_issue_comment_request_replay_reuses_comment_and_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="owner-replay",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_progress",
+        assignee_agent_id=agent_id,
+    )
+    payload = {
+        "body": "@owner-replay 请继续",
+        "requestId": "comment-request-replay",
+    }
+
+    first_code, first_body = await _request(
+        app, "POST", f"/api/issues/{issue_id}/comments", json=payload
+    )
+    second_code, second_body = await _request(
+        app, "POST", f"/api/issues/{issue_id}/comments", json=payload
+    )
+
+    assert first_code == second_code == 200
+    assert first_body["id"] == second_body["id"]
+    async with session_factory() as verify:
+        comments = (
+            (
+                await verify.execute(
+                    select(IssueComment).where(IssueComment.issue_id == issue_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(comments) == 1
+    assert comments[0].request_id == "comment-request-replay"
+    assert len(wakeups) == 1
+
+
+async def test_issue_comment_merges_into_deferred_issue_execution(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="owner-deferred",
+                role="engineer",
+                status="idle",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="todo",
+        assignee_agent_id=agent_id,
+    )
+    async with async_transaction(session):
+        session.add(
+            AgentWakeupRequest(
+                org_id=org_id,
+                agent_id=agent_id,
+                source="assignment",
+                reason="issue_assigned",
+                status="deferred_issue_execution",
+                payload={
+                    "issueId": issue_id,
+                    "__releaseAfterParentRunId": "parent-run-1",
+                    "__deferredContextSnapshot": {"issueId": issue_id},
+                },
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={
+            "body": "补充执行说明",
+            "requestId": "deferred-comment-1",
+        },
+    )
+
+    assert code == 200
+    async with session_factory() as verify:
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(wakeups) == 1
+    assert wakeups[0].status == "deferred_issue_execution"
+    assert wakeups[0].coalesced_count == 1
+    assert wakeups[0].payload is not None
+    context = wakeups[0].payload["__deferredContextSnapshot"]
+    assert context["commentId"] == body["id"]
+    assert context["commentIds"] == [body["id"]]
+    assert runs == []
+
+
+async def test_issue_comments_during_active_run_coalesce_into_one_followup(
+    app: FastAPI,
+    session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Agent(
+                id=agent_id,
+                org_id=org_id,
+                name="active-owner",
+                role="engineer",
+                status="working",
+            )
+        )
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        status="in_progress",
+        assignee_agent_id=agent_id,
+    )
+    async with async_transaction(session):
+        issue = await session.get(Issue, issue_id)
+        assert issue is not None
+        issue.checkout_run_id = run_id
+        issue.execution_run_id = run_id
+        session.add(
+            HeartbeatRun(
+                id=run_id,
+                org_id=org_id,
+                agent_id=agent_id,
+                invocation_source="assignment",
+                status="running",
+                context_snapshot={"issueId": issue_id},
+            )
+        )
+
+    first_code, first_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "第一次调整", "requestId": "active-comment-1"},
+    )
+    second_code, second_body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "第二次调整", "requestId": "active-comment-2"},
+    )
+
+    assert first_code == second_code == 200
+    async with session_factory() as verify:
+        runs = (
+            (
+                await verify.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == agent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await verify.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == agent_id,
+                        AgentWakeupRequest.status == "deferred_issue_execution",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [run.id for run in runs] == [run_id]
+    assert len(wakeups) == 1
+    assert wakeups[0].coalesced_count == 1
+    assert wakeups[0].payload is not None
+    context = wakeups[0].payload["__deferredContextSnapshot"]
+    assert context["commentIds"] == [first_body["id"], second_body["id"]]
 
 
 async def test_review_decision_route_applies_status_mapping(

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.issue_comments import (
-    insert_issue_comment,
+    insert_issue_comment_idempotent,
     list_issue_comments,
 )
 from packages.database.queries.issue_attachments import (
@@ -1062,17 +1062,28 @@ class IssueService:
         if issue is None:
             raise ValueError("Issue not found")
 
+        request_id = payload.get("requestId")
         values: dict[str, Any] = {
             "org_id": issue.org_id,
             "issue_id": issue.id,
             "body": payload["body"],
+            "request_id": request_id,
         }
         if actor_type == "agent":
             values["author_agent_id"] = actor_id
         else:
             values["author_user_id"] = actor_id
 
-        comment = await insert_issue_comment(self._session, values)
+        comment, created = await insert_issue_comment_idempotent(self._session, values)
+        if not created:
+            expected_author = (
+                comment.author_agent_id
+                if actor_type == "agent"
+                else comment.author_user_id
+            )
+            if comment.body != payload["body"] or expected_author != actor_id:
+                raise ValueError("Comment requestId was already used")
+            return comment
         await insert_activity_log(
             self._session,
             org_id=issue.org_id,

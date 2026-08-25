@@ -9,7 +9,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from packages.database.clients import (
+    ConcurrentDatabaseWriteStrategy,
     CoordinatedAsyncSession,
+    DatabaseWriteStrategy,
+    SQLiteSerializedWriteStrategy,
     create_database_engine,
     create_session_factory,
 )
@@ -24,6 +27,11 @@ class CoordinationEvent(CoordinationBase):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     value: Mapped[str]
+
+
+def test_database_write_variants_share_one_strategy_boundary() -> None:
+    assert isinstance(SQLiteSerializedWriteStrategy(), DatabaseWriteStrategy)
+    assert isinstance(ConcurrentDatabaseWriteStrategy(), DatabaseWriteStrategy)
 
 
 async def _database(tmp_path: Path, name: str = "coordination.db"):

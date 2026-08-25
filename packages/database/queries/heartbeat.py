@@ -147,22 +147,6 @@ async def claim_due_wakeup_request(
     return result.scalar_one_or_none()
 
 
-async def claim_parent_deferred_wakeup(
-    session: AsyncSession, wakeup_id: str, claimed_at: datetime
-) -> AgentWakeupRequest | None:
-    result = await session.execute(
-        update(AgentWakeupRequest)
-        .where(
-            AgentWakeupRequest.id == wakeup_id,
-            AgentWakeupRequest.status == "deferred_parent_yield",
-        )
-        .values(status="claimed", claimed_at=claimed_at, updated_at=claimed_at)
-        .returning(AgentWakeupRequest)
-        .execution_options(synchronize_session=False, populate_existing=True)
-    )
-    return result.scalar_one_or_none()
-
-
 async def create_run(session: AsyncSession, fields: Mapping[str, Any]) -> HeartbeatRun:
     row = HeartbeatRun(**dict(fields))
     session.add(row)
@@ -335,32 +319,6 @@ async def renew_run_execution_lease(
     return result.scalar_one_or_none() is not None
 
 
-async def request_run_yield(
-    session: AsyncSession,
-    run_id: str,
-    owner_token: str,
-    requested_at: datetime,
-) -> HeartbeatRun | None:
-    """Persist a parent handoff request without releasing its execution lease."""
-
-    result = await session.execute(
-        update(HeartbeatRun)
-        .where(
-            HeartbeatRun.id == run_id,
-            HeartbeatRun.status == "running",
-            HeartbeatRun.execution_owner_token == owner_token,
-            HeartbeatRun.yield_requested_at.is_(None),
-        )
-        .values(
-            yield_requested_at=requested_at,
-            updated_at=requested_at,
-        )
-        .returning(HeartbeatRun)
-        .execution_options(synchronize_session=False, populate_existing=True)
-    )
-    return result.scalar_one_or_none()
-
-
 async def claim_expired_run_execution(
     session: AsyncSession, run_id: str, *, now: datetime | None = None
 ) -> HeartbeatRun | None:
@@ -446,9 +404,7 @@ async def transition_run_to_terminal(
     run = result.scalar_one_or_none()
     if run is None or run.wakeup_request_id is None:
         return run
-    wakeup_status = (
-        "completed" if status in {"succeeded", "waiting_for_children"} else status
-    )
+    wakeup_status = "completed" if status == "succeeded" else status
     await session.execute(
         update(AgentWakeupRequest)
         .where(

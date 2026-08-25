@@ -43,7 +43,7 @@ Run 恢复是两者共同依赖的基础。如果 Run 已实际完成却永久�
 - assignment、review、on-demand、内部 automation 等唤醒来源；
 - queued run claim、每 Agent 并发限制、paused 延期、取消、重试和 orphan recovery；
 - server lifespan 中的周期调度与 queued run 恢复；
-- `waiting_for_children` 与 `issue_children_settled` 父任务续跑。
+- `issue_children_settled` 父任务续跑；父 Run 与子 Run 使用标准终态并可并发执行。
 
 当前缺口：
 
@@ -115,7 +115,7 @@ terminal_effects_pending = false
 1. **新产生的 Run：** Run 从 `running` 进入终态时，必须在同一原子事务中写入 Run 终态和待执行终态副作用。新代码不得再产生 `status=running` 但已有 `finishedAt` 的记录。
 2. **已经存在的损坏记录：** 只有存在权威终态证据时，才能兼容修复到对应终态；如果只有 `finishedAt`、`exitCode` 或 `resultJson`，不能猜测成功，必须结合 execution lease、进程状态和恢复策略处理。
 
-`waiting_for_children`、`issue_children_settled` 和 parent continuation 是 Octopus 的本地父子任务扩展，不属于本计划声明的当前上游兼容基线。其状态与并发加固在 Phase 1C 单独处理，不作为 Heartbeat 或 Automation 的前置条件。
+`issue_children_settled` 和 parent continuation 是 Octopus 的本地父子任务扩展，不属于本计划声明的当前上游兼容基线。其并发加固在 Phase 1C 单独处理，不作为 Heartbeat 或 Automation 的前置条件。父 Run 不使用等待型非终态；存在活动子任务时正常结束为 `succeeded`，父 Issue 保持 `in_progress`。
 
 ### 4.3 Heartbeat 流程
 
@@ -157,7 +157,7 @@ Automation 已暂缓，目标流程和实施细节见 `docs/AUTOMATION-TODO.md`�
 - 锁定上游 Run 终态 CAS、terminal effects intent、recovery、claim 和 lease 的具体字段与算法；在完成对照前，不决定新增字段、锁类型或 migration 结构；
 - 修正 `docs/guides/heartbeat-scheduler.md` 中环境变量、默认扫描周期、`intervalSec`、`preflightEnabled` 和 `runDiagnosticsOnTimer` 的当前行为说明；
 - 明确 `runDiagnosticsOnTimer` 是 Octopus 扩展或旧配置兼容项，不将其描述为当前上游契约；再决定保留、迁移或弃用策略；
-- 将 `waiting_for_children`、`issue_children_settled` 和 parent continuation 明确记录为 Octopus 本地扩展；
+- 将 `issue_children_settled` 和 parent continuation 明确记录为 Octopus 本地扩展，并删除旧等待型 Run 协议；
 - 明确 Heartbeat 优化属于 Step 13 follow-up；
 
 旧损坏 Run 的兼容恢复必须按以下证据优先级处理：
@@ -240,41 +240,32 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 
 性质：Octopus 本地扩展，不属于当前上游兼容功能，也不是 Heartbeat 或 Automation 的前置条件。
 
+本阶段采用父子 Run 并行模型，不再使用父任务交接模型。详细实施契约见
+`docs/step-13-runs/PARENT-CHILD-RECOVERY-IMPLEMENTATION.md`。
+
 任务：
 
-- 单独维护 `waiting_for_children`、`issue_children_settled` 和 parent continuation；
-- 引入父级锁、completion generation 或等价唯一键，避免最后两个子任务并发完成时漏唤醒或重复唤醒；
-- 不把父子汇合扩展字段或状态混入上游 Run 终态协议。
+- 父 Agent 通过批量接口在同一事务中写入完整初始 child Issue 集合；事务提交后立即物化 assignment wakeup，不等待父 Run 结束；
+- 父 Run 与不同 child Issue 的 Run 可以并行；同一个 Issue 同时最多存在一个 `queued/running` Run；
+- 删除 `waiting_for_children`、`yield_requested_at`、`deferred_parent_yield` 和 `yield-children` 协议，不新增 Issue execution stage；
+- 父任务的控制权来自父子 Issue 关系，不来自父 Run 或 Workspace lease；停止、评论、重试、替换等控制面操作不需要 Workspace 写租约；
+- 评论先持久化并使用数据库请求键保证传输重试幂等；父 Issue 已有活动 Run 时合并为一次跟进执行，不启动同一 Issue 的第二个并发 Run；
+- 子任务失败时先在原 Issue 上创建重试 Run；重试耗尽后 replacement 使用新 Issue ID，旧 Issue 只退役、不删除；
+- 按当前有效 child 集合生成父 continuation 幂等边界，避免最后两个子任务并发完成时漏唤醒或重复唤醒；
+- 子任务只承担实际工作，最终汇总产物由父任务生成；
+- Run 上下文、执行锁和父子关联统一使用 Issue UUID，identifier 只作为 API/CLI 输入别名；
+- 将执行、终态、恢复分别封装为 `RunExecutionService`、`RunFinalizationService`、`RunRecoveryService`，父子流程由独立 Coordinator 编排，不继续扩张 `HeartbeatService`。
+- Adapter 指令、Workspace 访问和数据库写协调使用抽象基类加策略子类；Coordinator 通过依赖注入组合策略，禁止在业务流程中散落 provider/type 条件分支。
 
 验收：
 
+- 运行中的父 Run 原子创建三个子任务后，三个子 Run 可以在父 Run 仍运行时进入执行；
+- 初始批量创建失败时整批回滚，重复调用返回已落库集合，不产生部分或重复子任务；
+- 同一评论请求只生成一条评论和一次有效唤醒；
+- 父任务可以在子任务执行期间停止、指导、重试或替换子任务；
+- replacement 后旧 child 保留审计记录但不再参与当前汇合；
 - PostgreSQL 双事务并发完成最后两个子任务时，父 continuation 恰好产生一次；
-- 扩展关闭或未使用时，不影响普通 Run、Heartbeat 或 Automation 恢复。
-
-#### Phase 1C 补充：原子拆分与父任务汇总所有权
-
-父子汇合可靠性还要求“拆分结果先落库，再启动子任务”。本扩展不新增 plan/batch 表，也不依赖标题作为幂等键：
-
-- 父 Agent 必须先生成完整的并行子任务集合，再通过一个批量接口在同一事务中写入全部 child Issue 和 assignment wakeup；禁止逐条创建同级子任务；
-- 由活跃父 Run 创建的 child wakeup 先以 `deferred_parent_yield` 持久化，不生成或启动可执行 child Run；父 Agent 可以完成短暂评论和协调，再显式调用 `yield-children`；
-- 父任务让出采用两阶段协议：第一阶段只持久化 `yield_requested_at`，父 Run 仍为 `running` 并继续持有执行租约和工作区锁；执行层通知 Adapter 停止并确认进程退出后，第二阶段才原子完成 `running → waiting_for_children`、终态副作用、父 Issue 执行锁释放和 deferred child wakeup 入队；事务提交后才允许 Dispatcher 启动子任务；
-- 父协调窗口有固定上限。父 Adapter 未主动让出时，Run Recovery 先持久化同一让出请求；租约过期且 Runtime 已消失后才代为完成第二阶段。不能依赖模型自行退出，也不能在父进程仍存活时提前释放资源；
-- 父 Issue 行锁是创建边界：若父任务已经存在可见子任务，普通重试直接返回已落库集合，不重新规划或补建另一批；单个子任务的重试或替换继续使用显式 retry/replace 流程；
-- 父 continuation 发起 retry/replace 时，新执行同样先 deferred，父任务再次让出后才进入队列；replacement 必须隐藏旧 child，使旧 blocked/cancelled 记录不再参与当前父级汇合；
-- 子任务只是实际可并行执行的工作，不创建“汇总、合并、报告”子任务；最后一批子任务结算后，由 parent continuation 读取子任务结果并在父任务中完成最终汇总；
-- 普通 Heartbeat actionable 查询排除已有子任务的父 Issue，避免父任务在等待期间被当成普通工作再次启动；`issue_children_settled` continuation 是父任务恢复执行的主路径；
-- Heartbeat/manual preflight 必须能够发现“父任务仍为 `todo/in_progress`、全部子任务已结算、当前 settlement generation 缺少 continuation”的历史记录，并按同一父级幂等键补建 continuation；
-- Run 上下文和终态收尾统一使用 Issue UUID；identifier 只作为 API/CLI 输入别名，不能直接作为 execution lock、deferred wakeup 或 parent continuation 的数据库关联键。
-
-补充验收：
-
-- 同一父任务的批量创建请求重复执行（即使重试载荷标题变化）也只保留首个完整子任务集合；
-- 批量中的任一 child/wakeup 创建失败时整批回滚，不留下部分子任务；
-- 父任务让出前没有 child Run 可被 Dispatcher 领取；让出事务完成后 child Run 才统一进入 queued；父任务未主动让出时 Recovery 能在协调宽限期后完成同样交接；
-- blocked child 的 retry/replace 不会在父 continuation 仍持有执行权时启动，replacement 后旧 child 不再计入 active/settled 汇合集合；
-- 父任务等待子任务期间不会被 Heartbeat 普通预检重复运行；
-- 全部子任务已结束但 continuation 丢失时，下一次 Heartbeat/manual preflight 能补建且只补建一次；
-- 通过 identifier 执行或关闭子任务时，终态收尾仍能释放正确的 UUID 锁并唤醒父任务；
+- blocked child 会唤醒父任务决策，不产生永久等待的合成 Run；
 - 最终汇总产物属于父任务，不存在仅用于汇总的子 Issue。
 
 ### Phase 2：Heartbeat 语义对齐
@@ -373,7 +364,7 @@ Phase 1C 是 Octopus 父子任务汇合扩展的独立维护批次，不属于�
 2. **Heartbeat时间字段：** 是否新增独立scheduler checked字段，需先对照上游schema；如上游无字段，应优先保持外部schema并在内部runtime state或调度记录中保存。
 3. **Automation排期：** 已暂缓并迁移到 `docs/AUTOMATION-TODO.md`；重新启动时再确认 Step、Webhook 前置依赖和首个交付范围。
 4. **多数据库承诺：** MySQL 的 partial unique index 和 JSON 索引实现需要独立兼容设计，不能直接复制 PostgreSQL DDL。
-5. **父子汇合并发：** `waiting_for_children`、`issue_children_settled` 和 parent continuation 是 Octopus 本地扩展，在 Phase 1C 独立加固；它们不是 Heartbeat 或 Automation 的前置条件。
+5. **父子汇合并发：** `issue_children_settled` 和 parent continuation 是 Octopus 本地扩展，在 Phase 1C 独立加固；父 Run 使用标准终态，父 Issue 关系承载汇合状态。它们不是 Heartbeat 或 Automation 的前置条件。
 6. **多实例部署：** 如果短期仍只承诺单实例，应在文档中明确；数据库约束仍应提前建立，避免未来迁移成本。
 
 ## 9. Definition of Done

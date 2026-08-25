@@ -8,7 +8,6 @@ WakeupRequestStatus = Literal[
     "queued",
     "deferred_issue_execution",
     "deferred_agent_paused",
-    "deferred_parent_yield",
     "claimed",
     "coalesced",
     "skipped",
@@ -19,7 +18,6 @@ WakeupRequestStatus = Literal[
 HeartbeatRunStatus = Literal[
     "queued",
     "running",
-    "waiting_for_children",
     "succeeded",
     "failed",
     "cancelled",
@@ -51,7 +49,6 @@ WAKEUP_REQUEST_STATUSES: tuple[WakeupRequestStatus, ...] = (
     "queued",
     "deferred_issue_execution",
     "deferred_agent_paused",
-    "deferred_parent_yield",
     "claimed",
     "coalesced",
     "skipped",
@@ -62,7 +59,6 @@ WAKEUP_REQUEST_STATUSES: tuple[WakeupRequestStatus, ...] = (
 HEARTBEAT_RUN_STATUSES: tuple[HeartbeatRunStatus, ...] = (
     "queued",
     "running",
-    "waiting_for_children",
     "succeeded",
     "failed",
     "cancelled",

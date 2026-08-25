@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -124,13 +125,6 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     )
     create_children_parser.set_defaults(handler=create_issue_children)
 
-    yield_children_parser = actions.add_parser(
-        "yield-children",
-        help="Yield the active parent run and release deferred child work",
-    )
-    yield_children_parser.add_argument("issue_id")
-    yield_children_parser.set_defaults(handler=yield_issue_children)
-
     retry_child_parser = actions.add_parser(
         "retry-child", help="Retry a blocked child issue"
     )
@@ -206,6 +200,7 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     comment_add.add_argument("issue_id")
     comment_add.add_argument("--org-id")
     comment_add.add_argument("--body", required=True)
+    comment_add.add_argument("--request-id")
     _add_work_product_declaration_args(comment_add)
     comment_add.set_defaults(handler=add_comment)
 
@@ -324,12 +319,6 @@ def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
     )
 
 
-def yield_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
-    return client.request(
-        "POST", f"/api/issues/{args.issue_id}/yield-children", json={}
-    )
-
-
 def retry_child_issue(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("POST", f"/api/issues/{args.issue_id}/retry-child", json={})
 
@@ -416,7 +405,21 @@ def list_comments(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def add_comment(args: argparse.Namespace, client: ApiClient) -> Any:
-    payload = _add_work_product_declarations({"body": args.body}, args)
+    request_id = args.request_id
+    if request_id is None:
+        run_id = os.environ.get("OCTOPUS_RUN_ID", "").strip()
+        if run_id:
+            digest = hashlib.sha256(
+                f"{run_id}\0{args.issue_id}\0{args.body}".encode()
+            ).hexdigest()
+            request_id = f"run-comment:{digest}"
+    payload = _add_work_product_declarations(
+        {
+            "body": args.body,
+            **({"requestId": request_id} if request_id else {}),
+        },
+        args,
+    )
     return client.request("POST", f"/api/issues/{args.issue_id}/comments", json=payload)
 
 

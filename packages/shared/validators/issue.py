@@ -271,10 +271,22 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
 def validate_create_issue_comment(
     payload: Mapping[str, Any],
 ) -> CreateIssueCommentPayload:
-    _reject_unknown_fields(payload, allowed_fields={"body", "workProductDeclarations"})
+    _reject_unknown_fields(
+        payload,
+        allowed_fields={"body", "requestId", "workProductDeclarations"},
+    )
     body = payload.get("body")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("'body' is required and must be a non-empty string")
+    request_id = payload.get("requestId")
+    if request_id is not None and (
+        not isinstance(request_id, str)
+        or not request_id.strip()
+        or len(request_id) > 128
+    ):
+        raise ValueError(
+            "'requestId' must be a non-empty string of at most 128 characters"
+        )
     _check_work_product_declarations(payload)
     return cast(CreateIssueCommentPayload, payload)
 

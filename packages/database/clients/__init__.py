@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from .base import create_database_engine
-from .coordination import DatabaseTransactionCoordinator, DatabaseWritePermit
+from .coordination import (
+    ConcurrentDatabaseWriteStrategy,
+    DatabaseTransactionCoordinator,
+    DatabaseWritePermit,
+    DatabaseWriteStrategy,
+    SQLiteSerializedWriteStrategy,
+)
 from .session import CoordinatedAsyncSession, create_session_factory
 from .transaction import async_transaction
 
@@ -11,5 +17,8 @@ __all__ = [
     "CoordinatedAsyncSession",
     "DatabaseTransactionCoordinator",
     "DatabaseWritePermit",
+    "DatabaseWriteStrategy",
+    "SQLiteSerializedWriteStrategy",
+    "ConcurrentDatabaseWriteStrategy",
     "async_transaction",
 ]

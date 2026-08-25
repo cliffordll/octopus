@@ -214,8 +214,11 @@ def test_validate_update_issue_unknown_field_raises() -> None:
 
 
 def test_validate_create_issue_comment_happy() -> None:
-    payload = validate_create_issue_comment({"body": "Looks good"})
+    payload = validate_create_issue_comment(
+        {"body": "Looks good", "requestId": "request-1"}
+    )
     assert payload["body"] == "Looks good"
+    assert payload["requestId"] == "request-1"
 
 
 def test_validate_create_issue_comment_blank_body_raises() -> None:

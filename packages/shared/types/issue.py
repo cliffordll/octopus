@@ -146,6 +146,7 @@ IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_fo
 
 class CreateIssueCommentPayload(TypedDict):
     body: str
+    requestId: NotRequired[str]
     workProductDeclarations: NotRequired[list[WorkProductDeclarationPayload]]
 
 
