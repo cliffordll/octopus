@@ -45,6 +45,15 @@ class BrokenSession:
     async def begin(self) -> BrokenTransaction:
         return self.transaction
 
+    def in_transaction(self) -> bool:
+        return self.transaction.is_active
+
+    async def rollback(self) -> None:
+        await self.transaction.rollback()
+
+    async def commit(self) -> None:
+        await self.transaction.commit()
+
     async def close(self) -> None:
         self.close_called = True
         raise RuntimeError("close connection is already broken")
@@ -75,23 +84,24 @@ class SlowDisposeEngine:
         await asyncio.sleep(10)
 
 
-class EmptyAsyncContext:
-    async def __aenter__(self) -> object:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        return None
-
-
 class SchedulerTestSession:
+    def __init__(self) -> None:
+        self.transaction_active = False
+
     async def __aenter__(self) -> "SchedulerTestSession":
         return self
 
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    def begin(self) -> EmptyAsyncContext:
-        return EmptyAsyncContext()
+    async def begin(self) -> None:
+        self.transaction_active = True
+
+    async def commit(self) -> None:
+        self.transaction_active = False
+
+    async def rollback(self) -> None:
+        self.transaction_active = False
 
 
 async def test_get_session_preserves_original_exception_when_cleanup_fails() -> None:
