@@ -286,6 +286,8 @@ class ParentCloseoutGovernance:
     async def _has_parent_summary_evidence(
         self, run: HeartbeatRun, parent: Issue, children: list[Issue]
     ) -> bool:
+        if await self._run_declares_existing_parent_primary_product(run, parent):
+            return True
         child_settled_at = max(
             (child.completed_at or child.updated_at or child.created_at)
             for child in children
@@ -299,6 +301,60 @@ class ParentCloseoutGovernance:
             if product_created_at >= child_settled_at:
                 return True
         return await self._run_mentions_children(run, parent, children)
+
+    async def _run_declares_existing_parent_primary_product(
+        self, run: HeartbeatRun, parent: Issue
+    ) -> bool:
+        """Accept an existing parent artifact explicitly resubmitted by this Run."""
+        activity_rows = await self._session.execute(
+            select(ActivityLog.details).where(
+                ActivityLog.org_id == parent.org_id,
+                ActivityLog.run_id == run.id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == parent.id,
+            )
+        )
+        declared_paths = {
+            normalized
+            for details in activity_rows.scalars().all()
+            if isinstance(details, dict)
+            for declaration in (details.get("workProductDeclarations") or [])
+            if isinstance(declaration, dict)
+            and declaration.get("isPrimary") is True
+            for normalized in (
+                self._normalize_product_path(declaration.get("path")),
+            )
+            if normalized
+        }
+        if not declared_paths:
+            return False
+
+        product_rows = await self._session.execute(
+            select(IssueWorkProduct).where(
+                IssueWorkProduct.org_id == parent.org_id,
+                IssueWorkProduct.issue_id == parent.id,
+                IssueWorkProduct.is_primary.is_(True),
+            )
+        )
+        for product in product_rows.scalars().all():
+            metadata = (
+                product.metadata_json
+                if isinstance(product.metadata_json, dict)
+                else {}
+            )
+            product_paths = {
+                normalized
+                for value in (
+                    product.title,
+                    metadata.get("workspacePath"),
+                    metadata.get("path"),
+                )
+                for normalized in (self._normalize_product_path(value),)
+                if normalized
+            }
+            if declared_paths & product_paths:
+                return True
+        return False
 
     async def _latest_parent_primary_product_at(self, parent: Issue) -> datetime | None:
         result = await self._session.execute(
@@ -372,3 +428,9 @@ class ParentCloseoutGovernance:
             if isinstance(value, str) and value.strip():
                 values.append(value)
         return "\n".join(values)
+
+    @staticmethod
+    def _normalize_product_path(value: object) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.replace("\\", "/").strip().casefold()

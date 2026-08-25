@@ -3639,6 +3639,108 @@ async def test_parent_primary_work_product_satisfies_child_output_evidence() -> 
         await engine.dispose()
 
 
+async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-parent-resubmits-primary",
+                name="Step 15 Parent Resubmits Primary",
+                issue_prefix="PRP",
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Four mountains report",
+                status="done",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            product = IssueWorkProduct(
+                org_id=org.id,
+                issue_id=parent.id,
+                type="document",
+                provider="octopus",
+                title="reports/four-mountains.md",
+                status="active",
+                is_primary=True,
+                created_at=datetime.now(UTC) - timedelta(hours=1),
+            )
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Jiuhua Mountain food guide",
+                status="done",
+                completed_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+            session.add_all([product, child])
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                finished_at=datetime.now(UTC),
+                context_snapshot={
+                    "issueId": parent.id,
+                    "closeoutMode": "parent_summary",
+                },
+            )
+            session.add(run)
+            await session.flush()
+            session.add(
+                ActivityLog(
+                    org_id=org.id,
+                    actor_type="agent",
+                    actor_id=agent.id,
+                    action="issue.updated",
+                    entity_type="issue",
+                    entity_id=parent.id,
+                    run_id=run.id,
+                    details={
+                        "status": "done",
+                        "workProductDeclarations": [
+                            {
+                                "path": "reports\\four-mountains.md",
+                                "isPrimary": True,
+                            }
+                        ],
+                    },
+                )
+            )
+            await session.flush()
+
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(agent, run)
+            warnings = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.action
+                            == "issue.parent_deliverable_convergence_warning"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            assert final.status == "succeeded"
+            assert warnings == []
+    finally:
+        await engine.dispose()
+
+
 async def test_child_outputs_batch_closes_without_parent_summary() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
