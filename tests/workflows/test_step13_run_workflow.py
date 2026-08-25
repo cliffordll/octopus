@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import select, update
@@ -727,7 +728,7 @@ async def test_dispatch_workspace_prepare_failure_uses_clean_finalization_sessio
         run_id: str,
         status: str,
         values: dict,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> object:
         nonlocal transition_attempts
         transition_attempts += 1

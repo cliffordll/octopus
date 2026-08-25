@@ -18,20 +18,28 @@ class WorkspaceAccessStrategy(ABC):
 
 
 class SharedWorkspaceAccessStrategy(WorkspaceAccessStrategy):
-    lock_namespace = "shared"
+    @property
+    def lock_namespace(self) -> str:
+        return "shared"
 
 
 class IsolatedWorkspaceAccessStrategy(WorkspaceAccessStrategy):
     # Git mutates common source-repository metadata while adding worktrees.
-    lock_namespace = "isolated-source-repo"
+    @property
+    def lock_namespace(self) -> str:
+        return "isolated-source-repo"
 
 
 class OperatorBranchWorkspaceAccessStrategy(WorkspaceAccessStrategy):
-    lock_namespace = "operator-branch"
+    @property
+    def lock_namespace(self) -> str:
+        return "operator-branch"
 
 
 class AgentWorkspaceAccessStrategy(WorkspaceAccessStrategy):
-    lock_namespace = "agent-workspace"
+    @property
+    def lock_namespace(self) -> str:
+        return "agent-workspace"
 
 
 def workspace_access_strategy(

@@ -48,6 +48,7 @@ from packages.shared.validators.workspace import (
     validate_issue_execution_workspace_settings,
     validate_project_workspace_execution_policy,
 )
+from packages.shared.types.project import CreateProjectWorkspacePayload
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -1469,16 +1470,19 @@ async def test_git_workspace_preparation_is_serialized_by_strategy(
                 strategy["operatorBranch"] = "feature/coordinated"
             await project_service.create_workspace(
                 project["id"],
-                {
-                    "name": "Primary",
-                    "cwd": str(project_cwd),
-                    "defaultRef": "main",
-                    "executionWorkspacePolicy": {
-                        "enabled": True,
-                        "defaultMode": mode,
-                        "workspaceStrategy": strategy,
+                cast(
+                    CreateProjectWorkspacePayload,
+                    {
+                        "name": "Primary",
+                        "cwd": str(project_cwd),
+                        "defaultRef": "main",
+                        "executionWorkspacePolicy": {
+                            "enabled": True,
+                            "defaultMode": mode,
+                            "workspaceStrategy": strategy,
+                        },
                     },
-                },
+                ),
                 actor_type="user",
                 actor_id="dev",
             )

@@ -173,8 +173,7 @@ async def test_sqlite_rollback_releases_the_next_writer(
         await second.commit()
 
         assert (
-            await second.scalar(text("select count(*) from coordination_events"))
-            == 1
+            await second.scalar(text("select count(*) from coordination_events")) == 1
         )
     finally:
         await first.close()
@@ -246,7 +245,9 @@ async def test_four_sqlite_workers_commit_through_the_same_writer_queue(
         verification = session_factory()
         try:
             values = set(
-                await verification.scalars(text("select value from coordination_events"))
+                await verification.scalars(
+                    text("select value from coordination_events")
+                )
             )
         finally:
             await verification.close()

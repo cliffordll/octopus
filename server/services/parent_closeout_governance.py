@@ -319,11 +319,8 @@ class ParentCloseoutGovernance:
             for details in activity_rows.scalars().all()
             if isinstance(details, dict)
             for declaration in (details.get("workProductDeclarations") or [])
-            if isinstance(declaration, dict)
-            and declaration.get("isPrimary") is True
-            for normalized in (
-                self._normalize_product_path(declaration.get("path")),
-            )
+            if isinstance(declaration, dict) and declaration.get("isPrimary") is True
+            for normalized in (self._normalize_product_path(declaration.get("path")),)
             if normalized
         }
         if not declared_paths:
@@ -338,9 +335,7 @@ class ParentCloseoutGovernance:
         )
         for product in product_rows.scalars().all():
             metadata = (
-                product.metadata_json
-                if isinstance(product.metadata_json, dict)
-                else {}
+                product.metadata_json if isinstance(product.metadata_json, dict) else {}
             )
             product_paths = {
                 normalized
