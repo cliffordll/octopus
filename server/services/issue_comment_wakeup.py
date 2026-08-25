@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import re
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,6 +96,116 @@ class CommentWakeupResult:
     merged_agent_ids: tuple[str, ...]
 
 
+InstructionDelivery = Literal["queued", "merged", "ignored"]
+
+
+class AdapterInstructionChannel(ABC):
+    """Extension point for delivering durable instructions to an Adapter owner."""
+
+    @abstractmethod
+    async def deliver(
+        self,
+        *,
+        issue: IssueDetail,
+        target: CommentWakeupTarget,
+        comment_id: str,
+        comment_body: str,
+        actor_type: str,
+        actor_id: str,
+    ) -> InstructionDelivery:
+        """Deliver or coalesce one instruction without starting duplicate Issue work."""
+
+
+class FollowupRunInstructionChannel(AdapterInstructionChannel):
+    """Deliver CLI Adapter instructions through a coalesced follow-up Run."""
+
+    def __init__(self, session: AsyncSession, heartbeat: HeartbeatService) -> None:
+        self._session = session
+        self._heartbeat = heartbeat
+
+    async def deliver(
+        self,
+        *,
+        issue: IssueDetail,
+        target: CommentWakeupTarget,
+        comment_id: str,
+        comment_body: str,
+        actor_type: str,
+        actor_id: str,
+    ) -> InstructionDelivery:
+        if await self._merge_into_deferred_wakeup(
+            issue_id=issue["id"],
+            agent_id=target.agent_id,
+            comment_id=comment_id,
+            comment_body=comment_body,
+        ):
+            return "merged"
+        run = await self._heartbeat.wakeup(
+            target.agent_id,
+            IssueCommentWakeupCoordinator._mention_payload(
+                issue=issue,
+                agent_id=target.agent_id,
+                comment_id=comment_id,
+                comment_body=comment_body,
+                explicit_mention=target.explicit_mention,
+            ),
+            actor_type=actor_type,
+            actor_id=actor_id,
+            execute_immediately=False,
+        )
+        return "queued" if run is not None else "ignored"
+
+    async def _merge_into_deferred_wakeup(
+        self,
+        *,
+        issue_id: str,
+        agent_id: str,
+        comment_id: str,
+        comment_body: str,
+    ) -> bool:
+        for wakeup in await list_wakeup_requests_by_status(
+            self._session,
+            agent_id,
+            "deferred_issue_execution",
+        ):
+            payload = dict(wakeup.payload or {})
+            if payload.get("issueId") != issue_id:
+                continue
+            context = dict(payload.get(_DEFERRED_CONTEXT_KEY) or {})
+            comment_ids = [
+                value
+                for value in context.get("commentIds", [])
+                if isinstance(value, str)
+            ]
+            previous_comment_id = context.get("commentId")
+            if (
+                isinstance(previous_comment_id, str)
+                and previous_comment_id not in comment_ids
+            ):
+                comment_ids.append(previous_comment_id)
+            if comment_id in comment_ids:
+                return True
+            comment_ids.append(comment_id)
+            context.update(
+                {
+                    "commentId": comment_id,
+                    "commentIds": comment_ids,
+                    "commentBody": comment_body,
+                }
+            )
+            payload[_DEFERRED_CONTEXT_KEY] = context
+            await update_wakeup_request(
+                self._session,
+                wakeup.id,
+                {
+                    "payload": payload,
+                    "coalesced_count": wakeup.coalesced_count + 1,
+                },
+            )
+            return True
+        return False
+
+
 class IssueCommentWakeupCoordinator:
     """Persist comment wakeups and coalesce work for an already active Issue."""
 
@@ -104,11 +216,11 @@ class IssueCommentWakeupCoordinator:
         agent_service: AgentService,
         *,
         policy: IssueCommentWakeupPolicy | None = None,
+        channel: AdapterInstructionChannel | None = None,
     ) -> None:
-        self._session = session
-        self._heartbeat = heartbeat
         self._agent_service = agent_service
         self._policy = policy or IssueCommentWakeupPolicy()
+        self._channel = channel or FollowupRunInstructionChannel(session, heartbeat)
 
     async def process(
         self,
@@ -130,83 +242,19 @@ class IssueCommentWakeupCoordinator:
         dispatch: list[str] = []
         merged: list[str] = []
         for target in decision.targets:
-            agent_id = target.agent_id
-            if await self._merge_into_deferred_wakeup(
-                issue_id=issue["id"],
-                agent_id=agent_id,
+            delivery = await self._channel.deliver(
+                issue=issue,
+                target=target,
                 comment_id=comment_id,
                 comment_body=comment_body,
-            ):
-                merged.append(agent_id)
-                continue
-            run = await self._heartbeat.wakeup(
-                agent_id,
-                self._mention_payload(
-                    issue=issue,
-                    agent_id=agent_id,
-                    comment_id=comment_id,
-                    comment_body=comment_body,
-                    explicit_mention=target.explicit_mention,
-                ),
                 actor_type=actor_type,
                 actor_id=actor_id,
-                execute_immediately=False,
             )
-            if run is not None:
-                dispatch.append(agent_id)
+            if delivery == "merged":
+                merged.append(target.agent_id)
+            elif delivery == "queued":
+                dispatch.append(target.agent_id)
         return CommentWakeupResult(tuple(dispatch), tuple(merged))
-
-    async def _merge_into_deferred_wakeup(
-        self,
-        *,
-        issue_id: str,
-        agent_id: str,
-        comment_id: str,
-        comment_body: str,
-    ) -> bool:
-        for status in ("deferred_issue_execution",):
-            wakeups = await list_wakeup_requests_by_status(
-                self._session,
-                agent_id,
-                status,
-            )
-            for wakeup in wakeups:
-                payload = dict(wakeup.payload or {})
-                if payload.get("issueId") != issue_id:
-                    continue
-                context = dict(payload.get(_DEFERRED_CONTEXT_KEY) or {})
-                comment_ids = [
-                    value
-                    for value in context.get("commentIds", [])
-                    if isinstance(value, str)
-                ]
-                previous_comment_id = context.get("commentId")
-                if (
-                    isinstance(previous_comment_id, str)
-                    and previous_comment_id not in comment_ids
-                ):
-                    comment_ids.append(previous_comment_id)
-                if comment_id in comment_ids:
-                    return True
-                comment_ids.append(comment_id)
-                context.update(
-                    {
-                        "commentId": comment_id,
-                        "commentIds": comment_ids,
-                        "commentBody": comment_body,
-                    }
-                )
-                payload[_DEFERRED_CONTEXT_KEY] = context
-                await update_wakeup_request(
-                    self._session,
-                    wakeup.id,
-                    {
-                        "payload": payload,
-                        "coalesced_count": wakeup.coalesced_count + 1,
-                    },
-                )
-                return True
-        return False
 
     @staticmethod
     def _mention_payload(

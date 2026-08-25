@@ -85,7 +85,16 @@ from ..services.heartbeat import (
 )
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.child_dispatch import ChildDispatchCoordinator
+from ..services.child_recovery import (
+    ChildRecoveryCoordinator,
+    ChildRecoveryUnavailable,
+)
 from ..services.issue_comment_wakeup import IssueCommentWakeupCoordinator
+from ..services.parent_child_control import (
+    ParentChildControlAuthorizer,
+    ParentChildControlContext,
+    ParentChildControlDenied,
+)
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
 from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
@@ -360,64 +369,37 @@ async def retry_child_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
     assert_organization_access(request, detail["orgId"])
-    runs = await heartbeat.list_for_issue(id)
-    failed = next(
-        (
-            run
-            for run in runs or []
-            if run.get("status") in {"failed", "timed_out", "cancelled"}
-        ),
-        None,
-    )
-    if failed is None:
+    parent_id = detail.get("parentId")
+    parent = await service.get_by_id(parent_id) if parent_id else None
+    if parent is None:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail="Child issue has no failed, timed out, or cancelled run to retry",
+            detail="Issue is not a child issue",
         )
-    runs_by_id = {
-        str(run["runId"]): run
-        for run in runs or []
-        if isinstance(run.get("runId"), str)
-    }
-    retry_attempts = 0
-    cursor = failed
-    seen_run_ids: set[str] = set()
-    while isinstance(cursor.get("retryOfRunId"), str):
-        retry_attempts += 1
-        retry_of = str(cursor["retryOfRunId"])
-        if retry_of in seen_run_ids:
-            break
-        seen_run_ids.add(retry_of)
-        previous = runs_by_id.get(retry_of)
-        if previous is None:
-            break
-        cursor = previous
-    if retry_attempts >= 1:
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=parent, child=detail),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    try:
+        retried = await ChildRecoveryCoordinator(service, heartbeat).retry(
+            detail,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ChildRecoveryUnavailable as exc:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=(
-                "Child retry limit reached; replace the child, accept the "
-                "incomplete result, or block the parent."
-            ),
-        )
-    await service.update_issue(
-        id,
-        {"status": "in_progress", "comment": "Retrying blocked child issue."},
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-        run_id=actor.run_id,
-    )
-    retried = await heartbeat.retry_run(
-        str(failed["runId"]),
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-        execute_immediately=False,
-        recovery_trigger="manual",
-    )
-    if retried is None:
-        raise HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND, detail="Run not found"
-        )
+            detail=str(exc),
+        ) from exc
     return dict(retried)
 
 
@@ -448,6 +430,24 @@ async def replace_child_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Issue is not a child issue",
         )
+    parent = await service.get_by_id(parent_id)
+    if parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Parent issue not found",
+        )
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=parent, child=old_child),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     if old_child.get("executionRunId") or old_child.get("checkoutRunId"):
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -458,6 +458,15 @@ async def replace_child_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Completed child issue already has registered work products",
         )
+    try:
+        await ChildRecoveryCoordinator(
+            service, heartbeat
+        ).require_failed_retry_before_replacement(old_child["id"])
+    except ChildRecoveryUnavailable as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     title = body.get("title") or f"Replacement for {old_child['title']}"
     description = body.get("description") or old_child.get("description")
     payload = validate_create_issue(
@@ -509,6 +518,7 @@ async def accept_incomplete_issue_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> IssueDetail:
     actor = require_actor_identity(request)
     detail = await service.get_by_id(id)
@@ -517,6 +527,18 @@ async def accept_incomplete_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
     assert_organization_access(request, detail["orgId"])
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=detail),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     reason = body.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise HTTPException(
