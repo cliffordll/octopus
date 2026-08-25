@@ -129,6 +129,7 @@ from ..services.heartbeat import (
     dispatch_queued_agent,
     track_dispatch_task,
 )
+from ..services.run_admission import DirectRunCreationDenied, RunAdmissionPolicy
 from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["agents"])
@@ -1035,11 +1036,15 @@ async def _invoke_agent(
 ) -> HeartbeatRun | dict[str, str]:
     await _get_agent_or_404(id, request=request, service=service)
     actor = require_actor_identity(request)
-    if actor.actor_type == "agent" and actor.actor_id != id:
+    try:
+        RunAdmissionPolicy(heartbeat).require_direct_creation_authority(
+            actor_type=actor.actor_type
+        )
+    except DirectRunCreationDenied as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Agent can only invoke itself",
-        )
+            detail=str(exc),
+        ) from exc
     try:
         request_body = dict(body)
         if diagnostic:
