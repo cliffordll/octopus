@@ -252,8 +252,10 @@ before treating the work as delegated:
 Write the complete child array as a UTF-8 JSON file first, then submit the file without shell-escaping the JSON. The CLI validates the complete file before sending any write request:
 
 ```bash
-octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" --json
+octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" --closeout-mode <parent_summary|child_outputs> --json
 ```
+
+Use `parent_summary` when the parent must create a new synthesized final artifact. Use `child_outputs` when the child artifacts themselves are final and the parent only verifies and closes the batch.
 
 Never test this write command by creating a placeholder child on the real parent issue.
 
@@ -263,8 +265,9 @@ Before delegating child issues, list available agents when you need to choose th
 octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
-Before creating child issues, list existing children for the parent. A rerun must
-reuse the persisted split instead of submitting another split:
+Before creating child issues, list existing children for the parent. A retry in
+the same parent Run must reuse that Run's persisted batch instead of submitting
+another split; a later parent Run may create a new delegation batch:
 
 ```bash
 octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json

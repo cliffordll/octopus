@@ -17,6 +17,7 @@ from packages.shared.types.issue import IssueDetail
 
 from .agents import AgentService
 from .heartbeat import HeartbeatService
+from .issues import IssueService
 
 
 _MENTION_PATTERN = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
@@ -32,6 +33,7 @@ class CommentWakeupTarget:
 @dataclass(frozen=True)
 class CommentWakeupDecision:
     targets: tuple[CommentWakeupTarget, ...]
+    reopen_issue: bool = False
 
 
 class IssueCommentWakeupPolicy:
@@ -52,10 +54,39 @@ class IssueCommentWakeupPolicy:
         actor_type: str,
         actor_id: str,
     ) -> CommentWakeupDecision:
-        if issue["status"] in {"backlog", "done", "cancelled"}:
+        if issue["status"] in {"backlog", "cancelled"}:
             return CommentWakeupDecision(())
         tokens = self.mentioned_tokens(body)
         assignee_agent_id = issue.get("assigneeAgentId")
+        if issue["status"] == "done":
+            if actor_type == "agent" or not assignee_agent_id:
+                return CommentWakeupDecision(())
+            assignee = next(
+                (agent for agent in agents if agent["id"] == assignee_agent_id),
+                None,
+            )
+            if assignee is None:
+                return CommentWakeupDecision(())
+            aliases = {
+                value.lower()
+                for value in (
+                    assignee["id"],
+                    assignee["name"],
+                    assignee["urlKey"],
+                )
+                if isinstance(value, str) and value
+            }
+            if tokens.isdisjoint(aliases):
+                return CommentWakeupDecision(())
+            return CommentWakeupDecision(
+                (
+                    CommentWakeupTarget(
+                        agent_id=assignee_agent_id,
+                        explicit_mention=True,
+                    ),
+                ),
+                reopen_issue=True,
+            )
         targets: list[CommentWakeupTarget] = []
         for agent in agents:
             if assignee_agent_id:
@@ -214,11 +245,13 @@ class IssueCommentWakeupCoordinator:
         session: AsyncSession,
         heartbeat: HeartbeatService,
         agent_service: AgentService,
+        issue_service: IssueService,
         *,
         policy: IssueCommentWakeupPolicy | None = None,
         channel: AdapterInstructionChannel | None = None,
     ) -> None:
         self._agent_service = agent_service
+        self._issue_service = issue_service
         self._policy = policy or IssueCommentWakeupPolicy()
         self._channel = channel or FollowupRunInstructionChannel(session, heartbeat)
 
@@ -239,6 +272,16 @@ class IssueCommentWakeupCoordinator:
             actor_type=actor_type,
             actor_id=actor_id,
         )
+        if decision.reopen_issue:
+            reopened = await self._issue_service.update_issue(
+                issue["id"],
+                {"reopen": True},
+                actor_type=actor_type,
+                actor_id=actor_id,
+            )
+            if reopened is None:
+                return CommentWakeupResult((), ())
+            issue = reopened
         dispatch: list[str] = []
         merged: list[str] = []
         for target in decision.targets:

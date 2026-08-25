@@ -104,7 +104,11 @@ def test_issue_priorities_match_contract() -> None:
 
 
 def test_issue_origin_kinds_match_contract() -> None:
-    assert ISSUE_ORIGIN_KINDS == ("manual", "automation_execution")
+    assert ISSUE_ORIGIN_KINDS == (
+        "manual",
+        "automation_execution",
+        "delegation",
+    )
     assert DEFAULT_ISSUE_ORIGIN_KIND == "manual"
 
 

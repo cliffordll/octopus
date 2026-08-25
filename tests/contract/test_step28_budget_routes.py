@@ -282,10 +282,6 @@ async def test_issue_execute_returns_explainable_budget_block(
         application,
         "POST",
         f"/api/issues/{issue_id}/execute",
-        headers={
-            "x-test-agent-id": agent_id,
-            "x-test-org-id": org_id,
-        },
     )
 
     assert code == 422

@@ -97,6 +97,7 @@ def test_issue_indexes_match_upstream() -> None:
         "issues_company_reviewer_agent_status_idx",
         "issues_company_reviewer_user_status_idx",
         "issues_company_parent_idx",
+        "issues_delegation_batch_idx",
         "issues_company_project_idx",
         "issues_company_origin_idx",
         "issues_company_project_workspace_idx",
@@ -270,7 +271,7 @@ async def test_run_recovery_migration_repairs_partially_materialized_schema(
             "select id, idempotency_key from agent_wakeup_requests order by id"
         ).fetchall()
 
-    assert revision == ("20260825_000029",)
+    assert revision == ("20260825_000030",)
     assert "process_exited_at" in run_columns
     assert "execution_owner_token" in run_columns
     assert "terminal_effects_pending" in run_columns

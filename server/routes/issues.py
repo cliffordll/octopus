@@ -492,6 +492,9 @@ async def replace_child_issue_route(
         actor_type=actor.actor_type,
         actor_id=actor.actor_id,
         run_id=actor.run_id,
+        origin_run_id=old_child.get("originRunId"),
+        closeout_mode=old_child.get("closeoutMode"),
+        origin_kind=old_child.get("originKind"),
     )
     await service.record_child_replaced(
         old_child,
@@ -1125,6 +1128,7 @@ async def create_issue_comment_route(
         session,
         heartbeat,
         agent_service,
+        service,
     ).process(
         issue=detail,
         comment_id=comment.id,
