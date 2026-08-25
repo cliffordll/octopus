@@ -20,9 +20,24 @@ EPAI/POD 写入链路需要生产级数据库能力，不能依赖 SQLite 的单
 routes
   -> services
     -> packages/database/queries 统一数据操作接口
-      -> packages/database dialect/helper 处理方言差异
-        -> SQLite / PostgreSQL / MySQL
+      -> packages/database/clients 统一事务与连接生命周期
+        -> database transaction coordinator 选择并发策略
+          -> packages/database dialect/helper 处理方言差异
+            -> SQLite / PostgreSQL / MySQL
 ```
+
+数据库事务层对所有数据库都生效，但并发策略不同：
+
+- SQLite：Session 第一次实际写入前取得同一 engine 的进程内写许可，持有到
+  commit/rollback/close；读取不取许可，Adapter 运行也不持有许可。
+- PostgreSQL/MySQL：不使用进程级全局写锁，继续依赖数据库原生并发事务、
+  行锁、唯一约束和 CAS。
+- request、Scheduler、Dispatcher、Run Recovery 使用同一个 Session factory 和
+  transaction helper，不能各自实现提交/回滚规则。
+
+该协调层解决单个 Octopus server 进程内的 SQLite 写竞争。多进程共同写一个
+SQLite 文件仍只受 `busy_timeout` 保护，不作为生产并发承诺；生产或多实例部署
+继续推荐 PostgreSQL。
 
 ## 任务
 
@@ -85,6 +100,10 @@ routes
 - engine factory 已按 dialect 配置 SQLite/PostgreSQL/MySQL：SQLite 自动创建父目录并保留 pragma，PostgreSQL/MySQL 启用连接健康检查，MySQL 使用 `utf8mb4` 和连接 recycle。
 - 已加入 MySQL async driver：`asyncmy`。
 - 已新增 `packages/database/queries/_compat.py`，用于 query 层收口跨数据库 `RETURNING` 差异。
+- 已新增统一数据库事务协调层：所有生产 Session 由
+  `CoordinatedAsyncSession` 创建；SQLite 写事务进入单写者队列，读取保持并行，
+  PostgreSQL/MySQL 保持原生并发；request、Scheduler、Dispatcher 和 Recovery 的
+  commit/rollback/close 统一经过 Session 生命周期。
 - 已改造当前阻塞面核心写路径：agents、chats、issues、organization skills，以及 issue counter / checkout issue。
 - MySQL migration 已处理 baseline partial unique index 的直接兼容问题：MySQL 路径降级为普通非唯一索引，并在 migration README 记录等价约束待补。
 - README、UI README、CLI README、migration README 和相关历史分析文档已同步默认 SQLite layout、PostgreSQL/MySQL 连接串和外部数据库与 instance root 的关系。

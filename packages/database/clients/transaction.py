@@ -8,5 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 @asynccontextmanager
 async def async_transaction(session: AsyncSession) -> AsyncIterator[AsyncSession]:
-    async with session.begin():
+    await session.begin()
+    try:
         yield session
+    except BaseException:
+        await session.rollback()
+        raise
+    else:
+        await session.commit()
