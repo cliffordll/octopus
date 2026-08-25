@@ -107,6 +107,7 @@ from .logs import (
 from .runtime_providers import inject_runtime_provider_config
 from .run_lifecycle import RunFinalizationService, RunRecoveryService
 from .run_execution import RunExecutionService
+from .parent_continuation import ParentContinuationCoordinator
 from .workspace_paths import ensure_octopus_run_log_dir
 from .workspace_access import workspace_access_strategy
 from .workspaces import (
@@ -280,6 +281,10 @@ class HeartbeatService:
     @property
     def recovery(self) -> RunRecoveryService:
         return RunRecoveryService(self)
+
+    @property
+    def parent_continuation(self) -> ParentContinuationCoordinator:
+        return ParentContinuationCoordinator(self)
 
     async def wakeup(
         self,
@@ -4410,7 +4415,7 @@ class HeartbeatService:
     async def _wake_parent_after_child_settled(
         self, final: HeartbeatRunRow, issue: IssueRow
     ) -> None:
-        await self.queue_parent_continuation_for_settled_child(
+        await self.parent_continuation.queue_for_settled_child(
             issue.id, expected_org_id=final.org_id
         )
 
@@ -4536,6 +4541,14 @@ class HeartbeatService:
         return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
     async def queue_parent_continuation_for_settled_child(
+        self, child_issue_id: str, *, expected_org_id: str | None = None
+    ) -> str | None:
+        return await self.parent_continuation.queue_for_settled_child(
+            child_issue_id,
+            expected_org_id=expected_org_id,
+        )
+
+    async def _queue_parent_continuation_for_settled_child_impl(
         self, child_issue_id: str, *, expected_org_id: str | None = None
     ) -> str | None:
         issue = await get_issue_by_id(self._session, child_issue_id)

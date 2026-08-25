@@ -27,6 +27,13 @@ The parent does not need to yield, stop, or release its authority before child
 Runs start. A parent Run may finish naturally when its current turn is complete;
 later comments and child events can create a new parent Run.
 
+Agent-driven retry, replacement, and acceptance of incomplete child work require
+the active parent Run. Board/user operations remain the human override path. A
+comment on an assigned Issue is delivered to that Issue's assignee; mentions stay
+inside the instruction text and do not bypass the parent owner to wake a different
+child Agent directly. CLI Adapters receive these instructions through the
+`AdapterInstructionChannel` abstraction as a coalesced follow-up Run.
+
 ## State contract
 
 - Issue status remains `backlog`, `todo`, `in_progress`, `in_review`, `blocked`,
@@ -56,13 +63,16 @@ Route / Scheduler
   terminal effects.
 - `ChildDispatchCoordinator` owns atomic initial child creation and after-commit
   wakeup materialization.
-- `ParentCommandCoordinator` owns durable comment commands, wakeup coalescing,
-  and parent control authorization.
+- `IssueCommentWakeupCoordinator` and `AdapterInstructionChannel` own durable
+  comment commands and wakeup coalescing; `ParentChildControlAuthorizer` owns
+  parent control authorization.
 - `ChildRecoveryCoordinator` owns retry-before-replacement and retirement.
 - `ParentContinuationCoordinator` owns effective-child settlement and exactly-once
   parent continuation.
-- `DatabaseWriteCoordinator` contains SQLite/PostgreSQL write coordination.
-- `WorkspaceAccessManager` contains workspace-mode concurrency policy.
+- `DatabaseTransactionCoordinator` composes inherited `DatabaseWriteStrategy`
+  implementations for SQLite and server databases.
+- `WorkspacePreparationCoordinator` composes inherited
+  `WorkspaceAccessStrategy` implementations for each workspace mode.
 - Adapter-specific instruction delivery is hidden behind
   `AdapterInstructionChannel`; CLI Adapters initially use a coalesced follow-up
   Run rather than unsupported live prompt injection.
@@ -118,7 +128,8 @@ returns the persisted child set and never creates a partial or duplicate set.
 ### Batch 2: parent commands and child recovery
 
 - Keep caller-supplied comment request IDs and the database uniqueness boundary.
-- Add `ParentCommandCoordinator`; comments persist before wakeup creation.
+- Add `IssueCommentWakeupCoordinator`, `AdapterInstructionChannel`, and
+  `ParentChildControlAuthorizer`; comments persist before wakeup creation.
 - Coalesce instructions when the same Issue already has queued/running work.
 - Let the parent stop, cancel, guide, retry, or replace its children without a
   workspace write lease for control-plane operations.

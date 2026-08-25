@@ -249,6 +249,7 @@ Phase 1A 和 1B 是 Heartbeat 与 Automation 的共同前置条件，必须独�
 - 父 Run 与不同 child Issue 的 Run 可以并行；同一个 Issue 同时最多存在一个 `queued/running` Run；
 - 删除 `waiting_for_children`、`yield_requested_at`、`deferred_parent_yield` 和 `yield-children` 协议，不新增 Issue execution stage；
 - 父任务的控制权来自父子 Issue 关系，不来自父 Run 或 Workspace lease；停止、评论、重试、替换等控制面操作不需要 Workspace 写租约；
+- Agent 发起的子任务重试、替换和接受不完整结果必须来自当前 active parent Run；board/user 保留人工覆盖权；父 Issue 评论只唤醒父负责人，不因 `@子 Agent` 绕过父任务控制权；
 - 评论先持久化并使用数据库请求键保证传输重试幂等；父 Issue 已有活动 Run 时合并为一次跟进执行，不启动同一 Issue 的第二个并发 Run；
 - 子任务失败时先在原 Issue 上创建重试 Run；重试耗尽后 replacement 使用新 Issue ID，旧 Issue 只退役、不删除；
 - 按当前有效 child 集合生成父 continuation 幂等边界，避免最后两个子任务并发完成时漏唤醒或重复唤醒；

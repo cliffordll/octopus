@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI
@@ -33,9 +33,107 @@ from packages.database.schema import (
     IssueWorkProduct,
     Organization,
 )
+from packages.shared.types.issue import IssueDetail
 from server.app import app as fastapi_app
 from server.services.heartbeat import HeartbeatService
+from server.services.child_recovery import (
+    ChildRecoveryCoordinator,
+    ChildRecoveryUnavailable,
+)
 from server.services.issues import IssueService
+from server.services.parent_child_control import (
+    ParentChildControlAuthorizer,
+    ParentChildControlContext,
+    ParentChildControlDenied,
+)
+
+
+class _ParentRunProbe:
+    def __init__(self, active: bool) -> None:
+        self.active = active
+
+    async def is_active_parent_run(self, *_args: Any, **_kwargs: Any) -> bool:
+        return self.active
+
+
+class _ChildRunProbe:
+    def __init__(self, runs: list[dict[str, Any]]) -> None:
+        self.runs = runs
+
+    async def list_for_issue(self, _issue_id: str) -> list[dict[str, Any]]:
+        return self.runs
+
+
+def _parent_control_issue() -> IssueDetail:
+    return cast(
+        IssueDetail,
+        {
+            "id": "parent-1",
+            "orgId": "org-1",
+            "assigneeAgentId": "manager-1",
+        },
+    )
+
+
+async def test_parent_child_control_requires_active_parent_run_for_agents() -> None:
+    context = ParentChildControlContext(parent=_parent_control_issue())
+    inactive = ParentChildControlAuthorizer(cast(HeartbeatService, _ParentRunProbe(False)))
+    with pytest.raises(ParentChildControlDenied, match="active parent Run"):
+        await inactive.authorize(
+            context,
+            actor_type="agent",
+            actor_id="manager-1",
+            run_id="run-1",
+        )
+
+    active = ParentChildControlAuthorizer(cast(HeartbeatService, _ParentRunProbe(True)))
+    await active.authorize(
+        context,
+        actor_type="agent",
+        actor_id="manager-1",
+        run_id="run-1",
+    )
+
+
+async def test_parent_child_control_rejects_non_owner_agent_but_allows_board() -> None:
+    context = ParentChildControlContext(parent=_parent_control_issue())
+    authorizer = ParentChildControlAuthorizer(
+        cast(HeartbeatService, _ParentRunProbe(True))
+    )
+    with pytest.raises(ParentChildControlDenied, match="parent assignee"):
+        await authorizer.authorize(
+            context,
+            actor_type="agent",
+            actor_id="child-agent",
+            run_id="run-1",
+        )
+    await authorizer.authorize(
+        context,
+        actor_type="board",
+        actor_id="local-board",
+        run_id=None,
+    )
+
+
+async def test_child_replacement_requires_one_failed_retry_first() -> None:
+    original = {"runId": "run-original", "status": "failed", "retryOfRunId": None}
+    coordinator = ChildRecoveryCoordinator(
+        cast(IssueService, object()),
+        cast(HeartbeatService, _ChildRunProbe([original])),
+    )
+    with pytest.raises(ChildRecoveryUnavailable, match="Retry the existing child"):
+        await coordinator.require_failed_retry_before_replacement("child-1")
+
+    failed_retry = {
+        "runId": "run-retry",
+        "status": "failed",
+        "retryOfRunId": "run-original",
+    }
+    coordinator = ChildRecoveryCoordinator(
+        cast(IssueService, object()),
+        cast(HeartbeatService, _ChildRunProbe([failed_retry, original])),
+    )
+    await coordinator.require_failed_retry_before_replacement("child-1")
 
 
 @pytest.fixture
@@ -1062,6 +1160,8 @@ async def test_parent_replacement_retires_old_child_and_dispatches_immediately(
     parent_id = str(uuid.uuid4())
     old_child_id = str(uuid.uuid4())
     parent_run_id = str(uuid.uuid4())
+    failed_run_id = str(uuid.uuid4())
+    failed_retry_id = str(uuid.uuid4())
     async with async_transaction(session):
         session.add_all(
             [
@@ -1104,6 +1204,31 @@ async def test_parent_replacement_retires_old_child_and_dispatches_immediately(
                     status="running",
                     execution_owner_token="parent-owner",
                     context_snapshot={"issueId": parent_id},
+                ),
+                HeartbeatRun(
+                    id=failed_run_id,
+                    org_id=org_id,
+                    agent_id=child_agent_id,
+                    invocation_source="assignment",
+                    run_purpose="task_execution",
+                    trigger_detail="system",
+                    status="failed",
+                    created_at=datetime.now(UTC) - timedelta(minutes=2),
+                    finished_at=datetime.now(UTC) - timedelta(minutes=1),
+                    context_snapshot={"issueId": old_child_id},
+                ),
+                HeartbeatRun(
+                    id=failed_retry_id,
+                    org_id=org_id,
+                    agent_id=child_agent_id,
+                    invocation_source="on_demand",
+                    run_purpose="task_execution",
+                    trigger_detail="manual",
+                    status="failed",
+                    retry_of_run_id=failed_run_id,
+                    created_at=datetime.now(UTC) - timedelta(seconds=30),
+                    finished_at=datetime.now(UTC),
+                    context_snapshot={"issueId": old_child_id},
                 ),
             ]
         )
