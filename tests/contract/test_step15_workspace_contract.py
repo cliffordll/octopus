@@ -3639,6 +3639,129 @@ async def test_parent_primary_work_product_satisfies_child_output_evidence() -> 
         await engine.dispose()
 
 
+async def test_child_outputs_batch_closes_without_parent_summary() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                url_key="step15-child-outputs-closeout",
+                name="Step 15 Child Outputs Closeout",
+                issue_prefix="COC",
+            )
+            session.add(org)
+            await session.flush()
+            parent_agent = Agent(org_id=org.id, name="Parent Agent")
+            child_agent = Agent(org_id=org.id, name="Child Agent")
+            session.add_all([parent_agent, child_agent])
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Four travel guides",
+                status="in_progress",
+                assignee_agent_id=parent_agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            batch_run_id = str(uuid.uuid4())
+            children = [
+                Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title=title,
+                    status="done",
+                    assignee_agent_id=child_agent.id,
+                    origin_kind="delegation",
+                    origin_run_id=batch_run_id,
+                    closeout_mode="child_outputs",
+                    completed_at=datetime.now(UTC),
+                )
+                for title in ("Lushan guide", "Huangshan guide")
+            ]
+            unrelated_old_child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Old batch without output",
+                status="done",
+                origin_kind="delegation",
+                origin_run_id=str(uuid.uuid4()),
+                closeout_mode="parent_summary",
+                completed_at=datetime.now(UTC),
+            )
+            session.add_all([*children, unrelated_old_child])
+            await session.flush()
+            for child in children:
+                session.add(
+                    IssueWorkProduct(
+                        org_id=org.id,
+                        issue_id=child.id,
+                        type="document",
+                        provider="octopus",
+                        title=f"reports/{child.id}.md",
+                        status="ready",
+                        is_primary=True,
+                    )
+                )
+            child_run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=child_agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={"issueId": children[-1].id},
+            )
+            session.add(child_run)
+            await session.flush()
+
+            await HeartbeatService(session)._wake_parent_after_child_settled(
+                child_run, children[-1]
+            )
+            continuation = (
+                await session.execute(
+                    select(HeartbeatRun).where(
+                        HeartbeatRun.agent_id == parent_agent.id,
+                        HeartbeatRun.status == "queued",
+                    )
+                )
+            ).scalar_one()
+            assert continuation.context_snapshot["closeoutMode"] == "child_outputs"
+            assert (
+                continuation.context_snapshot["delegationOriginRunId"] == batch_run_id
+            )
+            assert {
+                item["sourceIssueId"]
+                for item in continuation.context_snapshot["childPrimaryWorkProducts"]
+            } == {child.id for child in children}
+
+            parent.status = "done"
+            parent.completed_at = datetime.now(UTC)
+            continuation.status = "succeeded"
+            continuation.finished_at = datetime.now(UTC)
+            await session.flush()
+            final = await HeartbeatService(
+                session
+            )._enforce_closeout_governance_success(parent_agent, continuation)
+
+            warnings = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.action
+                            == "issue.parent_deliverable_convergence_warning"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert final.status == "succeeded"
+            assert warnings == []
+    finally:
+        await engine.dispose()
+
+
 async def test_four_beauties_parent_child_delivery_acceptance() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:

@@ -328,14 +328,29 @@ def _child_deliverable_convergence_prompt(
         and not isinstance(blocked_children, list)
     ):
         return ""
+    closeout_mode = _string(context.get("closeoutMode")) or "parent_summary"
     guidance = [
         "## Parent Deliverable Convergence",
         "",
         "Wake reason: `issue_children_settled`.",
-        "All direct child issues are now terminal. Your job is to synthesize their primary deliverables into the parent issue's final deliverable.",
-        "Do not finish by only summarizing child task status. Produce a parent-owned final report or artifact first.",
+        "All child issues in this delegation batch are now terminal.",
         f'Use `octopus issue get "{issue_ref}" --json` if you need the current registered work products and child provenance.',
     ]
+    if closeout_mode == "child_outputs":
+        guidance.extend(
+            [
+                "Closeout mode: `child_outputs`.",
+                "The child deliverables are the final outputs. Verify that every completed child has its expected primary work product, then close the parent without creating a duplicate parent summary artifact.",
+            ]
+        )
+    else:
+        guidance.extend(
+            [
+                "Closeout mode: `parent_summary`.",
+                "Synthesize the child primary deliverables into the parent issue's final deliverable.",
+                "Do not finish by only summarizing child task status. Produce a parent-owned final report or artifact first.",
+            ]
+        )
     if prompt:
         guidance.extend(["", prompt])
     if isinstance(blocked_children, list) and blocked_children:
@@ -357,12 +372,13 @@ def _child_deliverable_convergence_prompt(
                 "Do not mark the parent issue done while any child is blocked or cancelled unless the user explicitly asked for an incomplete deliverable. Either fix/retry the missing child work, create a replacement child, or block the parent issue with a clear missing-output explanation.",
             ]
         )
-    guidance.extend(
-        [
-            "",
-            "Before closing out, write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md`. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work.",
-        ]
-    )
+    if closeout_mode == "parent_summary":
+        guidance.extend(
+            [
+                "",
+                "Before closing out, write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md`. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work.",
+            ]
+        )
     return "\n".join(guidance)
 
 
@@ -396,9 +412,9 @@ def _subtask_coordination_prompt(issue_ref: str, issue: dict[str, Any]) -> str:
             'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
             f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`. Reuse the persisted split on reruns; do not recreate it.',
             "Write the complete set of real, parallel subtasks to a UTF-8 JSON file, then submit it in one atomic call; the CLI validates the whole file before sending any write request: "
-            f'`octopus issue create-children "{issue_ref}" --children-file "<children.json>" --json`. '
+            f'`octopus issue create-children "{issue_ref}" --children-file "<children.json>" --closeout-mode <parent_summary|child_outputs> --json`. '
             "Each JSON array entry must contain `title` and `assigneeAgentId`. Do not create delegated siblings one at a time, and never test the command by creating a placeholder child on the real parent issue.",
-            "Do not create a child whose job is to summarize, merge, or report on the other children. After all children settle, Octopus wakes this parent issue and the parent owns the final synthesis and deliverable.",
+            "Choose `parent_summary` when the parent must synthesize a new final artifact. Choose `child_outputs` when the child deliverables themselves are final and the parent only verifies them. Do not create a child whose job is to summarize, merge, or report on the other children.",
             "Set `assigneeAgentId` explicitly in every delegated child entry. Prefer a suitable agent other than yourself when one is available.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
             "After the atomic child creation succeeds, Octopus queues the children immediately. Continue useful parent work and coordination while child Runs execute in parallel; finish the current parent Run naturally when there is no more useful work.",
