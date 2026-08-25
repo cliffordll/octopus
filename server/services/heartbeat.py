@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
-import hashlib
 import logging
 import os
 from pathlib import Path
@@ -108,6 +107,8 @@ from .runtime_providers import inject_runtime_provider_config
 from .run_lifecycle import RunFinalizationService, RunRecoveryService
 from .run_execution import RunExecutionService
 from .parent_continuation import ParentContinuationCoordinator
+from .parent_closeout_governance import ParentCloseoutGovernance
+from .delegation_closeout import DelegationBatchStore
 from .workspace_paths import ensure_octopus_run_log_dir
 from .workspace_access import workspace_access_strategy
 from .workspaces import (
@@ -284,7 +285,11 @@ class HeartbeatService:
 
     @property
     def parent_continuation(self) -> ParentContinuationCoordinator:
-        return ParentContinuationCoordinator(self)
+        return ParentContinuationCoordinator(self._session, self)
+
+    @property
+    def parent_closeout(self) -> ParentCloseoutGovernance:
+        return ParentCloseoutGovernance(self._session)
 
     async def wakeup(
         self,
@@ -1870,7 +1875,7 @@ class HeartbeatService:
                             IssueRow.parent_id == parent.id,
                             IssueRow.hidden_at.is_(None),
                         )
-                        .order_by(IssueRow.id)
+                        .order_by(IssueRow.created_at, IssueRow.id)
                     )
                 )
                 .scalars()
@@ -1878,7 +1883,10 @@ class HeartbeatService:
             )
             if not children:
                 continue
-            settlement_cycle_key = await self._parent_settlement_cycle_key(parent.id)
+            batch = await DelegationBatchStore(self._session).for_child(children[-1])
+            settlement_cycle_key = await self.parent_continuation.settlement_cycle_key(
+                parent.id, batch=batch
+            )
             if settlement_cycle_key is None:
                 continue
             idempotency_key = (
@@ -1957,8 +1965,20 @@ class HeartbeatService:
                     and issue is not None
                     and issue.assignee_agent_id == agent.id
                 ):
-                    settlement_cycle_key = await self._parent_settlement_cycle_key(
-                        issue.id
+                    origin_run_id = payload.get("delegationOriginRunId")
+                    batch = (
+                        await DelegationBatchStore(self._session).for_parent(
+                            issue.id,
+                            org_id=issue.org_id,
+                            origin_run_id=origin_run_id,
+                        )
+                        if isinstance(origin_run_id, str) and origin_run_id
+                        else None
+                    )
+                    settlement_cycle_key = (
+                        await self.parent_continuation.settlement_cycle_key(
+                            issue.id, batch=batch
+                        )
                     )
                     is_current_parent_continuation = (
                         settlement_cycle_key is not None
@@ -2877,7 +2897,9 @@ class HeartbeatService:
                     else {}
                 )
                 wakeup_terminal_values: dict[str, Any] = {
-                    "status": "completed" if final_status == "succeeded" else final_status,
+                    "status": "completed"
+                    if final_status == "succeeded"
+                    else final_status,
                     "finished_at": final.finished_at or datetime.now(UTC),
                     "error": final.error or getattr(result, "error_message", None),
                 }
@@ -2929,11 +2951,7 @@ class HeartbeatService:
                     if final_status == "failed" and result is None and final.error
                     else f"run {final_status}"
                 ),
-                level=(
-                    "info"
-                    if final_status == "succeeded"
-                    else "error"
-                ),
+                level=("info" if final_status == "succeeded" else "error"),
                 idempotency_key=f"terminal-effect:outcome:{final_status}",
             )
             workspace_service = WorkspaceService(self._session)
@@ -3284,9 +3302,7 @@ class HeartbeatService:
             return final
         if issue.assignee_agent_id == agent.id and issue.status == "done":
             has_unresolved_blocked_child = (
-                await self._record_parent_blocked_child_unresolved_if_needed(
-                    final, issue
-                )
+                await self.parent_closeout.record_blocked_child_if_needed(final, issue)
             )
             if has_unresolved_blocked_child:
                 return await self._mark_closeout_governance_failed(
@@ -3303,12 +3319,12 @@ class HeartbeatService:
                     final,
                     "Issue was marked done without the required work product.",
                 )
-            if await self._record_parent_deliverable_convergence_warning_if_needed(
+            if await self.parent_closeout.record_evidence_warning_if_needed(
                 final, issue
             ):
                 return await self._mark_closeout_governance_failed(
                     final,
-                    "Parent issue was marked done without a parent-owned final deliverable or child-output evidence.",
+                    self.parent_closeout.missing_evidence_message(final),
                 )
             return final
         if self._is_reviewer_issue_run(agent, final, issue, context):
@@ -3352,19 +3368,19 @@ class HeartbeatService:
             return final
         if (
             wake_reason == "issue_children_settled"
-            and await self._block_parent_for_unresolved_blocked_children(final, issue)
+            and await self.parent_closeout.block_for_unresolved_children(final, issue)
         ):
             return final
         issue_has_reviewer = bool(issue.reviewer_agent_id or issue.reviewer_user_id)
         if await self._run_has_issue_closeout_signal(
             final, issue.id, issue_has_reviewer=issue_has_reviewer
         ):
-            if await self._record_parent_deliverable_convergence_warning_if_needed(
+            if await self.parent_closeout.record_evidence_warning_if_needed(
                 final, issue
             ):
                 return await self._mark_closeout_governance_failed(
                     final,
-                    "Parent issue was marked done without a parent-owned final deliverable or child-output evidence.",
+                    self.parent_closeout.missing_evidence_message(final),
                 )
             return final
         passive_followup = _passive_followup_context(context)
@@ -3703,320 +3719,6 @@ class HeartbeatService:
             },
         )
         return True
-
-    async def _accepted_incomplete_child_ids(self, issue: IssueRow) -> set[str]:
-        rows = (
-            (
-                await self._session.execute(
-                    select(ActivityLog.details).where(
-                        and_(
-                            ActivityLog.org_id == issue.org_id,
-                            ActivityLog.entity_type == "issue",
-                            ActivityLog.entity_id == issue.id,
-                            ActivityLog.action == "issue.incomplete_accepted",
-                        )
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        accepted: set[str] = set()
-        for details in rows:
-            if not isinstance(details, dict):
-                continue
-            child_issue_id = details.get("childIssueId")
-            if isinstance(child_issue_id, str) and child_issue_id:
-                accepted.add(child_issue_id)
-            child_issue_ids = details.get("childIssueIds")
-            if isinstance(child_issue_ids, list):
-                accepted.update(
-                    child_id
-                    for child_id in child_issue_ids
-                    if isinstance(child_id, str) and child_id
-                )
-        return accepted
-
-    async def _unaccepted_blocked_children(self, issue: IssueRow) -> list[IssueRow]:
-        accepted_child_ids = await self._accepted_incomplete_child_ids(issue)
-        return [
-            child
-            for child in await self._direct_children(issue)
-            if child.status in {"blocked", "cancelled"}
-            and child.id not in accepted_child_ids
-        ]
-
-    async def _block_parent_for_unresolved_blocked_children(
-        self, final: HeartbeatRunRow, issue: IssueRow
-    ) -> bool:
-        blocked_children = await self._unaccepted_blocked_children(issue)
-        if not blocked_children:
-            return False
-        from_status = issue.status
-        await update_issue(
-            self._session,
-            issue.id,
-            {
-                "status": "blocked",
-                "completed_at": None,
-            },
-        )
-        await insert_activity_log(
-            self._session,
-            org_id=issue.org_id,
-            actor_type="system",
-            actor_id="parent_child_governance",
-            action="issue.updated",
-            entity_type="issue",
-            entity_id=issue.id,
-            agent_id=final.agent_id,
-            run_id=final.id,
-            details={
-                "status": "blocked",
-                "fromStatus": from_status,
-                "reason": "blocked_child_unresolved",
-                "runId": final.id,
-                "childIssues": [
-                    {
-                        "id": child.id,
-                        "identifier": child.identifier,
-                        "title": child.title,
-                        "status": child.status,
-                    }
-                    for child in blocked_children
-                ],
-            },
-        )
-        await insert_activity_log(
-            self._session,
-            org_id=issue.org_id,
-            actor_type="system",
-            actor_id="parent_child_governance",
-            action="issue.parent_blocked_child_unresolved",
-            entity_type="issue",
-            entity_id=issue.id,
-            agent_id=final.agent_id,
-            run_id=final.id,
-            details={
-                "issueId": issue.id,
-                "runId": final.id,
-                "reason": "parent_blocked_due_to_blocked_children",
-                "childIssues": [
-                    {
-                        "id": child.id,
-                        "identifier": child.identifier,
-                        "title": child.title,
-                        "status": child.status,
-                    }
-                    for child in blocked_children
-                ],
-                "nextActions": [
-                    "retry_child",
-                    "reassign_child",
-                    "create_replacement_child",
-                    "accept_incomplete",
-                ],
-            },
-        )
-        return True
-
-    async def _record_parent_blocked_child_unresolved_if_needed(
-        self, final: HeartbeatRunRow, issue: IssueRow
-    ) -> bool:
-        blocked_children = await self._unaccepted_blocked_children(issue)
-        if not blocked_children:
-            return False
-        if issue.status == "done":
-            await update_issue(
-                self._session,
-                issue.id,
-                {
-                    "status": "blocked",
-                    "completed_at": None,
-                    "cancelled_at": None,
-                },
-            )
-            await insert_activity_log(
-                self._session,
-                org_id=issue.org_id,
-                actor_type="system",
-                actor_id="parent_child_governance",
-                action="issue.updated",
-                entity_type="issue",
-                entity_id=issue.id,
-                agent_id=final.agent_id,
-                run_id=final.id,
-                details={
-                    "status": "blocked",
-                    "fromStatus": "done",
-                    "reason": "parent_done_with_blocked_children",
-                    "runId": final.id,
-                    "childIssues": [
-                        {
-                            "id": child.id,
-                            "identifier": child.identifier,
-                            "title": child.title,
-                            "status": child.status,
-                        }
-                        for child in blocked_children
-                    ],
-                },
-            )
-            issue.status = "blocked"
-            issue.completed_at = None
-            issue.cancelled_at = None
-        if await self._run_has_issue_activity(
-            final, issue.id, ("issue.parent_blocked_child_unresolved",)
-        ):
-            return True
-        await insert_activity_log(
-            self._session,
-            org_id=issue.org_id,
-            actor_type="system",
-            actor_id="parent_child_governance",
-            action="issue.parent_blocked_child_unresolved",
-            entity_type="issue",
-            entity_id=issue.id,
-            agent_id=final.agent_id,
-            run_id=final.id,
-            details={
-                "issueId": issue.id,
-                "runId": final.id,
-                "reason": "parent_done_with_blocked_children",
-                "childIssues": [
-                    {
-                        "id": child.id,
-                        "identifier": child.identifier,
-                        "title": child.title,
-                        "status": child.status,
-                    }
-                    for child in blocked_children
-                ],
-                "allowedCloseout": "block_parent_or_create_replacement_child",
-            },
-        )
-        return True
-
-    async def _record_parent_deliverable_convergence_warning_if_needed(
-        self, final: HeartbeatRunRow, issue: IssueRow
-    ) -> bool:
-        children = await self._direct_children(issue)
-        if not children:
-            return False
-        active_statuses = {"backlog", "todo", "in_progress", "in_review"}
-        if any(child.status in active_statuses for child in children):
-            return False
-        if await self._run_has_issue_activity(
-            final, issue.id, ("issue.parent_deliverable_convergence_warning",)
-        ):
-            return True
-        if await self._parent_closeout_has_child_evidence(final, issue, children):
-            return False
-        await insert_activity_log(
-            self._session,
-            org_id=issue.org_id,
-            actor_type="system",
-            actor_id="parent_deliverable_governance",
-            action="issue.parent_deliverable_convergence_warning",
-            entity_type="issue",
-            entity_id=issue.id,
-            agent_id=final.agent_id,
-            run_id=final.id,
-            details={
-                "issueId": issue.id,
-                "runId": final.id,
-                "reason": "parent_done_without_child_output_evidence",
-                "childIssues": [
-                    {
-                        "id": child.id,
-                        "identifier": child.identifier,
-                        "title": child.title,
-                        "status": child.status,
-                    }
-                    for child in children
-                ],
-                "expectedEvidence": [
-                    "parent_primary_work_product_after_children_settled",
-                    "closeout_comment_mentions_child_identifier_or_title",
-                ],
-            },
-        )
-        return True
-
-    async def _direct_children(self, issue: IssueRow) -> list[IssueRow]:
-        result = await self._session.execute(
-            select(IssueRow).where(
-                and_(
-                    IssueRow.org_id == issue.org_id,
-                    IssueRow.parent_id == issue.id,
-                    IssueRow.hidden_at.is_(None),
-                )
-            )
-        )
-        return list(result.scalars().all())
-
-    async def _parent_closeout_has_child_evidence(
-        self, final: HeartbeatRunRow, issue: IssueRow, children: list[IssueRow]
-    ) -> bool:
-        child_settled_at = max(
-            (child.completed_at or child.updated_at or child.created_at)
-            for child in children
-        )
-        if child_settled_at.tzinfo is None:
-            child_settled_at = child_settled_at.replace(tzinfo=UTC)
-        product_created_at = await self._latest_parent_primary_work_product_created_at(
-            issue
-        )
-        if product_created_at is not None:
-            if product_created_at.tzinfo is None:
-                product_created_at = product_created_at.replace(tzinfo=UTC)
-            if product_created_at >= child_settled_at:
-                return True
-        return await self._run_closeout_mentions_children(final, issue, children)
-
-    async def _latest_parent_primary_work_product_created_at(
-        self, issue: IssueRow
-    ) -> datetime | None:
-        result = await self._session.execute(
-            select(IssueWorkProduct.created_at)
-            .where(
-                and_(
-                    IssueWorkProduct.org_id == issue.org_id,
-                    IssueWorkProduct.issue_id == issue.id,
-                    IssueWorkProduct.is_primary.is_(True),
-                )
-            )
-            .order_by(IssueWorkProduct.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    async def _run_closeout_mentions_children(
-        self, final: HeartbeatRunRow, issue: IssueRow, children: list[IssueRow]
-    ) -> bool:
-        result = await self._session.execute(
-            select(ActivityLog.details).where(
-                and_(
-                    ActivityLog.org_id == issue.org_id,
-                    ActivityLog.run_id == final.id,
-                    ActivityLog.entity_type == "issue",
-                    ActivityLog.entity_id == issue.id,
-                    ActivityLog.action.in_(("issue.comment_added", "issue.updated")),
-                )
-            )
-        )
-        haystack = "\n".join(
-            _activity_details_text(details)
-            for details in result.scalars().all()
-            if isinstance(details, dict)
-        ).casefold()
-        if not haystack:
-            return False
-        for child in children:
-            needles = [child.identifier, child.title]
-            if any(needle and needle.casefold() in haystack for needle in needles):
-                return True
-        return False
 
     async def _run_has_issue_closeout_signal(
         self,
@@ -4419,127 +4121,6 @@ class HeartbeatService:
             issue.id, expected_org_id=final.org_id
         )
 
-    async def _issue_settlement_cycle_key(self, issue: IssueRow) -> str:
-        """Return a stable identifier for the current terminal-status cycle.
-
-        ``Issue.updated_at`` also changes for lock cleanup and ordinary edits, so it
-        cannot identify a business status transition. Activity IDs are stable across
-        terminal-effect retries and change when a reopened issue settles again.
-        """
-
-        activities = (
-            (
-                await self._session.execute(
-                    select(ActivityLog)
-                    .where(
-                        ActivityLog.org_id == issue.org_id,
-                        ActivityLog.entity_type == "issue",
-                        ActivityLog.entity_id == issue.id,
-                        ActivityLog.action.in_(
-                            (
-                                "issue.created",
-                                "issue.updated",
-                                "issue.review_decision_recorded",
-                            )
-                        ),
-                    )
-                    .order_by(ActivityLog.created_at, ActivityLog.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        current_status: str | None = None
-        terminal_activity_id: str | None = None
-        review_statuses = {
-            "approve": "done",
-            "request_changes": "in_progress",
-            "blocked": "blocked",
-        }
-        terminal_statuses = {"done", "cancelled", "blocked"}
-        for activity in activities:
-            details = activity.details if isinstance(activity.details, dict) else {}
-            status = details.get("status")
-            if activity.action == "issue.review_decision_recorded":
-                decision = details.get("decision")
-                status = (
-                    review_statuses.get(decision) if isinstance(decision, str) else None
-                )
-            elif (
-                not isinstance(status, str)
-                and details.get("reopen") is True
-                and current_status in {"done", "cancelled"}
-            ):
-                status = "todo"
-            if not isinstance(status, str) or status == current_status:
-                continue
-            current_status = status
-            terminal_activity_id = activity.id if status in terminal_statuses else None
-
-        if current_status == issue.status and terminal_activity_id is not None:
-            return f"activity:{terminal_activity_id}"
-
-        # Legacy/imported rows may predate activity events. Their dedicated terminal
-        # timestamps are stable under execution-lock cleanup, unlike updated_at.
-        terminal_at = (
-            issue.completed_at
-            if issue.status == "done"
-            else issue.cancelled_at
-            if issue.status == "cancelled"
-            else None
-        )
-        if terminal_at is not None:
-            if terminal_at.tzinfo is None:
-                terminal_at = terminal_at.replace(tzinfo=UTC)
-            return f"{issue.status}:{terminal_at.isoformat()}"
-        return f"{issue.status}:legacy"
-
-    async def _parent_settlement_cycle_key(self, parent_id: str) -> str | None:
-        children = (
-            (
-                await self._session.execute(
-                    select(IssueRow)
-                    .where(
-                        IssueRow.parent_id == parent_id,
-                        IssueRow.hidden_at.is_(None),
-                    )
-                    .order_by(IssueRow.id)
-                    .execution_options(populate_existing=True)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        terminal_statuses = {"done", "cancelled", "blocked"}
-        if not children or any(
-            child.status not in terminal_statuses for child in children
-        ):
-            return None
-        child_run_ids = {
-            run_id
-            for child in children
-            for run_id in (child.execution_run_id, child.checkout_run_id)
-            if run_id
-        }
-        if child_run_ids:
-            active_child_run = (
-                await self._session.execute(
-                    select(HeartbeatRunRow.id)
-                    .where(
-                        HeartbeatRunRow.id.in_(child_run_ids),
-                        HeartbeatRunRow.status.in_(("queued", "running")),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if active_child_run is not None:
-                return None
-        parts = [
-            f"{child.id}:{await self._issue_settlement_cycle_key(child)}"
-            for child in children
-        ]
-        return hashlib.sha256("|".join(parts).encode()).hexdigest()
-
     async def queue_parent_continuation_for_settled_child(
         self, child_issue_id: str, *, expected_org_id: str | None = None
     ) -> str | None:
@@ -4547,93 +4128,6 @@ class HeartbeatService:
             child_issue_id,
             expected_org_id=expected_org_id,
         )
-
-    async def _queue_parent_continuation_for_settled_child_impl(
-        self, child_issue_id: str, *, expected_org_id: str | None = None
-    ) -> str | None:
-        issue = await get_issue_by_id(self._session, child_issue_id)
-        if issue is None or (
-            expected_org_id is not None and issue.org_id != expected_org_id
-        ):
-            return None
-        if issue.parent_id is None or issue.status not in {
-            "done",
-            "cancelled",
-            "blocked",
-        }:
-            return None
-        # Serialize the "last child settled" decision per parent. Without this
-        # lock, two child transactions can each observe the other child as active
-        # and both skip the continuation. PostgreSQL READ COMMITTED takes a fresh
-        # snapshot for the active-child query after the lock waiter resumes.
-        parent = (
-            await self._session.execute(
-                select(IssueRow).where(IssueRow.id == issue.parent_id).with_for_update()
-            )
-        ).scalar_one_or_none()
-        if (
-            parent is None
-            or parent.org_id != issue.org_id
-            or parent.status not in {"todo", "in_progress"}
-            or not parent.assignee_agent_id
-        ):
-            return None
-        settlement_cycle_key = await self._parent_settlement_cycle_key(parent.id)
-        if settlement_cycle_key is None:
-            return None
-        continuation = await self.wakeup(
-            parent.assignee_agent_id,
-            {
-                "source": "assignment",
-                "triggerDetail": "system",
-                "reason": "issue_children_settled",
-                "idempotencyKey": (
-                    f"issue:{parent.id}:children_settled:{settlement_cycle_key}"
-                ),
-                "payload": {
-                    "issueId": parent.id,
-                    "mutation": "children_settled",
-                    "completedChildIssueId": issue.id,
-                },
-                "contextSnapshot": {
-                    "issueId": parent.id,
-                    "source": "issue.children_settled",
-                    "wakeSource": "assignment",
-                    "wakeReason": "issue_children_settled",
-                    "completedChildIssueId": issue.id,
-                    "issue": {
-                        "id": parent.id,
-                        "identifier": parent.identifier,
-                        "title": parent.title,
-                        "description": parent.description,
-                        "status": parent.status,
-                        "priority": parent.priority,
-                    },
-                },
-            },
-            actor_type="system",
-            actor_id="heartbeat_child_coordination",
-            execute_immediately=False,
-        )
-        if continuation is not None and not self.last_wakeup_reused:
-            await insert_activity_log(
-                self._session,
-                org_id=parent.org_id,
-                actor_type="system",
-                actor_id="heartbeat_child_coordination",
-                action="issue.children_settled",
-                entity_type="issue",
-                entity_id=parent.id,
-                run_id=None,
-                details={
-                    "parentIssueId": parent.id,
-                    "completedChildIssueId": issue.id,
-                    "completedChildIdentifier": issue.identifier,
-                    "completedChildTitle": issue.title,
-                    "reason": "issue_children_settled",
-                },
-            )
-        return parent.assignee_agent_id
 
     async def _queue_issue_review_wakeup_after_success(
         self, final: HeartbeatRunRow, issue: IssueRow
@@ -5010,6 +4504,8 @@ class HeartbeatService:
             ("issueId", "issueId"),
             ("primaryIssueId", "primaryIssueId"),
             ("projectId", "projectId"),
+            ("delegationOriginRunId", "delegationOriginRunId"),
+            ("closeoutMode", "closeoutMode"),
         ):
             value = payload.get(source_key)
             if isinstance(value, str) and value:
@@ -5029,8 +4525,16 @@ class HeartbeatService:
             return context_snapshot
         from .issues import IssueService
 
+        raw_delegation_origin_run_id = context_snapshot.get("delegationOriginRunId")
+        delegation_origin_run_id = (
+            raw_delegation_origin_run_id
+            if isinstance(raw_delegation_origin_run_id, str)
+            and raw_delegation_origin_run_id
+            else None
+        )
         heartbeat_context = await IssueService(self._session).get_heartbeat_context(
-            issue_id
+            issue_id,
+            delegation_origin_run_id=delegation_origin_run_id,
         )
         if heartbeat_context is None:
             return context_snapshot

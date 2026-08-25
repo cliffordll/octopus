@@ -684,7 +684,9 @@ async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
                     )
                 )
             ).scalar_one()
-            wakeup = await verify.get(AgentWakeupRequest, reviewer_run.wakeup_request_id)
+            wakeup = await verify.get(
+                AgentWakeupRequest, reviewer_run.wakeup_request_id
+            )
             reviewer_row = await verify.get(AgentRow, reviewer["id"])
             assert reviewer_run.status == "failed", {
                 "wakeupStatus": wakeup.status if wakeup else None,
@@ -1323,6 +1325,7 @@ async def test_run_recovery_repairs_missing_parent_continuation_without_timer(
     assert run.context_snapshot["issueId"] == parent.id
     assert run.context_snapshot["wakeReason"] == "issue_children_settled"
 
+
 @pytest.mark.parametrize("pending_status", ["queued", "deferred_issue_execution"])
 async def test_timer_materializes_runless_parent_continuation(
     session: AsyncSession,
@@ -1353,7 +1356,7 @@ async def test_timer_materializes_runless_parent_continuation(
         )
         session.add(child)
         await session.flush()
-        cycle = await heartbeat._parent_settlement_cycle_key(parent.id)
+        cycle = await heartbeat.parent_continuation.settlement_cycle_key(parent.id)
         assert cycle is not None
         pending = AgentWakeupRequest(
             org_id=agent["orgId"],
@@ -1431,9 +1434,10 @@ async def test_timer_recovery_ignores_hidden_active_legacy_child(
     assert run.context_snapshot["issueId"] == parent.id
     assert run.context_snapshot["wakeReason"] == "issue_children_settled"
     assert await heartbeat._issue_has_active_children(parent.id) is False
-    assert [child.title for child in await heartbeat._direct_children(parent)] == [
-        "Visible settled child"
-    ]
+    assert [
+        child.title
+        for child in await heartbeat.parent_closeout.children_for_run(run, parent)
+    ] == ["Visible settled child"]
 
 
 async def test_timer_preflight_treats_review_assignment_as_actionable(
@@ -3455,6 +3459,8 @@ async def test_running_adapter_emits_progress_events_without_log_output(
     payload = progress_events[-1].payload
     assert isinstance(payload, dict)
     assert payload["processPid"] == 43210
+
+
 @pytest.mark.asyncio
 async def test_silent_runtime_is_timed_out_instead_of_running_forever(
     monkeypatch: pytest.MonkeyPatch,

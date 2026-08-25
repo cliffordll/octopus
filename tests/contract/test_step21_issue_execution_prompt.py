@@ -99,13 +99,15 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert "assigneeAgentId" in prompt
     assert "Do not create delegated siblings one at a time" in prompt
     assert "Do not create a child whose job is to summarize" in prompt
-    assert "parent owns the final synthesis" in prompt
+    assert "--closeout-mode <parent_summary|child_outputs>" in prompt
+    assert "Choose `parent_summary`" in prompt
+    assert "Choose `child_outputs`" in prompt
     assert 'octopus agent list --org-id "$OCTOPUS_ORG_ID"' in prompt
     assert (
         "Do not mark the parent issue done while child issues are still open" in prompt
     )
-    assert "add a progress comment and exit the current run" in prompt
-    assert "Do not poll or wait for delegated children" in prompt
+    assert "finish the current parent Run naturally" in prompt
+    assert "Do not poll indefinitely for delegated children" in prompt
     assert "Never assign a delegated child issue to yourself" in prompt
     assert (
         "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
@@ -212,7 +214,8 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
 
     assert "## Parent Deliverable Convergence" in prompt
     assert "issue_children_settled" in prompt
-    assert "All direct child issues are now terminal" in prompt
+    assert "All child issues in this delegation batch are now terminal" in prompt
+    assert "Closeout mode: `parent_summary`" in prompt
     assert "西施.md" in prompt
     assert "parent issue's final deliverable" in prompt
     assert "Blocked or Cancelled Child Issues" in prompt
@@ -224,6 +227,36 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
     )
     assert "not as the default target for shared project work" in prompt
     assert 'octopus issue done "OCT-88"' in prompt
+
+
+def test_runtime_prompt_uses_child_outputs_without_parent_summary() -> None:
+    prompt = runtime_prompt_from_config(
+        {
+            "promptTemplate": "# Base\n\nYou are an agent.",
+            "_octopus": {
+                "context": {
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_children_settled",
+                    "closeoutMode": "child_outputs",
+                    "childPrimaryWorkProducts": [{"id": "wp-guide"}],
+                    "childWorkProductsPrompt": "- OCT-91: 庐山攻略.md",
+                    "issue": {
+                        "id": "issue-parent",
+                        "identifier": "OCT-88",
+                        "title": "四份旅游攻略",
+                        "description": "直接采用四个子任务成果。",
+                        "status": "in_progress",
+                        "priority": "medium",
+                    },
+                }
+            },
+        }
+    )
+
+    assert "Closeout mode: `child_outputs`" in prompt
+    assert "child deliverables are the final outputs" in prompt
+    assert "without creating a duplicate parent summary artifact" in prompt
+    assert "Produce a parent-owned final report" not in prompt
 
 
 def test_runtime_prompt_hard_gates_passive_followup_closeout() -> None:
