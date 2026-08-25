@@ -16,7 +16,9 @@ from server.services.workspace_paths import resolve_default_sqlite_database_url
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Alembic may run in the same process as contract tests or an embedded server.
+    # Do not disable loggers that were created before migration configuration.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
