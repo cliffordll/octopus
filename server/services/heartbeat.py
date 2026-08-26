@@ -4133,8 +4133,6 @@ class HeartbeatService:
         await self.parent_continuation.queue_for_settled_child(
             issue.id,
             expected_org_id=final.org_id,
-            child_run_id=final.id,
-            child_agent_id=final.agent_id,
         )
 
     async def queue_parent_continuation_for_settled_child(

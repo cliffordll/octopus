@@ -255,7 +255,7 @@ Write the complete child array as a UTF-8 JSON file first, then submit the file 
 octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" [--parent-output-required] --json
 ```
 
-Child outputs are final by default. Use `--parent-output-required` only when the current instruction explicitly requires a separate parent-owned final artifact.
+Child outputs are final by default, but the parent Agent is always resumed after the child set settles so it can summarize the results and close the parent issue. Use `--parent-output-required` only when the current instruction explicitly requires a separate parent-owned final artifact.
 
 Never test this write command by creating a placeholder child on the real parent issue.
 

@@ -20,9 +20,7 @@ from packages.database.schema import (
 )
 from packages.shared.validators.issue import validate_create_child_issues
 from server.services.heartbeat import HeartbeatService
-from server.services.delegation_closeout import DelegationBatchStore
 from server.services.issues import IssueService
-from server.services.parent_closeout_governance import ParentCloseoutGovernance
 
 
 async def test_parent_output_request_is_validated_before_issue_completion() -> None:
@@ -262,7 +260,7 @@ async def test_recovery_preserves_terminal_run_when_parent_request_is_missing() 
         await engine.dispose()
 
 
-async def test_child_outputs_policy_completes_parent_without_parent_run() -> None:
+async def test_child_outputs_policy_always_queues_parent_continuation() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -282,7 +280,7 @@ async def test_child_outputs_policy_completes_parent_without_parent_run() -> Non
                 org_id=org.id,
                 title="Parent",
                 status="in_progress",
-                assignee_agent_id=None,
+                assignee_agent_id=parent_agent.id,
             )
             session.add(parent)
             await session.flush()
@@ -304,18 +302,6 @@ async def test_child_outputs_policy_completes_parent_without_parent_run() -> Non
             ]
             session.add_all(children)
             await session.flush()
-            for child in children[:1]:
-                session.add(
-                    IssueWorkProduct(
-                        org_id=org.id,
-                        issue_id=child.id,
-                        type="document",
-                        provider="octopus",
-                        title=f"reports/{child.id}.md",
-                        status="active",
-                        is_primary=True,
-                    )
-                )
             child_run = HeartbeatRun(
                 org_id=org.id,
                 agent_id=child_agent.id,
@@ -330,22 +316,6 @@ async def test_child_outputs_policy_completes_parent_without_parent_run() -> Non
             await HeartbeatService(session)._wake_parent_after_child_settled(
                 child_run, children[-1]
             )
-            await session.refresh(parent)
-            assert parent.status == "blocked"
-
-            session.add(
-                IssueWorkProduct(
-                    org_id=org.id,
-                    issue_id=children[-1].id,
-                    type="document",
-                    provider="octopus",
-                    title=f"reports/{children[-1].id}.md",
-                    status="active",
-                    is_primary=True,
-                )
-            )
-            parent.status = "in_progress"
-            await session.flush()
             await HeartbeatService(session)._wake_parent_after_child_settled(
                 child_run, children[-1]
             )
@@ -362,145 +332,14 @@ async def test_child_outputs_policy_completes_parent_without_parent_run() -> Non
                 .all()
             )
 
-            assert parent.status == "done"
-            assert parent_runs == []
-            actions = (
-                (
-                    await session.execute(
-                        select(ActivityLog.action).where(
-                            ActivityLog.entity_id == parent.id,
-                            ActivityLog.action.in_(
-                                (
-                                    "issue.child_outputs_closeout_failed",
-                                    "issue.child_outputs_closeout_completed",
-                                )
-                            ),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
+            assert parent.status == "in_progress"
+            assert len(parent_runs) == 1
+            continuation = parent_runs[0]
+            assert continuation.status == "queued"
+            assert continuation.agent_id == parent_agent.id
+            assert continuation.context_snapshot["wakeReason"] == (
+                "issue_children_settled"
             )
-            assert actions.count("issue.child_outputs_closeout_failed") == 1
-            assert actions.count("issue.child_outputs_closeout_completed") == 1
-    finally:
-        await engine.dispose()
-
-
-async def test_incomplete_acceptance_does_not_leak_into_a_later_batch() -> None:
-    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory: async_sessionmaker = create_session_factory(engine)
-    try:
-        async with factory() as session:
-            org = Organization(name="Scoped", url_key="scoped", issue_prefix="SCO")
-            session.add(org)
-            await session.flush()
-            parent = Issue(org_id=org.id, title="Parent", status="in_progress")
-            session.add(parent)
-            await session.flush()
-            policy = {"version": 1, "mode": "child_outputs_are_final"}
-            old_origin = str(uuid.uuid4())
-            new_origin = str(uuid.uuid4())
-            old_child = Issue(
-                org_id=org.id,
-                parent_id=parent.id,
-                title="Old",
-                status="blocked",
-                origin_kind="delegation",
-                origin_run_id=old_origin,
-                closeout_policy=policy,
-            )
-            new_child = Issue(
-                org_id=org.id,
-                parent_id=parent.id,
-                title="New",
-                status="blocked",
-                origin_kind="delegation",
-                origin_run_id=new_origin,
-                closeout_policy=policy,
-            )
-            session.add_all([old_child, new_child])
-            await session.flush()
-            session.add(
-                ActivityLog(
-                    org_id=org.id,
-                    actor_type="board",
-                    actor_id="local-board",
-                    action="issue.incomplete_accepted",
-                    entity_type="issue",
-                    entity_id=parent.id,
-                    details={
-                        "childIssueIds": [old_child.id],
-                        "delegationOriginRunId": old_origin,
-                        "reason": "Old batch only",
-                    },
-                )
-            )
-            await session.flush()
-            batch = await DelegationBatchStore(session).for_parent(
-                parent.id, org_id=org.id, origin_run_id=new_origin
-            )
-            assert batch is not None
-
-            result = await ParentCloseoutGovernance(session).complete_child_outputs(
-                parent,
-                batch,
-                child_run_id=None,
-                child_agent_id=None,
-            )
-            await session.refresh(parent)
-
-            assert result.completed is False
-            assert parent.status == "blocked"
-            assert "blocked or cancelled" in (result.error or "")
-
-            session.add(
-                ActivityLog(
-                    org_id=org.id,
-                    actor_type="board",
-                    actor_id="local-board",
-                    action="issue.incomplete_accepted",
-                    entity_type="issue",
-                    entity_id=parent.id,
-                    details={
-                        "childIssueIds": [new_child.id],
-                        "delegationOriginRunId": new_origin,
-                        "reason": "Accept this batch",
-                    },
-                )
-            )
-            parent.status = "in_progress"
-            await session.flush()
-            recovered = await ParentCloseoutGovernance(session).complete_child_outputs(
-                parent,
-                batch,
-                child_run_id=None,
-                child_agent_id=None,
-            )
-            await session.refresh(parent)
-
-            assert recovered.completed is True
-            assert parent.status == "done"
-            closeout_actions = (
-                (
-                    await session.execute(
-                        select(ActivityLog.action).where(
-                            ActivityLog.entity_id == parent.id,
-                            ActivityLog.action.in_(
-                                (
-                                    "issue.child_outputs_closeout_failed",
-                                    "issue.child_outputs_closeout_completed",
-                                )
-                            ),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            assert closeout_actions.count("issue.child_outputs_closeout_failed") == 1
-            assert closeout_actions.count("issue.child_outputs_closeout_completed") == 1
+            assert continuation.context_snapshot["closeoutPolicy"] == policy
     finally:
         await engine.dispose()

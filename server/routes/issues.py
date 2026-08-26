@@ -923,12 +923,16 @@ async def update_issue_route(
         actor = require_actor_identity(request)
         if (
             actor.actor_type == "agent"
-            and payload.get("status") == "done"
+            and payload.get("status") is not None
             and detail.get("assigneeAgentId") != actor.actor_id
         ):
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
-                detail="Only the checkout owner can mark issue done",
+                detail=(
+                    "Only the checkout owner can mark issue done"
+                    if payload.get("status") == "done"
+                    else "Only the assigned Agent can change issue status"
+                ),
             )
         assignee_done_requested_review = (
             actor.actor_type == "agent"
