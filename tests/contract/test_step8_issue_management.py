@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
-from packages.database.clients import async_transaction
+from packages.database.clients import async_transaction, create_session_factory
 from packages.database.schema import (
     ActivityLog,
     Agent,
@@ -157,7 +157,7 @@ async def engine() -> AsyncIterator[AsyncEngine]:
 async def session_factory(
     engine: AsyncEngine,
 ) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    return create_session_factory(engine)
 
 
 @pytest.fixture
@@ -281,7 +281,7 @@ async def test_create_children_batch_persists_once_and_reuses_on_retry(
 ) -> None:
     org_id = await _seed_org(session)
     other_org_id = await _seed_org(session)
-    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="backlog")
     agent_id = str(uuid.uuid4())
     other_agent_id = str(uuid.uuid4())
     async with async_transaction(session):
@@ -627,7 +627,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
         )
 
     payload: CreateChildIssuesPayload = {
-        "closeoutMode": "child_outputs",
+        "closeoutPolicy": {"version": 1, "mode": "child_outputs_are_final"},
         "children": [{"title": "Same title", "assigneeAgentId": agent_id}],
     }
     first_parent_run_id = str(uuid.uuid4())
@@ -668,7 +668,13 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
     assert second[0]["id"] != first[0]["id"]
     assert first[0]["originRunId"] == first_parent_run_id
     assert second[0]["originRunId"] == second_parent_run_id
-    assert first[0]["closeoutMode"] == "child_outputs"
+    assert first[0]["closeoutPolicy"] == {
+        "version": 1,
+        "mode": "child_outputs_are_final",
+    }
+    parent = await IssueService(session).get_by_id(parent_id)
+    assert parent is not None
+    assert parent["status"] == "in_progress"
 
 
 async def test_create_children_batch_rolls_back_if_any_wakeup_fails(
@@ -848,7 +854,10 @@ async def test_parent_run_and_children_are_dispatchable_concurrently(
         f"/api/issues/{parent_id}/children/batch",
         headers=headers,
         json={
-            "closeoutMode": "child_outputs",
+            "closeoutPolicy": {
+                "version": 1,
+                "mode": "child_outputs_are_final",
+            },
             "children": [
                 {
                     "title": "Child A",
@@ -864,7 +873,9 @@ async def test_parent_run_and_children_are_dispatchable_concurrently(
 
     assert create_code == 200
     assert {child["originRunId"] for child in created["children"]} == {parent_run_id}
-    assert {child["closeoutMode"] for child in created["children"]} == {"child_outputs"}
+    assert {child["closeoutPolicy"]["mode"] for child in created["children"]} == {
+        "child_outputs_are_final"
+    }
     assert created["dispatchAgentIds"] == sorted(child_agent_ids)
     assert set(scheduled) == set(child_agent_ids)
     async with session_factory() as verify:
@@ -3819,6 +3830,23 @@ async def test_parent_done_allows_accepted_cancelled_child(
 
     assert code == 200
     assert body["status"] == "done"
+
+
+async def test_agent_cannot_accept_incomplete_child_work(app: FastAPI) -> None:
+    code, body = await _request(
+        app,
+        "POST",
+        "/api/issues/parent-1/accept-incomplete",
+        json={"childIssueId": "child-1", "reason": "skip"},
+        headers={
+            "x-test-agent-id": "agent-1",
+            "x-test-org-id": "org-1",
+            "x-test-run-id": "run-1",
+        },
+    )
+
+    assert code == 403
+    assert "human operator" in body["detail"]
 
 
 async def test_issue_detail_returns_association_fields_and_nulls(

@@ -1989,6 +1989,10 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
+    monkeypatch.setattr(
+        "packages.runtimes.local_process._supports_windows_blocking_fallback",
+        lambda: True,
+    )
     monkeypatch.setattr("packages.runtimes.local_process.subprocess.Popen", fake_popen)
 
     result = await execute_codex_local(

@@ -14,6 +14,7 @@ from packages.shared.types.heartbeat import HeartbeatRun as HeartbeatRunData
 from packages.shared.types.heartbeat import WakeAgentPayload
 
 from .delegation_closeout import DelegationBatch, DelegationBatchStore
+from .parent_closeout_governance import ParentCloseoutGovernance
 
 
 class ParentContinuationHost(Protocol):
@@ -96,6 +97,8 @@ class ParentContinuationCoordinator:
         child_issue_id: str,
         *,
         expected_org_id: str | None = None,
+        child_run_id: str | None = None,
+        child_agent_id: str | None = None,
     ) -> str | None:
         child = await get_issue_by_id(self._session, child_issue_id)
         if child is None or (
@@ -116,16 +119,69 @@ class ParentContinuationCoordinator:
         if (
             parent is None
             or parent.org_id != child.org_id
-            or parent.status not in {"todo", "in_progress"}
-            or not parent.assignee_agent_id
+            or parent.status not in {"backlog", "todo", "in_progress", "blocked"}
         ):
             return None
         batch = await DelegationBatchStore(self._session).for_child(child)
         if batch is None:
             return None
+        governance = ParentCloseoutGovernance(self._session)
+        if (
+            parent.status == "blocked"
+            and not await governance.is_automatic_closeout_block(parent, batch)
+        ):
+            return None
         settlement_cycle_key = await self.settlement_cycle_key(parent.id, batch=batch)
         if settlement_cycle_key is None:
             return None
+        if not batch.requires_parent_output:
+            closeout = await governance.complete_child_outputs(
+                parent,
+                batch,
+                child_run_id=(
+                    child_run_id or child.execution_run_id or child.checkout_run_id
+                ),
+                child_agent_id=child_agent_id or child.assignee_agent_id,
+            )
+            if closeout.completed and parent.reviewer_agent_id:
+                await self._host.wakeup(
+                    parent.reviewer_agent_id,
+                    {
+                        "source": "review",
+                        "triggerDetail": "system",
+                        "reason": "issue_review_requested",
+                        "idempotencyKey": (
+                            f"issue:{parent.id}:child_outputs_review:"
+                            f"{settlement_cycle_key}"
+                        ),
+                        "payload": {
+                            "issueId": parent.id,
+                            "mutation": "assignee_done",
+                        },
+                        "contextSnapshot": {
+                            "issueId": parent.id,
+                            "source": "issue.child_outputs_closeout",
+                            "wakeSource": "review",
+                            "wakeReason": "issue_review_requested",
+                            "role": "reviewer",
+                        },
+                    },
+                    actor_type="system",
+                    actor_id="run_finalization_service",
+                    execute_immediately=False,
+                )
+                return parent.reviewer_agent_id
+            return None
+        if not parent.assignee_agent_id:
+            return None
+        delegation_context = (
+            {
+                "delegationOriginRunId": batch.origin_run_id,
+                "closeoutPolicy": batch.closeout_policy,
+            }
+            if batch.origin_run_id is not None
+            else {}
+        )
         continuation = await self._host.wakeup(
             parent.assignee_agent_id,
             {
@@ -139,8 +195,7 @@ class ParentContinuationCoordinator:
                     "issueId": parent.id,
                     "mutation": "children_settled",
                     "completedChildIssueId": child.id,
-                    "delegationOriginRunId": batch.origin_run_id,
-                    "closeoutMode": batch.closeout_mode,
+                    **delegation_context,
                 },
                 "contextSnapshot": {
                     "issueId": parent.id,
@@ -148,8 +203,7 @@ class ParentContinuationCoordinator:
                     "wakeSource": "assignment",
                     "wakeReason": "issue_children_settled",
                     "completedChildIssueId": child.id,
-                    "delegationOriginRunId": batch.origin_run_id,
-                    "closeoutMode": batch.closeout_mode,
+                    **delegation_context,
                     "issue": {
                         "id": parent.id,
                         "identifier": parent.identifier,
@@ -181,7 +235,7 @@ class ParentContinuationCoordinator:
                     "completedChildTitle": child.title,
                     "reason": "issue_children_settled",
                     "delegationOriginRunId": batch.origin_run_id,
-                    "closeoutMode": batch.closeout_mode,
+                    "closeoutPolicy": batch.closeout_policy,
                 },
             )
         return parent.assignee_agent_id

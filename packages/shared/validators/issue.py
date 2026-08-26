@@ -4,8 +4,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from ..constants.issue import (
-    DEFAULT_DELEGATION_CLOSEOUT_MODE,
-    DELEGATION_CLOSEOUT_MODES,
+    DELEGATION_CLOSEOUT_POLICY_MODES,
     ISSUE_ORIGIN_KINDS,
     ISSUE_PRIORITIES,
     ISSUE_STATUSES,
@@ -184,12 +183,8 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
 def validate_create_child_issues(
     payload: Mapping[str, Any],
 ) -> CreateChildIssuesPayload:
-    _reject_unknown_fields(payload, allowed_fields={"children", "closeoutMode"})
-    closeout_mode = payload.get("closeoutMode", DEFAULT_DELEGATION_CLOSEOUT_MODE)
-    if closeout_mode not in DELEGATION_CLOSEOUT_MODES:
-        raise ValueError(
-            f"'closeoutMode' must be one of {list(DELEGATION_CLOSEOUT_MODES)}"
-        )
+    _reject_unknown_fields(payload, allowed_fields={"children", "closeoutPolicy"})
+    closeout_policy = _validate_closeout_policy(payload.get("closeoutPolicy"))
     children = payload.get("children")
     if not isinstance(children, list) or not children:
         raise ValueError("'children' is required and must be a non-empty list")
@@ -219,8 +214,54 @@ def validate_create_child_issues(
         seen_titles.add(normalized_title)
     return cast(
         CreateChildIssuesPayload,
-        {"closeoutMode": closeout_mode, "children": validated},
+        {"closeoutPolicy": closeout_policy, "children": validated},
     )
+
+
+def _validate_closeout_policy(value: object) -> dict[str, Any]:
+    if value is None:
+        return {"version": 1, "mode": "child_outputs_are_final"}
+    if not isinstance(value, Mapping):
+        raise ValueError("'closeoutPolicy' must be an object")
+    _reject_unknown_fields(value, allowed_fields={"version", "mode", "requirements"})
+    if value.get("version") != 1:
+        raise ValueError("'closeoutPolicy.version' must be 1")
+    mode = value.get("mode")
+    if mode not in DELEGATION_CLOSEOUT_POLICY_MODES:
+        raise ValueError(
+            "'closeoutPolicy.mode' must be one of "
+            f"{list(DELEGATION_CLOSEOUT_POLICY_MODES)}"
+        )
+    requirements = value.get("requirements")
+    if requirements is not None:
+        if not isinstance(requirements, Mapping):
+            raise ValueError("'closeoutPolicy.requirements' must be an object")
+        _reject_unknown_fields(
+            requirements,
+            allowed_fields={"minimumOutputs", "primaryOutputRequired"},
+        )
+        minimum_outputs = requirements.get("minimumOutputs")
+        if minimum_outputs is not None and (
+            isinstance(minimum_outputs, bool)
+            or not isinstance(minimum_outputs, int)
+            or minimum_outputs < 0
+        ):
+            raise ValueError(
+                "'closeoutPolicy.requirements.minimumOutputs' must be a "
+                "non-negative integer"
+            )
+        primary_required = requirements.get("primaryOutputRequired")
+        if primary_required is not None and not isinstance(primary_required, bool):
+            raise ValueError(
+                "'closeoutPolicy.requirements.primaryOutputRequired' must be a boolean"
+            )
+        if mode == "parent_output_required" and (
+            minimum_outputs == 0 or primary_required is False
+        ):
+            raise ValueError(
+                "'parent_output_required' requires at least one primary output"
+            )
+    return dict(value)
 
 
 def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:
@@ -274,7 +315,6 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
         validate_record_issue_review_decision(decision)
 
     _check_work_product_declarations(payload)
-
     return cast(UpdateIssuePayload, payload)
 
 

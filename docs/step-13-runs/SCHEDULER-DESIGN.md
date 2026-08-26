@@ -161,7 +161,7 @@ try_start_next_run(agentId)
 
 ```text
 issue 业务逻辑创建 queued run
-  -> after commit 调 dispatch_queued_agent(agentId)
+  -> after commit 调 RunDispatchService.dispatch_agent(agentId)
 ```
 
 如果 agent 空闲，马上启动。
@@ -172,7 +172,7 @@ issue 业务逻辑创建 queued run
 
 ```text
 Run-1 finished
-  -> 当前执行流程再调 dispatch_queued_agent(agentId)
+  -> 当前执行流程再调 RunDispatchService.dispatch_agent(agentId)
   -> 如果有 Run-2 queued，就继续启动 Run-2
 ```
 
@@ -201,7 +201,7 @@ scheduler 是 server 里的常驻后台循环。
 1. materialize_due_scheduled_wakeups()
    到期的 scheduled wakeup 转成 queued run。
 
-2. dispatch_all_queued_runs()
+2. RunDispatchService.dispatch_all()
    扫 queued run，调用 dispatcher。
 
 3. recover_orphaned_runs()

@@ -166,7 +166,7 @@ child completion. The UI shows only real queued/running executions as active.
 - A comment committed before an HTTP timeout is replayed by request ID.
 - A lost Adapter causes the old Run to close as process-lost; a recovery attempt
   uses a new Run related to the same Issue.
-- Concurrent Dispatcher/Recovery workers use claim CAS and execution leases.
+- Concurrent `RunDispatchService`/`RunRecoveryService` workers use claim CAS and execution leases.
 - Concurrent final-child events use a database uniqueness boundary for one
   parent continuation.
 - A parent cannot become `done` while effective children are active unless the

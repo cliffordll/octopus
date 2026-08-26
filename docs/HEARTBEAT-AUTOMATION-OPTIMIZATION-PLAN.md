@@ -63,7 +63,7 @@ Run 恢复是两者共同依赖的基础。如果 Run 已实际完成却永久�
 1. **上游契约优先。** 外部 schema、API、枚举、状态和关键副作用按当前上游控制面证据实现，不为 Python 重写发明另一套产品模型。
 2. **事件驱动为主，周期扫描兜底。** Issue assignment、review、mention、approval 等事件应立即入队；Heartbeat 不应成为正常任务启动的主要路径。
 3. **不空跑模型。** timer preflight 在数据库层完成；无可执行工作时记录 skipped evidence，不创建 Agent Run，不启动 Runtime。
-4. **意图先持久化，再执行。** Scheduler 不直接启动 Agent；它只物化持久化意图，Dispatcher 负责准入和执行。
+4. **意图先持久化，再执行。** Scheduler 不直接启动 Agent；它只物化持久化意图，`RunDispatchService` 负责准入和执行。
 5. **一个调度宿主，多个领域 tick。** Heartbeat、Automation、scheduled wakeup、recovery 共享后台循环生命周期，但各自拥有独立 service 和规则。
 6. **数据库保证幂等。** 关键 exactly-once/at-most-once 边界不能只依赖应用层先查询再插入。
 7. **组织作用域贯穿全链路。** 定义、触发、运行、输出、密钥、Issue、Chat 和 Agent 均需验证 organization 边界。
@@ -215,7 +215,7 @@ Automation 已暂缓，目标流程和实施细节见 `docs/AUTOMATION-TODO.md`�
 
 ### Phase 1B：Execution lease、claim 与 wakeup 幂等
 
-目标：确保 Dispatcher、Recovery、Heartbeat 和 Automation 可以安全共用 Run 执行基础设施。
+目标：确保 `RunDispatchService`、`RunRecoveryService`、Heartbeat 和 Automation 可以安全共用 Run 执行基础设施。
 
 任务：
 

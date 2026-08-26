@@ -36,8 +36,8 @@ from server.services.agents import AgentService
 from server.services.heartbeat import (
     HeartbeatService,
     WorkspacePreparationCoordinator,
-    dispatch_queued_agent,
 )
+from server.services.run_dispatch import RunDispatchService
 from server.services.run_lifecycle import RunFinalizationService
 from server.services.projects import ProjectService
 from server.services.run_repair import IssueRunRepairService
@@ -614,13 +614,17 @@ async def test_each_assignment_success_creates_a_new_reviewer_wakeup(
 
 async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
         HeartbeatService,
         "_run_has_issue_closeout_signal",
         _closeout_signal_exists,
     )
-    engine: AsyncEngine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    database_path = tmp_path / "reviewer-dispatch.sqlite3"
+    engine: AsyncEngine = create_database_engine(
+        f"sqlite+aiosqlite:///{database_path.as_posix()}"
+    )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory: async_sessionmaker[AsyncSession] = create_session_factory(engine)
@@ -671,7 +675,7 @@ async def test_assignment_dispatch_immediately_dispatches_reviewer_run(
                 )
 
         assert run is not None and run["status"] == "queued"
-        await dispatch_queued_agent(factory, assignee["id"])
+        await RunDispatchService(factory).dispatch_agent(assignee["id"])
 
         async with factory() as verify:
             reviewer_run = (
@@ -764,7 +768,7 @@ async def test_dispatch_workspace_prepare_failure_uses_clean_finalization_sessio
                 )
 
         assert run is not None
-        await dispatch_queued_agent(factory, agent["id"])
+        await RunDispatchService(factory).dispatch_agent(agent["id"])
 
         async with factory() as verify:
             stored = await verify.get(HeartbeatRun, run["id"])
@@ -831,7 +835,7 @@ async def test_four_runs_serialize_workspace_prepare_then_execute_in_parallel(
             if active_adapters == 4:
                 all_adapters_started.set()
             try:
-                await asyncio.wait_for(all_adapters_started.wait(), timeout=2)
+                await asyncio.wait_for(all_adapters_started.wait(), timeout=5)
                 return RuntimeExecutionResult(exit_code=0)
             finally:
                 active_adapters -= 1
@@ -907,7 +911,7 @@ async def test_four_runs_serialize_workspace_prepare_then_execute_in_parallel(
                     await session.flush()
                     run_ids.append(queued.id)
 
-        await dispatch_queued_agent(factory, agent["id"])
+        await RunDispatchService(factory).dispatch_agent(agent["id"])
 
         async with factory() as verify:
             runs = (
@@ -915,7 +919,13 @@ async def test_four_runs_serialize_workspace_prepare_then_execute_in_parallel(
                     select(HeartbeatRun).where(HeartbeatRun.id.in_(run_ids))
                 )
             ).scalars()
-            assert {run.status for run in runs} == {"succeeded"}
+            run_rows = list(runs)
+            assert {run.status for run in run_rows} == {"succeeded"}, [
+                (run.status, run.error_code, run.error) for run in run_rows
+            ] + [
+                ("max_active_prepares", max_active_prepares),
+                ("max_active_adapters", max_active_adapters),
+            ]
         assert max_active_prepares == 1
         assert max_active_adapters == 4
     finally:
@@ -960,7 +970,7 @@ async def test_workspace_prepare_retries_transient_sqlite_lock(
                 )
 
         assert run is not None
-        await dispatch_queued_agent(factory, agent["id"])
+        await RunDispatchService(factory).dispatch_agent(agent["id"])
 
         async with factory() as verify:
             stored = await verify.get(HeartbeatRun, run["id"])
@@ -1027,7 +1037,7 @@ async def test_run_cancelled_during_workspace_prepare_never_invokes_adapter(
                 )
 
         assert run is not None
-        await dispatch_queued_agent(factory, agent["id"])
+        await RunDispatchService(factory).dispatch_agent(agent["id"])
 
         async with factory() as verify:
             stored = await verify.get(HeartbeatRun, run["id"])

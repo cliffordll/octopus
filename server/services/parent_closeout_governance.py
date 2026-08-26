@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -7,10 +8,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
+from packages.database.queries.heartbeat import update_run
 from packages.database.queries.issues import update_issue
 from packages.database.schema import ActivityLog, HeartbeatRun, Issue, IssueWorkProduct
 
-from .delegation_closeout import DelegationBatchStore, closeout_mode_from_context
+from .delegation_closeout import (
+    DelegationBatch,
+    DelegationBatchStore,
+)
+
+
+@dataclass(frozen=True)
+class ParentCloseoutResult:
+    applicable: bool
+    completed: bool
+    error: str | None = None
 
 
 class ParentCloseoutGovernance:
@@ -18,6 +30,356 @@ class ParentCloseoutGovernance:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def is_automatic_closeout_block(
+        self, parent: Issue, batch: DelegationBatch
+    ) -> bool:
+        rows = await self._session.execute(
+            select(ActivityLog.details).where(
+                ActivityLog.org_id == parent.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == parent.id,
+                ActivityLog.action == "issue.child_outputs_closeout_failed",
+            )
+        )
+        return any(
+            isinstance(details, dict)
+            and details.get("delegationOriginRunId") == batch.origin_run_id
+            for details in rows.scalars().all()
+        )
+
+    async def record_closeout_request_if_required(
+        self,
+        parent: Issue,
+        *,
+        run_id: str | None,
+        actor_type: str,
+        actor_id: str,
+        comment: str | None,
+        declarations: list[dict[str, Any]],
+    ) -> bool:
+        """Persist an Agent request without prematurely completing the parent."""
+
+        store = DelegationBatchStore(self._session)
+        run = await self._session.get(HeartbeatRun, run_id) if run_id else None
+        if run is not None and run.org_id != parent.org_id:
+            run = None
+        context = (
+            run.context_snapshot
+            if run is not None and isinstance(run.context_snapshot, dict)
+            else {}
+        )
+        context_origin = context.get("delegationOriginRunId")
+        batch = (
+            await store.for_parent(
+                parent.id,
+                org_id=parent.org_id,
+                origin_run_id=context_origin,
+            )
+            if isinstance(context_origin, str) and context_origin
+            else await store.latest_for_parent(parent.id, org_id=parent.org_id)
+        )
+        if batch is None or not batch.requires_parent_output:
+            return False
+        if actor_type != "agent":
+            raise ValueError(
+                "This parent requires a validated parent output. A human operator "
+                "cannot bypass it by directly marking the issue done."
+            )
+        if run is None:
+            raise ValueError(
+                "A parent-output closeout request must come from an active Agent Run"
+            )
+        origin_run_id = batch.origin_run_id
+        if origin_run_id is None:
+            return False
+        if (
+            context_origin != origin_run_id
+            or context.get("closeoutPolicy") != batch.closeout_policy
+        ):
+            updated_context = {
+                **context,
+                "delegationOriginRunId": origin_run_id,
+                "closeoutPolicy": batch.closeout_policy,
+            }
+            updated_run = await update_run(
+                self._session, run.id, {"context_snapshot": updated_context}
+            )
+            if updated_run is not None:
+                run = updated_run
+        if any(
+            child.status in {"backlog", "todo", "in_progress", "in_review"}
+            for child in batch.children
+        ):
+            raise ValueError(
+                "Cannot request parent closeout while delegated child issues are open"
+            )
+        existing = await self._session.execute(
+            select(ActivityLog.details)
+            .where(
+                ActivityLog.org_id == parent.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == parent.id,
+                ActivityLog.run_id == run.id,
+                ActivityLog.action == "issue.closeout_requested",
+            )
+            .limit(1)
+        )
+        previous = existing.scalar_one_or_none()
+        next_details = {
+            "version": 1,
+            "runId": run.id,
+            "delegationOriginRunId": origin_run_id,
+            "declaredWorkProducts": declarations,
+            "comment": comment,
+        }
+        if previous == next_details:
+            return True
+        if parent.status == "todo":
+            await update_issue(
+                self._session,
+                parent.id,
+                {"status": "in_progress", "started_at": datetime.now(UTC)},
+            )
+        await insert_activity_log(
+            self._session,
+            org_id=parent.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.closeout_requested",
+            entity_type="issue",
+            entity_id=parent.id,
+            agent_id=run.agent_id,
+            run_id=run.id,
+            details=next_details,
+        )
+        return True
+
+    async def finalize_parent_output_request(
+        self, run: HeartbeatRun, parent: Issue, *, apply: bool = True
+    ) -> ParentCloseoutResult:
+        context = run.context_snapshot if isinstance(run.context_snapshot, dict) else {}
+        origin_run_id = context.get("delegationOriginRunId")
+        store = DelegationBatchStore(self._session)
+        batch = (
+            await store.for_parent(
+                parent.id,
+                org_id=parent.org_id,
+                origin_run_id=origin_run_id,
+            )
+            if isinstance(origin_run_id, str) and origin_run_id
+            else await store.latest_for_parent(parent.id, org_id=parent.org_id)
+        )
+        if batch is None:
+            return ParentCloseoutResult(applicable=False, completed=False)
+        policy = batch.closeout_policy
+        if policy["mode"] != "parent_output_required":
+            return ParentCloseoutResult(applicable=False, completed=False)
+        children = list(batch.children)
+        open_children = [
+            child
+            for child in children
+            if child.status in {"backlog", "todo", "in_progress", "in_review"}
+        ]
+        if open_children:
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error=(
+                    "Parent closeout cannot be verified because delegated child "
+                    f"issues are still open: {self._child_labels(open_children)}."
+                ),
+            )
+        blocked_children = await self._unaccepted_blocked_children(run, parent)
+        if blocked_children:
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error=(
+                    "Parent closeout cannot be verified because delegated child "
+                    f"issues are blocked or cancelled: {self._child_labels(blocked_children)}."
+                ),
+            )
+        request = await self._closeout_request(run, parent)
+        if request is None:
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error=(
+                    "Parent closeout request is missing. Run `octopus issue done` "
+                    "and declare the parent output with `--primary-work-product`."
+                ),
+            )
+        declared = request.get("declaredWorkProducts")
+        declared_items = declared if isinstance(declared, list) else []
+        declared_paths = {
+            normalized
+            for item in declared_items
+            if isinstance(item, dict)
+            for normalized in (self._normalize_product_path(item.get("path")),)
+            if normalized
+        }
+        primary_paths = {
+            normalized
+            for item in declared_items
+            if isinstance(item, dict) and item.get("isPrimary") is True
+            for normalized in (self._normalize_product_path(item.get("path")),)
+            if normalized
+        }
+        requirements = policy.get("requirements", {})
+        minimum_outputs = requirements.get("minimumOutputs", 1)
+        primary_required = requirements.get("primaryOutputRequired", True)
+        if primary_required and not primary_paths:
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error=(
+                    "Parent closeout request did not declare a primary output. "
+                    "Use `--primary-work-product <path>`."
+                ),
+            )
+        paths_to_validate = primary_paths if primary_required else declared_paths
+        matched_paths = await self._matching_parent_product_paths(
+            parent,
+            paths_to_validate,
+            primary_only=primary_required,
+        )
+        if len(matched_paths) < minimum_outputs:
+            missing = sorted(paths_to_validate - matched_paths)
+            detail = ", ".join(missing) if missing else "no declared output was found"
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error=(
+                    "Parent closeout output validation failed: "
+                    f"{detail}. Required outputs: {minimum_outputs}; "
+                    f"validated outputs: {len(matched_paths)}."
+                ),
+            )
+        if not apply:
+            return ParentCloseoutResult(applicable=True, completed=True)
+        target_status = (
+            "in_review"
+            if parent.reviewer_agent_id or parent.reviewer_user_id
+            else "done"
+        )
+        existing_finalization = await self._session.execute(
+            select(ActivityLog.details).where(
+                ActivityLog.org_id == parent.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == parent.id,
+                ActivityLog.run_id == run.id,
+                ActivityLog.action == "issue.updated",
+            )
+        )
+        if any(
+            isinstance(item, dict) and item.get("reason") == "parent_closeout_validated"
+            for item in existing_finalization.scalars().all()
+        ):
+            return ParentCloseoutResult(applicable=True, completed=True)
+        values: dict[str, Any] = {"status": target_status}
+        if target_status == "done":
+            values["completed_at"] = datetime.now(UTC)
+        await update_issue(self._session, parent.id, values)
+        await insert_activity_log(
+            self._session,
+            org_id=parent.org_id,
+            actor_type="system",
+            actor_id="run_finalization_service",
+            action="issue.updated",
+            entity_type="issue",
+            entity_id=parent.id,
+            agent_id=run.agent_id,
+            run_id=run.id,
+            details={
+                "status": target_status,
+                "reason": "parent_closeout_validated",
+                "validatedPrimaryWorkProducts": sorted(matched_paths),
+            },
+        )
+        return ParentCloseoutResult(applicable=True, completed=True)
+
+    async def complete_child_outputs(
+        self,
+        parent: Issue,
+        batch: DelegationBatch,
+        *,
+        child_run_id: str | None,
+        child_agent_id: str | None,
+    ) -> ParentCloseoutResult:
+        if batch.closeout_policy["mode"] != "child_outputs_are_final":
+            return ParentCloseoutResult(applicable=False, completed=False)
+        locked_parent = (
+            await self._session.execute(
+                select(Issue)
+                .where(Issue.id == parent.id, Issue.org_id == parent.org_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked_parent is None:
+            return ParentCloseoutResult(applicable=False, completed=False)
+        parent = locked_parent
+        prior = await self._automatic_closeout_result(parent, batch)
+        if prior is not None:
+            return prior
+        open_children = [
+            child
+            for child in batch.children
+            if child.status in {"backlog", "todo", "in_progress", "in_review"}
+        ]
+        if open_children:
+            return ParentCloseoutResult(applicable=True, completed=False)
+        accepted = await self._accepted_incomplete_child_ids(parent, batch)
+        blocked = [
+            child
+            for child in batch.children
+            if child.status in {"blocked", "cancelled"} and child.id not in accepted
+        ]
+        missing = await self._children_missing_primary_outputs(list(batch.children))
+        if blocked or missing:
+            reason = (
+                "Delegated child issues are blocked or cancelled: "
+                + self._child_labels(blocked)
+                if blocked
+                else "Completed child issues have no primary output: "
+                + self._child_labels(
+                    [child for child in batch.children if child.id in set(missing)]
+                )
+            )
+            if parent.status != "blocked":
+                await update_issue(
+                    self._session,
+                    parent.id,
+                    {"status": "blocked", "completed_at": None},
+                )
+            await self._record_automatic_closeout(
+                parent,
+                batch,
+                action="issue.child_outputs_closeout_failed",
+                run_id=child_run_id,
+                agent_id=child_agent_id,
+                details={"error": reason, "missingChildIssueIds": missing},
+            )
+            return ParentCloseoutResult(applicable=True, completed=False, error=reason)
+        target_status = (
+            "in_review"
+            if parent.reviewer_agent_id or parent.reviewer_user_id
+            else "done"
+        )
+        values: dict[str, Any] = {"status": target_status}
+        if target_status == "done":
+            values["completed_at"] = datetime.now(UTC)
+        await update_issue(self._session, parent.id, values)
+        await self._record_automatic_closeout(
+            parent,
+            batch,
+            action="issue.child_outputs_closeout_completed",
+            run_id=child_run_id,
+            agent_id=child_agent_id,
+            details={"status": target_status},
+        )
+        return ParentCloseoutResult(applicable=True, completed=True)
 
     async def block_for_unresolved_children(
         self, run: HeartbeatRun, parent: Issue
@@ -135,74 +497,9 @@ class ParentCloseoutGovernance:
         )
         return True
 
-    async def record_evidence_warning_if_needed(
-        self, run: HeartbeatRun, parent: Issue
-    ) -> bool:
-        children = await self.children_for_run(run, parent)
-        if not children:
-            return False
-        if any(
-            child.status in {"backlog", "todo", "in_progress", "in_review"}
-            for child in children
-        ):
-            return False
-        if await self._run_has_activity(
-            run, parent.id, ("issue.parent_deliverable_convergence_warning",)
-        ):
-            return True
-        closeout_mode = closeout_mode_from_context(run.context_snapshot)
-        missing_child_ids: list[str] = []
-        if closeout_mode == "child_outputs":
-            missing_child_ids = await self._children_missing_primary_outputs(children)
-            if not missing_child_ids:
-                return False
-        elif await self._has_parent_summary_evidence(run, parent, children):
-            return False
-        await insert_activity_log(
-            self._session,
-            org_id=parent.org_id,
-            actor_type="system",
-            actor_id="parent_deliverable_governance",
-            action="issue.parent_deliverable_convergence_warning",
-            entity_type="issue",
-            entity_id=parent.id,
-            agent_id=run.agent_id,
-            run_id=run.id,
-            details={
-                "issueId": parent.id,
-                "runId": run.id,
-                "reason": (
-                    "child_outputs_missing_primary_work_product"
-                    if closeout_mode == "child_outputs"
-                    else "parent_done_without_child_output_evidence"
-                ),
-                "closeoutMode": closeout_mode,
-                "childIssues": self._child_summaries(children),
-                "expectedEvidence": (
-                    ["primary_work_product_for_every_completed_child"]
-                    if closeout_mode == "child_outputs"
-                    else [
-                        "parent_primary_work_product_after_children_settled",
-                        "closeout_comment_mentions_child_identifier_or_title",
-                    ]
-                ),
-                "missingChildIssueIds": missing_child_ids,
-            },
-        )
-        return True
-
-    def missing_evidence_message(self, run: HeartbeatRun) -> str:
-        if closeout_mode_from_context(run.context_snapshot) == "child_outputs":
-            return (
-                "Parent issue cannot close because one or more delegated child "
-                "outputs have no primary work product."
-            )
-        return (
-            "Parent issue was marked done without a parent-owned final "
-            "deliverable or child-output evidence."
-        )
-
-    async def _accepted_incomplete_child_ids(self, parent: Issue) -> set[str]:
+    async def _accepted_incomplete_child_ids(
+        self, parent: Issue, batch: DelegationBatch | None
+    ) -> set[str]:
         rows = (
             (
                 await self._session.execute(
@@ -221,22 +518,49 @@ class ParentCloseoutGovernance:
         for details in rows:
             if not isinstance(details, dict):
                 continue
+            if (
+                batch is not None
+                and details.get("delegationOriginRunId") != batch.origin_run_id
+            ):
+                continue
             child_issue_id = details.get("childIssueId")
             if isinstance(child_issue_id, str) and child_issue_id:
                 accepted.add(child_issue_id)
             child_issue_ids = details.get("childIssueIds")
             if isinstance(child_issue_ids, list):
-                accepted.update(
+                valid_ids = {
                     child_id
                     for child_id in child_issue_ids
                     if isinstance(child_id, str) and child_id
-                )
+                }
+                accepted.update(valid_ids)
         return accepted
 
     async def _unaccepted_blocked_children(
         self, run: HeartbeatRun, parent: Issue
     ) -> list[Issue]:
-        accepted_child_ids = await self._accepted_incomplete_child_ids(parent)
+        context = run.context_snapshot if isinstance(run.context_snapshot, dict) else {}
+        origin_run_id = context.get("delegationOriginRunId")
+        batch = (
+            await DelegationBatchStore(self._session).for_parent(
+                parent.id,
+                org_id=parent.org_id,
+                origin_run_id=origin_run_id,
+            )
+            if isinstance(origin_run_id, str) and origin_run_id
+            else await DelegationBatchStore(self._session).latest_for_parent(
+                parent.id, org_id=parent.org_id
+            )
+        )
+        if batch is None:
+            accepted_child_ids = await self._accepted_incomplete_child_ids(parent, None)
+            return [
+                child
+                for child in await self.children_for_run(run, parent)
+                if child.status in {"blocked", "cancelled"}
+                and child.id not in accepted_child_ids
+            ]
+        accepted_child_ids = await self._accepted_incomplete_child_ids(parent, batch)
         return [
             child
             for child in await self.children_for_run(run, parent)
@@ -274,6 +598,7 @@ class ParentCloseoutGovernance:
             select(IssueWorkProduct.issue_id).where(
                 IssueWorkProduct.issue_id.in_(completed_child_ids),
                 IssueWorkProduct.is_primary.is_(True),
+                IssueWorkProduct.status.in_(("active", "ready")),
             )
         )
         child_ids_with_products = set(rows.scalars().all())
@@ -283,56 +608,44 @@ class ParentCloseoutGovernance:
             if child_id not in child_ids_with_products
         ]
 
-    async def _has_parent_summary_evidence(
-        self, run: HeartbeatRun, parent: Issue, children: list[Issue]
-    ) -> bool:
-        if await self._run_declares_existing_parent_primary_product(run, parent):
-            return True
-        child_settled_at = max(
-            (child.completed_at or child.updated_at or child.created_at)
-            for child in children
-        )
-        if child_settled_at.tzinfo is None:
-            child_settled_at = child_settled_at.replace(tzinfo=UTC)
-        product_created_at = await self._latest_parent_primary_product_at(parent)
-        if product_created_at is not None:
-            if product_created_at.tzinfo is None:
-                product_created_at = product_created_at.replace(tzinfo=UTC)
-            if product_created_at >= child_settled_at:
-                return True
-        return await self._run_mentions_children(run, parent, children)
-
-    async def _run_declares_existing_parent_primary_product(
+    async def _closeout_request(
         self, run: HeartbeatRun, parent: Issue
-    ) -> bool:
-        """Accept an existing parent artifact explicitly resubmitted by this Run."""
-        activity_rows = await self._session.execute(
-            select(ActivityLog.details).where(
+    ) -> dict[str, Any] | None:
+        result = await self._session.execute(
+            select(ActivityLog.details)
+            .where(
                 ActivityLog.org_id == parent.org_id,
                 ActivityLog.run_id == run.id,
                 ActivityLog.entity_type == "issue",
                 ActivityLog.entity_id == parent.id,
+                ActivityLog.action == "issue.closeout_requested",
             )
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(1)
         )
-        declared_paths = {
-            normalized
-            for details in activity_rows.scalars().all()
-            if isinstance(details, dict)
-            for declaration in (details.get("workProductDeclarations") or [])
-            if isinstance(declaration, dict) and declaration.get("isPrimary") is True
-            for normalized in (self._normalize_product_path(declaration.get("path")),)
-            if normalized
-        }
-        if not declared_paths:
-            return False
+        details = result.scalar_one_or_none()
+        return details if isinstance(details, dict) else None
 
+    async def _matching_parent_product_paths(
+        self,
+        parent: Issue,
+        declared_paths: set[str],
+        *,
+        primary_only: bool,
+    ) -> set[str]:
+        if not declared_paths:
+            return set()
+        criteria = [
+            IssueWorkProduct.org_id == parent.org_id,
+            IssueWorkProduct.issue_id == parent.id,
+            IssueWorkProduct.status.in_(("active", "ready")),
+        ]
+        if primary_only:
+            criteria.append(IssueWorkProduct.is_primary.is_(True))
         product_rows = await self._session.execute(
-            select(IssueWorkProduct).where(
-                IssueWorkProduct.org_id == parent.org_id,
-                IssueWorkProduct.issue_id == parent.id,
-                IssueWorkProduct.is_primary.is_(True),
-            )
+            select(IssueWorkProduct).where(*criteria)
         )
+        matched: set[str] = set()
         for product in product_rows.scalars().all():
             metadata = (
                 product.metadata_json if isinstance(product.metadata_json, dict) else {}
@@ -347,45 +660,83 @@ class ParentCloseoutGovernance:
                 for normalized in (self._normalize_product_path(value),)
                 if normalized
             }
-            if declared_paths & product_paths:
-                return True
-        return False
+            matched.update(declared_paths & product_paths)
+        return matched
 
-    async def _latest_parent_primary_product_at(self, parent: Issue) -> datetime | None:
-        result = await self._session.execute(
-            select(IssueWorkProduct.created_at)
-            .where(
-                IssueWorkProduct.org_id == parent.org_id,
-                IssueWorkProduct.issue_id == parent.id,
-                IssueWorkProduct.is_primary.is_(True),
-            )
-            .order_by(IssueWorkProduct.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    async def _run_mentions_children(
-        self, run: HeartbeatRun, parent: Issue, children: list[Issue]
-    ) -> bool:
-        result = await self._session.execute(
+    async def _record_automatic_closeout(
+        self,
+        parent: Issue,
+        batch: DelegationBatch,
+        *,
+        action: str,
+        run_id: str | None,
+        agent_id: str | None,
+        details: dict[str, Any],
+    ) -> None:
+        existing = await self._session.execute(
             select(ActivityLog.details).where(
                 ActivityLog.org_id == parent.org_id,
-                ActivityLog.run_id == run.id,
                 ActivityLog.entity_type == "issue",
                 ActivityLog.entity_id == parent.id,
-                ActivityLog.action.in_(("issue.comment_added", "issue.updated")),
+                ActivityLog.action == action,
             )
         )
-        haystack = "\n".join(
-            self._activity_details_text(details)
-            for details in result.scalars().all()
-            if isinstance(details, dict)
-        ).casefold()
-        return bool(haystack) and any(
-            needle and needle.casefold() in haystack
-            for child in children
-            for needle in (child.identifier, child.title)
+        if any(
+            isinstance(item, dict)
+            and item.get("delegationOriginRunId") == batch.origin_run_id
+            for item in existing.scalars().all()
+        ):
+            return
+        await insert_activity_log(
+            self._session,
+            org_id=parent.org_id,
+            actor_type="system",
+            actor_id="run_finalization_service",
+            action=action,
+            entity_type="issue",
+            entity_id=parent.id,
+            agent_id=agent_id,
+            run_id=run_id,
+            details={
+                "delegationOriginRunId": batch.origin_run_id,
+                "closeoutPolicy": batch.closeout_policy,
+                "childIssueIds": [child.id for child in batch.children],
+                **details,
+            },
         )
+
+    async def _automatic_closeout_result(
+        self, parent: Issue, batch: DelegationBatch
+    ) -> ParentCloseoutResult | None:
+        rows = await self._session.execute(
+            select(ActivityLog.action, ActivityLog.details).where(
+                ActivityLog.org_id == parent.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == parent.id,
+                ActivityLog.action.in_(
+                    (
+                        "issue.child_outputs_closeout_completed",
+                        "issue.child_outputs_closeout_failed",
+                    )
+                ),
+            )
+        )
+        for action, details in rows.all():
+            if (
+                isinstance(details, dict)
+                and details.get("delegationOriginRunId") == batch.origin_run_id
+            ):
+                if action == "issue.child_outputs_closeout_completed":
+                    return ParentCloseoutResult(applicable=True, completed=True)
+                # A failed attempt is recoverable evidence, not a final batch
+                # result. Human acceptance or a newly registered output may
+                # make this same batch valid on a later reconciliation.
+                continue
+        return None
+
+    @staticmethod
+    def _child_labels(children: list[Issue]) -> str:
+        return ", ".join(child.identifier or child.id for child in children)
 
     async def _run_has_activity(
         self, run: HeartbeatRun, issue_id: str, actions: tuple[str, ...]
@@ -414,15 +765,6 @@ class ParentCloseoutGovernance:
             }
             for child in children
         ]
-
-    @staticmethod
-    def _activity_details_text(details: dict[str, Any]) -> str:
-        values: list[str] = []
-        for key in ("body", "comment", "note", "summary", "message", "status"):
-            value = details.get(key)
-            if isinstance(value, str) and value.strip():
-                values.append(value)
-        return "\n".join(values)
 
     @staticmethod
     def _normalize_product_path(value: object) -> str | None:

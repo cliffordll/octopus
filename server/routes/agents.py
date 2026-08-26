@@ -126,9 +126,9 @@ from ..services.agent_instructions import AgentInstructionsService
 from ..services.agent_memory import AgentMemoryService
 from ..services.heartbeat import (
     HeartbeatService,
-    dispatch_queued_agent,
     track_dispatch_task,
 )
+from ..services.run_dispatch import RunDispatchService
 from ..services.run_admission import DirectRunCreationDenied, RunAdmissionPolicy
 from ..services.workspaces import WorkspaceService
 
@@ -138,7 +138,9 @@ router = APIRouter(tags=["agents"])
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
     async def dispatch_after_commit() -> None:
         await asyncio.sleep(0.01)
-        await dispatch_queued_agent(request.app.state.session_factory, agent_id)
+        await RunDispatchService(request.app.state.session_factory).dispatch_agent(
+            agent_id
+        )
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())

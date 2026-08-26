@@ -490,6 +490,12 @@ function workspaceModeNotice(mode: string | null | undefined): string {
   if (mode !== "shared_workspace") return "";
   return "共享工作区不会隔离文件；多个任务可以操作同一目录，覆盖由路径约定、diff 审核和 closeout 控制。";
 }
+
+function closeoutPolicyLabel(mode: string | null | undefined): string | null {
+  if (mode === "child_outputs_are_final") return "子任务产出即完成";
+  if (mode === "parent_output_required") return "父任务还需产出";
+  return null;
+}
 type PushCredentials = { username: string; password: string };
 
 function promptForPushCredentials(): PushCredentials | null {
@@ -570,7 +576,12 @@ function activitySummary(event: ActivityEvent): string {
   if (event.action === "issue.review_closeout_missing") return issueCloseoutReviewSummary(event);
 
   if (event.action === "issue.convergence_review_requested") return issueConvergenceReviewSummary(event);
-  if (event.action === "issue.parent_deliverable_convergence_warning") return "父任务已收尾，但没有看到父任务最终产物或引用子任务结果的证据。";
+  if (event.action === "issue.closeout_requested") return "父任务已提交完成请求，正在验证声明的任务产物。";
+  if (event.action === "issue.child_outputs_closeout_completed") return "子任务产物已通过验证，父任务已自动完成。";
+  if (event.action === "issue.child_outputs_closeout_failed") {
+    const error = event.details?.error;
+    return typeof error === "string" && error.trim() ? error : "子任务产物验证失败，父任务已阻塞。";
+  }
   if (event.action === "issue.children_settled") return "所有子任务已进入终态，父任务已被唤醒继续汇总。";
 
   if (typeof event.summary === "string" && event.summary.trim()) return event.summary;
@@ -624,9 +635,17 @@ function activityTitle(event: ActivityEvent): string {
 
       return "需要收敛评审";
 
-    case "issue.parent_deliverable_convergence_warning":
+    case "issue.closeout_requested":
 
-      return "父任务汇总证据不足";
+      return "正在验证任务产物";
+
+    case "issue.child_outputs_closeout_completed":
+
+      return "父任务自动完成";
+
+    case "issue.child_outputs_closeout_failed":
+
+      return "子任务产物验证失败";
 
     case "issue.children_settled":
 
@@ -656,7 +675,9 @@ function activityIcon(event: ActivityEvent): string {
 
   if (event.action === "issue.convergence_review_requested") return "!";
 
-  if (event.action === "issue.parent_deliverable_convergence_warning") return "!";
+  if (event.action === "issue.child_outputs_closeout_failed") return "!";
+
+  if (event.action === "issue.closeout_requested") return "V";
 
   if (event.action === "issue.children_settled") return "S";
 
@@ -678,7 +699,9 @@ function activityTone(event: ActivityEvent): string {
 
   if (event.action === "issue.convergence_review_requested") return "needs-review";
 
-  if (event.action === "issue.parent_deliverable_convergence_warning") return "needs-attention";
+  if (event.action === "issue.child_outputs_closeout_failed") return "needs-attention";
+
+  if (event.action === "issue.closeout_requested") return "needs-review";
 
   if (event.action === "issue.children_settled") return "status";
 
@@ -4775,7 +4798,12 @@ export function IssuePage() {
 
                 </div>
 
-                <span className="muted">{subIssueList.length}</span>
+                <span className="muted">
+                  {closeoutPolicyLabel(subIssues.data?.closeoutPolicy?.mode) && (
+                    <Badge>{closeoutPolicyLabel(subIssues.data?.closeoutPolicy?.mode)}</Badge>
+                  )}
+                  {subIssueList.length}
+                </span>
 
               </div>
 

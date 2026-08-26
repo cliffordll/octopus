@@ -16,6 +16,12 @@ ProcessChunkCallback = Callable[[bytes], Awaitable[None]]
 ProcessFallbackCallback = Callable[[PermissionError], Awaitable[None]]
 
 
+def _supports_windows_blocking_fallback() -> bool:
+    """Return whether the Windows-only blocking spawn fallback is available."""
+
+    return os.name == "nt"
+
+
 @dataclass(frozen=True)
 class LocalProcessResult:
     exit_code: int | None
@@ -58,7 +64,7 @@ class LocalProcessSupervisor:
                 **runtime_subprocess_kwargs(),
             )
         except PermissionError as exc:
-            if not allow_blocking_fallback or os.name != "nt":
+            if not allow_blocking_fallback or not _supports_windows_blocking_fallback():
                 raise
             if on_blocking_fallback is not None:
                 await on_blocking_fallback(exc)

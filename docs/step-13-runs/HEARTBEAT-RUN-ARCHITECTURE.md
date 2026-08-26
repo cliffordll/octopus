@@ -93,7 +93,7 @@ recover_orphaned_runs()
 list_organizations()
 for each org:
   HeartbeatService.tick_timers(org.id)
-dispatch_all_queued_runs()
+RunDispatchService.dispatch_all()
 sleep(interval)
 ```
 
@@ -252,8 +252,8 @@ server scheduler loop
   -> HeartbeatService.wakeup()
   -> 写 agent_wakeup_requests
   -> 写 heartbeat_runs(status=queued)
-  -> dispatch_all_queued_runs()
-  -> dispatch_queued_agent(agent_id)
+  -> RunDispatchService.dispatch_all()
+  -> RunDispatchService.dispatch_agent(agent_id)
   -> HeartbeatService.execute_claimed_run()
   -> get_runtime_adapter(agent.agent_runtime_type)
   -> adapter.execute(context)

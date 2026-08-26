@@ -4,11 +4,11 @@
 
 ## 背景
 
-当前 Run 执行、终态收尾和异常恢复集中在 `HeartbeatService` 与 Dispatcher
+当前 Run 执行、终态收尾和异常恢复集中在 `HeartbeatService` 与 `RunDispatchService`
 函数中。现场问题表明以下生命周期边界仍不完整：
 
 1. 后台 Run 的数据库 Session 可能未可靠归还连接池；
-2. fire-and-forget Dispatcher task 的异常可能未被观察；
+2. fire-and-forget `RunDispatchService` task 的异常可能未被观察；
 3. execution lease 已过期但没有 `processPid` 的 Run 会被周期恢复永久跳过；
 4. 父 Run 因基础设施故障失败时，即使仍有活动子任务，父 Issue 也可能被错误改为 `blocked`；
 5. recovery Run 成功后不能安全恢复由同一系统故障造成的父 Issue 状态；
@@ -16,29 +16,29 @@
 
 ## 目标结构
 
-- `RunExecution`：每个已领取 Run 的执行生命周期，独占数据库 Session，负责
+- `RunExecutionService`：每个已领取 Run 的执行生命周期，独占数据库 Session，负责
   Adapter 调用、租约续期、取消响应、提交/回滚和资源释放。
-- `RunFinalizer`：正常执行与恢复共同使用的终态入口，负责 Run 终态和可恢复、
+- `RunFinalizationService`：正常执行与恢复共同使用的终态入口，负责 Run 终态和可恢复、
   幂等的 wakeup、Agent、Issue、Workspace、父任务续跑等副作用。
-- `RunRecovery`：周期检查异常 Run，依据 lease 与进程证据进行 CAS 认领，调用
-  `RunFinalizer` 收口，并在允许时创建一次关联原 Run 的 recovery Run。
+- `RunRecoveryService`：周期检查异常 Run，依据 lease 与进程证据进行 CAS 认领，调用
+  `RunFinalizationService` 收口，并在允许时创建一次关联原 Run 的 recovery Run。
 
-Dispatcher 只负责领取排队 Run、创建 `RunExecution` 并观察后台 task 结果；
+`RunDispatchService` 只负责领取排队 Run、创建 `RunExecutionService` 并观察后台 task 结果；
 Adapter 只负责启动和监控 Runtime 进程，不负责数据库租约或业务终态。
 
 ## 批次与提交边界
 
-### 批次一：RunExecution
+### 批次一：RunExecutionService
 
 - 把每个 Run 的 Session、HeartbeatService、执行与清理封装为显式对象；
-- Dispatcher 必须持有并观察后台 task，异常进入结构化日志；
+- `RunDispatchService` 必须持有并观察后台 task，异常进入结构化日志；
 - commit、rollback、close 具有明确顺序，关闭失败不得静默吞掉；
 - 保持现有 claim、并发槽、Adapter 和 API 契约不变。
 
 验收：Adapter 成功、失败、取消以及 task 异常时 Session 均被关闭；续租随执行结束；
 后台异常可观察；相关 Step 13 workflow/contract 测试通过。
 
-### 批次二：RunFinalizer
+### 批次二：RunFinalizationService
 
 - 提取正常执行与 recovery 共用的 Run 终态和 terminal effects 入口；
 - terminal effects 保持可重入，旧 owner 不能覆盖新 owner；
@@ -50,7 +50,7 @@ Adapter 只负责启动和监控 Runtime 进程，不负责数据库租约或业
 验收：terminal effects 重放无重复副作用；活动子任务、用户手动 blocked、系统
 blocked、并发 Run 状态均有工作流测试。
 
-### 批次三：RunRecovery
+### 批次三：RunRecoveryService
 
 - lease 是恢复主证据，PID 是本地进程辅助证据；
 - lease 有效保持 `running`；lease 过期且进程存活时暂缓并记录证据；
@@ -58,7 +58,7 @@ blocked、并发 Run 状态均有工作流测试。
   `failed/process_lost`；
 - 自动 recovery Run 保留 `retryOfRunId`、Issue、Agent、Workspace 和上下文，
   同一故障最多创建一次自动重试；
-- Recovery 不直接调用 Adapter，新 Run 统一交回 Dispatcher。
+- `RunRecoveryService` 不直接调用 Adapter，新 Run 统一交回 `RunDispatchService`。
 
 验收：无 PID 过期 Run 可恢复；有效租约和活进程不误杀；重复/并发扫描只收口和
 重试一次；恢复 Run 仍属于原任务。
@@ -90,7 +90,7 @@ blocked、并发 Run 状态均有工作流测试。
 
 - 不修改对外 Run、Issue 或 Runtime API 契约；
 - 不新增业务状态值；
-- 不让 Recovery 维护或复活旧 Adapter/OS 进程；
+- 不让 `RunRecoveryService` 维护或复活旧 Adapter/OS 进程；
 - 不在本批次实现 Automation；
 - 不把父任务汇总拆成额外的 summary child Issue。
 

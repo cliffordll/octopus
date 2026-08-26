@@ -5,10 +5,51 @@ from collections.abc import Awaitable, Callable
 import logging
 
 from anyio import CancelScope
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 REQUEST_DB_CLEANUP_TIMEOUT_SECONDS = 2.0
+
+
+async def close_session_shielded(session: AsyncSession) -> None:
+    """Close a database session even when its caller is being cancelled."""
+
+    try:
+        await run_shielded_cleanup(
+            "close database session",
+            session.close,
+            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        return
+
+
+async def rollback_session_shielded(session: AsyncSession) -> None:
+    """Roll back a database session even when its caller is being cancelled."""
+
+    try:
+        await run_shielded_cleanup(
+            "roll back database session",
+            session.rollback,
+            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        return
+
+
+async def commit_session_shielded(session: AsyncSession) -> None:
+    """Finish a commit before propagating caller cancellation."""
+
+    commit_task = asyncio.create_task(session.commit())
+    try:
+        await asyncio.shield(commit_task)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(commit_task)
+        except BaseException:
+            pass
+        raise
 
 
 async def run_shielded_cleanup(

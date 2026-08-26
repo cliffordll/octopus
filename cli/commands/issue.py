@@ -124,13 +124,17 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
         help="UTF-8 JSON file containing the child issue array",
     )
     create_children_parser.add_argument(
-        "--closeout-mode",
-        choices=("parent_summary", "child_outputs"),
-        default="parent_summary",
+        "--parent-output-required",
+        action="store_true",
         help=(
-            "How the parent closes this batch: create a parent summary or use "
-            "the child outputs directly"
+            "Require the parent to produce and declare its own final output; "
+            "by default child outputs are final"
         ),
+    )
+    create_children_parser.add_argument(
+        "--closeout-policy-file",
+        type=Path,
+        help="UTF-8 JSON file containing an advanced closeout policy object",
     )
     create_children_parser.set_defaults(handler=create_issue_children)
 
@@ -222,7 +226,13 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
 
     done_parser = actions.add_parser("done", help="Mark an issue done")
     done_parser.add_argument("issue_id")
-    done_parser.add_argument("--comment", required=True)
+    done_comment = done_parser.add_mutually_exclusive_group(required=True)
+    done_comment.add_argument("--comment")
+    done_comment.add_argument(
+        "--comment-file",
+        type=Path,
+        help="UTF-8 file containing the completion comment",
+    )
     _add_work_product_declaration_args(done_parser)
     done_parser.set_defaults(handler=done_issue)
 
@@ -321,12 +331,40 @@ def create_issue_children(args: argparse.Namespace, client: ApiClient) -> Any:
         raise ValueError(f"{source} must contain valid JSON") from exc
     if not isinstance(children, list) or not children:
         raise ValueError(f"{source} must contain a non-empty JSON array")
+    if args.closeout_policy_file is not None and args.parent_output_required:
+        raise ValueError(
+            "--closeout-policy-file cannot be combined with --parent-output-required"
+        )
+    closeout_policy: object = {"version": 1, "mode": "child_outputs_are_final"}
+    if args.parent_output_required:
+        closeout_policy = {
+            "version": 1,
+            "mode": "parent_output_required",
+            "requirements": {
+                "minimumOutputs": 1,
+                "primaryOutputRequired": True,
+            },
+        }
+    elif args.closeout_policy_file is not None:
+        try:
+            raw_policy = args.closeout_policy_file.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise ValueError(
+                f"Unable to read --closeout-policy-file "
+                f"{args.closeout_policy_file}: {exc}"
+            ) from exc
+        try:
+            closeout_policy = json.loads(raw_policy)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--closeout-policy-file must contain valid JSON") from exc
+        if not isinstance(closeout_policy, dict):
+            raise ValueError("--closeout-policy-file must contain a JSON object")
     return client.request(
         "POST",
         f"/api/issues/{args.issue_id}/children/batch",
         json={
             "children": children,
-            "closeoutMode": args.closeout_mode,
+            "closeoutPolicy": closeout_policy,
         },
     )
 
@@ -446,8 +484,17 @@ def review_issue(args: argparse.Namespace, client: ApiClient) -> Any:
 
 
 def done_issue(args: argparse.Namespace, client: ApiClient) -> Any:
+    comment = args.comment
+    if args.comment_file is not None:
+        try:
+            comment = args.comment_file.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise ValueError(
+                f"Unable to read --comment-file {args.comment_file}: {exc}"
+            ) from exc
+    assert comment is not None
     payload = _add_work_product_declarations(
-        {"status": "done", "comment": args.comment}, args
+        {"status": "done", "comment": comment}, args
     )
     return client.request(
         "PATCH",
