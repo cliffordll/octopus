@@ -7,6 +7,7 @@ import logging
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from packages.database.clients import begin_write_transaction
 from packages.database.clients.cleanup import (
     REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     run_shielded_cleanup as _run_shielded_cleanup,
@@ -18,7 +19,12 @@ logger = logging.getLogger(__name__)
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     session_factory = request.app.state.session_factory
     session = session_factory()
-    await session.begin()
+    request_method = getattr(request, "method", "GET")
+    write_transaction = request_method not in {"GET", "HEAD", "OPTIONS"}
+    if write_transaction:
+        await begin_write_transaction(session)
+    else:
+        await session.begin()
     try:
         yield session
     except BaseException:

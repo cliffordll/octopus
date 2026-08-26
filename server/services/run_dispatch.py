@@ -4,7 +4,7 @@ import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from packages.database.clients import async_transaction
+from packages.database.clients import async_transaction, async_write_transaction
 from packages.database.clients.cleanup import close_session_shielded
 from packages.database.queries.heartbeat import list_queued_agent_ids
 
@@ -22,7 +22,7 @@ class RunDispatchService:
 
         session = self._session_factory()
         try:
-            async with async_transaction(session):
+            async with async_write_transaction(session):
                 run_ids = await HeartbeatService(session).claim_queued_for_dispatch(
                     agent_id
                 )
@@ -61,7 +61,7 @@ class RunDispatchService:
 
         session = self._session_factory()
         try:
-            async with async_transaction(session):
+            async with async_write_transaction(session):
                 heartbeat = HeartbeatService(session)
                 scheduled_agent_ids = (
                     await heartbeat.materialize_due_scheduled_wakeups()

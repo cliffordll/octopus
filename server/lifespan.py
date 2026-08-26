@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.database.clients import (
-    async_transaction,
+    async_write_transaction,
     create_database_engine,
     create_session_factory,
 )
@@ -38,7 +38,7 @@ async def _heartbeat_scheduler(
 ) -> None:
     try:
         async with session_factory() as session:
-            async with async_transaction(session):
+            async with async_write_transaction(session):
                 await HeartbeatService(session).recover_orphaned_runs()
         await RunDispatchService(session_factory).dispatch_all()
     except Exception:
@@ -48,7 +48,7 @@ async def _heartbeat_scheduler(
             return
         try:
             async with session_factory() as session:
-                async with async_transaction(session):
+                async with async_write_transaction(session):
                     heartbeat = HeartbeatService(session)
                     await heartbeat.recover_orphaned_runs(require_process_loss=True)
                     for org in await list_organizations(session):
