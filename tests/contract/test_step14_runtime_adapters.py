@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import importlib
 import json
 import os
@@ -18,8 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
+from packages.runtimes.claude_local.protocol import build_args as build_claude_args
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
+from packages.runtimes.codex_local.runner import _build_args as build_codex_args
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
+from packages.runtimes.local_process import LocalProcessResult
 from packages.runtimes.opencode_local.protocol import build_args as build_opencode_args
 from packages.runtimes.opencode_local.runner import (
     _read_stdout as read_opencode_stdout,
@@ -77,6 +81,38 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
         paths.ORG_ADAPTER_QUOTA_WINDOWS_PATH
         == "/api/orgs/{orgId}/adapters/{type}/quota-windows"
     )
+
+
+def test_codex_defaults_to_managed_workspace_write_sandbox() -> None:
+    args = build_codex_args({})
+
+    assert args[args.index("--sandbox") + 1] == "workspace-write"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in args
+
+
+def test_codex_preserves_explicit_sandbox_policy() -> None:
+    explicit = build_codex_args({"extraArgs": ["--sandbox", "read-only"]})
+    short_explicit = build_codex_args({"extraArgs": ["-s=read-only"]})
+    bypass = build_codex_args({"dangerouslyBypassApprovalsAndSandbox": True})
+
+    assert explicit.count("--sandbox") == 1
+    assert explicit[explicit.index("--sandbox") + 1] == "read-only"
+    assert "--sandbox" not in short_explicit
+    assert "-s=read-only" in short_explicit
+    assert "--sandbox" not in bypass
+    assert "--dangerously-bypass-approvals-and-sandbox" in bypass
+
+
+def test_claude_defaults_to_accepting_workspace_edits() -> None:
+    default = build_claude_args({})
+    explicit = build_claude_args({"extraArgs": ["--permission-mode", "plan"]})
+    bypass = build_claude_args({"dangerouslySkipPermissions": True})
+
+    assert default[default.index("--permission-mode") + 1] == "acceptEdits"
+    assert explicit.count("--permission-mode") == 1
+    assert explicit[explicit.index("--permission-mode") + 1] == "plan"
+    assert "--permission-mode" not in bypass
+    assert "--dangerously-skip-permissions" in bypass
 
 
 def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
@@ -1449,7 +1485,84 @@ async def test_codex_execute_streams_agent_message_delta(
     )
 
     assert result.exit_code == 0
-    assert streamed == [{"type": "assistant_delta", "delta": "done"}]
+    assert streamed == [
+        {
+            "type": "runtime_progress",
+            "runtime": "codex_local",
+            "eventType": "thread.started",
+            "itemType": None,
+            "message": "Codex 会话已启动",
+        },
+        {"type": "assistant_delta", "delta": "done"},
+        {
+            "type": "runtime_progress",
+            "runtime": "codex_local",
+            "eventType": "item.completed",
+            "itemType": "agent_message",
+            "message": "Codex 已生成回复",
+        },
+    ]
+
+
+async def test_codex_execute_forwards_jsonl_and_progress_before_process_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = (
+        b'{"type":"thread.started","thread_id":"thread-live"}\n'
+        b'{"type":"turn.started"}\n'
+        b'{"type":"item.started","item":{"type":"command_execution",'
+        b'"command":"rg -n TODO server"}}\n'
+        b'{"type":"item.completed","item":{"type":"command_execution",'
+        b'"exit_code":0}}\n'
+        b'{"type":"turn.completed","usage":{}}\n'
+    )
+    logs: list[tuple[str, str]] = []
+    progress: list[dict[str, object]] = []
+    observed_live_output = False
+
+    async def fake_run(*args: object, **kwargs: object) -> LocalProcessResult:
+        nonlocal observed_live_output
+        on_stdout_chunk = kwargs["on_stdout_chunk"]
+        assert callable(on_stdout_chunk)
+        split = stdout.index(b"\n", stdout.index(b"\n") + 1) + 1
+        await on_stdout_chunk(stdout[:split])
+        observed_live_output = any("turn.started" in chunk for _, chunk in logs)
+        await on_stdout_chunk(stdout[split:])
+        return LocalProcessResult(exit_code=0, stdout=stdout, stderr=b"")
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    async def on_stream_event(event: dict[str, object]) -> None:
+        progress.append(event)
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.local_process_supervisor.run",
+        fake_run,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-live",
+            agent_id="agent-live",
+            org_id="org-live",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=on_log,
+            on_stream_event=on_stream_event,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert observed_live_output is True
+    assert sum("thread.started" in chunk for _, chunk in logs) == 1
+    assert [event["message"] for event in progress] == [
+        "Codex 会话已启动",
+        "Codex 开始处理任务",
+        "正在执行命令：rg -n TODO server",
+        "命令执行完成（退出码 0）",
+        "Codex 本轮处理完成",
+    ]
 
 
 async def test_codex_execute_infers_openrouter_biller_from_api_key(
@@ -2072,18 +2185,32 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> Any:
         raise PermissionError(5, "Access is denied")
 
+    output = (
+        b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
+        b'{"type":"item.completed","item":{"type":"agent_message",'
+        b'"text":"fallback ok"}}\n'
+    )
+    live_logs: list[tuple[str, str]] = []
+
+    class CaptureStdin(io.BytesIO):
+        def close(self) -> None:
+            captured["input"] = self.getvalue()
+            super().close()
+
     class FakePopen:
         pid = 4242
         returncode = 0
 
+        def __init__(self) -> None:
+            self.stdin = CaptureStdin()
+            self.stdout = io.BytesIO(output)
+            self.stderr = io.BytesIO()
+
         def communicate(self, payload: bytes | None = None) -> tuple[bytes, bytes]:
-            captured["input"] = payload
-            return (
-                b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
-                b'{"type":"item.completed","item":{"type":"agent_message",'
-                b'"text":"fallback ok"}}\n',
-                b"",
-            )
+            raise AssertionError("streaming fallback must not buffer with communicate")
+
+        def wait(self) -> int:
+            return self.returncode
 
         def poll(self) -> int:
             return self.returncode
@@ -2102,6 +2229,9 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     )
     monkeypatch.setattr("packages.runtimes.local_process.subprocess.Popen", fake_popen)
 
+    async def on_log(stream: str, chunk: str) -> None:
+        live_logs.append((stream, chunk))
+
     result = await execute_codex_local(
         RuntimeExecutionContext(
             run_id="run-subprocess-fallback",
@@ -2109,7 +2239,7 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
             org_id="org-subprocess-fallback",
             agent_name="Codex",
             config={"command": "codex-test"},
-            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+            on_log=on_log,
         )
     )
 
@@ -2117,6 +2247,7 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     assert result.session_id_after == "thread-fallback"
     assert result.result_json is not None
     assert result.result_json["summary"] == "fallback ok"
+    assert any("thread-fallback" in chunk for _, chunk in live_logs)
     prompt = captured["input"].decode("utf-8")
     assert "## Runtime Tool Capability" in prompt
     assert "Do not guess tool input schemas" in prompt

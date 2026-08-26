@@ -9,6 +9,11 @@ from ..session import runtime_session_id
 
 def build_args(config: dict[str, Any]) -> list[str]:
     args = _string_list(config.get("extraArgs", config.get("args", [])))
+    has_permission_mode = any(
+        argument == "--permission-mode" or argument.startswith("--permission-mode=")
+        for argument in args
+    )
+    has_permission_bypass = "--dangerously-skip-permissions" in args
     session_id = runtime_session_id(config)
     if session_id:
         args.extend(["--resume", session_id])
@@ -23,7 +28,12 @@ def build_args(config: dict[str, Any]) -> list[str]:
     if isinstance(max_turns, int) and not isinstance(max_turns, bool) and max_turns > 0:
         args.extend(["--max-turns", str(max_turns)])
     if config.get("dangerouslySkipPermissions") is True:
-        args.extend(["--dangerously-skip-permissions"])
+        if not has_permission_bypass:
+            args.append("--dangerously-skip-permissions")
+    elif not has_permission_mode and not has_permission_bypass:
+        # Non-interactive Agent Runs must be able to materialize requested
+        # workspace outputs without granting unrestricted command execution.
+        args.extend(["--permission-mode", "acceptEdits"])
     if config.get("chrome") is True:
         args.append("--chrome")
     return args

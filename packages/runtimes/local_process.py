@@ -6,7 +6,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable, cast
 
 from .common import runtime_subprocess_kwargs, terminate_runtime_process
 
@@ -150,6 +150,19 @@ class LocalProcessSupervisor:
         try:
             if on_process_started is not None:
                 await on_process_started(process.pid, datetime.now(UTC))
+            if (
+                (on_stdout_chunk is not None or on_stderr_chunk is not None)
+                and getattr(process, "stdout", None) is not None
+                and getattr(process, "stderr", None) is not None
+            ):
+                return await self._run_blocking_streaming(
+                    process,
+                    input_data=input_data,
+                    timeout_sec=timeout_sec,
+                    cancel_event=cancel_event,
+                    on_stdout_chunk=on_stdout_chunk,
+                    on_stderr_chunk=on_stderr_chunk,
+                )
             communication = asyncio.create_task(
                 asyncio.to_thread(
                     process.communicate,
@@ -194,6 +207,87 @@ class LocalProcessSupervisor:
                 await on_process_exited(
                     process.pid, process.returncode, datetime.now(UTC)
                 )
+
+    async def _run_blocking_streaming(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        input_data: bytes | None,
+        timeout_sec: float,
+        cancel_event: asyncio.Event | None,
+        on_stdout_chunk: ProcessChunkCallback | None,
+        on_stderr_chunk: ProcessChunkCallback | None,
+    ) -> LocalProcessResult:
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stdin_task = asyncio.create_task(
+            asyncio.to_thread(self._write_blocking_stdin, process, input_data)
+        )
+        stdout_task = asyncio.create_task(
+            self._read_blocking_pipe(process.stdout, on_stdout_chunk)
+        )
+        stderr_task = asyncio.create_task(
+            self._read_blocking_pipe(process.stderr, on_stderr_chunk)
+        )
+        wait_task = asyncio.create_task(asyncio.to_thread(process.wait))
+        cancelled = self._cancel_waiter(cancel_event)
+        tasks = (stdin_task, stdout_task, stderr_task, wait_task)
+        try:
+            outcome = await self._wait_for_completion(
+                wait_task,
+                cancelled=cancelled,
+                timeout_sec=timeout_sec,
+            )
+            if outcome in {"cancelled", "timed_out"}:
+                await terminate_runtime_process(process)
+            await stdin_task
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+            await wait_task
+            return self._result(
+                process,
+                stdout,
+                stderr,
+                cancelled=outcome == "cancelled",
+                timed_out=outcome == "timed_out",
+                signal="SIGTERM" if outcome == "cancelled" else None,
+            )
+        except asyncio.CancelledError:
+            await terminate_runtime_process(process)
+            for task in tasks:
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.gather(*tasks)
+            raise
+        finally:
+            await self._cancel_task(cancelled)
+
+    @staticmethod
+    def _write_blocking_stdin(
+        process: subprocess.Popen[bytes], input_data: bytes | None
+    ) -> None:
+        if process.stdin is None:
+            return
+        try:
+            if input_data:
+                process.stdin.write(input_data)
+                process.stdin.flush()
+        finally:
+            process.stdin.close()
+
+    @staticmethod
+    async def _read_blocking_pipe(
+        pipe: Any, callback: ProcessChunkCallback | None
+    ) -> bytes:
+        chunks: list[bytes] = []
+        read = getattr(pipe, "read1", pipe.read)
+        while True:
+            chunk = await asyncio.to_thread(read, 65_536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if callback is not None:
+                await callback(chunk)
+        return b"".join(chunks)
 
     async def _run_buffered(
         self,
