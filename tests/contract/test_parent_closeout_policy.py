@@ -89,6 +89,24 @@ async def test_parent_output_request_is_validated_before_issue_completion() -> N
                     actor_id="local-board",
                 )
 
+            with pytest.raises(ValueError, match="--primary-work-product <path>"):
+                await IssueService(session).update_issue(
+                    parent.id,
+                    {"status": "done", "comment": "Final report completed."},
+                    actor_type="agent",
+                    actor_id=agent.id,
+                    run_id=run.id,
+                )
+            missing_declaration_request = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.action == "issue.closeout_requested",
+                        ActivityLog.run_id == run.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            assert missing_declaration_request is None
+
             updated = await IssueService(session).update_issue(
                 parent.id,
                 {
