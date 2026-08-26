@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update as sqlalchemy_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
@@ -17,6 +17,7 @@ from .delegation_closeout import (
     DelegationBatch,
     DelegationBatchStore,
 )
+from .issue_hierarchy import IssueHierarchyPolicy
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,16 @@ class ParentCloseoutGovernance:
     async def finalize_parent_output_request(
         self, run: HeartbeatRun, parent: Issue, *, apply: bool = True
     ) -> ParentCloseoutResult:
+        hierarchy = IssueHierarchyPolicy(self._session)
+        if apply:
+            locked = await hierarchy.lock_root(parent.id, parent.org_id)
+            if locked is None:
+                return ParentCloseoutResult(
+                    applicable=True,
+                    completed=False,
+                    error="Parent closeout target no longer exists.",
+                )
+            parent = locked
         context = run.context_snapshot if isinstance(run.context_snapshot, dict) else {}
         origin_run_id = context.get("delegationOriginRunId")
         store = DelegationBatchStore(self._session)
@@ -164,6 +175,17 @@ class ParentCloseoutGovernance:
         policy = batch.closeout_policy
         if policy["mode"] != "parent_output_required":
             return ParentCloseoutResult(applicable=False, completed=False)
+        if apply:
+            unsettled = await hierarchy.unsettled_descendants(parent)
+            if unsettled:
+                return ParentCloseoutResult(
+                    applicable=True,
+                    completed=False,
+                    error=(
+                        "Parent closeout cannot be verified because descendant "
+                        f"issues remain unsettled: {self._child_labels(unsettled)}."
+                    ),
+                )
         request = await self._closeout_request(run, parent)
         is_settlement_continuation = (
             context.get("wakeReason") == "issue_children_settled"
@@ -263,7 +285,28 @@ class ParentCloseoutGovernance:
         values: dict[str, Any] = {"status": target_status}
         if target_status == "done":
             values["completed_at"] = datetime.now(UTC)
-        await update_issue(self._session, parent.id, values)
+        if not await self._transition_parent(run, parent, values):
+            await insert_activity_log(
+                self._session,
+                org_id=parent.org_id,
+                actor_type="system",
+                actor_id="run_finalization_service",
+                action="issue.closeout_effect_skipped",
+                entity_type="issue",
+                entity_id=parent.id,
+                agent_id=run.agent_id,
+                run_id=run.id,
+                details={
+                    "runId": run.id,
+                    "effect": "parent_closeout",
+                    "reason": "stale_issue_execution",
+                },
+            )
+            return ParentCloseoutResult(
+                applicable=True,
+                completed=False,
+                error="Parent closeout was superseded by a newer issue state.",
+            )
         await insert_activity_log(
             self._session,
             org_id=parent.org_id,
@@ -281,6 +324,27 @@ class ParentCloseoutGovernance:
             },
         )
         return ParentCloseoutResult(applicable=True, completed=True)
+
+    async def _transition_parent(
+        self, run: HeartbeatRun, parent: Issue, values: dict[str, Any]
+    ) -> bool:
+        result = await self._session.execute(
+            sqlalchemy_update(Issue)
+            .where(
+                Issue.org_id == parent.org_id,
+                Issue.id == parent.id,
+                Issue.assignee_agent_id == run.agent_id,
+                Issue.execution_run_id == run.id,
+                Issue.checkout_run_id == run.id,
+                Issue.status.in_(("todo", "in_progress")),
+            )
+            .values(**values, updated_at=datetime.now(UTC))
+            .returning(Issue.id)
+        )
+        changed = result.scalar_one_or_none() is not None
+        if changed:
+            await self._session.refresh(parent)
+        return changed
 
     async def block_for_unresolved_children(
         self, run: HeartbeatRun, parent: Issue

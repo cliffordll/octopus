@@ -63,6 +63,8 @@ from .delegation_closeout import (
 )
 from .documents import DocumentService
 from .goals import GoalService
+from .issue_completion import IssueCompletionGovernance
+from .issue_hierarchy import IssueHierarchyPolicy
 from .parent_closeout_governance import ParentCloseoutGovernance
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
@@ -313,30 +315,11 @@ class IssueService:
         actor_id: str,
         run_id: str | None = None,
     ) -> tuple[IssueDetail, list[IssueDetail], bool]:
-        # Take a write lock before reading the child set. PostgreSQL/MySQL lock the
-        # parent row; SQLite begins its single-writer transaction here instead of
-        # relying on its no-op ``FOR UPDATE`` implementation.
-        locked_parent_id = (
-            await self._session.execute(
-                update(Issue)
-                .where(Issue.id == parent_issue_id)
-                .values(updated_at=Issue.updated_at)
-                .returning(Issue.id)
-            )
-        ).scalar_one_or_none()
-        if locked_parent_id is None:
-            locked_parent_id = (
-                await self._session.execute(
-                    update(Issue)
-                    .where(Issue.identifier == parent_issue_id)
-                    .values(updated_at=Issue.updated_at)
-                    .returning(Issue.id)
-                )
-            ).scalar_one_or_none()
-        parent = (
-            await self._session.get(Issue, locked_parent_id)
-            if locked_parent_id is not None
-            else None
+        parent = await get_issue_by_id(self._session, parent_issue_id)
+        if parent is None:
+            raise ValueError("Parent issue not found")
+        parent = await IssueHierarchyPolicy(self._session).lock_root(
+            parent.id, parent.org_id
         )
         if parent is None:
             raise ValueError("Parent issue not found")
@@ -594,6 +577,20 @@ class IssueService:
             payload.get("status") == "in_review"
             and payload.get("requestedStatus") == "done"
         )
+        hierarchy_mutation_requested = (
+            done_requested
+            or "parentId" in payload
+            or "status" in payload
+            or payload.get("reopen") is True
+            or payload.get("reviewDecision") is not None
+        )
+        if hierarchy_mutation_requested:
+            locked = await IssueHierarchyPolicy(self._session).lock_root(
+                current.id, current.org_id
+            )
+            if locked is None:
+                return None
+            current = locked
         if done_requested and await ParentCloseoutGovernance(
             self._session
         ).record_closeout_request_if_required(
@@ -609,6 +606,26 @@ class IssueService:
             refreshed = await get_issue_by_id(self._session, current.id)
             assert refreshed is not None
             return await self._to_detail(refreshed)
+
+        if done_requested:
+            declarations = [
+                dict(item) for item in payload.get("workProductDeclarations", [])
+            ]
+            if declarations:
+                await self._reject_done_with_open_descendants(current)
+            if await IssueCompletionGovernance(
+                self._session
+            ).record_request_if_declared(
+                current,
+                run_id=run_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                comment=payload.get("comment"),
+                declarations=declarations,
+            ):
+                refreshed = await get_issue_by_id(self._session, current.id)
+                assert refreshed is not None
+                return await self._to_detail(refreshed)
 
         values = {
             ISSUE_UPDATE_TO_COLUMN[key]: value
@@ -653,6 +670,9 @@ class IssueService:
         if payload.get("reopen") and "status" not in values:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
+
+        if values.get("status") in {"backlog", "todo", "in_progress", "in_review"}:
+            await IssueHierarchyPolicy(self._session).assert_open_ancestors(current)
 
         effective_values = {
             "status": values.get("status", current.status),
@@ -705,70 +725,12 @@ class IssueService:
             )
         return await self._to_detail(row)
 
-    async def _accepted_incomplete_child_ids(self, parent: Issue) -> set[str]:
-        rows = (
-            (
-                await self._session.execute(
-                    select(ActivityLog.details).where(
-                        and_(
-                            ActivityLog.org_id == parent.org_id,
-                            ActivityLog.entity_type == "issue",
-                            ActivityLog.entity_id == parent.id,
-                            ActivityLog.action == "issue.incomplete_accepted",
-                        )
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        accepted: set[str] = set()
-        for details in rows:
-            if not isinstance(details, dict):
-                continue
-            has_specific_children = False
-            child_issue_id = details.get("childIssueId")
-            if isinstance(child_issue_id, str) and child_issue_id:
-                accepted.add(child_issue_id)
-                has_specific_children = True
-            child_issue_ids = details.get("childIssueIds")
-            if isinstance(child_issue_ids, list):
-                valid_ids = {
-                    child_id
-                    for child_id in child_issue_ids
-                    if isinstance(child_id, str) and child_id
-                }
-                accepted.update(valid_ids)
-                has_specific_children = has_specific_children or bool(valid_ids)
-            if not has_specific_children:
-                accepted.add("*")
-        return accepted
-
     async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
-        rows = (
-            (
-                await self._session.execute(
-                    select(Issue).where(Issue.org_id == parent.org_id)
-                )
-            )
-            .scalars()
-            .all()
+        unsettled = await IssueHierarchyPolicy(self._session).unsettled_descendants(
+            parent
         )
-        children_by_parent: dict[str, list[Issue]] = {}
-        for row in rows:
-            if row.parent_id is not None:
-                children_by_parent.setdefault(row.parent_id, []).append(row)
-
-        accepted_child_ids = await self._accepted_incomplete_child_ids(parent)
-        stack = list(children_by_parent.get(parent.id, []))
-        while stack:
-            child = stack.pop()
-            stack.extend(children_by_parent.get(child.id, []))
-            if child.status == "done":
-                continue
+        for child in unsettled:
             if child.status in {"blocked", "cancelled"}:
-                if "*" in accepted_child_ids or child.id in accepted_child_ids:
-                    continue
                 raise ValueError(
                     "Cannot mark issue done while child issues are blocked or cancelled. "
                     f"Retry, replace, or explicitly resolve child issue {child.identifier or child.id} first."
@@ -797,6 +759,12 @@ class IssueService:
         parent = await get_issue_by_id(self._session, parent_id)
         if parent is None or parent.org_id != org_id:
             raise ValueError("Parent issue not found")
+        parent = await IssueHierarchyPolicy(self._session).lock_root(
+            parent.id, parent.org_id
+        )
+        if parent is None:
+            raise ValueError("Parent issue not found")
+        await IssueHierarchyPolicy(self._session).assert_can_accept_descendant(parent)
         if issue_id is not None:
             await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
         values["request_depth"] = parent.request_depth + 1

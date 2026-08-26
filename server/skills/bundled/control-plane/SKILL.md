@@ -228,6 +228,12 @@ If the issue has a reviewer, this command means "ready for review" and moves
 the issue to `in_review`; it does not bypass the reviewer or directly complete
 the issue.
 
+When completion declares `--work-product` or `--primary-work-product`, the
+command may return the issue as `in_progress` while Run finalization verifies
+that the declared files really exist. A successful command is the durable
+close-out request: do not retry it just because validation is still pending.
+Missing declared files fail the Run and leave the issue blocked.
+
 - blocker:
 
 ```bash

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+import os
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
@@ -79,6 +81,9 @@ async def test_parent_output_request_is_validated_before_issue_completion() -> N
                 },
             )
             session.add_all([child, run])
+            await session.flush()
+            parent.execution_run_id = run.id
+            parent.checkout_run_id = run.id
             await session.flush()
 
             with pytest.raises(ValueError, match="cannot bypass"):
@@ -188,6 +193,293 @@ async def test_parent_output_request_is_validated_before_issue_completion() -> N
             assert len(finalization_activities) == 1
             assert reviewer_wakeup.status == "queued"
     finally:
+        await engine.dispose()
+
+
+async def test_stale_parent_closeout_cannot_overwrite_cancelled_issue() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(name="Stale closeout", url_key="stale-closeout")
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            origin_run_id = str(uuid.uuid4())
+            policy = {
+                "version": 1,
+                "mode": "parent_output_required",
+                "requirements": {
+                    "minimumOutputs": 1,
+                    "primaryOutputRequired": True,
+                },
+            }
+            parent = Issue(
+                org_id=org.id,
+                title="Cancelled parent",
+                status="cancelled",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="continuation",
+                trigger_detail="system",
+                status="succeeded",
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                    "delegationOriginRunId": origin_run_id,
+                    "closeoutPolicy": policy,
+                },
+            )
+            session.add(run)
+            await session.flush()
+            session.add_all(
+                [
+                    Issue(
+                        org_id=org.id,
+                        parent_id=parent.id,
+                        title="Done child",
+                        status="done",
+                        origin_kind="delegation",
+                        origin_run_id=origin_run_id,
+                        closeout_policy=policy,
+                    ),
+                    IssueWorkProduct(
+                        org_id=org.id,
+                        issue_id=parent.id,
+                        type="document",
+                        provider="octopus",
+                        title="reports/final.md",
+                        status="active",
+                        is_primary=True,
+                        created_by_run_id=run.id,
+                    ),
+                    ActivityLog(
+                        org_id=org.id,
+                        actor_type="agent",
+                        actor_id=agent.id,
+                        action="issue.closeout_requested",
+                        entity_type="issue",
+                        entity_id=parent.id,
+                        agent_id=agent.id,
+                        run_id=run.id,
+                        details={
+                            "version": 1,
+                            "runId": run.id,
+                            "delegationOriginRunId": origin_run_id,
+                            "declaredWorkProducts": [
+                                {
+                                    "path": "reports/final.md",
+                                    "isPrimary": True,
+                                }
+                            ],
+                        },
+                    ),
+                ]
+            )
+            await session.flush()
+
+            result = await ParentCloseoutGovernance(
+                session
+            ).finalize_parent_output_request(run, parent)
+            await session.refresh(parent)
+
+            assert result.applicable is True
+            assert result.completed is False
+            assert "superseded" in (result.error or "")
+            assert parent.status == "cancelled"
+            skipped = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.run_id == run.id,
+                        ActivityLog.action == "issue.closeout_effect_skipped",
+                    )
+                )
+            ).scalar_one()
+            assert skipped.details["reason"] == "stale_issue_execution"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("OCTOPUS_TEST_POSTGRES_URL"),
+    reason="requires OCTOPUS_TEST_POSTGRES_URL",
+)
+async def test_postgres_parent_closeout_and_nested_child_insert_share_lock() -> None:
+    database_url = os.environ["OCTOPUS_TEST_POSTGRES_URL"]
+    engine = create_database_engine(database_url)
+    factory: async_sessionmaker = create_session_factory(engine)
+    schema_name = f"octopus_parent_closeout_lock_{uuid.uuid4().hex}"
+    quoted_schema = f'"{schema_name}"'
+    child_session = None
+    closeout_session = None
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"CREATE SCHEMA {quoted_schema}"))
+            await connection.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+            await connection.run_sync(Base.metadata.create_all)
+
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+                org = Organization(
+                    name="Parent closeout lock",
+                    url_key=f"parent-closeout-lock-{uuid.uuid4().hex}",
+                    issue_prefix="PCL",
+                )
+                session.add(org)
+                await session.flush()
+                agent = Agent(org_id=org.id, name="Parent Agent")
+                session.add(agent)
+                await session.flush()
+                origin_run_id = str(uuid.uuid4())
+                policy = {
+                    "version": 1,
+                    "mode": "parent_output_required",
+                    "requirements": {
+                        "minimumOutputs": 1,
+                        "primaryOutputRequired": True,
+                    },
+                }
+                parent = Issue(
+                    org_id=org.id,
+                    title="Parent",
+                    status="in_progress",
+                    assignee_agent_id=agent.id,
+                )
+                session.add(parent)
+                await session.flush()
+                run = HeartbeatRun(
+                    org_id=org.id,
+                    agent_id=agent.id,
+                    invocation_source="continuation",
+                    trigger_detail="system",
+                    status="succeeded",
+                    context_snapshot={
+                        "issueId": parent.id,
+                        "wakeReason": "issue_children_settled",
+                        "delegationOriginRunId": origin_run_id,
+                        "closeoutPolicy": policy,
+                    },
+                )
+                session.add(run)
+                await session.flush()
+                parent.execution_run_id = run.id
+                parent.checkout_run_id = run.id
+                delegated_child = Issue(
+                    org_id=org.id,
+                    parent_id=parent.id,
+                    title="Settled delegated child",
+                    status="done",
+                    origin_kind="delegation",
+                    origin_run_id=origin_run_id,
+                    closeout_policy=policy,
+                )
+                session.add_all(
+                    [
+                        delegated_child,
+                        IssueWorkProduct(
+                            org_id=org.id,
+                            issue_id=parent.id,
+                            type="document",
+                            provider="octopus",
+                            title="reports/final.md",
+                            status="active",
+                            is_primary=True,
+                            created_by_run_id=run.id,
+                        ),
+                        ActivityLog(
+                            org_id=org.id,
+                            actor_type="agent",
+                            actor_id=agent.id,
+                            action="issue.closeout_requested",
+                            entity_type="issue",
+                            entity_id=parent.id,
+                            agent_id=agent.id,
+                            run_id=run.id,
+                            details={
+                                "version": 1,
+                                "runId": run.id,
+                                "delegationOriginRunId": origin_run_id,
+                                "declaredWorkProducts": [
+                                    {
+                                        "path": "reports/final.md",
+                                        "isPrimary": True,
+                                    }
+                                ],
+                            },
+                        ),
+                    ]
+                )
+                await session.flush()
+                org_id = org.id
+                parent_id = parent.id
+                run_id = run.id
+                delegated_child_id = delegated_child.id
+
+        child_session = factory()
+        closeout_session = factory()
+        await child_session.begin()
+        await closeout_session.begin()
+        await child_session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+        await closeout_session.execute(
+            text(f"SET LOCAL search_path TO {quoted_schema}")
+        )
+        reopened = await IssueService(child_session).update_issue(
+            delegated_child_id,
+            {"reopen": True},
+            actor_type="user",
+            actor_id="operator",
+        )
+        assert reopened is not None
+        assert reopened["status"] == "todo"
+        await IssueService(child_session).create_issue(
+            org_id,
+            {"title": "Concurrent grandchild", "parentId": delegated_child_id},
+            actor_type="user",
+            actor_id="operator",
+        )
+
+        run = await closeout_session.get(HeartbeatRun, run_id)
+        parent = await closeout_session.get(Issue, parent_id)
+        assert run is not None and parent is not None
+        closeout_task = asyncio.create_task(
+            ParentCloseoutGovernance(closeout_session).finalize_parent_output_request(
+                run, parent
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not closeout_task.done()
+        await child_session.commit()
+
+        result = await asyncio.wait_for(closeout_task, timeout=5)
+        assert result.completed is False
+        assert "remain unsettled" in (result.error or "")
+        await closeout_session.commit()
+
+        async with factory() as session:
+            async with session.begin():
+                await session.execute(text(f"SET LOCAL search_path TO {quoted_schema}"))
+                persisted = await session.get(Issue, parent_id)
+                assert persisted is not None
+                assert persisted.status == "in_progress"
+    finally:
+        if child_session is not None:
+            await child_session.close()
+        if closeout_session is not None:
+            await closeout_session.close()
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(f"DROP SCHEMA IF EXISTS {quoted_schema} CASCADE")
+            )
         await engine.dispose()
 
 
