@@ -166,10 +166,92 @@ def test_runtime_prompt_reconciles_existing_children_on_rerun() -> None:
     assert "children_blocked" in prompt
     assert "东海介绍" in prompt
     assert "西海介绍" in prompt
-    assert "Reuse the persisted child split" in prompt
-    assert "A normal rerun is reconciliation, not replanning" in prompt
+    assert "Reuse the persisted child split during an automatic rerun" in prompt
+    assert "A normal automatic rerun is reconciliation, not replanning" in prompt
     assert "childKey" not in prompt
     assert "--child-key" not in prompt
+
+
+def test_new_user_comment_can_request_a_new_child_set() -> None:
+    prompt = runtime_prompt_from_config(
+        {
+            "promptTemplate": "# Base\n\nYou are an agent.",
+            "_octopus": {
+                "context": {
+                    "wakeSource": "assignment",
+                    "wakeReason": "issue_comment_added",
+                    "commentId": "comment-new-delegation",
+                    "commentBody": (
+                        "@ceo-1 创建四个子任务，分别介绍一下四大名著的作者，"
+                        "每个子任务都要有自己的报告"
+                    ),
+                    "parentExecutionStage": "children_settled",
+                    "childOutputs": {
+                        "totalChildCount": 4,
+                        "children": [
+                            {
+                                "id": "old-child-1",
+                                "identifier": "OCT-101",
+                                "title": "旧子任务",
+                                "status": "done",
+                                "workProducts": [{"id": "old-product"}],
+                            }
+                        ],
+                    },
+                    "issue": {
+                        "id": "issue-parent",
+                        "identifier": "OCT-100",
+                        "title": "介绍中国四大名著",
+                        "description": "汇总四大名著资料。",
+                        "status": "in_progress",
+                        "priority": "medium",
+                    },
+                }
+            },
+        }
+    )
+
+    assert "## Parent Rerun Reconcile" in prompt
+    assert "## Subtask Coordination" in prompt
+    assert "## Current User Instruction" in prompt
+    assert (
+        "@ceo-1 创建四个子任务，分别介绍一下四大名著的作者，每个子任务都要有自己的报告"
+    ) in prompt
+    assert "current comment is a new operator instruction" in prompt
+    assert "must create a new atomic child set" in prompt
+    assert "even when historical child issues already cover similar work" in prompt
+    assert "Preserve historical child issues instead of deleting them" in prompt
+    assert "Reuse the persisted child split during an automatic rerun" not in prompt
+
+
+def test_mentioned_comment_receives_the_current_user_instruction() -> None:
+    prompt = runtime_prompt_from_config(
+        {
+            "promptTemplate": "# Base\n\nYou are an agent.",
+            "_octopus": {
+                "context": {
+                    "wakeSource": "mention",
+                    "wakeReason": "issue_comment_mentioned",
+                    "commentId": "comment-mentioned",
+                    "commentBody": "@ceo-1 请创建两个子任务并分别生成报告",
+                    "issue": {
+                        "id": "issue-parent",
+                        "identifier": "OCT-100",
+                        "title": "资料整理",
+                        "description": "整理现有资料。",
+                        "status": "in_progress",
+                        "priority": "medium",
+                    },
+                }
+            },
+        }
+    )
+
+    assert "You have been assigned to work on an issue" in prompt
+    assert "## Current User Instruction" in prompt
+    assert "@ceo-1 请创建两个子任务并分别生成报告" in prompt
+    assert "## Subtask Coordination" in prompt
+    assert "must create a new atomic child set" in prompt
 
 
 def test_runtime_prompt_converges_child_primary_products_after_children_settle() -> (
