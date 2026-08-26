@@ -21,6 +21,7 @@ from packages.database.schema import (
 from packages.shared.validators.issue import validate_create_child_issues
 from server.services.heartbeat import HeartbeatService
 from server.services.issues import IssueService
+from server.services.parent_closeout_governance import ParentCloseoutGovernance
 
 
 async def test_parent_output_request_is_validated_before_issue_completion() -> None:
@@ -187,6 +188,152 @@ def test_parent_output_policy_requires_a_real_primary_output() -> None:
                 "children": [{"title": "Child"}],
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("wake_reason", "child_status"),
+    [
+        ("issue_assigned", "todo"),
+        ("issue_comment_mentioned", "done"),
+    ],
+)
+async def test_parent_progress_run_does_not_require_closeout(
+    wake_reason: str, child_status: str
+) -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(name="Progress", url_key="progress", issue_prefix="PRO")
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            origin_run_id = str(uuid.uuid4())
+            policy = {
+                "version": 1,
+                "mode": "parent_output_required",
+                "requirements": {
+                    "minimumOutputs": 1,
+                    "primaryOutputRequired": True,
+                },
+            }
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Research",
+                status=child_status,
+                origin_kind="delegation",
+                origin_run_id=origin_run_id,
+                closeout_policy=policy,
+                completed_at=(datetime.now(UTC) if child_status == "done" else None),
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="assignment",
+                trigger_detail="system",
+                status="running",
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": wake_reason,
+                    "delegationOriginRunId": origin_run_id,
+                    "closeoutPolicy": policy,
+                },
+            )
+            session.add_all([child, run])
+            await session.flush()
+
+            result = await ParentCloseoutGovernance(
+                session
+            ).finalize_parent_output_request(run, parent, apply=False)
+
+            assert result.applicable is False
+            assert result.completed is False
+            assert result.error is None
+    finally:
+        await engine.dispose()
+
+
+async def test_settlement_continuation_requires_parent_closeout_request() -> None:
+    engine = create_database_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory: async_sessionmaker = create_session_factory(engine)
+    try:
+        async with factory() as session:
+            org = Organization(
+                name="Settlement", url_key="settlement", issue_prefix="SET"
+            )
+            session.add(org)
+            await session.flush()
+            agent = Agent(org_id=org.id, name="Parent Agent")
+            session.add(agent)
+            await session.flush()
+            parent = Issue(
+                org_id=org.id,
+                title="Parent",
+                status="in_progress",
+                assignee_agent_id=agent.id,
+            )
+            session.add(parent)
+            await session.flush()
+            origin_run_id = str(uuid.uuid4())
+            policy = {
+                "version": 1,
+                "mode": "parent_output_required",
+                "requirements": {
+                    "minimumOutputs": 1,
+                    "primaryOutputRequired": True,
+                },
+            }
+            child = Issue(
+                org_id=org.id,
+                parent_id=parent.id,
+                title="Research",
+                status="done",
+                origin_kind="delegation",
+                origin_run_id=origin_run_id,
+                closeout_policy=policy,
+                completed_at=datetime.now(UTC),
+            )
+            run = HeartbeatRun(
+                org_id=org.id,
+                agent_id=agent.id,
+                invocation_source="continuation",
+                trigger_detail="system",
+                status="running",
+                context_snapshot={
+                    "issueId": parent.id,
+                    "wakeReason": "issue_children_settled",
+                    "delegationOriginRunId": origin_run_id,
+                    "closeoutPolicy": policy,
+                },
+            )
+            session.add_all([child, run])
+            await session.flush()
+
+            result = await ParentCloseoutGovernance(
+                session
+            ).finalize_parent_output_request(run, parent, apply=False)
+
+            assert result.applicable is True
+            assert result.completed is False
+            assert result.error is not None
+            assert "Parent closeout request is missing" in result.error
+    finally:
+        await engine.dispose()
 
 
 async def test_recovery_preserves_terminal_run_when_parent_request_is_missing() -> None:

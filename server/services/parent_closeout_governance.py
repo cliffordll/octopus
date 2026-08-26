@@ -158,6 +158,16 @@ class ParentCloseoutGovernance:
         policy = batch.closeout_policy
         if policy["mode"] != "parent_output_required":
             return ParentCloseoutResult(applicable=False, completed=False)
+        request = await self._closeout_request(run, parent)
+        is_settlement_continuation = (
+            context.get("wakeReason") == "issue_children_settled"
+        )
+        if request is None and not is_settlement_continuation:
+            # Delegation and progress Runs are not parent closeout attempts. The
+            # parent-output policy becomes mandatory only when the parent Agent
+            # is resumed after its children settle, or when this Run explicitly
+            # requested completion through `octopus issue done`.
+            return ParentCloseoutResult(applicable=False, completed=False)
         children = list(batch.children)
         open_children = [
             child
@@ -183,7 +193,6 @@ class ParentCloseoutGovernance:
                     f"issues are blocked or cancelled: {self._child_labels(blocked_children)}."
                 ),
             )
-        request = await self._closeout_request(run, parent)
         if request is None:
             return ParentCloseoutResult(
                 applicable=True,
