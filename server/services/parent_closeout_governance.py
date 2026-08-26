@@ -11,6 +11,7 @@ from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.heartbeat import update_run
 from packages.database.queries.issues import update_issue
 from packages.database.schema import ActivityLog, HeartbeatRun, Issue, IssueWorkProduct
+from packages.shared.types.issue import DelegationCloseoutPolicy
 
 from .delegation_closeout import (
     DelegationBatch,
@@ -97,6 +98,11 @@ class ParentCloseoutGovernance:
             raise ValueError(
                 "Cannot request parent closeout while delegated child issues are open"
             )
+        declaration_error = self._required_declaration_error(
+            batch.closeout_policy, declarations
+        )
+        if declaration_error is not None:
+            raise ValueError(declaration_error)
         existing = await self._session.execute(
             select(ActivityLog.details)
             .where(
@@ -204,31 +210,16 @@ class ParentCloseoutGovernance:
             )
         declared = request.get("declaredWorkProducts")
         declared_items = declared if isinstance(declared, list) else []
-        declared_paths = {
-            normalized
-            for item in declared_items
-            if isinstance(item, dict)
-            for normalized in (self._normalize_product_path(item.get("path")),)
-            if normalized
-        }
-        primary_paths = {
-            normalized
-            for item in declared_items
-            if isinstance(item, dict) and item.get("isPrimary") is True
-            for normalized in (self._normalize_product_path(item.get("path")),)
-            if normalized
-        }
+        declared_paths, primary_paths = self._declaration_paths(declared_items)
         requirements = policy.get("requirements", {})
         minimum_outputs = requirements.get("minimumOutputs", 1)
         primary_required = requirements.get("primaryOutputRequired", True)
-        if primary_required and not primary_paths:
+        declaration_error = self._required_declaration_error(policy, declared_items)
+        if declaration_error is not None:
             return ParentCloseoutResult(
                 applicable=True,
                 completed=False,
-                error=(
-                    "Parent closeout request did not declare a primary output. "
-                    "Use `--primary-work-product <path>`."
-                ),
+                error=declaration_error,
             )
         paths_to_validate = primary_paths if primary_required else declared_paths
         matched_paths = await self._matching_parent_product_paths(
@@ -590,3 +581,33 @@ class ParentCloseoutGovernance:
         if not isinstance(value, str) or not value.strip():
             return None
         return value.replace("\\", "/").strip().casefold()
+
+    def _declaration_paths(self, declarations: list[Any]) -> tuple[set[str], set[str]]:
+        declared_paths = {
+            normalized
+            for item in declarations
+            if isinstance(item, dict)
+            for normalized in (self._normalize_product_path(item.get("path")),)
+            if normalized
+        }
+        primary_paths = {
+            normalized
+            for item in declarations
+            if isinstance(item, dict) and item.get("isPrimary") is True
+            for normalized in (self._normalize_product_path(item.get("path")),)
+            if normalized
+        }
+        return declared_paths, primary_paths
+
+    def _required_declaration_error(
+        self, policy: DelegationCloseoutPolicy, declarations: list[Any]
+    ) -> str | None:
+        requirements = policy.get("requirements", {})
+        if requirements.get("primaryOutputRequired", True):
+            _, primary_paths = self._declaration_paths(declarations)
+            if not primary_paths:
+                return (
+                    "Parent closeout requires a primary output declaration. Retry "
+                    "`octopus issue done` with `--primary-work-product <path>`."
+                )
+        return None
