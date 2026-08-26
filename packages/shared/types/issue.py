@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, NotRequired, TypedDict
 
 from ..constants.issue import (
-    DelegationCloseoutMode,
+    DelegationCloseoutPolicyMode,
     IssueOriginKind,
     IssuePriority,
     IssueStatus,
@@ -74,7 +74,7 @@ class IssueDetail(IssueListItem):
     originKind: IssueOriginKind
     originId: str | None
     originRunId: str | None
-    closeoutMode: DelegationCloseoutMode | None
+    closeoutPolicy: "DelegationCloseoutPolicy | None"
     issueNumber: int | None
     requestDepth: int
     startedAt: str | None
@@ -119,8 +119,19 @@ class CreateIssuePayload(TypedDict):
     requestDepth: NotRequired[int]
 
 
+class DelegationCloseoutRequirements(TypedDict, total=False):
+    minimumOutputs: int
+    primaryOutputRequired: bool
+
+
+class DelegationCloseoutPolicy(TypedDict):
+    version: Literal[1]
+    mode: DelegationCloseoutPolicyMode
+    requirements: NotRequired[DelegationCloseoutRequirements]
+
+
 class CreateChildIssuesPayload(TypedDict):
-    closeoutMode: NotRequired[DelegationCloseoutMode]
+    closeoutPolicy: NotRequired[DelegationCloseoutPolicy]
     children: list[CreateIssuePayload]
 
 

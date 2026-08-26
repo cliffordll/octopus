@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from packages.database.queries.heartbeat import transition_run_to_terminal
 from packages.database.schema import Agent as AgentRow
 from packages.database.schema import HeartbeatRun as HeartbeatRunRow
+from packages.database.schema import Issue as IssueRow
 from packages.shared.constants.heartbeat import HeartbeatRunStatus
 from packages.shared.types.heartbeat import HeartbeatRun
+
+if TYPE_CHECKING:
+    from .parent_closeout_governance import ParentCloseoutResult
 
 
 class RunLifecycleHost(Protocol):
@@ -37,6 +41,10 @@ class RunLifecycleHost(Protocol):
     async def _restore_system_blocked_issue_after_recovery(
         self, final: HeartbeatRunRow
     ) -> bool: ...
+
+    async def _queue_issue_review_wakeup_after_success(
+        self, final: HeartbeatRunRow, issue: IssueRow
+    ) -> None: ...
 
     async def _recover_orphaned_runs_impl(
         self,
@@ -106,6 +114,31 @@ class RunFinalizationService:
         self, run: HeartbeatRunRow
     ) -> bool:
         return await self._host._restore_system_blocked_issue_after_recovery(run)
+
+    async def finalize_parent_closeout(
+        self, run: HeartbeatRunRow, issue: IssueRow
+    ) -> "ParentCloseoutResult":
+        from .parent_closeout_governance import ParentCloseoutGovernance
+
+        result = await ParentCloseoutGovernance(
+            self._host._session
+        ).finalize_parent_output_request(run, issue)
+        if result.completed:
+            await self._host._session.refresh(issue)
+            if issue.status == "in_review":
+                await self._host._queue_issue_review_wakeup_after_success(run, issue)
+        return result
+
+    async def validate_parent_closeout(
+        self, run: HeartbeatRunRow, issue: IssueRow
+    ) -> "ParentCloseoutResult":
+        """Validate policy evidence before the Run terminal CAS."""
+
+        from .parent_closeout_governance import ParentCloseoutGovernance
+
+        return await ParentCloseoutGovernance(
+            self._host._session
+        ).finalize_parent_output_request(run, issue, apply=False)
 
 
 class RunRecoveryService:

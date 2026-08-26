@@ -6,7 +6,7 @@
 
 ## 1. 为什么暂缓
 
-Automation 是独立产品领域，不是当前任务执行链的必要前置条件。普通 Issue 分配、子任务批量创建、父任务 continuation、Heartbeat preflight、RunExecution、RunFinalizer 和 RunRecovery 均不依赖正式 Automation。
+Automation 是独立产品领域，不是当前任务执行链的必要前置条件。普通 Issue 分配、子任务批量创建、父任务 continuation、Heartbeat preflight、`RunExecutionService`、`RunFinalizationService` 和 `RunRecoveryService` 均不依赖正式 Automation。
 
 当前优先级是继续加固已有执行链，尤其是 Workspace 并发准备、Run 启动前异常收口以及 SQLite 开发环境下的写锁竞争。等产品明确需要定时报表、API 触发或 Webhook 自动执行时，再启动本 TODO。
 
@@ -14,7 +14,7 @@ Automation 是独立产品领域，不是当前任务执行链的必要前置条
 
 ## 2. 目标
 
-Automation 用于保存一项可重复触发的固定工作，并在定时、手动、API 或 Webhook 触发后，创建可审计的 Automation Run，再通过统一 Dispatcher 调用 Agent。
+Automation 用于保存一项可重复触发的固定工作，并在定时、手动、API 或 Webhook 触发后，创建可审计的 Automation Run，再通过统一 `RunDispatchService` 调用 Agent。
 
 ```text
 Automation definition
@@ -30,7 +30,7 @@ Issue output 或 Chat output
 Agent Run
 ```
 
-Heartbeat 回答“Agent 当前是否有遗漏工作”；Automation 回答“预定义工作是否应在此刻执行”。两者可以共用 wakeup、Dispatcher、RunExecution、RunFinalizer 和 RunRecovery，但必须拥有独立配置、状态和运行证据。
+Heartbeat 回答“Agent 当前是否有遗漏工作”；Automation 回答“预定义工作是否应在此刻执行”。两者可以共用 wakeup、`RunDispatchService`、`RunExecutionService`、`RunFinalizationService` 和 `RunRecoveryService`，但必须拥有独立配置、状态和运行证据。
 
 ## 3. 前置条件
 
@@ -183,6 +183,6 @@ server/services/automations/
 
 1. 产品出现明确的定时、API 或 Webhook 自动执行场景；
 2. 用户确认 Automation 的首个交付范围；
-3. RunExecution、RunFinalizer 和 RunRecovery 的现有稳定性问题完成验收；
+3. `RunExecutionService`、`RunFinalizationService` 和 `RunRecoveryService` 的现有稳定性问题完成验收；
 4. 为 Automation 建立独立 Step、实施计划和验收批次；
 5. 不与 Heartbeat 或 Run Recovery 修复混在同一个开发提交中。

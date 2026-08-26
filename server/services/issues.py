@@ -33,8 +33,6 @@ from packages.database.schema import (
     IssueComment,
 )
 from packages.shared.constants.issue import (
-    DEFAULT_DELEGATION_CLOSEOUT_MODE,
-    DelegationCloseoutMode,
     IssueOriginKind,
     IssuePriority,
     IssueStatus,
@@ -48,6 +46,7 @@ from packages.shared.types.issue import (
     CreateChildIssuesPayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
+    DelegationCloseoutPolicy,
     IssueDetail,
     IssueListItem,
     UpdateIssuePayload,
@@ -56,9 +55,15 @@ from packages.shared.types.issue_attachment import (
     IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
-from .delegation_closeout import DELEGATION_ORIGIN_KIND, DelegationBatchStore
+from .delegation_closeout import (
+    DEFAULT_DELEGATION_CLOSEOUT_POLICY,
+    DELEGATION_ORIGIN_KIND,
+    DelegationBatchStore,
+    normalize_closeout_policy,
+)
 from .documents import DocumentService
 from .goals import GoalService
+from .parent_closeout_governance import ParentCloseoutGovernance
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
 _REOPENABLE_STATUSES = {"done", "cancelled"}
@@ -244,7 +249,7 @@ class IssueService:
                 {
                     "parentId": child.parent_id,
                     "originRunId": child.origin_run_id,
-                    "closeoutMode": child.closeout_mode,
+                    "closeoutPolicy": normalize_closeout_policy(child.closeout_policy),
                     "assigneeUserId": child.assignee_user_id,
                     "reviewerAgentId": child.reviewer_agent_id,
                     "reviewerUserId": child.reviewer_user_id,
@@ -272,6 +277,14 @@ class IssueService:
         blocked_count = sum(
             1 for child in children if child.status in {"blocked", "cancelled"}
         )
+        latest_policy_child = next(
+            (
+                child
+                for child in reversed(children)
+                if child.closeout_policy is not None
+            ),
+            None,
+        )
         return {
             "parent": dict(_to_list_item(parent)),
             "children": child_items,
@@ -284,7 +297,11 @@ class IssueService:
             ),
             "includeWorkProducts": include_work_products,
             "delegationOriginRunId": delegation_origin_run_id,
-            "closeoutMode": (children[0].closeout_mode if children else None),
+            "closeoutPolicy": (
+                normalize_closeout_policy(latest_policy_child.closeout_policy)
+                if latest_policy_child is not None
+                else None
+            ),
         }
 
     async def create_child_issues(
@@ -336,6 +353,17 @@ class IssueService:
 
         if parent.status in {"done", "cancelled"}:
             raise ValueError("Closed parent issue cannot create child issues")
+        if parent.status in {"backlog", "todo"}:
+            updated_parent = await update_issue(
+                self._session,
+                parent.id,
+                {
+                    "status": "in_progress",
+                    "started_at": parent.started_at or datetime.now(UTC),
+                },
+            )
+            if updated_parent is not None:
+                parent = updated_parent
 
         agent_ids: set[str] = set()
         for child in payload["children"]:
@@ -364,7 +392,9 @@ class IssueService:
             )
 
         children: list[IssueDetail] = []
-        closeout_mode = payload.get("closeoutMode", DEFAULT_DELEGATION_CLOSEOUT_MODE)
+        closeout_policy = payload.get(
+            "closeoutPolicy", DEFAULT_DELEGATION_CLOSEOUT_POLICY
+        )
         for child in payload["children"]:
             child_payload: CreateIssuePayload = {
                 **child,
@@ -379,7 +409,7 @@ class IssueService:
                     actor_id=actor_id,
                     run_id=run_id,
                     origin_run_id=run_id,
-                    closeout_mode=closeout_mode,
+                    closeout_policy=closeout_policy,
                     origin_kind=DELEGATION_ORIGIN_KIND,
                 )
             )
@@ -398,7 +428,7 @@ class IssueService:
                 "childCount": len(children),
                 "mode": "atomic_batch",
                 "originRunId": run_id,
-                "closeoutMode": closeout_mode,
+                "closeoutPolicy": closeout_policy,
             },
         )
         return await self._to_detail(parent), children, True
@@ -476,7 +506,7 @@ class IssueService:
         actor_id: str,
         run_id: str | None = None,
         origin_run_id: str | None = None,
-        closeout_mode: DelegationCloseoutMode | None = None,
+        closeout_policy: DelegationCloseoutPolicy | None = None,
         origin_kind: IssueOriginKind | None = None,
     ) -> IssueDetail:
         values = {
@@ -487,8 +517,8 @@ class IssueService:
         values["org_id"] = org_id
         if origin_run_id is not None:
             values["origin_run_id"] = origin_run_id
-        if closeout_mode is not None:
-            values["closeout_mode"] = closeout_mode
+        if closeout_policy is not None:
+            values["closeout_policy"] = dict(closeout_policy)
         if origin_kind is not None:
             values["origin_kind"] = origin_kind
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
@@ -559,6 +589,26 @@ class IssueService:
         current = await get_issue_by_id(self._session, issue_id)
         if current is None:
             return None
+
+        done_requested = payload.get("status") == "done" or (
+            payload.get("status") == "in_review"
+            and payload.get("requestedStatus") == "done"
+        )
+        if done_requested and await ParentCloseoutGovernance(
+            self._session
+        ).record_closeout_request_if_required(
+            current,
+            run_id=run_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            comment=payload.get("comment"),
+            declarations=[
+                dict(item) for item in payload.get("workProductDeclarations", [])
+            ],
+        ):
+            refreshed = await get_issue_by_id(self._session, current.id)
+            assert refreshed is not None
+            return await self._to_detail(refreshed)
 
         values = {
             ISSUE_UPDATE_TO_COLUMN[key]: value
@@ -676,16 +726,22 @@ class IssueService:
         for details in rows:
             if not isinstance(details, dict):
                 continue
+            has_specific_children = False
             child_issue_id = details.get("childIssueId")
             if isinstance(child_issue_id, str) and child_issue_id:
                 accepted.add(child_issue_id)
+                has_specific_children = True
             child_issue_ids = details.get("childIssueIds")
             if isinstance(child_issue_ids, list):
-                accepted.update(
+                valid_ids = {
                     child_id
                     for child_id in child_issue_ids
                     if isinstance(child_id, str) and child_id
-                )
+                }
+                accepted.update(valid_ids)
+                has_specific_children = has_specific_children or bool(valid_ids)
+            if not has_specific_children:
+                accepted.add("*")
         return accepted
 
     async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
@@ -711,7 +767,7 @@ class IssueService:
             if child.status == "done":
                 continue
             if child.status in {"blocked", "cancelled"}:
-                if child.id in accepted_child_ids:
+                if "*" in accepted_child_ids or child.id in accepted_child_ids:
                     continue
                 raise ValueError(
                     "Cannot mark issue done while child issues are blocked or cancelled. "
@@ -948,7 +1004,7 @@ class IssueService:
             include_work_products=True,
             delegation_origin_run_id=delegation_origin_run_id,
         )
-        closeout_mode = child_outputs.get("closeoutMode") if child_outputs else None
+        closeout_policy = child_outputs.get("closeoutPolicy") if child_outputs else None
         if delegation_origin_run_id is not None and child_outputs is not None:
             batch_child_ids = {
                 str(child.get("id")) for child in child_outputs.get("children", [])
@@ -960,7 +1016,7 @@ class IssueService:
             ]
         child_work_products_prompt = _build_child_work_products_prompt(
             child_primary_work_products,
-            closeout_mode=closeout_mode,
+            closeout_policy=closeout_policy,
         )
         blocked_child_issues = _blocked_child_issues(
             child_outputs.get("children", []) if child_outputs else []
@@ -998,7 +1054,7 @@ class IssueService:
             else "no_children",
             "blockedChildIssues": blocked_child_issues,
             "delegationOriginRunId": delegation_origin_run_id,
-            "closeoutMode": closeout_mode,
+            "closeoutPolicy": closeout_policy,
             "wakeComment": None,
         }
 
@@ -1077,11 +1133,39 @@ class IssueService:
         child_issue_ids: Sequence[str] | None = None,
         run_id: str | None = None,
     ) -> None:
-        details: dict[str, Any] = {"reason": reason}
-        if child_issue_ids:
-            details["childIssueIds"] = list(child_issue_ids)
-            if len(child_issue_ids) == 1:
-                details["childIssueId"] = child_issue_ids[0]
+        if not child_issue_ids:
+            raise ValueError("At least one child issue must be selected")
+        rows = (
+            (
+                await self._session.execute(
+                    select(Issue).where(
+                        Issue.id.in_(list(child_issue_ids)),
+                        Issue.org_id == issue["orgId"],
+                        Issue.parent_id == issue["id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        origins = {row.origin_run_id for row in rows}
+        if len(rows) != len(set(child_issue_ids)) or len(origins) != 1:
+            raise ValueError(
+                "Accepted child issues must belong to one delegation batch"
+            )
+        origin_run_id = next(iter(origins))
+        if origin_run_id is None and any(
+            row.origin_kind == DELEGATION_ORIGIN_KIND for row in rows
+        ):
+            raise ValueError("Accepted child issues are not a delegated batch")
+        details: dict[str, Any] = {
+            "reason": reason,
+            "childIssueIds": list(child_issue_ids),
+        }
+        if origin_run_id is not None:
+            details["delegationOriginRunId"] = origin_run_id
+        if len(child_issue_ids) == 1:
+            details["childIssueId"] = child_issue_ids[0]
         await insert_activity_log(
             self._session,
             org_id=issue["orgId"],
@@ -1304,7 +1388,7 @@ def _child_primary_work_products(
 def _build_child_work_products_prompt(
     child_primary_work_products: Sequence[Mapping[str, Any]],
     *,
-    closeout_mode: object = None,
+    closeout_policy: object = None,
 ) -> str:
     if not child_primary_work_products:
         return ""
@@ -1329,7 +1413,10 @@ def _build_child_work_products_prompt(
         if location:
             line += f" ({location})"
         lines.append(line)
-    if closeout_mode == "child_outputs":
+    policy_mode = (
+        closeout_policy.get("mode") if isinstance(closeout_policy, Mapping) else None
+    )
+    if policy_mode == "child_outputs_are_final":
         lines.extend(
             [
                 "",
@@ -1480,7 +1567,11 @@ def _to_detail(row: Issue) -> IssueDetail:
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
         originRunId=row.origin_run_id,
-        closeoutMode=cast(DelegationCloseoutMode | None, row.closeout_mode),
+        closeoutPolicy=(
+            normalize_closeout_policy(row.closeout_policy)
+            if row.closeout_policy is not None
+            else None
+        ),
         issueNumber=row.issue_number,
         requestDepth=row.request_depth,
         startedAt=row.started_at.isoformat() if row.started_at else None,

@@ -183,7 +183,7 @@ def test_issue_create_children_submits_one_atomic_batch() -> None:
     assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
     assert json.loads(requests[0].read()) == {
         "children": children,
-        "closeoutMode": "parent_summary",
+        "closeoutPolicy": {"version": 1, "mode": "child_outputs_are_final"},
     }
 
 
@@ -228,11 +228,11 @@ def test_issue_create_children_reads_atomic_batch_from_utf8_file(
     assert requests[0].url.path == "/api/issues/PARENT-1/children/batch"
     assert json.loads(requests[0].read()) == {
         "children": children,
-        "closeoutMode": "parent_summary",
+        "closeoutPolicy": {"version": 1, "mode": "child_outputs_are_final"},
     }
 
 
-def test_issue_create_children_accepts_child_outputs_closeout_mode() -> None:
+def test_issue_create_children_accepts_parent_output_policy() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -247,14 +247,20 @@ def test_issue_create_children_accepts_child_outputs_closeout_mode() -> None:
                 "PARENT-1",
                 "--children-json",
                 '[{"title":"Guide","assigneeAgentId":"agent-1"}]',
-                "--closeout-mode",
-                "child_outputs",
+                "--parent-output-required",
             ],
             client=ApiClient(transport=httpx.MockTransport(handler)),
         )
         == 0
     )
-    assert json.loads(requests[0].read())["closeoutMode"] == "child_outputs"
+    assert json.loads(requests[0].read())["closeoutPolicy"] == {
+        "version": 1,
+        "mode": "parent_output_required",
+        "requirements": {
+            "minimumOutputs": 1,
+            "primaryOutputRequired": True,
+        },
+    }
 
 
 def test_issue_create_accepts_body_alias_for_description() -> None:
@@ -642,6 +648,36 @@ def test_issue_closeout_commands_match_control_plane_skill_contract() -> None:
     assert requests[2].url.path == "/api/issues/issue-3/review-decision"
     assert requests[2].read() == (b'{"decision":"approve","note":"Review passed."}')
     assert output.getvalue().strip().startswith("{")
+
+
+def test_issue_done_reads_multiline_comment_from_utf8_file(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "issue-1", "status": "in_progress"})
+
+    comment_file = tmp_path / "closeout.md"
+    comment_file.write_text("## 完成\n\n- 已验证产物\n- 已运行测试\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "issue",
+                "done",
+                "issue-1",
+                "--comment-file",
+                str(comment_file),
+                "--primary-work-product",
+                "reports/final.md",
+            ],
+            client=ApiClient(transport=httpx.MockTransport(handler)),
+        )
+        == 0
+    )
+    assert json.loads(requests[0].read())["comment"] == (
+        "## 完成\n\n- 已验证产物\n- 已运行测试\n"
+    )
 
 
 def test_api_client_attaches_runtime_actor_headers(

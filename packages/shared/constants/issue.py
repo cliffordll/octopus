@@ -45,11 +45,12 @@ ISSUE_ORIGIN_KINDS: tuple[IssueOriginKind, ...] = (
 
 DEFAULT_ISSUE_ORIGIN_KIND: IssueOriginKind = "manual"
 
-DelegationCloseoutMode = Literal["parent_summary", "child_outputs"]
+DelegationCloseoutPolicyMode = Literal[
+    "child_outputs_are_final",
+    "parent_output_required",
+]
 
-DELEGATION_CLOSEOUT_MODES: tuple[DelegationCloseoutMode, ...] = (
-    "parent_summary",
-    "child_outputs",
+DELEGATION_CLOSEOUT_POLICY_MODES: tuple[DelegationCloseoutPolicyMode, ...] = (
+    "child_outputs_are_final",
+    "parent_output_required",
 )
-
-DEFAULT_DELEGATION_CLOSEOUT_MODE: DelegationCloseoutMode = "parent_summary"

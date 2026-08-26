@@ -17,7 +17,8 @@ from packages.database.clients import (
 from packages.database.migrations.runner import upgrade_to_head
 from packages.database.queries.organizations import list_organizations
 
-from .services.heartbeat import HeartbeatService, dispatch_all_queued_runs
+from .services.heartbeat import HeartbeatService
+from .services.run_dispatch import RunDispatchService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ async def _heartbeat_scheduler(
         async with session_factory() as session:
             async with async_transaction(session):
                 await HeartbeatService(session).recover_orphaned_runs()
-        await dispatch_all_queued_runs(session_factory)
+        await RunDispatchService(session_factory).dispatch_all()
     except Exception:
         logger.exception("heartbeat startup recovery failed")
     while True:
@@ -52,7 +53,7 @@ async def _heartbeat_scheduler(
                     await heartbeat.recover_orphaned_runs(require_process_loss=True)
                     for org in await list_organizations(session):
                         await heartbeat.tick_timers(org.id)
-            await dispatch_all_queued_runs(session_factory)
+            await RunDispatchService(session_factory).dispatch_all()
         except asyncio.CancelledError:
             raise
         except Exception:

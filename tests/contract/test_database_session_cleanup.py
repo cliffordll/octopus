@@ -11,6 +11,7 @@ import pytest
 
 from server import lifespan as lifespan_module
 from server.services import heartbeat as heartbeat_module
+from server.services.run_execution import RunExecutionService
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import (
@@ -238,7 +239,7 @@ async def test_run_execution_rolls_back_and_closes_when_service_fails(
     session = TrackingSession()
     monkeypatch.setattr(heartbeat_module, "HeartbeatService", FailingHeartbeatService)
 
-    execution = heartbeat_module.RunExecutionService(  # type: ignore[arg-type]
+    execution = RunExecutionService(  # type: ignore[arg-type]
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
@@ -284,7 +285,7 @@ async def test_run_execution_waits_for_commit_before_cancel_cleanup(
     monkeypatch.setattr(
         heartbeat_module, "HeartbeatService", SuccessfulHeartbeatService
     )
-    execution = heartbeat_module.RunExecutionService(  # type: ignore[arg-type]
+    execution = RunExecutionService(  # type: ignore[arg-type]
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
@@ -350,19 +351,21 @@ async def test_heartbeat_scheduler_recovers_orphaned_runs_on_each_tick(
         async def tick_timers(self, _org_id: str) -> list[object]:
             return []
 
-    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
-        nonlocal dispatch_calls
-        dispatch_calls += 1
-        if dispatch_calls >= 2:
-            tick_complete.set()
+    class FakeRunDispatchService:
+        def __init__(self, _session_factory: object) -> None:
+            return None
+
+        async def dispatch_all(self) -> None:
+            nonlocal dispatch_calls
+            dispatch_calls += 1
+            if dispatch_calls >= 2:
+                tick_complete.set()
 
     async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
         return [SimpleNamespace(id="org-1")]
 
     monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
-    monkeypatch.setattr(
-        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
-    )
+    monkeypatch.setattr(lifespan_module, "RunDispatchService", FakeRunDispatchService)
     monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
 
     def _make_session_factory() -> SchedulerTestSession:
@@ -406,16 +409,18 @@ async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
         async def tick_timers(self, _org_id: str) -> list[object]:
             return []
 
-    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
-        return None
+    class FakeRunDispatchService:
+        def __init__(self, _session_factory: object) -> None:
+            return None
+
+        async def dispatch_all(self) -> None:
+            return None
 
     async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
         return []
 
     monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
-    monkeypatch.setattr(
-        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
-    )
+    monkeypatch.setattr(lifespan_module, "RunDispatchService", FakeRunDispatchService)
     monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
 
     def _make_session_factory() -> SchedulerTestSession:

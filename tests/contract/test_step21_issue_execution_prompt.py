@@ -99,9 +99,9 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert "assigneeAgentId" in prompt
     assert "Do not create delegated siblings one at a time" in prompt
     assert "Do not create a child whose job is to summarize" in prompt
-    assert "--closeout-mode <parent_summary|child_outputs>" in prompt
-    assert "Choose `parent_summary`" in prompt
-    assert "Choose `child_outputs`" in prompt
+    assert "--parent-output-required" in prompt
+    assert "The default policy treats child deliverables as the final outputs" in prompt
+    assert "current wake comment or instruction is authoritative" in prompt
     assert 'octopus agent list --org-id "$OCTOPUS_ORG_ID"' in prompt
     assert (
         "Do not mark the parent issue done while child issues are still open" in prompt
@@ -182,6 +182,14 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
                 "context": {
                     "wakeSource": "assignment",
                     "wakeReason": "issue_children_settled",
+                    "closeoutPolicy": {
+                        "version": 1,
+                        "mode": "parent_output_required",
+                        "requirements": {
+                            "minimumOutputs": 1,
+                            "primaryOutputRequired": True,
+                        },
+                    },
                     "childPrimaryWorkProducts": [
                         {
                             "id": "wp-xishi",
@@ -215,7 +223,7 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
     assert "## Parent Deliverable Convergence" in prompt
     assert "issue_children_settled" in prompt
     assert "All child issues in this delegation batch are now terminal" in prompt
-    assert "Closeout mode: `parent_summary`" in prompt
+    assert "Closeout policy: the parent must produce its own output" in prompt
     assert "西施.md" in prompt
     assert "parent issue's final deliverable" in prompt
     assert "Blocked or Cancelled Child Issues" in prompt
@@ -229,7 +237,7 @@ def test_runtime_prompt_converges_child_primary_products_after_children_settle()
     assert 'octopus issue done "OCT-88"' in prompt
 
 
-def test_runtime_prompt_uses_child_outputs_without_parent_summary() -> None:
+def test_runtime_prompt_describes_child_outputs_are_final_policy() -> None:
     prompt = runtime_prompt_from_config(
         {
             "promptTemplate": "# Base\n\nYou are an agent.",
@@ -237,7 +245,10 @@ def test_runtime_prompt_uses_child_outputs_without_parent_summary() -> None:
                 "context": {
                     "wakeSource": "assignment",
                     "wakeReason": "issue_children_settled",
-                    "closeoutMode": "child_outputs",
+                    "closeoutPolicy": {
+                        "version": 1,
+                        "mode": "child_outputs_are_final",
+                    },
                     "childPrimaryWorkProducts": [{"id": "wp-guide"}],
                     "childWorkProductsPrompt": "- OCT-91: 庐山攻略.md",
                     "issue": {
@@ -253,7 +264,7 @@ def test_runtime_prompt_uses_child_outputs_without_parent_summary() -> None:
         }
     )
 
-    assert "Closeout mode: `child_outputs`" in prompt
+    assert "Closeout policy: child outputs are final" in prompt
     assert "child deliverables are the final outputs" in prompt
     assert "without creating a duplicate parent summary artifact" in prompt
     assert "Produce a parent-owned final report" not in prompt

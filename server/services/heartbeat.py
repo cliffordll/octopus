@@ -13,7 +13,6 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
-from packages.database.clients import async_transaction
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import (
     advance_agent_heartbeat_check,
@@ -91,8 +90,8 @@ from packages.shared.types.heartbeat import (
 )
 
 from packages.database.clients.cleanup import (
-    REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
-    run_shielded_cleanup as _run_shielded_cleanup,
+    close_session_shielded as _shielded_session_close,
+    rollback_session_shielded as _shielded_session_rollback,
 )
 
 from .agents import AgentConflictError, prepare_agent_runtime_config
@@ -105,7 +104,6 @@ from .logs import (
 )
 from .runtime_providers import inject_runtime_provider_config
 from .run_lifecycle import RunFinalizationService, RunRecoveryService
-from .run_execution import RunExecutionService
 from .parent_continuation import ParentContinuationCoordinator
 from .parent_closeout_governance import ParentCloseoutGovernance
 from .delegation_closeout import DelegationBatchStore
@@ -2664,15 +2662,36 @@ class HeartbeatService:
                         f"{_exception_message(wp_exc)}\n"
                     ),
                 )
+            closeout_error: str | None = None
+            if final_status == "succeeded":
+                issue_id = _issue_id_from_context(running.context_snapshot or {})
+                issue = (
+                    await get_issue_by_id(self._session, issue_id)
+                    if issue_id is not None
+                    else None
+                )
+                if issue is not None and issue.org_id == running.org_id:
+                    closeout = await self.finalizer.validate_parent_closeout(
+                        running, issue
+                    )
+                    if closeout.applicable and not closeout.completed:
+                        closeout_error = closeout.error or (
+                            "Parent closeout validation failed"
+                        )
+                        final_status = "failed"
             final = await self.finalizer.transition(
                 running.id,
                 final_status,
                 {
                     "finished_at": datetime.now(UTC),
-                    "error": silence_timeout_error or result.error_message,
+                    "error": (
+                        closeout_error or silence_timeout_error or result.error_message
+                    ),
                     "error_code": (
                         "timeout"
                         if final_status == "timed_out"
+                        else "closeout_missing"
+                        if closeout_error is not None
                         else "adapter_failed"
                         if final_status == "failed"
                         else None
@@ -2694,7 +2713,7 @@ class HeartbeatService:
                     if result.result_json or runtime_services or work_products
                     else None,
                     "stdout_excerpt": stdout or None,
-                    "stderr_excerpt": stderr or silence_timeout_error,
+                    "stderr_excerpt": stderr or silence_timeout_error or closeout_error,
                 },
                 expected_owner_token=running.execution_owner_token,
             )
@@ -3300,6 +3319,14 @@ class HeartbeatService:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or issue.org_id != final.org_id:
             return final
+        parent_closeout = await self.finalizer.finalize_parent_closeout(final, issue)
+        if parent_closeout.applicable:
+            if parent_closeout.completed:
+                return final
+            # A recovered legacy terminal Run is immutable. New Runs validate
+            # this evidence before their terminal CAS; Recovery only reports
+            # missing effects and never rewrites an authoritative terminal state.
+            return final
         if issue.assignee_agent_id == agent.id and issue.status == "done":
             has_unresolved_blocked_child = (
                 await self.parent_closeout.record_blocked_child_if_needed(final, issue)
@@ -3318,13 +3345,6 @@ class HeartbeatService:
                 return await self._mark_closeout_governance_failed(
                     final,
                     "Issue was marked done without the required work product.",
-                )
-            if await self.parent_closeout.record_evidence_warning_if_needed(
-                final, issue
-            ):
-                return await self._mark_closeout_governance_failed(
-                    final,
-                    self.parent_closeout.missing_evidence_message(final),
                 )
             return final
         if self._is_reviewer_issue_run(agent, final, issue, context):
@@ -3375,13 +3395,6 @@ class HeartbeatService:
         if await self._run_has_issue_closeout_signal(
             final, issue.id, issue_has_reviewer=issue_has_reviewer
         ):
-            if await self.parent_closeout.record_evidence_warning_if_needed(
-                final, issue
-            ):
-                return await self._mark_closeout_governance_failed(
-                    final,
-                    self.parent_closeout.missing_evidence_message(final),
-                )
             return final
         passive_followup = _passive_followup_context(context)
         raw_attempt = passive_followup.get("attempt")
@@ -4118,7 +4131,10 @@ class HeartbeatService:
         self, final: HeartbeatRunRow, issue: IssueRow
     ) -> None:
         await self.parent_continuation.queue_for_settled_child(
-            issue.id, expected_org_id=final.org_id
+            issue.id,
+            expected_org_id=final.org_id,
+            child_run_id=final.id,
+            child_agent_id=final.agent_id,
         )
 
     async def queue_parent_continuation_for_settled_child(
@@ -4505,11 +4521,13 @@ class HeartbeatService:
             ("primaryIssueId", "primaryIssueId"),
             ("projectId", "projectId"),
             ("delegationOriginRunId", "delegationOriginRunId"),
-            ("closeoutMode", "closeoutMode"),
         ):
             value = payload.get(source_key)
             if isinstance(value, str) and value:
                 context[target_key] = value
+        closeout_policy = payload.get("closeoutPolicy")
+        if isinstance(closeout_policy, dict):
+            context["closeoutPolicy"] = dict(closeout_policy)
         return context
 
     def _payload_context_snapshot(
@@ -4719,34 +4737,6 @@ def _dedupe_work_product_payloads(products: list[Any]) -> list[Any]:
     return deduped
 
 
-async def _shielded_session_close(session: AsyncSession) -> None:
-    with contextlib.suppress(asyncio.CancelledError):
-        await _run_shielded_cleanup(
-            "close heartbeat dispatch database session",
-            session.close,
-            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
-        )
-
-
-async def _shielded_session_rollback(session: AsyncSession) -> None:
-    with contextlib.suppress(asyncio.CancelledError):
-        await _run_shielded_cleanup(
-            "roll back heartbeat dispatch database session",
-            session.rollback,
-            timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
-        )
-
-
-async def _commit_session_before_cleanup(session: AsyncSession) -> None:
-    commit_task = asyncio.create_task(session.commit())
-    try:
-        await asyncio.shield(commit_task)
-    except asyncio.CancelledError:
-        with contextlib.suppress(BaseException):
-            await asyncio.shield(commit_task)
-        raise
-
-
 def _is_sqlite_database_locked_error(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None:
@@ -4845,65 +4835,3 @@ def heartbeat_event_to_data(row: HeartbeatRunEventRow) -> HeartbeatRunEvent:
         "idempotencyKey": row.idempotency_key,
         "createdAt": row.created_at.isoformat(),
     }
-
-
-async def dispatch_queued_agent(
-    session_factory: async_sessionmaker[AsyncSession], agent_id: str
-) -> None:
-    session = session_factory()
-    try:
-        async with async_transaction(session):
-            run_ids = await HeartbeatService(session).claim_queued_for_dispatch(
-                agent_id
-            )
-    finally:
-        await _shielded_session_close(session)
-    if not run_ids:
-        return
-
-    next_agent_ids = {
-        reviewer_agent_id
-        for reviewer_agent_id in await asyncio.gather(
-            *(
-                RunExecutionService(
-                    session_factory,
-                    run_id=run_id,
-                    agent_id=agent_id,
-                ).run()
-                for run_id in run_ids
-            )
-        )
-        if reviewer_agent_id is not None
-    }
-    next_agent_ids.add(agent_id)
-    # Terminal effects can enqueue more than reviewer work (notably a parent
-    # continuation after the last child settles). Drain every newly queued
-    # agent instead of only recursing into the child/reviewer agents.
-    queued_session = session_factory()
-    try:
-        async with async_transaction(queued_session):
-            next_agent_ids.update(await list_queued_agent_ids(queued_session))
-    finally:
-        await _shielded_session_close(queued_session)
-    await asyncio.gather(
-        *(
-            dispatch_queued_agent(session_factory, next_agent_id)
-            for next_agent_id in next_agent_ids
-        )
-    )
-
-
-async def dispatch_all_queued_runs(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    session = session_factory()
-    try:
-        async with async_transaction(session):
-            heartbeat = HeartbeatService(session)
-            scheduled_agent_ids = await heartbeat.materialize_due_scheduled_wakeups()
-            agent_ids = scheduled_agent_ids | await list_queued_agent_ids(session)
-    finally:
-        await _shielded_session_close(session)
-    await asyncio.gather(
-        *(dispatch_queued_agent(session_factory, agent_id) for agent_id in agent_ids)
-    )

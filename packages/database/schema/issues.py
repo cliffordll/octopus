@@ -127,7 +127,9 @@ class Issue(Base):
     origin_kind: Mapped[str] = mapped_column(Text, nullable=False, default="manual")
     origin_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     origin_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    closeout_mode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closeout_policy: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True
+    )
     request_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     billing_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     assignee_agent_runtime_overrides: Mapped[dict[str, Any] | None] = mapped_column(

@@ -546,6 +546,7 @@ it("shows an issue and records comments and review decisions", async () => {
         settledChildCount: 0,
         totalChildCount: 1,
         includeWorkProducts: true,
+        closeoutPolicy: { version: 1, mode: "parent_output_required" },
       });
 
     }
@@ -962,6 +963,7 @@ it("shows an issue and records comments and review decisions", async () => {
 
   expect(screen.getByText("github #42")).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("产物 西施介绍.md");
+  expect(screen.getByRole("region", { name: "子任务" })).toHaveTextContent("父任务还需产出");
 
   expect(screen.getByRole("link", { name: "下载" })).toHaveAttribute("href", "/api/assets/asset-product-1/content");
 
@@ -2355,7 +2357,7 @@ it("does not keep stale closeout review warning after a newer run starts", async
   expect(activityRegion).toHaveTextContent("自动收口已尝试 2/2 次");
 });
 
-it("surfaces parent child-settled and convergence warning activity", async () => {
+it("surfaces parent child-settled and output-validation activity", async () => {
   const issue = {
     id: "issue-1",
     orgId: "org-1",
@@ -2398,7 +2400,7 @@ it("surfaces parent child-settled and convergence warning activity", async () =>
     if (path === "/api/issues/issue-1/activity" && init?.method === "GET") {
       return respond([
         { id: "activity-settled", orgId: "org-1", action: "issue.children_settled", entityType: "issue", entityId: "issue-1", actorType: "system", details: { completedChildIssueId: "issue-child-4" }, createdAt: "2026-06-02T10:00:00Z" },
-        { id: "activity-warning", orgId: "org-1", action: "issue.parent_deliverable_convergence_warning", entityType: "issue", entityId: "issue-1", actorType: "system", details: {}, createdAt: "2026-06-02T11:00:00Z" },
+        { id: "activity-warning", orgId: "org-1", action: "issue.child_outputs_closeout_failed", entityType: "issue", entityId: "issue-1", actorType: "system", details: { error: "Completed child issue OCT-4 has no primary output." }, createdAt: "2026-06-02T11:00:00Z" },
       ]);
     }
     return respond(issue);
@@ -2411,8 +2413,8 @@ it("surfaces parent child-settled and convergence warning activity", async () =>
   const activityRegion = await screen.findByRole("region", { name: "动态" });
   expect(activityRegion).toHaveTextContent("子任务已完成");
   expect(activityRegion).toHaveTextContent("所有子任务已进入终态，父任务已被唤醒继续汇总。");
-  expect(activityRegion).toHaveTextContent("父任务汇总证据不足");
-  expect(activityRegion).toHaveTextContent("父任务已收尾，但没有看到父任务最终产物或引用子任务结果的证据。");
+  expect(activityRegion).toHaveTextContent("子任务产物验证失败");
+  expect(activityRegion).toHaveTextContent("Completed child issue OCT-4 has no primary output.");
 });
 
 it("surfaces missing reviewer closeout decisions on the issue page", async () => {

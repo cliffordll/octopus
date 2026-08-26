@@ -252,10 +252,10 @@ before treating the work as delegated:
 Write the complete child array as a UTF-8 JSON file first, then submit the file without shell-escaping the JSON. The CLI validates the complete file before sending any write request:
 
 ```bash
-octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" --closeout-mode <parent_summary|child_outputs> --json
+octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" [--parent-output-required] --json
 ```
 
-Use `parent_summary` when the parent must create a new synthesized final artifact. Use `child_outputs` when the child artifacts themselves are final and the parent only verifies and closes the batch.
+Child outputs are final by default. Use `--parent-output-required` only when the current instruction explicitly requires a separate parent-owned final artifact.
 
 Never test this write command by creating a placeholder child on the real parent issue.
 

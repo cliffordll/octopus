@@ -166,7 +166,17 @@ export type IssueStatus =
   | "cancelled";
 export type IssuePriority = "critical" | "high" | "medium" | "low";
 export type IssueOriginKind = "manual" | "automation_execution" | "delegation";
-export type DelegationCloseoutMode = "parent_summary" | "child_outputs";
+export type DelegationCloseoutPolicyMode =
+  | "child_outputs_are_final"
+  | "parent_output_required";
+export interface DelegationCloseoutPolicy {
+  version: 1;
+  mode: DelegationCloseoutPolicyMode;
+  requirements?: {
+    minimumOutputs?: number;
+    primaryOutputRequired?: boolean;
+  };
+}
 export type IssueReviewDecision = "approve" | "request_changes" | "blocked" | "needs_followup";
 
 export interface IssueListItem {
@@ -326,7 +336,7 @@ export interface IssueDetail extends IssueListItem {
   reviewerUserId: string | null;
   parentId: string | null;
   originRunId: string | null;
-  closeoutMode: DelegationCloseoutMode | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
   issueNumber: number | null;
   requestDepth: number;
   startedAt: string | null;
@@ -341,7 +351,7 @@ export interface IssueDetail extends IssueListItem {
 export interface IssueChildOutput extends IssueListItem {
   parentId: string | null;
   originRunId: string | null;
-  closeoutMode: DelegationCloseoutMode | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
   assigneeUserId: string | null;
   reviewerAgentId: string | null;
   reviewerUserId: string | null;
@@ -362,7 +372,7 @@ export interface IssueChildrenResponse {
   parentExecutionStage: string;
   includeWorkProducts: boolean;
   delegationOriginRunId: string | null;
-  closeoutMode: DelegationCloseoutMode | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
 }
 
 export interface IssueDocumentSummary {

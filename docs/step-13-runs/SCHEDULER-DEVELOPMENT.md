@@ -76,7 +76,7 @@ idempotencyKey
 ```text
 create assignment wakeup
   -> create queued run(runPurpose=task_execution)
-  -> after commit dispatch_queued_agent(agentId)
+  -> after commit RunDispatchService.dispatch_agent(agentId)
 ```
 
 禁止：
@@ -163,7 +163,7 @@ scheduler tick 只能做基础设施推进：
 ```text
 recover_orphaned_runs()
 materialize_due_scheduled_wakeups()
-dispatch_all_queued_runs()
+RunDispatchService.dispatch_all()
 tick_timer_heartbeats()
 ```
 

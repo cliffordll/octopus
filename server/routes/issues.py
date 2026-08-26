@@ -80,9 +80,9 @@ from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
 from ..services.heartbeat import (
     HeartbeatService,
-    dispatch_queued_agent,
     track_dispatch_task,
 )
+from ..services.run_dispatch import RunDispatchService
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
 from ..services.child_dispatch import ChildDispatchCoordinator
 from ..services.child_recovery import (
@@ -115,7 +115,9 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
         # Let the request-scoped transaction close before the dispatcher claims
         # the queued run with a separate session.
         await asyncio.sleep(0.05)
-        await dispatch_queued_agent(request.app.state.session_factory, agent_id)
+        await RunDispatchService(request.app.state.session_factory).dispatch_agent(
+            agent_id
+        )
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
@@ -493,7 +495,7 @@ async def replace_child_issue_route(
         actor_id=actor.actor_id,
         run_id=actor.run_id,
         origin_run_id=old_child.get("originRunId"),
-        closeout_mode=old_child.get("closeoutMode"),
+        closeout_policy=old_child.get("closeoutPolicy"),
         origin_kind=old_child.get("originKind"),
     )
     await service.record_child_replaced(
@@ -529,6 +531,11 @@ async def accept_incomplete_issue_route(
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
 ) -> IssueDetail:
     actor = require_actor_identity(request)
+    if actor.actor_type == "agent":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only a human operator can accept incomplete child work",
+        )
     detail = await service.get_by_id(id)
     if detail is None:
         raise HTTPException(
@@ -565,6 +572,11 @@ async def accept_incomplete_issue_route(
             if isinstance(child_id, str) and child_id.strip()
         )
     child_ids = list(dict.fromkeys(child_ids))
+    if not child_ids:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="childIssueIds must identify at least one blocked or cancelled child",
+        )
     for child_id in child_ids:
         child = await service.get_by_id(child_id)
         if child is None:
@@ -604,6 +616,23 @@ async def accept_incomplete_issue_route(
         run_id=actor.run_id,
     )
     assert updated is not None
+    child_outputs = await service.get_child_outputs(id)
+    settled_child_ids = (
+        child_ids
+        if child_ids
+        else [
+            str(child["id"])
+            for child in (child_outputs or {}).get("children", [])
+            if child.get("status") in {"done", "blocked", "cancelled"}
+        ]
+    )
+    for child_id in settled_child_ids:
+        parent_agent_id = await heartbeat.queue_parent_continuation_for_settled_child(
+            child_id,
+            expected_org_id=detail["orgId"],
+        )
+        if parent_agent_id:
+            _schedule_dispatch(request, parent_agent_id)
     return updated
 
 

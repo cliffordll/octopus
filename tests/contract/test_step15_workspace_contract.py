@@ -39,9 +39,9 @@ from server.services.agents import AgentService
 from server.services.heartbeat import (
     HeartbeatService,
     WorkspacePreparationCoordinator,
-    dispatch_queued_agent,
 )
 from server.services.issues import IssueService
+from server.services.run_dispatch import RunDispatchService
 from server.services.projects import ProjectService
 from server.services.workspaces import WorkspaceService
 from packages.shared.validators.workspace import (
@@ -2534,11 +2534,23 @@ async def test_done_child_waits_for_run_finalization_before_parent_continuation(
             )
             session.add(parent)
             await session.flush()
+            origin_run_id = str(uuid.uuid4())
+            policy = {
+                "version": 1,
+                "mode": "parent_output_required",
+                "requirements": {
+                    "minimumOutputs": 1,
+                    "primaryOutputRequired": True,
+                },
+            }
             child = Issue(
                 org_id=org.id,
                 parent_id=parent.id,
                 title="Child",
                 status="done",
+                origin_kind="delegation",
+                origin_run_id=origin_run_id,
+                closeout_policy=policy,
                 completed_at=datetime.now(UTC),
                 assignee_agent_id=child_agent.id,
             )
@@ -2698,7 +2710,7 @@ async def test_dispatcher_runs_parent_continuation_queued_by_child_closeout(
             assert parent_runs_before == []
             await session.commit()
 
-        await dispatch_queued_agent(factory, child_agent.id)
+            await RunDispatchService(factory).dispatch_agent(child_agent.id)
 
         async with factory() as session:
             child_after = await session.get(HeartbeatRun, child_run.id)
@@ -3120,7 +3132,7 @@ async def test_parent_run_with_active_children_finishes_without_closing_issue() 
         await engine.dispose()
 
 
-async def test_parent_done_without_child_output_evidence_fails_closeout() -> None:
+async def test_non_delegated_parent_done_ignores_delegation_closeout_policy() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3169,23 +3181,21 @@ async def test_parent_done_without_child_output_evidence_fails_closeout() -> Non
             final = await HeartbeatService(
                 session
             )._enforce_closeout_governance_success(agent, run)
-            warning = (
-                await session.execute(
-                    select(ActivityLog).where(
-                        ActivityLog.action
-                        == "issue.parent_deliverable_convergence_warning"
+            warnings = (
+                (
+                    await session.execute(
+                        select(ActivityLog).where(
+                            ActivityLog.action
+                            == "issue.parent_deliverable_convergence_warning"
+                        )
                     )
                 )
-            ).scalar_one()
-
-            assert final.status == "failed"
-            assert final.error_code == "closeout_missing"
-            assert warning.entity_id == parent.id
-            assert warning.run_id == run.id
-            assert (
-                warning.details["reason"] == "parent_done_without_child_output_evidence"
+                .scalars()
+                .all()
             )
-            assert warning.details["childIssues"][0]["title"] == "Xi Shi report"
+
+            assert final.status == "succeeded"
+            assert warnings == []
     finally:
         await engine.dispose()
 
@@ -3678,11 +3688,23 @@ async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() 
                 is_primary=True,
                 created_at=datetime.now(UTC) - timedelta(hours=1),
             )
+            origin_run_id = str(uuid.uuid4())
+            policy = {
+                "version": 1,
+                "mode": "parent_output_required",
+                "requirements": {
+                    "minimumOutputs": 1,
+                    "primaryOutputRequired": True,
+                },
+            }
             child = Issue(
                 org_id=org.id,
                 parent_id=parent.id,
                 title="Jiuhua Mountain food guide",
                 status="done",
+                origin_kind="delegation",
+                origin_run_id=origin_run_id,
+                closeout_policy=policy,
                 completed_at=datetime.now(UTC) - timedelta(minutes=1),
             )
             session.add_all([product, child])
@@ -3696,7 +3718,8 @@ async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() 
                 finished_at=datetime.now(UTC),
                 context_snapshot={
                     "issueId": parent.id,
-                    "closeoutMode": "parent_summary",
+                    "delegationOriginRunId": origin_run_id,
+                    "closeoutPolicy": policy,
                 },
             )
             session.add(run)
@@ -3706,13 +3729,14 @@ async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() 
                     org_id=org.id,
                     actor_type="agent",
                     actor_id=agent.id,
-                    action="issue.updated",
+                    action="issue.closeout_requested",
                     entity_type="issue",
                     entity_id=parent.id,
                     run_id=run.id,
                     details={
-                        "status": "done",
-                        "workProductDeclarations": [
+                        "version": 1,
+                        "delegationOriginRunId": origin_run_id,
+                        "declaredWorkProducts": [
                             {
                                 "path": "reports\\four-mountains.md",
                                 "isPrimary": True,
@@ -3741,11 +3765,13 @@ async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() 
 
             assert final.status == "succeeded"
             assert warnings == []
+            await session.refresh(parent)
+            assert parent.status == "done"
     finally:
         await engine.dispose()
 
 
-async def test_child_outputs_batch_closes_without_parent_summary() -> None:
+async def test_child_outputs_policy_closes_without_parent_continuation() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3781,7 +3807,10 @@ async def test_child_outputs_batch_closes_without_parent_summary() -> None:
                     assignee_agent_id=child_agent.id,
                     origin_kind="delegation",
                     origin_run_id=batch_run_id,
-                    closeout_mode="child_outputs",
+                    closeout_policy={
+                        "version": 1,
+                        "mode": "child_outputs_are_final",
+                    },
                     completed_at=datetime.now(UTC),
                 )
                 for title in ("Lushan guide", "Huangshan guide")
@@ -3793,7 +3822,14 @@ async def test_child_outputs_batch_closes_without_parent_summary() -> None:
                 status="done",
                 origin_kind="delegation",
                 origin_run_id=str(uuid.uuid4()),
-                closeout_mode="parent_summary",
+                closeout_policy={
+                    "version": 1,
+                    "mode": "parent_output_required",
+                    "requirements": {
+                        "minimumOutputs": 1,
+                        "primaryOutputRequired": True,
+                    },
+                },
                 completed_at=datetime.now(UTC),
             )
             session.add_all([*children, unrelated_old_child])
@@ -3831,39 +3867,23 @@ async def test_child_outputs_batch_closes_without_parent_summary() -> None:
                         HeartbeatRun.status == "queued",
                     )
                 )
-            ).scalar_one()
-            assert continuation.context_snapshot["closeoutMode"] == "child_outputs"
-            assert (
-                continuation.context_snapshot["delegationOriginRunId"] == batch_run_id
-            )
-            assert {
-                item["sourceIssueId"]
-                for item in continuation.context_snapshot["childPrimaryWorkProducts"]
-            } == {child.id for child in children}
-
-            parent.status = "done"
-            parent.completed_at = datetime.now(UTC)
-            continuation.status = "succeeded"
-            continuation.finished_at = datetime.now(UTC)
-            await session.flush()
-            final = await HeartbeatService(
-                session
-            )._enforce_closeout_governance_success(parent_agent, continuation)
-
-            warnings = (
-                (
-                    await session.execute(
-                        select(ActivityLog).where(
-                            ActivityLog.action
-                            == "issue.parent_deliverable_convergence_warning"
-                        )
+            ).scalar_one_or_none()
+            await session.refresh(parent)
+            closeout = (
+                await session.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity_id == parent.id,
+                        ActivityLog.action == "issue.child_outputs_closeout_completed",
                     )
                 )
-                .scalars()
-                .all()
-            )
-            assert final.status == "succeeded"
-            assert warnings == []
+            ).scalar_one()
+
+            assert continuation is None
+            assert parent.status == "done"
+            assert closeout.details["delegationOriginRunId"] == batch_run_id
+            assert set(closeout.details["childIssueIds"]) == {
+                child.id for child in children
+            }
     finally:
         await engine.dispose()
 

@@ -34,9 +34,8 @@ from packages.database.schema import (
 from server.app import create_app
 from server.services.heartbeat import (
     _issue_passive_followup_delay,
-    dispatch_all_queued_runs,
-    dispatch_queued_agent,
 )
+from server.services.run_dispatch import RunDispatchService
 
 
 def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
@@ -2035,7 +2034,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     assert followup_run is None
     assert premature_activity is None
 
-    await dispatch_queued_agent(app.state.session_factory, agent["id"])
+    await RunDispatchService(app.state.session_factory).dispatch_agent(agent["id"])
 
     async with session_factory() as session:
         followup_run = (
@@ -2052,7 +2051,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         wakeup_row.requested_at = datetime.now(UTC) - timedelta(seconds=1)
         await session.commit()
 
-    await dispatch_all_queued_runs(app.state.session_factory)
+    await RunDispatchService(app.state.session_factory).dispatch_all()
 
     async with session_factory() as session:
         followup_run = (

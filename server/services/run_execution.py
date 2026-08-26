@@ -4,6 +4,11 @@ import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from packages.database.clients.cleanup import (
+    close_session_shielded,
+    commit_session_shielded,
+    rollback_session_shielded,
+)
 from packages.database.queries.issues import get_issue_by_id
 from packages.shared.types.heartbeat import HeartbeatRun
 
@@ -29,10 +34,7 @@ class RunExecutionService:
             HeartbeatService,
             RunExecutionFinalizationError,
             WorkspacePreparationCoordinator,
-            _commit_session_before_cleanup,
             _is_sqlite_database_locked_error,
-            _shielded_session_close,
-            _shielded_session_rollback,
         )
 
         session = self._session_factory()
@@ -45,11 +47,11 @@ class RunExecutionService:
         try:
             final = await service.execute_claimed_run(self.run_id)
             reviewer_agent_id = await self._reviewer_to_dispatch(session, final)
-            await _commit_session_before_cleanup(session)
+            await commit_session_shielded(session)
             return reviewer_agent_id
         except RunExecutionFinalizationError as failure:
-            await _shielded_session_rollback(session)
-            await _shielded_session_close(session)
+            await rollback_session_shielded(session)
+            await close_session_shielded(session)
             session_closed = True
             for attempt in range(
                 1, WorkspacePreparationCoordinator.MAX_SQLITE_ATTEMPTS + 1
@@ -62,7 +64,7 @@ class RunExecutionService:
                     await clean_service.finalize_unhandled_execution_failure(failure)
                     return None
                 except Exception as exc:
-                    await _shielded_session_rollback(clean_session)
+                    await rollback_session_shielded(clean_session)
                     if (
                         not _is_sqlite_database_locked_error(exc)
                         or attempt
@@ -71,17 +73,17 @@ class RunExecutionService:
                         raise
                     await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
                 except BaseException:
-                    await _shielded_session_rollback(clean_session)
+                    await rollback_session_shielded(clean_session)
                     raise
                 finally:
-                    await _shielded_session_close(clean_session)
+                    await close_session_shielded(clean_session)
             return None
         except BaseException:
-            await _shielded_session_rollback(session)
+            await rollback_session_shielded(session)
             raise
         finally:
             if not session_closed:
-                await _shielded_session_close(session)
+                await close_session_shielded(session)
 
     async def _reviewer_to_dispatch(
         self, session: AsyncSession, final: HeartbeatRun | None

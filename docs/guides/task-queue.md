@@ -150,14 +150,14 @@ server 启动时，`server/lifespan.py` 会启动 heartbeat scheduler。
 
 ```text
 recover_orphaned_runs()
-dispatch_all_queued_runs()
+RunDispatchService.dispatch_all()
 ```
 
 之后按周期执行：
 
 ```text
 tick_timers()
-dispatch_all_queued_runs()
+RunDispatchService.dispatch_all()
 ```
 
 配置项：
