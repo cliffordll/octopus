@@ -1680,6 +1680,7 @@ class HeartbeatService:
             )
             run = await self._initialize_run_log(run)
             await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
+            await self._claim_issue_execution_for_task_run(agent, run, context_snapshot)
             resumed.append(
                 self._to_run(
                     await self._start_if_capacity(agent, run)
@@ -2062,7 +2063,7 @@ class HeartbeatService:
                     "error": None,
                 },
             )
-            await self._claim_issue_execution_for_assignment_run(
+            await self._claim_issue_execution_for_task_run(
                 agent,
                 run,
                 context_snapshot,
@@ -2202,7 +2203,7 @@ class HeartbeatService:
         )
         issue_id = _issue_id_from_context(context_snapshot)
         issue = await get_issue_by_id(self._session, issue_id) if issue_id else None
-        await self._claim_issue_execution_for_assignment_run(
+        await self._claim_issue_execution_for_task_run(
             agent,
             run,
             context_snapshot,
@@ -2272,9 +2273,7 @@ class HeartbeatService:
         )
         run = await self._initialize_run_log(run)
         await update_wakeup_request(self._session, wakeup.id, {"run_id": run.id})
-        await self._claim_issue_execution_for_assignment_run(
-            agent, run, context_snapshot
-        )
+        await self._claim_issue_execution_for_task_run(agent, run, context_snapshot)
         await self._append_event(
             run,
             1,
@@ -4291,7 +4290,7 @@ class HeartbeatService:
                     "error": None,
                 },
             )
-            await self._claim_issue_execution_for_assignment_run(
+            await self._claim_issue_execution_for_task_run(
                 agent,
                 run,
                 context_snapshot,
@@ -4314,7 +4313,7 @@ class HeartbeatService:
             await self._session.flush()
             return
 
-    async def _claim_issue_execution_for_assignment_run(
+    async def _claim_issue_execution_for_task_run(
         self,
         agent: AgentRow,
         run: HeartbeatRunRow,
@@ -4322,7 +4321,7 @@ class HeartbeatService:
         *,
         issue: IssueRow | None = None,
     ) -> None:
-        if run.invocation_source != "assignment":
+        if run.run_purpose != "task_execution":
             return
         issue_id = _issue_id_from_context(context_snapshot)
         if issue_id is None:

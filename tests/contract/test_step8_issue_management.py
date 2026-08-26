@@ -2983,8 +2983,11 @@ async def test_user_mention_reopens_done_issue_and_queues_assignee_wakeup(
             )
         ).scalar_one()
     assert issue is not None
-    assert issue.status != "done"
+    assert issue.status == "in_progress"
+    assert issue.started_at is not None
     assert issue.completed_at is None
+    assert issue.execution_run_id == run.id
+    assert issue.checkout_run_id == run.id
     assert wakeup.source == "on_demand"
     assert wakeup.payload == {
         "issueId": issue_id,
@@ -2992,6 +2995,7 @@ async def test_user_mention_reopens_done_issue_and_queues_assignee_wakeup(
         "commentId": create_body["id"],
     }
     assert run.context_snapshot is not None
+    assert run.run_purpose == "task_execution"
     assert run.context_snapshot["commentBody"] == ("@closed-owner 请继续补充旅游计划")
 
 
