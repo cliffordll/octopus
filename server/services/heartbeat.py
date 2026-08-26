@@ -13,6 +13,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from packages.database.clients import enable_write_transactions
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.agents import (
     advance_agent_heartbeat_check,
@@ -3158,9 +3159,18 @@ class HeartbeatService:
     ) -> dict[str, Any] | None:
         if self._session_factory is None:
             return await self._prepare_workspace_context(agent, running)
+        agent_id = agent.id
+        run_id = running.id
+        org_id = agent.org_id
+        # The planning reads above must not keep an old SQLite snapshot while a
+        # separate short Workspace transaction commits. End that read segment,
+        # then make every following execution segment reserve its writer slot
+        # before reading current Run state.
+        await self._session.commit()
         workspace_context = await WorkspacePreparationCoordinator(
             self._session_factory
-        ).prepare(agent_id=agent.id, run_id=running.id, org_id=agent.org_id)
+        ).prepare(agent_id=agent_id, run_id=run_id, org_id=org_id)
+        enable_write_transactions(self._session)
         await self._session.refresh(running)
         if running.status != "running":
             raise RuntimeError(
@@ -4774,6 +4784,7 @@ class WorkspacePreparationCoordinator:
         async with lock:
             for attempt in range(1, self.MAX_SQLITE_ATTEMPTS + 1):
                 session = self._session_factory()
+                enable_write_transactions(session)
                 try:
                     await WorkspaceService(session).lock_preparation_plan(plan)
                     agent = await get_agent_by_id(session, agent_id)

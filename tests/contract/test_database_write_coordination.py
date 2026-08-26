@@ -13,6 +13,7 @@ from packages.database.clients import (
     CoordinatedAsyncSession,
     DatabaseWriteStrategy,
     SQLiteSerializedWriteStrategy,
+    async_write_transaction,
     create_database_engine,
     create_session_factory,
 )
@@ -82,6 +83,53 @@ async def test_sqlite_write_transactions_wait_in_one_local_queue(
         await first.commit()
         await asyncio.wait_for(second_task, timeout=1)
 
+        verification = session_factory()
+        try:
+            values = list(
+                await verification.scalars(
+                    text("select value from coordination_events order by id")
+                )
+            )
+        finally:
+            await verification.close()
+        assert values == ["first", "second"]
+    finally:
+        await first.close()
+        await second.close()
+        await engine.dispose()
+
+
+async def test_sqlite_write_intent_reserves_writer_before_the_first_read(
+    tmp_path: Path,
+) -> None:
+    engine, session_factory = await _database(tmp_path, "write-intent.db")
+    first = session_factory()
+    second = session_factory()
+    second_started = asyncio.Event()
+    try:
+        async with async_write_transaction(first):
+            assert (
+                await first.scalar(text("select count(*) from coordination_events"))
+                == 0
+            )
+
+            async def write_second() -> None:
+                second_started.set()
+                async with async_write_transaction(second):
+                    await second.execute(
+                        text("insert into coordination_events(value) values ('second')")
+                    )
+
+            second_task = asyncio.create_task(write_second())
+            await second_started.wait()
+            await asyncio.sleep(0.02)
+            assert second_task.done() is False
+
+            await first.execute(
+                text("insert into coordination_events(value) values ('first')")
+            )
+
+        await asyncio.wait_for(second_task, timeout=1)
         verification = session_factory()
         try:
             values = list(

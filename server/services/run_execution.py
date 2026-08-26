@@ -4,6 +4,7 @@ import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from packages.database.clients import enable_write_transactions
 from packages.database.clients.cleanup import (
     close_session_shielded,
     commit_session_shielded,
@@ -57,6 +58,7 @@ class RunExecutionService:
                 1, WorkspacePreparationCoordinator.MAX_SQLITE_ATTEMPTS + 1
             ):
                 clean_session = self._session_factory()
+                enable_write_transactions(clean_session)
                 try:
                     clean_service = HeartbeatService(
                         clean_session, commit_process_metadata=True

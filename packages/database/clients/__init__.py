@@ -9,7 +9,12 @@ from .coordination import (
     SQLiteSerializedWriteStrategy,
 )
 from .session import CoordinatedAsyncSession, create_session_factory
-from .transaction import async_transaction
+from .transaction import (
+    async_transaction,
+    async_write_transaction,
+    begin_write_transaction,
+    enable_write_transactions,
+)
 
 __all__ = [
     "create_database_engine",
@@ -21,4 +26,7 @@ __all__ = [
     "SQLiteSerializedWriteStrategy",
     "ConcurrentDatabaseWriteStrategy",
     "async_transaction",
+    "async_write_transaction",
+    "begin_write_transaction",
+    "enable_write_transactions",
 ]

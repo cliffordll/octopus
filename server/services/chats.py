@@ -766,6 +766,11 @@ class ChatService:
             workspace_data.get("cwd"), str
         ):
             config["cwd"] = workspace_data["cwd"]
+        # Persist the user message and Workspace preparation, then release the
+        # database transaction before the potentially long Adapter call. A
+        # write-intent session will reserve a fresh short transaction when the
+        # result is persisted below.
+        await self._session.commit()
         transcript: list[ChatStreamTranscriptEntry] = []
 
         async def capture_stream_event(event: dict[str, Any]) -> None:
