@@ -67,6 +67,8 @@ import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel,
 
 import { writeRecentIssue } from "../utils/recentIssues";
 
+import { formatRuntimeLog } from "../utils/runtimeLog";
+
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
@@ -2914,7 +2916,7 @@ function PaginatedLogView({
 
       {!log.isLoading && !content && <p className="muted">{emptyText}</p>}
 
-      {content && <AutoScrollPre className={preClassName} content={content} />}
+      {content && <AutoScrollPre className={preClassName} content={formatRuntimeLog(content)} />}
 
       {!eof && cursor !== null && (
 
@@ -3122,7 +3124,7 @@ function IssueRunOutputPanel({
 
   const liveLogDelta = streamLogDelta(streamLog, runLog.data?.content);
 
-  const collapsedRunLogSummary = compactLatestSummary(liveLogDelta || runLog.data?.content || run?.stdoutExcerpt || run?.stderrExcerpt);
+  const collapsedRunLogSummary = compactLatestSummary(formatRuntimeLog(liveLogDelta || runLog.data?.content || run?.stdoutExcerpt || run?.stderrExcerpt));
 
   const collapsedExecutionSummary = latestExecutionSummary(events, operations);
 

@@ -617,7 +617,7 @@ function AgentRunDetail({
           {!eventsLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
           {events.length > 0 && (
             <div className="agent-run-events compact">
-              {events.slice(0, 6).map((event) => (
+              {events.slice(-6).map((event) => (
                 <article className="agent-run-event compact" key={event.id}>
                   <div className="agent-run-event-header">
                     <span>#{event.seq}</span>

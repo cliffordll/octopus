@@ -2388,6 +2388,25 @@ class HeartbeatService:
                     sequence += 1
                 await self._commit_background_runtime_progress()
 
+        async def on_stream_event(event: dict[str, Any]) -> None:
+            nonlocal sequence
+            if event.get("type") != "runtime_progress":
+                return
+            message = event.get("message")
+            if not isinstance(message, str) or not message.strip():
+                return
+            async with runtime_callback_lock:
+                await self._append_event(
+                    running,
+                    sequence,
+                    "runtime.progress",
+                    message=message.strip(),
+                    level="info",
+                    payload=event,
+                )
+                sequence += 1
+                await self._commit_background_runtime_progress()
+
         async def on_process_exited(
             pid: int, exit_code: int | None, exited_at: datetime
         ) -> None:
@@ -2588,6 +2607,7 @@ class HeartbeatService:
                     cancel_event=cancellation,
                     on_process_started=on_process_started,
                     on_process_exited=on_process_exited,
+                    on_stream_event=on_stream_event,
                 )
             )
             await self._finish_adapter_workspace_operation(
