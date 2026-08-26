@@ -12,7 +12,7 @@ import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
-import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
+import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
@@ -166,9 +166,8 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
 
 function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
   const config = readJsonObject(value, "Agent runtime config");
-  if (!supportsRuntimeModels(runtime)) return config;
   const model = typeof config.model === "string" ? config.model.trim() : "";
-  return { ...config, model: validateModelReference(model) };
+  return applyRuntimeModelConfig(config, runtime, model);
 }
 
 function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
@@ -1097,6 +1096,7 @@ export function AgentPage() {
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
+        replaceAgentRuntimeConfig: true,
         runtimeConfig: materializeHeartbeatRuntimeConfig(readJsonObject(runtimeConfig, "Runtime config")),
         budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars || 0) * 100),
       });
@@ -1126,6 +1126,17 @@ export function AgentPage() {
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
+  }
+  function changeRuntime(nextRuntime: AgentRuntimeType) {
+    const nextConfig = runtimeConfigAfterSwitch(
+      readJsonObjectSafe(agentRuntimeConfig),
+      runtime,
+      nextRuntime,
+    );
+    setRuntime(nextRuntime);
+    setAgentRuntimeConfig(JSON.stringify(nextConfig, null, 2));
+    setRuntimeTestResult(null);
+    setConfigurationError(null);
   }
   function setRuntimeModelInput(modelId: string) {
     try {
@@ -1752,7 +1763,7 @@ export function AgentPage() {
                     <div className="agent-property-list">
                       <label className="agent-property-row">
                         <span>Runtime</span>
-                        <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+                        <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => changeRuntime(event.target.value as AgentRuntimeType)}>
                           {adapterOptions.map((adapter) => (
                             <option key={adapter.type} value={adapter.type}>{adapter.displayName}</option>
                           ))}
@@ -1762,9 +1773,9 @@ export function AgentPage() {
                       {supportsRuntimeModels(runtime) && (
                         <label className="agent-property-row">
                           <span>模型配置</span>
-                          {runtimeModelOptions.length > 0 ? (
+                          {runtime === "codex_local" || runtimeModelOptions.length > 0 ? (
                             <select value={selectedRuntimeModel} onChange={(event) => selectRuntimeModel(event.target.value)}>
-                              <option value="">选择模型</option>
+                              <option value="">{runtime === "codex_local" ? "使用 Codex 默认模型" : "选择模型"}</option>
                               {runtimeModelOptions.map((model) => (
                                 <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
                                   {runtimeModelLabel(model)}

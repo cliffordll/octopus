@@ -592,18 +592,57 @@ async def prepare_agent_runtime_config(
 
 _PROVIDER_MODEL_RUNTIME_TYPES = {"opencode_local", "openclaw_local"}
 _OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions"
+_RUNTIME_SWITCH_RESET_FIELDS = frozenset(
+    {
+        "args",
+        "command",
+        "dangerouslyBypassApprovalsAndSandbox",
+        "env",
+        "extraArgs",
+        "model",
+        "modelReasoningEffort",
+        "probeArgs",
+        "reasoningEffort",
+        "search",
+        "sessionId",
+        "sessionIdBefore",
+    }
+)
+
+
+def _runtime_config_after_switch(
+    previous_runtime_type: str,
+    next_runtime_type: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    if previous_runtime_type == next_runtime_type:
+        return config
+    return {
+        key: value
+        for key, value in config.items()
+        if key not in _RUNTIME_SWITCH_RESET_FIELDS
+    }
 
 
 def _normalize_runtime_config_defaults(
     runtime_type: str, config: dict[str, Any]
 ) -> dict[str, Any]:
-    if runtime_type != "opencode_local":
-        return config
     extra_args = config.get("extraArgs")
     normalized_args = list(extra_args) if isinstance(extra_args, list) else []
-    if _OPENCODE_SKIP_PERMISSIONS_ARG not in normalized_args:
+    if runtime_type == "opencode_local" and (
+        _OPENCODE_SKIP_PERMISSIONS_ARG not in normalized_args
+    ):
         normalized_args.append(_OPENCODE_SKIP_PERMISSIONS_ARG)
-    return {**config, "extraArgs": normalized_args}
+    if runtime_type != "opencode_local":
+        normalized_args = [
+            arg for arg in normalized_args if arg != _OPENCODE_SKIP_PERMISSIONS_ARG
+        ]
+    normalized = {**config}
+    if normalized_args:
+        normalized["extraArgs"] = normalized_args
+    else:
+        normalized.pop("extraArgs", None)
+    return config if normalized == config else normalized
 
 
 def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
@@ -975,12 +1014,17 @@ class AgentService:
         next_runtime_type = cast(
             str, patch.get("agentRuntimeType", existing.agent_runtime_type)
         )
-        next_runtime_config = _normalize_runtime_config_defaults(
+        candidate_runtime_config = _runtime_config_after_switch(
+            existing.agent_runtime_type,
             next_runtime_type,
             cast(
                 dict[str, Any],
                 patch.get("agentRuntimeConfig", existing.agent_runtime_config),
             ),
+        )
+        next_runtime_config = _normalize_runtime_config_defaults(
+            next_runtime_type,
+            candidate_runtime_config,
         )
         if next_runtime_config is not existing.agent_runtime_config:
             patch["agentRuntimeConfig"] = next_runtime_config

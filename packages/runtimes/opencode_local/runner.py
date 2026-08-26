@@ -22,6 +22,7 @@ from ..tool_capabilities import (
     append_runtime_workspace_guidance,
 )
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+from .ollama import LocalOllamaProvider
 from .protocol import (
     auth_required,
     build_args,
@@ -72,13 +73,27 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    local_ollama = LocalOllamaProvider.from_runtime_config(context.config, env)
+    if local_ollama is not None:
+        validation_error = await local_ollama.validate()
+        if validation_error is not None:
+            return _result(
+                1,
+                "",
+                validation_error,
+                error_message=validation_error,
+                model=string(context.config.get("model")),
+            )
     home = await prepare_managed_home(
         runtime_type="opencode_local",
         context=context,
         env=env,
     )
     ensure_octopus_cli_shim(env, home)
-    _materialize_runtime_provider_config(home, context.config)
+    runtime_provider = _runtime_provider_config(context.config)
+    if runtime_provider is None and local_ollama is not None:
+        runtime_provider = local_ollama.execution_provider()
+    _materialize_runtime_provider_config(home, runtime_provider)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="opencode_local",
@@ -313,12 +328,8 @@ async def _emit_opencode_stream_event(
 
 
 def _materialize_runtime_provider_config(
-    home: os.PathLike[str] | str, config: dict
+    home: os.PathLike[str] | str, provider: dict | None
 ) -> None:
-    runtime_context = config.get("_octopus")
-    if not isinstance(runtime_context, dict):
-        return
-    provider = runtime_context.get("runtimeProvider")
     if not isinstance(provider, dict):
         return
     provider_id = string(provider.get("providerId"))
@@ -374,6 +385,14 @@ def _materialize_runtime_provider_config(
         json.dumps(document, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _runtime_provider_config(config: dict) -> dict | None:
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        return None
+    provider = runtime_context.get("runtimeProvider")
+    return provider if isinstance(provider, dict) else None
 
 
 def _read_opencode_config(config_path: Path) -> dict:

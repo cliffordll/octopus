@@ -9,7 +9,7 @@ import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { roleLabel } from "../utils/display";
-import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
+import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 function readJsonObject(value: string, label: string): Record<string, unknown> {
@@ -29,9 +29,8 @@ function readJsonObjectSafe(value: string): Record<string, unknown> {
 }
 
 function mergeModelConfig(config: Record<string, unknown>, runtime: AgentRuntimeType, model: string): Record<string, unknown> {
-  if (!supportsRuntimeModels(runtime)) return config;
   const trimmed = model.trim() || (typeof config.model === "string" ? config.model.trim() : "");
-  return { ...config, model: validateModelReference(trimmed) };
+  return applyRuntimeModelConfig(config, runtime, trimmed);
 }
 
 function parseCsv(value: string): string[] {
@@ -121,6 +120,17 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
     setAgentRuntimeConfig(JSON.stringify(next, null, 2));
     setConfigurationError("");
   }
+  function changeRuntime(nextRuntime: AgentRuntimeType) {
+    const nextConfig = runtimeConfigAfterSwitch(
+      readJsonObjectSafe(agentRuntimeConfig),
+      runtime,
+      nextRuntime,
+    );
+    setRuntime(nextRuntime);
+    setRuntimeModel("");
+    setAgentRuntimeConfig(JSON.stringify(nextConfig, null, 2));
+    setConfigurationError("");
+  }
   return (
       <form className="panel form agent-create-form" onSubmit={submit}>
         {isFirstAgent && <p className="muted">首个智能体将作为 CEO 创建</p>}
@@ -163,7 +173,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         </label>
         <label>
           Runtime
-          <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+          <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => changeRuntime(event.target.value as AgentRuntimeType)}>
             {adapterOptions.map((adapter) => (
               <option key={adapter.type} value={adapter.type}>{adapter.displayName}</option>
             ))}
@@ -173,9 +183,9 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         {supportsRuntimeModels(runtime) && (
           <label>
             模型配置
-            {modelOptions.length > 0 ? (
+            {runtime === "codex_local" || modelOptions.length > 0 ? (
               <select value={runtimeModel} onChange={(event) => setRuntimeModel(event.target.value)}>
-                <option value="">选择模型</option>
+                <option value="">{runtime === "codex_local" ? "使用 Codex 默认模型" : "选择模型"}</option>
                 {modelOptions.map((model) => (
                   <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
                     {runtimeModelLabel(model)}
