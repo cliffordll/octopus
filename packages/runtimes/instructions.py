@@ -137,6 +137,8 @@ def _heartbeat_prompt(config: dict[str, Any]) -> str:
         "issue_assigned",
         "issue_execute",
         "issue_checked_out",
+        "issue_comment_added",
+        "issue_comment_mentioned",
     }:
         return ""
     return _assignment_issue_prompt(
@@ -252,6 +254,7 @@ def _assignment_issue_prompt(
                 issue=issue,
                 intro="You have been assigned to work on an issue.",
             ),
+            _wake_comment_instruction_prompt(context),
             (
                 "Your task is to review this issue and begin working on it. "
                 "Use the available tools to explore the codebase, understand "
@@ -280,6 +283,29 @@ def _assignment_issue_prompt(
     )
 
 
+def _wake_comment_instruction_prompt(context: dict[str, Any]) -> str:
+    wake_reason = _string(context.get("wakeReason"))
+    comment_body = _string(context.get("commentBody"))
+    if (
+        wake_reason
+        not in {
+            "issue_comment_added",
+            "issue_comment_mentioned",
+        }
+        or not comment_body
+    ):
+        return ""
+    return "\n".join(
+        [
+            "## Current User Instruction",
+            "",
+            "This Run was triggered by the following new comment. Treat it as the latest instruction for this Run; the original issue description is background context.",
+            "",
+            comment_body,
+        ]
+    )
+
+
 def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
     child_outputs = context.get("childOutputs")
     if not isinstance(child_outputs, dict):
@@ -295,9 +321,8 @@ def _rerun_reconcile_prompt(issue_ref: str, context: dict[str, Any]) -> str:
         f"This parent issue already has {total or len(children)} direct child issue(s). Treat this run as a rerun/reconcile pass, not a blank first execution.",
         f"Current parent execution stage: `{stage}`.",
         f'Inspect existing children with `octopus issue children "{issue_ref}" --include-work-products --json` before creating, replacing, cancelling, or completing work.',
-        "Reuse the persisted child split. Retry or explicitly replace blocked work with the dedicated child recovery commands; do not submit another initial split or silently create sibling tasks for the same work.",
-        "A normal rerun is reconciliation, not replanning. Replanning the child set requires an explicit operator action outside this run.",
     ]
+    guidance.extend(_child_split_persistence_guidance(context))
     for child in children[:12]:
         if not isinstance(child, dict):
             continue
@@ -418,7 +443,8 @@ def _subtask_coordination_prompt(
             "",
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
             'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
-            f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`. Reuse the persisted split on reruns; do not recreate it.',
+            f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`.',
+            *_child_split_persistence_guidance(context),
             "Write the complete set of real, parallel subtasks to a UTF-8 JSON file, then submit it in one atomic call; the CLI validates the whole file before sending any write request: "
             f'`octopus issue create-children "{issue_ref}" --children-file "<children.json>" --json`. '
             "Each JSON array entry must contain `title` and `assigneeAgentId`. Do not create delegated siblings one at a time, and never test the command by creating a placeholder child on the real parent issue.",
@@ -434,6 +460,27 @@ def _subtask_coordination_prompt(
             "If the work should stay inside the parent run, do not create delegated child issues for it; say that explicitly in the close-out comment.",
         ]
     )
+
+
+def _child_split_persistence_guidance(context: dict[str, Any]) -> list[str]:
+    wake_reason = _string(context.get("wakeReason"))
+    comment_id = _string(context.get("commentId"))
+    comment_body = _string(context.get("commentBody"))
+    is_new_comment_instruction = (
+        wake_reason in {"issue_comment_added", "issue_comment_mentioned"}
+        and bool(comment_id)
+        and bool(comment_body)
+    )
+    if is_new_comment_instruction:
+        return [
+            "This Run was triggered by a new user comment. The current comment is a new operator instruction, not an automatic rerun or recovery pass.",
+            "If the current comment explicitly asks to create, split, re-split, or delegate child issues, you must create a new atomic child set even when historical child issues already cover similar work.",
+            "Preserve historical child issues instead of deleting them. Reuse a child set only when it was already created for this same comment; do not use an older delegation batch as a substitute for the current explicit instruction.",
+        ]
+    return [
+        "Reuse the persisted child split during an automatic rerun, recovery, or parent continuation. Retry or explicitly replace blocked work with the dedicated child recovery commands; do not silently create sibling tasks for the same delegation request.",
+        "A normal automatic rerun is reconciliation, not replanning. A later explicit user comment may authorize a new child set.",
+    ]
 
 
 def _issue_header_prompt(
