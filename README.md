@@ -77,13 +77,18 @@ uv run python scripts/verify.py
 .\scripts\install-git-hooks.ps1
 ```
 
-安装后，每次 `git commit` 会自动运行：
+安装后，普通 `git commit` 不会自动执行全量测试。需要完整提交门禁时，显式设置环境变量：
 
 ```powershell
-uv run python scripts/verify.py --pre-commit
+$env:OCTOPUS_FULL_VERIFY = "1"
+try {
+  git commit -m "<message>"
+} finally {
+  Remove-Item Env:OCTOPUS_FULL_VERIFY -ErrorAction SilentlyContinue
+}
 ```
 
-该 hook 会执行 ruff format check、ruff check、pyright、pytest、UI typecheck 和 UI test；任一失败都会阻止提交。
+只有 `OCTOPUS_FULL_VERIFY=1` 时，hook 才会执行 ruff format check、ruff check、pyright、pytest、UI typecheck 和 UI test；任一失败都会阻止提交。未明确要求全量测试时，应继续使用本次修改对应的专项验证，并通过 `git commit --no-verify` 提交。
 ### 测试失败时先看这里
 
 先确认依赖是同步过的：
@@ -99,7 +104,7 @@ cd ..
 
 | 现象 | 处理方式 |
 | --- | --- |
-| `uv run python scripts/verify.py --pre-commit` 阻止提交 | 按失败输出修复后重跑 `uv run python scripts/verify.py`，通过后再提交。 |
+| `OCTOPUS_FULL_VERIFY=1` 的提交被验证门禁阻止 | 按失败输出修复后重跑 `uv run python scripts/verify.py`，通过后再提交。 |
 | `uv run pyright .` 报缺包、找不到模块 | 先执行 `uv sync`。如果正在运行 server 导致 `.venv` 文件被锁，先停 server，或改用 `uv run --no-sync pyright .`。 |
 | `uv run ruff format --check .` 失败 | 运行 `uv run ruff format .`，再重新执行 `uv run python scripts/verify.py`。 |
 | `uv run pytest` 失败但不知道是哪一个测试 | 用失败输出里的完整节点重跑：`uv run pytest path\to\test_file.py::test_name -q -vv -x`。 |
