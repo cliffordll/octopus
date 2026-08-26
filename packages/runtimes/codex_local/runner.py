@@ -19,7 +19,7 @@ from ..local_skills import (
     ensure_octopus_cli_shim,
     materialize_runtime_skills,
 )
-from ..provider_config import apply_provider_env, model_for_cli
+from ..provider_config import apply_provider_env
 from ..paths import ensure_managed_runtime_home
 from ..session import effective_resume_session_id
 from ..tool_capabilities import (
@@ -27,6 +27,7 @@ from ..tool_capabilities import (
     append_runtime_workspace_guidance,
 )
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+from .model_selection import CodexModelSelection
 
 
 @dataclass(frozen=True)
@@ -104,11 +105,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         runtime_label="Codex",
         on_log=context.on_log,
     )
+    model_selection = CodexModelSelection.from_runtime_config(context.config)
 
     attempt = await _run_attempt(
         context=context,
         command=command,
-        args=_build_args(context.config, session_id),
+        args=_build_args(context.config, session_id, model_selection),
         cwd=cwd,
         prompt=prompt,
         env=env,
@@ -117,6 +119,39 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         billing_type=billing_type,
         biller=biller,
     )
+    using_default_model = False
+    if (
+        not attempt.result.timed_out
+        and (attempt.result.exit_code or 0) != 0
+        and model_selection.should_fallback(
+            stdout=attempt.stdout,
+            stderr=attempt.raw_stderr,
+        )
+    ):
+        await context.on_log(
+            "stderr",
+            (
+                f'[octopus] Codex model "{model_selection.model_id}" is unavailable; '
+                "retrying with the Codex CLI default model.\n"
+            ),
+        )
+        using_default_model = True
+        attempt = await _run_attempt(
+            context=context,
+            command=command,
+            args=_build_args(
+                context.config,
+                session_id,
+                CodexModelSelection(None),
+            ),
+            cwd=cwd,
+            prompt=prompt,
+            env=env,
+            timeout_sec=timeout_sec,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
     if (
         session_id
         and not attempt.result.timed_out
@@ -133,7 +168,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         retry = await _run_attempt(
             context=context,
             command=command,
-            args=_build_args(context.config, None),
+            args=_build_args(
+                context.config,
+                None,
+                CodexModelSelection(None) if using_default_model else model_selection,
+            ),
             cwd=cwd,
             prompt=prompt,
             env=env,
@@ -345,16 +384,16 @@ async def _completed_process_attempt(
 
 
 def _build_args(
-    config: dict[str, Any], resume_session_id: str | None = None
+    config: dict[str, Any],
+    resume_session_id: str | None = None,
+    model_selection: CodexModelSelection | None = None,
 ) -> list[str]:
     args = ["exec", "--skip-git-repo-check", "--json", "--disable", "plugins"]
     if config.get("search") is True:
         args.insert(0, "--search")
     if config.get("dangerouslyBypassApprovalsAndSandbox") is True:
         args.append("--dangerously-bypass-approvals-and-sandbox")
-    model = model_for_cli(config)
-    if model:
-        args.extend(["--model", model])
+    (model_selection or CodexModelSelection.from_runtime_config(config)).append_to(args)
     reasoning = _string(
         config.get("modelReasoningEffort") or config.get("reasoningEffort")
     )

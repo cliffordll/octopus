@@ -833,6 +833,56 @@ it("validates opencode local model before saving agent configuration", async () 
   );
 });
 
+it("switches from opencode to the Codex default model without stale arguments", async () => {
+  const agent = {
+    id: "agent-1",
+    orgId: "org-1",
+    name: "Builder",
+    role: "engineer",
+    status: "idle",
+    agentRuntimeType: "opencode_local",
+    agentRuntimeConfig: {
+      model: "ollama/qwen2.5:1.5b",
+      extraArgs: ["--dangerously-skip-permissions"],
+      timeoutSec: 60,
+    },
+    runtimeConfig: {},
+    budgetMonthlyCents: 0,
+    capabilities: null,
+    reportsTo: null,
+  };
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([agent]);
+    if (path === "/api/orgs/org-1/adapters" && init?.method === "GET") {
+      return respond([
+        { type: "opencode_local", displayName: "OpenCode", metadata: { type: "opencode_local", capabilities: { models: true } } },
+        { type: "codex_local", displayName: "Codex", metadata: { type: "codex_local", capabilities: { models: true } } },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/adapters/codex_local/models" && init?.method === "GET") {
+      return respond([{ id: "gpt-5-codex", label: "GPT-5 Codex" }]);
+    }
+    if (path === "/api/agents/agent-1" && init?.method === "PATCH") {
+      return respond({ ...agent, ...JSON.parse(String(init.body)) });
+    }
+    return respond({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/agents/agent-1/configuration");
+  await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "codex_local");
+  expect(await screen.findByRole("option", { name: "使用 Codex 默认模型" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+  const updateCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/agents/agent-1" && init?.method === "PATCH");
+  expect(updateCall).toBeDefined();
+  const payload = JSON.parse(String(updateCall?.[1]?.body));
+  expect(payload.agentRuntimeType).toBe("codex_local");
+  expect(payload.replaceAgentRuntimeConfig).toBe(true);
+  expect(payload.agentRuntimeConfig).toEqual({ timeoutSec: 60 });
+});
+
 it("warns when the configured opencode model is not in organization runtime models", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "opencode_local", agentRuntimeConfig: { model: "local/deepseek-v4-flash" }, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {

@@ -1163,6 +1163,44 @@ async def test_opencode_local_update_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
+async def test_switching_from_opencode_to_codex_clears_runtime_specific_config(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Runtime Switch Agent",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {
+                "model": "ollama/qwen2.5:1.5b",
+                "command": "opencode",
+                "extraArgs": ["--dangerously-skip-permissions"],
+                "timeoutSec": 60,
+            },
+        },
+    )
+
+    update_code, updated = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent['id']}",
+        json={"agentRuntimeType": "codex_local"},
+    )
+
+    assert update_code == 200
+    assert updated["agentRuntimeType"] == "codex_local"
+    updated_config = updated["agentRuntimeConfig"]
+    assert updated_config["timeoutSec"] == 60
+    assert updated_config["instructionsBundleMode"] == "managed"
+    assert "model" not in updated_config
+    assert "command" not in updated_config
+    assert "extraArgs" not in updated_config
+
+
 async def test_openclaw_local_agent_requires_provider_model(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -1714,6 +1752,75 @@ async def test_codex_execute_retries_unknown_resume_session(
     assert any("retrying with a fresh session" in chunk for _, chunk in logs)
 
 
+async def test_codex_execute_retries_unsupported_model_with_cli_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_args: list[tuple[str, ...]] = []
+    logs: list[tuple[str, str]] = []
+
+    class FakeCodexProcess:
+        def __init__(self, returncode: int, stdout: bytes, stderr: bytes) -> None:
+            self.returncode = returncode
+            self._stdout = stdout
+            self._stderr = stderr
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            raise AssertionError("Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_args.append(args)
+        if len(captured_args) == 1:
+            return FakeCodexProcess(
+                1,
+                b"",
+                b"Error: model gpt-obsolete is not supported\n",
+            )
+        return FakeCodexProcess(
+            0,
+            (
+                b'{"type":"thread.started","thread_id":"default-thread"}\n'
+                b'{"type":"item.completed","item":{"type":"agent_message",'
+                b'"text":"default model ok"}}\n'
+            ),
+            b"",
+        )
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-model-fallback",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={"command": "codex-test", "model": "openai/gpt-obsolete"},
+            on_log=on_log,
+        )
+    )
+
+    first_args = captured_args[0]
+    second_args = captured_args[1]
+    assert first_args[first_args.index("--model") + 1] == "gpt-obsolete"
+    assert "--model" not in second_args
+    assert result.exit_code == 0
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "default model ok"
+    assert any("Codex CLI default model" in chunk for _, chunk in logs)
+
+
 async def test_codex_execute_injects_runtime_context_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2253,6 +2360,116 @@ async def test_opencode_execute_materializes_database_provider_config(
     assert provider["options"]["baseURL"] == "https://deepseek.example/v1"
     assert provider["options"]["apiKey"] == "sk-db"
     assert provider["models"]["deepseek-v4-flash"]["name"] == "DeepSeek V4 Flash"
+
+
+async def test_opencode_execute_materializes_implicit_local_ollama_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_config = operator_home / ".config" / "opencode" / "opencode.json"
+    operator_config.parent.mkdir(parents=True)
+    operator_config.write_text(json.dumps({"provider": {}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful OpenCode process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        return FakeProcess()
+
+    async def fake_validate_ollama(_provider: Any) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.ollama.LocalOllamaProvider.validate",
+        fake_validate_ollama,
+    )
+
+    result = await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={
+                "command": "opencode-test",
+                "model": "ollama/qwen2.5:1.5b",
+            },
+        )
+    )
+
+    managed_config_path = (
+        tmp_path
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
+        / "org-14"
+        / "opencode-home"
+        / "agents"
+        / "agent-14"
+        / "home"
+        / ".config"
+        / "opencode"
+        / "opencode.json"
+    )
+    managed_config = json.loads(managed_config_path.read_text(encoding="utf-8"))
+    operator_config_after = json.loads(operator_config.read_text(encoding="utf-8"))
+    assert result.exit_code == 0
+    assert "ollama" not in operator_config_after["provider"]
+    provider = managed_config["provider"]["ollama"]
+    assert provider["name"] == "Ollama (local)"
+    assert provider["npm"] == "@ai-sdk/openai-compatible"
+    assert provider["options"]["baseURL"] == "http://127.0.0.1:11434/v1"
+    assert provider["models"]["qwen2.5:1.5b"]["name"] == "qwen2.5:1.5b"
+
+
+async def test_opencode_ollama_preflight_fails_before_process_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_validate_ollama(_provider: Any) -> str:
+        return 'Ollama model "missing:latest" is not installed.'
+
+    async def unexpected_create_subprocess_exec(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("OpenCode must not start after Ollama preflight failure")
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.ollama.LocalOllamaProvider.validate",
+        fake_validate_ollama,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        unexpected_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={
+                "command": "opencode-test",
+                "model": "ollama/missing:latest",
+            },
+        )
+    )
+
+    assert result.exit_code == 1
+    assert result.error_message == 'Ollama model "missing:latest" is not installed.'
 
 
 async def test_codex_and_claude_execute_use_database_provider_env(
