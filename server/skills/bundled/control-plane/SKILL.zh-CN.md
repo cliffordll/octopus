@@ -50,6 +50,8 @@ description: 通过 `octopus` CLI 与控制平面交互，在 heartbeat 中管�
 
 不要在 issue 没有 `reviewerAgentId` 时声称“已触发 reviewer”。没有任何 reviewer 时，`issue done` 会直接把任务改成 `done`，系统拒绝进入 `in_review`。只有 `reviewerUserId` 时进入人工评审，不会创建 reviewer agent run。
 
+当完成命令声明了 `--work-product` 或 `--primary-work-product` 时，Run 收尾会先验证文件真实存在，因此命令可能暂时返回 `in_progress`。只要命令执行成功，就表示关闭请求已经可靠记录，不要因为仍在验证而重复提交。声明的文件不存在时，Run 会失败，issue 会进入 `blocked`。
+
 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`：
 
 - 这次运行只用于补齐上一次成功运行缺失的 close-out 信号，不要先开始新的实现任务。

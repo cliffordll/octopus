@@ -11,6 +11,7 @@ from packages.shared.constants.heartbeat import HeartbeatRunStatus
 from packages.shared.types.heartbeat import HeartbeatRun
 
 if TYPE_CHECKING:
+    from .issue_completion import IssueCompletionResult
     from .parent_closeout_governance import ParentCloseoutResult
 
 
@@ -139,6 +140,38 @@ class RunFinalizationService:
         return await ParentCloseoutGovernance(
             self._host._session
         ).finalize_parent_output_request(run, issue, apply=False)
+
+    async def finalize_issue_completion(
+        self, run: HeartbeatRunRow, issue: IssueRow
+    ) -> "IssueCompletionResult":
+        from .issue_completion import IssueCompletionGovernance
+
+        result = await IssueCompletionGovernance(self._host._session).validate(
+            run, issue, apply=True
+        )
+        if result.completed:
+            await self._host._session.refresh(issue)
+            if issue.status == "in_review":
+                await self._host._queue_issue_review_wakeup_after_success(run, issue)
+        return result
+
+    async def validate_issue_completion(
+        self, run: HeartbeatRunRow, issue: IssueRow
+    ) -> "IssueCompletionResult":
+        from .issue_completion import IssueCompletionGovernance
+
+        return await IssueCompletionGovernance(self._host._session).validate(
+            run, issue, apply=False
+        )
+
+    async def block_failed_issue_completion(
+        self, run: HeartbeatRunRow, issue: IssueRow
+    ) -> bool:
+        from .issue_completion import IssueCompletionGovernance
+
+        return await IssueCompletionGovernance(
+            self._host._session
+        ).block_failed_request(run, issue)
 
 
 class RunRecoveryService:

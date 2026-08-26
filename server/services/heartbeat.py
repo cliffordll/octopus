@@ -97,6 +97,7 @@ from packages.database.clients.cleanup import (
 
 from .agents import AgentConflictError, prepare_agent_runtime_config
 from .costs import CostService
+from .issue_hierarchy import IssueHierarchyPolicy
 from .logs import (
     LogReadResult,
     append_local_file_log,
@@ -2691,14 +2692,28 @@ class HeartbeatService:
                     else None
                 )
                 if issue is not None and issue.org_id == running.org_id:
-                    closeout = await self.finalizer.validate_parent_closeout(
+                    parent_closeout = await self.finalizer.validate_parent_closeout(
                         running, issue
                     )
-                    if closeout.applicable and not closeout.completed:
-                        closeout_error = closeout.error or (
+                    if parent_closeout.applicable and not parent_closeout.completed:
+                        closeout_error = parent_closeout.error or (
                             "Parent closeout validation failed"
                         )
                         final_status = "failed"
+                    elif not parent_closeout.applicable:
+                        issue_completion = (
+                            await self.finalizer.validate_issue_completion(
+                                running, issue
+                            )
+                        )
+                        if (
+                            issue_completion.applicable
+                            and not issue_completion.completed
+                        ):
+                            closeout_error = issue_completion.error or (
+                                "Issue completion output validation failed"
+                            )
+                            final_status = "failed"
             final = await self.finalizer.transition(
                 running.id,
                 final_status,
@@ -3356,6 +3371,9 @@ class HeartbeatService:
             # this evidence before their terminal CAS; Recovery only reports
             # missing effects and never rewrites an authoritative terminal state.
             return final
+        issue_completion = await self.finalizer.finalize_issue_completion(final, issue)
+        if issue_completion.applicable:
+            return final
         if issue.assignee_agent_id == agent.id and issue.status == "done":
             has_unresolved_blocked_child = (
                 await self.parent_closeout.record_blocked_child_if_needed(final, issue)
@@ -3699,8 +3717,11 @@ class HeartbeatService:
             issue is None
             or issue.org_id != final.org_id
             or issue.assignee_agent_id != agent.id
-            or issue.status != "done"
         ):
+            return
+        if await self.finalizer.block_failed_issue_completion(final, issue):
+            return
+        if issue.status != "done":
             return
         missing_expected = (
             await self._record_done_missing_expected_work_product_if_needed(
@@ -3868,9 +3889,10 @@ class HeartbeatService:
             or original.invocation_source != "assignment"
         ):
             return False
-        issue = await self._lock_run_issue(final)
+        issue = await self._lock_run_issue_hierarchy(final)
         if issue is None or issue.status != "blocked":
             return False
+        await IssueHierarchyPolicy(self._session).assert_open_ancestors(issue)
         latest_status_change = await self._latest_issue_status_change(issue)
         if latest_status_change is None:
             return False
@@ -3919,13 +3941,14 @@ class HeartbeatService:
     ) -> bool:
         if running.status != "running" or running.invocation_source != "assignment":
             return False
-        issue = await self._lock_run_issue(running)
+        issue = await self._lock_run_issue_hierarchy(running)
         if (
             issue is None
             or issue.status != "blocked"
             or issue.assignee_agent_id != running.agent_id
         ):
             return False
+        await IssueHierarchyPolicy(self._session).assert_open_ancestors(issue)
         latest_status_change = await self._latest_issue_status_change(issue)
         if latest_status_change is None:
             return False
@@ -3939,7 +3962,7 @@ class HeartbeatService:
         if (
             blocked_activity.action != "issue.updated"
             or blocked_status != "blocked"
-            or details.get("reason") != "run_failed"
+            or details.get("reason") not in {"run_failed", "declared_outputs_missing"}
             or not isinstance(failed_run_id, str)
             or details.get("runId") != failed_run_id
         ):
@@ -3996,6 +4019,17 @@ class HeartbeatService:
                 .with_for_update()
             )
         ).scalar_one_or_none()
+
+    async def _lock_run_issue_hierarchy(self, run: HeartbeatRunRow) -> IssueRow | None:
+        issue_id = _issue_id_from_context(run.context_snapshot)
+        resolved_issue = (
+            await get_issue_by_id(self._session, issue_id) if issue_id else None
+        )
+        if resolved_issue is None or resolved_issue.org_id != run.org_id:
+            return None
+        return await IssueHierarchyPolicy(self._session).lock_root(
+            resolved_issue.id, resolved_issue.org_id
+        )
 
     async def _latest_issue_status_change(
         self, issue: IssueRow
