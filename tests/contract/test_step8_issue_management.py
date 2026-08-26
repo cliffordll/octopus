@@ -2163,6 +2163,37 @@ async def test_update_issue_route_returns_200_and_updates(
     assert body["status"] == "in_progress"
 
 
+async def test_agent_cannot_change_another_agents_issue_status(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    issue_id = await _seed_issue(
+        session,
+        org_id,
+        title="Parent task",
+        status="in_progress",
+        assignee_agent_id="parent-agent",
+    )
+
+    code, body = await _request(
+        app,
+        "PATCH",
+        f"/api/issues/{issue_id}",
+        json={"status": "blocked"},
+        headers={
+            "x-test-org-id": org_id,
+            "x-test-agent-id": "child-agent",
+        },
+    )
+
+    assert code == 403
+    assert body["detail"] == "Only the assigned Agent can change issue status"
+    row = await session.get_one(Issue, issue_id)
+    await session.refresh(row)
+    assert row.status == "in_progress"
+
+
 async def test_issue_heartbeat_context_route_returns_compact_issue_context(
     app: FastAPI,
     session: AsyncSession,

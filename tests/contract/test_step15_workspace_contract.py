@@ -3771,7 +3771,7 @@ async def test_parent_can_resubmit_existing_primary_work_product_for_closeout() 
         await engine.dispose()
 
 
-async def test_child_outputs_policy_closes_without_parent_continuation() -> None:
+async def test_child_outputs_policy_requires_parent_continuation() -> None:
     engine = create_database_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -3869,21 +3869,29 @@ async def test_child_outputs_policy_closes_without_parent_continuation() -> None
                 )
             ).scalar_one_or_none()
             await session.refresh(parent)
-            closeout = (
+            settled = (
                 await session.execute(
                     select(ActivityLog).where(
                         ActivityLog.entity_id == parent.id,
-                        ActivityLog.action == "issue.child_outputs_closeout_completed",
+                        ActivityLog.action == "issue.children_settled",
                     )
                 )
             ).scalar_one()
 
-            assert continuation is None
-            assert parent.status == "done"
-            assert closeout.details["delegationOriginRunId"] == batch_run_id
-            assert set(closeout.details["childIssueIds"]) == {
-                child.id for child in children
+            assert continuation is not None
+            assert continuation.agent_id == parent_agent.id
+            assert continuation.context_snapshot["wakeReason"] == (
+                "issue_children_settled"
+            )
+            assert continuation.context_snapshot["delegationOriginRunId"] == (
+                batch_run_id
+            )
+            assert continuation.context_snapshot["closeoutPolicy"] == {
+                "version": 1,
+                "mode": "child_outputs_are_final",
             }
+            assert parent.status == "in_progress"
+            assert settled.details["delegationOriginRunId"] == batch_run_id
     finally:
         await engine.dispose()
 

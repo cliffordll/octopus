@@ -1420,7 +1420,7 @@ def _build_child_work_products_prompt(
         lines.extend(
             [
                 "",
-                "These child deliverables are the final outputs for this delegation batch. Verify them and close the parent issue without creating a duplicate parent summary artifact.",
+                "These child deliverables are the final outputs for this delegation batch. The parent Agent must review and summarize the child results, record the parent closeout, and then close the parent issue without creating a duplicate parent artifact.",
             ]
         )
     else:

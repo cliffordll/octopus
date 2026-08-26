@@ -266,7 +266,8 @@ def test_runtime_prompt_describes_child_outputs_are_final_policy() -> None:
 
     assert "Closeout policy: child outputs are final" in prompt
     assert "child deliverables are the final outputs" in prompt
-    assert "without creating a duplicate parent summary artifact" in prompt
+    assert "As the parent Agent, verify and summarize every child result" in prompt
+    assert "without creating a duplicate parent artifact" in prompt
     assert "Produce a parent-owned final report" not in prompt
 
 

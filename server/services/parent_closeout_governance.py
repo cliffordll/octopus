@@ -31,23 +31,6 @@ class ParentCloseoutGovernance:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def is_automatic_closeout_block(
-        self, parent: Issue, batch: DelegationBatch
-    ) -> bool:
-        rows = await self._session.execute(
-            select(ActivityLog.details).where(
-                ActivityLog.org_id == parent.org_id,
-                ActivityLog.entity_type == "issue",
-                ActivityLog.entity_id == parent.id,
-                ActivityLog.action == "issue.child_outputs_closeout_failed",
-            )
-        )
-        return any(
-            isinstance(details, dict)
-            and details.get("delegationOriginRunId") == batch.origin_run_id
-            for details in rows.scalars().all()
-        )
-
     async def record_closeout_request_if_required(
         self,
         parent: Issue,
@@ -299,88 +282,6 @@ class ParentCloseoutGovernance:
         )
         return ParentCloseoutResult(applicable=True, completed=True)
 
-    async def complete_child_outputs(
-        self,
-        parent: Issue,
-        batch: DelegationBatch,
-        *,
-        child_run_id: str | None,
-        child_agent_id: str | None,
-    ) -> ParentCloseoutResult:
-        if batch.closeout_policy["mode"] != "child_outputs_are_final":
-            return ParentCloseoutResult(applicable=False, completed=False)
-        locked_parent = (
-            await self._session.execute(
-                select(Issue)
-                .where(Issue.id == parent.id, Issue.org_id == parent.org_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-        ).scalar_one_or_none()
-        if locked_parent is None:
-            return ParentCloseoutResult(applicable=False, completed=False)
-        parent = locked_parent
-        prior = await self._automatic_closeout_result(parent, batch)
-        if prior is not None:
-            return prior
-        open_children = [
-            child
-            for child in batch.children
-            if child.status in {"backlog", "todo", "in_progress", "in_review"}
-        ]
-        if open_children:
-            return ParentCloseoutResult(applicable=True, completed=False)
-        accepted = await self._accepted_incomplete_child_ids(parent, batch)
-        blocked = [
-            child
-            for child in batch.children
-            if child.status in {"blocked", "cancelled"} and child.id not in accepted
-        ]
-        missing = await self._children_missing_primary_outputs(list(batch.children))
-        if blocked or missing:
-            reason = (
-                "Delegated child issues are blocked or cancelled: "
-                + self._child_labels(blocked)
-                if blocked
-                else "Completed child issues have no primary output: "
-                + self._child_labels(
-                    [child for child in batch.children if child.id in set(missing)]
-                )
-            )
-            if parent.status != "blocked":
-                await update_issue(
-                    self._session,
-                    parent.id,
-                    {"status": "blocked", "completed_at": None},
-                )
-            await self._record_automatic_closeout(
-                parent,
-                batch,
-                action="issue.child_outputs_closeout_failed",
-                run_id=child_run_id,
-                agent_id=child_agent_id,
-                details={"error": reason, "missingChildIssueIds": missing},
-            )
-            return ParentCloseoutResult(applicable=True, completed=False, error=reason)
-        target_status = (
-            "in_review"
-            if parent.reviewer_agent_id or parent.reviewer_user_id
-            else "done"
-        )
-        values: dict[str, Any] = {"status": target_status}
-        if target_status == "done":
-            values["completed_at"] = datetime.now(UTC)
-        await update_issue(self._session, parent.id, values)
-        await self._record_automatic_closeout(
-            parent,
-            batch,
-            action="issue.child_outputs_closeout_completed",
-            run_id=child_run_id,
-            agent_id=child_agent_id,
-            details={"status": target_status},
-        )
-        return ParentCloseoutResult(applicable=True, completed=True)
-
     async def block_for_unresolved_children(
         self, run: HeartbeatRun, parent: Issue
     ) -> bool:
@@ -588,26 +489,6 @@ class ParentCloseoutGovernance:
         )
         return list(result.scalars().all())
 
-    async def _children_missing_primary_outputs(
-        self, children: list[Issue]
-    ) -> list[str]:
-        completed_child_ids = [child.id for child in children if child.status == "done"]
-        if not completed_child_ids:
-            return []
-        rows = await self._session.execute(
-            select(IssueWorkProduct.issue_id).where(
-                IssueWorkProduct.issue_id.in_(completed_child_ids),
-                IssueWorkProduct.is_primary.is_(True),
-                IssueWorkProduct.status.in_(("active", "ready")),
-            )
-        )
-        child_ids_with_products = set(rows.scalars().all())
-        return [
-            child_id
-            for child_id in completed_child_ids
-            if child_id not in child_ids_with_products
-        ]
-
     async def _closeout_request(
         self, run: HeartbeatRun, parent: Issue
     ) -> dict[str, Any] | None:
@@ -662,77 +543,6 @@ class ParentCloseoutGovernance:
             }
             matched.update(declared_paths & product_paths)
         return matched
-
-    async def _record_automatic_closeout(
-        self,
-        parent: Issue,
-        batch: DelegationBatch,
-        *,
-        action: str,
-        run_id: str | None,
-        agent_id: str | None,
-        details: dict[str, Any],
-    ) -> None:
-        existing = await self._session.execute(
-            select(ActivityLog.details).where(
-                ActivityLog.org_id == parent.org_id,
-                ActivityLog.entity_type == "issue",
-                ActivityLog.entity_id == parent.id,
-                ActivityLog.action == action,
-            )
-        )
-        if any(
-            isinstance(item, dict)
-            and item.get("delegationOriginRunId") == batch.origin_run_id
-            for item in existing.scalars().all()
-        ):
-            return
-        await insert_activity_log(
-            self._session,
-            org_id=parent.org_id,
-            actor_type="system",
-            actor_id="run_finalization_service",
-            action=action,
-            entity_type="issue",
-            entity_id=parent.id,
-            agent_id=agent_id,
-            run_id=run_id,
-            details={
-                "delegationOriginRunId": batch.origin_run_id,
-                "closeoutPolicy": batch.closeout_policy,
-                "childIssueIds": [child.id for child in batch.children],
-                **details,
-            },
-        )
-
-    async def _automatic_closeout_result(
-        self, parent: Issue, batch: DelegationBatch
-    ) -> ParentCloseoutResult | None:
-        rows = await self._session.execute(
-            select(ActivityLog.action, ActivityLog.details).where(
-                ActivityLog.org_id == parent.org_id,
-                ActivityLog.entity_type == "issue",
-                ActivityLog.entity_id == parent.id,
-                ActivityLog.action.in_(
-                    (
-                        "issue.child_outputs_closeout_completed",
-                        "issue.child_outputs_closeout_failed",
-                    )
-                ),
-            )
-        )
-        for action, details in rows.all():
-            if (
-                isinstance(details, dict)
-                and details.get("delegationOriginRunId") == batch.origin_run_id
-            ):
-                if action == "issue.child_outputs_closeout_completed":
-                    return ParentCloseoutResult(applicable=True, completed=True)
-                # A failed attempt is recoverable evidence, not a final batch
-                # result. Human acceptance or a newly registered output may
-                # make this same batch valid on a later reconciliation.
-                continue
-        return None
 
     @staticmethod
     def _child_labels(children: list[Issue]) -> str:
