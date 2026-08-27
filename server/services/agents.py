@@ -1002,26 +1002,31 @@ class AgentService:
         if "desiredSkills" in patch:
             desired_skills = cast(list[str], patch.pop("desiredSkills"))
         replace_runtime_config = patch.pop("replaceAgentRuntimeConfig", False)
-        if "agentRuntimeConfig" in patch and not replace_runtime_config:
-            patch["agentRuntimeConfig"] = {
-                **existing.agent_runtime_config,
-                **cast(dict[str, Any], patch["agentRuntimeConfig"]),
-            }
-        if "agentRuntimeConfig" in patch:
-            patch["agentRuntimeConfig"] = normalize_instructions_paths(
-                cast(dict[str, Any], patch["agentRuntimeConfig"])
-            )
         next_runtime_type = cast(
             str, patch.get("agentRuntimeType", existing.agent_runtime_type)
         )
-        candidate_runtime_config = _runtime_config_after_switch(
-            existing.agent_runtime_type,
-            next_runtime_type,
-            cast(
-                dict[str, Any],
-                patch.get("agentRuntimeConfig", existing.agent_runtime_config),
-            ),
-        )
+        if "agentRuntimeConfig" in patch:
+            submitted_runtime_config = normalize_instructions_paths(
+                cast(dict[str, Any], patch["agentRuntimeConfig"])
+            )
+            if replace_runtime_config:
+                candidate_runtime_config = submitted_runtime_config
+            else:
+                preserved_runtime_config = _runtime_config_after_switch(
+                    existing.agent_runtime_type,
+                    next_runtime_type,
+                    existing.agent_runtime_config,
+                )
+                candidate_runtime_config = {
+                    **preserved_runtime_config,
+                    **submitted_runtime_config,
+                }
+        else:
+            candidate_runtime_config = _runtime_config_after_switch(
+                existing.agent_runtime_type,
+                next_runtime_type,
+                existing.agent_runtime_config,
+            )
         next_runtime_config = _normalize_runtime_config_defaults(
             next_runtime_type,
             candidate_runtime_config,
