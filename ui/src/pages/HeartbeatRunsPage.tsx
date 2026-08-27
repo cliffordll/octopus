@@ -7,7 +7,7 @@ import type { Agent, HeartbeatRun } from "../api/types";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusPill } from "../components/StatusPill";
 import { roleLabel, statusLabel } from "../utils/display";
-import { runDescriptor, runIssueLabel, runPurposeLabel } from "../utils/runDisplay";
+import { runDescriptor, runIssueLabel, runPurposeLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
 import { OrgWorkspace } from "./OrganizationPage";
 
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
@@ -15,11 +15,6 @@ const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
-}
-
-function humanize(value?: string | null): string {
-  if (!value) return "none";
-  return statusLabel(value);
 }
 
 function relativeTime(value?: string | null): string {
@@ -45,6 +40,8 @@ function formatDateTime(value?: string | null): string | undefined {
 
 function latestRunSummary(run: HeartbeatRun | null): string | null {
   if (!run) return null;
+  const terminalReason = runTerminalReasonLabel(run);
+  if (terminalReason) return terminalReason;
   if (run.error?.trim()) return run.error.trim();
   const result = asRecord(run.resultJson);
   for (const key of ["summary", "result", "message"]) {
@@ -324,7 +321,7 @@ export function HeartbeatRunsPage() {
                     to={`/orgs/${run.orgId}/agents/${run.agentId}/runs/${run.id}`}
                   >
                     <div className="heartbeat-activity-heading">
-                      <StatusPill status={run.status}>{humanize(run.status)}</StatusPill>
+                      <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
                       <small>{agentNameById.get(run.agentId) ?? "未知智能体"}</small>
                     </div>
                     <p className="heartbeat-activity-meta" title={runDescriptor(run)}>{runPurposeLabel(run)} · {runDescriptor(run)}</p>

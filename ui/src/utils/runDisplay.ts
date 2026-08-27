@@ -1,5 +1,5 @@
 import type { HeartbeatRun } from "../api/types";
-import { sourceLabel } from "./display";
+import { sourceLabel, statusLabel } from "./display";
 
 function normalize(value: string | null | undefined): string {
   return value?.trim() ?? "";
@@ -28,6 +28,21 @@ const RUN_PHASE_LABELS: Record<string, string> = {
   issue_status_changed: "任务状态变更后执行",
   issue_changes_requested: "修改请求后执行",
 };
+
+const RUN_TERMINAL_REASON_LABELS: Record<string, string> = {
+  review_resolved_by_human: "评审已由人工完成",
+  review_superseded_by_another_run: "已被其他评审结论替代",
+};
+
+export function runTerminalReasonLabel(run: Pick<HeartbeatRun, "errorCode"> | null | undefined): string | null {
+  const errorCode = normalize(run?.errorCode);
+  return errorCode ? RUN_TERMINAL_REASON_LABELS[errorCode] ?? null : null;
+}
+
+export function runStatusLabel(run: Pick<HeartbeatRun, "status" | "errorCode"> | null | undefined): string {
+  if (!run) return "-";
+  return runTerminalReasonLabel(run) ?? statusLabel(run.status);
+}
 
 export function runPhaseLabel(run: Pick<HeartbeatRun, "contextSnapshot" | "triggerDetail" | "retryOfRunId" | "processLossRetryCount"> | null | undefined): string | null {
   if (!run) return null;

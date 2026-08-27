@@ -1225,7 +1225,9 @@ async def record_issue_review_decision_route(
         )
     await heartbeat.cancel_open_issue_review_wakeups(
         id,
-        reason="review already resolved",
+        resolving_actor_type=actor.actor_type,
+        resolving_actor_id=actor.actor_id,
+        resolving_run_id=actor.run_id,
     )
     return updated
 

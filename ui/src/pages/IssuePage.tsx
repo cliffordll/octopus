@@ -63,7 +63,7 @@ import { StatusPill } from "../components/StatusPill";
 
 import { formatBytes, formatDateTime, formatMoneyCents, priorityLabel, runErrorMessage, sourceLabel, statusLabel } from "../utils/display";
 
-import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPhaseLabel, runPurposeLabel, runWakeReason } from "../utils/runDisplay";
+import { isPassiveFollowupRun, isTaskExecutionRun, runDescriptor, runIssueLabel, runPhaseLabel, runPurposeLabel, runStatusLabel, runTerminalReasonLabel, runWakeReason } from "../utils/runDisplay";
 
 import { writeRecentIssue } from "../utils/recentIssues";
 
@@ -1123,6 +1123,10 @@ function runSummary(run: HeartbeatRun | null): string {
 
   if (!run) return "暂无运行记录";
 
+  const terminalReason = runTerminalReasonLabel(run);
+
+  if (terminalReason) return terminalReason;
+
   const error = runErrorMessage(run.error);
 
   if (run.status === "cancelled" && error === "run cancelled") return isPassiveFollowupRun(run) ? "已停止" : "已取消";
@@ -1157,15 +1161,19 @@ function latestRunStatusText(run: HeartbeatRun | null | undefined): string {
 
   if (!run) return "";
 
-  if (run.status === "cancelled") return isPassiveFollowupRun(run) ? "已停止" : "已取消";
+  if (run.status === "cancelled") return runTerminalReasonLabel(run) ?? (isPassiveFollowupRun(run) ? "已停止" : "已取消");
 
   return statusLabel(run.status);
 
 }
 
-function isUserCancelledRun(run: HeartbeatRun | null | undefined): boolean {
+function isExpectedCancelledRun(run: HeartbeatRun | null | undefined): boolean {
 
-  return Boolean(run && run.status === "cancelled" && runErrorMessage(run.error) === "run cancelled");
+  return Boolean(
+    run &&
+    run.status === "cancelled" &&
+    (runErrorMessage(run.error) === "run cancelled" || runTerminalReasonLabel(run)),
+  );
 
 }
 
@@ -2113,7 +2121,7 @@ function IssueQueueStatusPanel({
 
             <small title={runDescriptor(run)}>{runDescriptor(run)}</small>
             {queueRunIssueLabel(run) && <small>{queueRunIssueLabel(run)}</small>}
-            <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+            <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
           </article>))}
       </div>
       <Link className="button secondary small-button" to={`/orgs/${orgId}/agents/${issue.assigneeAgentId}/runs`}>打开负责人运行页</Link>
@@ -2714,7 +2722,7 @@ function IssueRunsPanel({
 
                       {phaseLabel && <span className="badge" title={wakeReason ? `原始触发原因：${wakeReason}` : undefined}>阶段 {phaseLabel}</span>}
 
-                      <StatusPill status={displayRun.status}>{statusLabel(displayRun.status)}</StatusPill>
+                      <StatusPill status={displayRun.status}>{runStatusLabel(displayRun)}</StatusPill>
 
                     </span>
 
@@ -3132,7 +3140,7 @@ function IssueRunOutputPanel({
 
   const run = data.run.data ?? null;
 
-  const suppressUserCancelError = isUserCancelledRun(run);
+  const suppressExpectedCancellationError = isExpectedCancelledRun(run);
 
   const events = data.events.data ?? [];
 
@@ -3296,7 +3304,7 @@ function IssueRunOutputPanel({
         <div className="issue-run-execution-content">
           {beforeContent}
 
-          {run?.error && !suppressUserCancelError && <ErrorNotice error={run.error} />}
+          {run?.error && !suppressExpectedCancellationError && <ErrorNotice error={run.error} />}
           {data.events.error && <ErrorNotice error={data.events.error} />}
           {data.operations.error && <ErrorNotice error={data.operations.error} />}
           {runLog.error && <ErrorNotice error={runLog.error} />}
@@ -4597,7 +4605,7 @@ export function IssuePage() {
 
   const latestRunErrorNotice =
 
-    latestRun && isUserCancelledRun(latestRun)
+    latestRun && isExpectedCancelledRun(latestRun)
 
       ? null
 

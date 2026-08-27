@@ -138,6 +138,8 @@ ISSUE_PASSIVE_FOLLOWUP_FAILURE_REASON = "missing_closure"
 ISSUE_PASSIVE_FOLLOWUP_MAX_ATTEMPTS = 2
 ISSUE_PASSIVE_FOLLOWUP_DELAY_ENV = "OCTOPUS_ISSUE_PASSIVE_FOLLOWUP_DELAY_SECONDS"
 ISSUE_PASSIVE_FOLLOWUP_DELAY_DEFAULT_SECONDS = 30 * 60
+REVIEW_RESOLVED_BY_HUMAN_CODE = "review_resolved_by_human"
+REVIEW_SUPERSEDED_BY_ANOTHER_RUN_CODE = "review_superseded_by_another_run"
 RUN_RECOVERY_GRACE_SECONDS = 5 * 60
 HUMAN_INTERVENTION_ACTOR_TYPES = {"board", "user"}
 WAKEUP_TRIGGER_DETAIL_VALUES = {"manual", "ping", "callback", "system"}
@@ -880,11 +882,27 @@ class HeartbeatService:
         return skipped
 
     async def cancel_open_issue_review_wakeups(
-        self, issue_id: str, *, reason: str
+        self,
+        issue_id: str,
+        *,
+        resolving_actor_type: str,
+        resolving_actor_id: str,
+        resolving_run_id: str | None,
     ) -> bool:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None or not issue.reviewer_agent_id:
             return False
+        resolved_by_human = resolving_actor_type in HUMAN_INTERVENTION_ACTOR_TYPES
+        reason_code = (
+            REVIEW_RESOLVED_BY_HUMAN_CODE
+            if resolved_by_human
+            else REVIEW_SUPERSEDED_BY_ANOTHER_RUN_CODE
+        )
+        reason = (
+            "review resolved by human"
+            if resolved_by_human
+            else "review superseded by another reviewer run"
+        )
         cancelled_any = False
         now = datetime.now(UTC)
         for status in ("queued", "claimed"):
@@ -898,6 +916,8 @@ class HeartbeatService:
                     and wakeup.reason == "issue_review_requested"
                     and payload.get("issueId") == issue.id
                 ):
+                    if resolving_run_id and wakeup.run_id == resolving_run_id:
+                        continue
                     await update_wakeup_request(
                         self._session,
                         wakeup.id,
@@ -921,7 +941,7 @@ class HeartbeatService:
                                     "status": "cancelled",
                                     "finished_at": now,
                                     "error": reason,
-                                    "error_code": "cancelled",
+                                    "error_code": reason_code,
                                 },
                             )
                             if was_running and cancelled is not None:
@@ -931,6 +951,12 @@ class HeartbeatService:
                                     "lifecycle",
                                     message=reason,
                                     level="warning",
+                                    payload={
+                                        "reasonCode": reason_code,
+                                        "resolvedByActorType": resolving_actor_type,
+                                        "resolvedByActorId": resolving_actor_id,
+                                        "resolvingRunId": resolving_run_id,
+                                    },
                                 )
                                 await WorkspaceService(
                                     self._session
