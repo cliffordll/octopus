@@ -237,11 +237,7 @@ export function AppShell() {
                 关闭
               </button>
             </div>
-            {selectedOrganizationId ? (
-              <OrganizationSettingsPanel orgId={selectedOrganizationId} />
-            ) : (
-              <p className="muted">请选择组织后再配置模型供应商。</p>
-            )}
+            <OrganizationSettingsPanel orgId={selectedOrganizationId} />
           </div>
         </div>
       )}

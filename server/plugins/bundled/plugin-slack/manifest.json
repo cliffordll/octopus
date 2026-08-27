@@ -1,0 +1,54 @@
+{
+  "id": "slack.connector",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Slack",
+  "description": "Integration contract fixture for workspace installation, message events, commands, and notifications.",
+  "author": "Octopus",
+  "categories": ["connector", "communication"],
+  "capabilities": [
+    "http.outbound",
+    "secrets.read-ref",
+    "events.emit",
+    "events.subscribe",
+    "agent.sessions.create",
+    "agent.sessions.send",
+    "webhooks.receive",
+    "instance.settings.register",
+    "activity.log.write"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "instanceConfigSchema": {
+    "type": "object",
+    "required": ["botTokenSecretRef", "signingSecretRef"],
+    "properties": {
+      "botTokenSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      },
+      "signingSecretRef": {
+        "type": "string",
+        "format": "secret-ref"
+      }
+    }
+  },
+  "webhooks": [
+    {
+      "endpointKey": "events",
+      "displayName": "Slack Events"
+    }
+  ],
+  "ui": {
+    "slots": [
+      {
+        "type": "settingsPage",
+        "id": "slack-settings",
+        "displayName": "Slack",
+        "exportName": "SlackSettings"
+      }
+    ]
+  }
+}

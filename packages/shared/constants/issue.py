@@ -35,11 +35,22 @@ ISSUE_PRIORITIES: tuple[IssuePriority, ...] = (
 
 DEFAULT_ISSUE_PRIORITY: IssuePriority = "medium"
 
-IssueOriginKind = Literal["manual", "automation_execution"]
+IssueOriginKind = Literal["manual", "automation_execution", "delegation"]
 
 ISSUE_ORIGIN_KINDS: tuple[IssueOriginKind, ...] = (
     "manual",
     "automation_execution",
+    "delegation",
 )
 
 DEFAULT_ISSUE_ORIGIN_KIND: IssueOriginKind = "manual"
+
+DelegationCloseoutPolicyMode = Literal[
+    "child_outputs_are_final",
+    "parent_output_required",
+]
+
+DELEGATION_CLOSEOUT_POLICY_MODES: tuple[DelegationCloseoutPolicyMode, ...] = (
+    "child_outputs_are_final",
+    "parent_output_required",
+)

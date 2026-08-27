@@ -7,6 +7,7 @@ import type {
   IssueDocumentRevision,
   IssueDocumentSummary,
   IssueDetail,
+  IssueChildrenResponse,
   IssueFilters,
   IssueListItem,
   IssueReviewDecision,
@@ -37,6 +38,10 @@ export const issuesApi = {
   },
   get: (issueId: string): Promise<IssueDetail> =>
     request<IssueDetail>(issueRoot(issueId), { method: "GET" }),
+  children: (issueId: string, includeWorkProducts = false): Promise<IssueChildrenResponse> => {
+    const query = includeWorkProducts ? "?includeWorkProducts=true" : "";
+    return request<IssueChildrenResponse>(`${issueRoot(issueId)}/children${query}`, { method: "GET" });
+  },
   listDocuments: (issueId: string): Promise<IssueDocumentSummary[]> =>
     request<IssueDocumentSummary[]>(`${issueRoot(issueId)}/documents`, { method: "GET" }),
   getDocument: (issueId: string, key: string): Promise<IssueDocument> =>

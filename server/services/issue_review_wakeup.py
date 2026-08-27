@@ -64,7 +64,7 @@ def build_issue_review_wakeup_payload(
             "reviewInstructions": (
                 f"{blocked_instructions} Record one structured reviewer decision "
                 "before exiting: approve, request_changes, needs_followup, or "
-                "blocked. Use `control-plane issue review`; do not rely on a "
+                "blocked. Use `octopus issue review`; do not rely on a "
                 "free-form comment as the durable outcome. Do not take over "
                 "implementation unless explicitly asked."
             ),

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$HostAddress = "127.0.0.1",
     [int]$ServerPort = $(if ($env:OCTOPUS_PORT) { [int]$env:OCTOPUS_PORT } else { 8000 }),
     [int]$UiPort = 5175
@@ -144,6 +144,9 @@ if (-not $env:OCTOPUS_HOST) {
 }
 if (-not $env:OCTOPUS_PORT) {
     $env:OCTOPUS_PORT = [string]$ServerPort
+}
+if (-not $env:OCTOPUS_HOME) {
+    $env:OCTOPUS_HOME = Join-Path $RepoRoot ".octopus"
 }
 if (-not $env:OCTOPUS_AUTO_MIGRATE) {
     $env:OCTOPUS_AUTO_MIGRATE = "1"

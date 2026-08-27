@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_PROVIDER_RUNTIMES, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
+import { applyRuntimeModelConfig, MODEL_PROVIDER_RUNTIMES, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 describe("runtime model references", () => {
   it("uses the server provider id when model id is provider-local", () => {
@@ -37,5 +37,30 @@ describe("runtime model references", () => {
     expect(supportsRuntimeModels("openclaw_local")).toBe(true);
     expect(supportsRuntimeModels("openclaw_gateway")).toBe(false);
     expect(supportsRuntimeModels("process")).toBe(false);
+  });
+
+  it("clears runtime-specific values when switching adapters", () => {
+    expect(runtimeConfigAfterSwitch(
+      {
+        model: "ollama/qwen2.5:1.5b",
+        command: "opencode",
+        extraArgs: ["--dangerously-skip-permissions"],
+        timeoutSec: 60,
+        instructionsEntryFile: "SOUL.md",
+      },
+      "opencode_local",
+      "codex_local",
+    )).toEqual({ timeoutSec: 60, instructionsEntryFile: "SOUL.md" });
+  });
+
+  it("uses the Codex CLI default model and removes OpenCode arguments", () => {
+    expect(applyRuntimeModelConfig(
+      {
+        model: "ollama/qwen2.5:1.5b",
+        extraArgs: ["--verbose", "--dangerously-skip-permissions"],
+      },
+      "codex_local",
+      "",
+    )).toEqual({ extraArgs: ["--verbose"] });
   });
 });

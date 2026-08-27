@@ -8,7 +8,7 @@
 
 EPAI/POD 写入链路需要生产级数据库能力，不能依赖 SQLite 的单写者锁模型。为避免把数据库差异泄漏到业务 service，本步骤单独收口数据库操作接口、方言兼容和测试矩阵。
 
-另一个需要同步收口的问题是数据库位置与上游 instance layout 对齐。上游 Rudder 默认使用 embedded PostgreSQL，并把数据库 cluster 放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db`。Octopus 即使继续支持 SQLite，也应保持同样的 instance-scoped 语义：SQLite 文件默认放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，而不是随进程 cwd 生成 `./octopus.db`。关键约束是 DB、workspace、runtime home、storage、run logs 和 server logs 必须属于同一个 instance root。详细路径问题记录见 `docs/analyze/agent-runtime-bugs.md` 的 Bug 12。
+另一个需要同步收口的问题是数据库位置与上游 instance layout 对齐。上游 upstream reference 默认使用 embedded PostgreSQL，并把数据库 cluster 放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db`。Octopus 即使继续支持 SQLite，也应保持同样的 instance-scoped 语义：SQLite 文件默认放在 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`，而不是随进程 cwd 生成 `./octopus.db`。关键约束是 DB、workspace、runtime home、storage、run logs 和 server logs 必须属于同一个 instance root。详细路径问题记录见 `docs/analyze/agent-runtime-bugs.md` 的 Bug 12。
 
 ## 目标
 
@@ -20,9 +20,24 @@ EPAI/POD 写入链路需要生产级数据库能力，不能依赖 SQLite 的单
 routes
   -> services
     -> packages/database/queries 统一数据操作接口
-      -> packages/database dialect/helper 处理方言差异
-        -> SQLite / PostgreSQL / MySQL
+      -> packages/database/clients 统一事务与连接生命周期
+        -> database transaction coordinator 选择并发策略
+          -> packages/database dialect/helper 处理方言差异
+            -> SQLite / PostgreSQL / MySQL
 ```
+
+数据库事务层对所有数据库都生效，但并发策略不同：
+
+- SQLite：Session 第一次实际写入前取得同一 engine 的进程内写许可，持有到
+  commit/rollback/close；读取不取许可，Adapter 运行也不持有许可。
+- PostgreSQL/MySQL：不使用进程级全局写锁，继续依赖数据库原生并发事务、
+  行锁、唯一约束和 CAS。
+- request、Scheduler、Dispatcher、Run Recovery 使用同一个 Session factory 和
+  transaction helper，不能各自实现提交/回滚规则。
+
+该协调层解决单个 Octopus server 进程内的 SQLite 写竞争。多进程共同写一个
+SQLite 文件仍只受 `busy_timeout` 保护，不作为生产并发承诺；生产或多实例部署
+继续推荐 PostgreSQL。
 
 ## 任务
 
@@ -32,7 +47,7 @@ routes
   - MySQL：兼容生产路径。
 - 对齐数据库位置和 instance layout：
   - 显式设置 `OCTOPUS_HOME` 时，以显式配置为准。
-  - 未设置 `OCTOPUS_HOME` 时，默认 home 仍是用户目录下的 `.octopus`，与上游默认 `~/.rudder` 语义对齐。
+  - 未设置 `OCTOPUS_HOME` 时，默认 home 仍是用户目录下的 `.octopus`，与上游默认 `~/.upstream-reference` 语义对齐。
   - SQLite 默认 URL 不再是 `sqlite+aiosqlite:///./octopus.db`；应解析为 `<OCTOPUS_HOME>/instances/<OCTOPUS_INSTANCE_ID>/db/octopus.db`。
   - 本地开发若显式设置 `OCTOPUS_HOME=.octopus`，SQLite 默认文件应为 `<当前目录>/.octopus/instances/default/db/octopus.db`。
   - 使用 PostgreSQL/MySQL 外部连接时，数据库连接不会携带文件侧 instance root；部署配置或启动器必须显式绑定 `OCTOPUS_HOME` / `OCTOPUS_INSTANCE_ID`。
@@ -85,6 +100,10 @@ routes
 - engine factory 已按 dialect 配置 SQLite/PostgreSQL/MySQL：SQLite 自动创建父目录并保留 pragma，PostgreSQL/MySQL 启用连接健康检查，MySQL 使用 `utf8mb4` 和连接 recycle。
 - 已加入 MySQL async driver：`asyncmy`。
 - 已新增 `packages/database/queries/_compat.py`，用于 query 层收口跨数据库 `RETURNING` 差异。
+- 已新增统一数据库事务协调层：所有生产 Session 由
+  `CoordinatedAsyncSession` 创建；SQLite 写事务进入单写者队列，读取保持并行，
+  PostgreSQL/MySQL 保持原生并发；request、Scheduler、Dispatcher 和 Recovery 的
+  commit/rollback/close 统一经过 Session 生命周期。
 - 已改造当前阻塞面核心写路径：agents、chats、issues、organization skills，以及 issue counter / checkout issue。
 - MySQL migration 已处理 baseline partial unique index 的直接兼容问题：MySQL 路径降级为普通非唯一索引，并在 migration README 记录等价约束待补。
 - README、UI README、CLI README、migration README 和相关历史分析文档已同步默认 SQLite layout、PostgreSQL/MySQL 连接串和外部数据库与 instance root 的关系。
@@ -106,7 +125,7 @@ routes
 
 这会造成一个明显的使用问题：用户在一个 organization 里录入 provider、api key、base URL 和 models 后，切换到另一个 organization 还需要重新录入。provider/model 连接配置本质上可以在当前 Octopus instance 内复用，而 organization 更适合只保存默认选择或私有覆盖。
 
-本子步骤不引入真实 user scope。真实用户、权限和 secret store 仍归 Step 29；本步骤只先建立 `global + organization + agent override` 的数据模型和解析规则。
+本子步骤不引入真实 user scope。真实用户、权限和 secret store 仍归 Step 30；本步骤只先建立 `global + organization + agent override` 的数据模型和解析规则。
 
 ### 目标
 
@@ -217,7 +236,7 @@ unique(scope_type, scope_id, runtime_type)
 ### 边界
 
 - 不实现真实 user-level provider/model。
-- 不实现 secret store、secret rotation 或 user credential isolation；这些归 Step 29。
+- 不实现 secret store、secret rotation 或 user credential isolation；这些归 Step 30。
 - 不把 global 理解为跨 instance 或跨部署共享；global 只表示当前 Octopus instance 内共享。
 - 不重做 Step 27 cost 或 Step 28 quota/governance。
 

@@ -1,4 +1,4 @@
-# Step 19: Attachment / Storage
+﻿# Step 19: Attachment / Storage
 
 状态：已完成
 
@@ -18,19 +18,19 @@
 
 开发前必须对照以下上游文件，不得自定义新的 storage/attachment 模型：
 
-- `D:\coding\rudder\server\src\storage\types.ts`
-- `D:\coding\rudder\server\src\storage\service.ts`
-- `D:\coding\rudder\server\src\storage\local-disk-provider.ts`
-- `D:\coding\rudder\server\src\routes\assets.ts`
-- `D:\coding\rudder\server\src\routes\chats.ts`
-- `D:\coding\rudder\server\src\routes\issues.ts`
-- `D:\coding\rudder\server\src\services\assets.ts`
-- `D:\coding\rudder\packages\db\src\schema\assets.ts`
-- `D:\coding\rudder\packages\db\src\schema\chat_attachments.ts`
-- `D:\coding\rudder\packages\db\src\schema\issue_attachments.ts`
-- `D:\coding\rudder\packages\shared\src\types\asset.ts`
-- `D:\coding\rudder\packages\shared\src\types\chat.ts`
-- `D:\coding\rudder\packages\shared\src\types\issue.ts`
+- `D:\coding\upstream-reference\server\src\storage\types.ts`
+- `D:\coding\upstream-reference\server\src\storage\service.ts`
+- `D:\coding\upstream-reference\server\src\storage\local-disk-provider.ts`
+- `D:\coding\upstream-reference\server\src\routes\assets.ts`
+- `D:\coding\upstream-reference\server\src\routes\chats.ts`
+- `D:\coding\upstream-reference\server\src\routes\issues.ts`
+- `D:\coding\upstream-reference\server\src\services\assets.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\assets.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\chat_attachments.ts`
+- `D:\coding\upstream-reference\packages\db\src\schema\issue_attachments.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\asset.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\chat.ts`
+- `D:\coding\upstream-reference\packages\shared\src\types\issue.ts`
 
 ## 本地现状
 

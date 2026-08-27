@@ -16,25 +16,25 @@
 
 ## 上游证据
 
-- `D:\coding\rudder\packages\agent-runtimes\opencode-local\`
-- `D:\coding\rudder\packages\agent-runtimes\codex-local\`
-- `D:\coding\rudder\packages\agent-runtimes\claude-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\opencode-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\codex-local\`
+- `D:\coding\upstream-reference\packages\agent-runtimes\claude-local\`
 - OpenCode CLI 内置 tool schema 与本地 `opencode run --format json` 输出协议。
-- `D:\coding\rudder\server\src\services\workspace-runtime.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.helpers.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.lifecycle.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.services.ts`
-- `D:\coding\rudder\server\src\services\workspace-runtime.comments.ts`
-- `D:\coding\rudder\server\src\services\workspace-backups.ts`
-- `D:\coding\rudder\server\src\services\managed-workspace-preflight.ts`
-- `D:\coding\rudder\server\src\services\workspace-operation-log-store.ts`
-- `D:\coding\rudder\server\src\services\issue-assignment-wakeup.ts`
-- `D:\coding\rudder\server\src\services\issue-review-wakeup.ts`
-- `D:\coding\rudder\server\src\services\runtime-kernel\`
-- `D:\coding\rudder\server\src\services\chat-generation-locks.ts`
-- `D:\coding\rudder\server\src\services\chat-assistant.helpers.ts`
-- `D:\coding\rudder\server\src\routes\chats.stream-routes.ts`
-- `D:\coding\rudder\server\src\routes\messenger.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.helpers.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.lifecycle.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.services.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-runtime.comments.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-backups.ts`
+- `D:\coding\upstream-reference\server\src\services\managed-workspace-preflight.ts`
+- `D:\coding\upstream-reference\server\src\services\workspace-operation-log-store.ts`
+- `D:\coding\upstream-reference\server\src\services\issue-assignment-wakeup.ts`
+- `D:\coding\upstream-reference\server\src\services\issue-review-wakeup.ts`
+- `D:\coding\upstream-reference\server\src\services\runtime-kernel\`
+- `D:\coding\upstream-reference\server\src\services\chat-generation-locks.ts`
+- `D:\coding\upstream-reference\server\src\services\chat-assistant.helpers.ts`
+- `D:\coding\upstream-reference\server\src\routes\chats.stream-routes.ts`
+- `D:\coding\upstream-reference\server\src\routes\messenger.ts`
 
 ## 任务
 
@@ -43,7 +43,7 @@
 - 为 `opencode_local`、`codex_local`、`claude_local` 建立 runtime tool capability 描述边界。
 - 在 runtime prompt/instructions/context 中注入可用工具、关键参数、禁止猜测 schema 的说明。
 - 在 runtime prompt 中注入 workspace output contract：可以读取任务要求的外部源码路径，但持久产物必须写入 Octopus 受管 worktree 或组织 artifacts 目录，避免写到外部源码目录后 UI 无法展示。
-- 在 runtime prompt/env 中注入 issue/run 专属产物目录：`OCTOPUS_ISSUE_ARTIFACTS_DIR` 与 `OCTOPUS_RUN_ARTIFACTS_DIR`。单次执行产生的持久文件优先写入 run 目录；跨 run 共享的任务级文件写入 issue 目录。
+- 在 runtime prompt/env 中注入 organization artifacts，并可兼容注入 `OCTOPUS_ISSUE_ARTIFACTS_DIR`。issue/run 目录是便于登记 work products 的建议路径，不是 shared workspace 下的物理隔离模型。
 - 明确 `opencode_local` 内置 `bash` 工具调用必须携带 `description` 和 `command`，避免只传 `command` 造成 schema error。
 - 将工具 schema error 从 adapter 崩溃中区分出来，保留原始 tool name、缺失字段、input 和可读诊断。
 - 对 OpenCode tool error 做结果归一化：如果 run 后续仍能继续并产生有效结果，不应仅因早期 tool error 直接覆盖最终 run error；如果进程终态失败，则错误摘要应指向首个阻断性错误和退出原因。
@@ -61,7 +61,7 @@
 - 审查 workspace backup/browser 相关上游能力；只补齐任务执行闭环必须依赖的 server 行为，完整 backup/browser UI 能力不在本步骤扩张。
 - 对齐上游 `organization-workspace-browser` 的最小只读能力：server 提供组织工作区真实目录列表、文件预览和图片 content 读取；UI 的“组织 -> 工作区”页面必须消费真实 API，不再用项目/智能体数据伪造文件树。
 - 组织工作区浏览根目录固定为 `OCTOPUS_HOME/instances/<instance_id>/organizations/<org_id>/workspaces`，默认 `~/.octopus/instances/default/organizations/<org_id>/workspaces`；运行产物通过 `artifacts/` 展示。该视图与 issue documents/work-products 是两个不同入口，前者是物理工作区文件浏览，后者是任务维度登记视图。
-- 每次 issue run 会预创建组织 artifacts 下的专属目录：`artifacts/issues/<issue_id>/runs/<run_id>/`。该目录属于组织工作区的一部分，UI 可通过组织工作区浏览器打开。
+- issue run 可以使用组织 artifacts 下的兼容目录，例如 `artifacts/issues/<issue_id>/...`，但 shared workspace 下不要求所有任务输出进入专属目录。UI 应把它展示为产物路径或登记来源，不展示为执行工作区。
 - 补齐项目 workspace 管理闭环：server 暴露 project workspace CRUD；UI 项目配置页支持新增本地 cwd/repo 工作区、设为主工作区和删除。项目 workspace 是可选绑定；任务执行优先使用可用主项目工作区，不可用时 fallback 到组织共享工作区。
 - 项目 workspace CRUD 与“执行工作区策略”不是同一个配置：前者登记项目可用的 cwd/repo；后者决定 run 使用共享工作区、独立工作区或操作分支等策略。UI 必须分区展示，不能把 cwd/repo 绑定塞进策略 JSON。
 
@@ -70,7 +70,7 @@
 - 用真实 issue 执行路径验证 checkout、heartbeat-context、assignment wakeup、review wakeup、passive followup 和 work product 登记。
 - 确保成功 run 产生的文件或结构化 workProducts 能稳定进入 issue documents/work-products API。
 - 成功 run 后扫描受管 worktree 与组织 artifacts 中本次执行新增/修改的有限文本产物，并登记为 issue work-products；外部源码目录只作为读取对象，不作为默认产物落点。
-- run 专属 artifacts 目录扫描结果登记为 issue work-products 时，metadata 必须带 `workspaceBrowserPath`，让 UI 能从任务产物直接跳转到“组织 -> 工作区”中的真实文件位置。
+- artifacts 或共享路径扫描结果登记为 issue work-products 时，metadata 必须带真实路径/`workspaceBrowserPath`、`createdByRunId` 和 workspace 信息，让 UI 能追溯哪个 run 写了哪个文件。
 - 确保 closeout、review、followup 不会因为 runtime 输出延迟、缺失 tool schema 或 workspace 产物登记失败而卡在 `in_progress`。
 - 对齐上游 runtime-kernel closeout/followup 行为，只补齐 server 已有 issue/run/workspace 模型需要的状态和事件，不发明新的项目经理式自动编排。
 

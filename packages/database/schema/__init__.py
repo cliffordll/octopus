@@ -30,6 +30,17 @@ from .issues import Issue, IssueAttachment
 from .messenger import MessengerThreadUserState
 from .organizations import Organization
 from .organization_skills import OrganizationSkill
+from .plugins import (
+    Plugin,
+    PluginConfig,
+    PluginEntity,
+    PluginJob,
+    PluginJobRun,
+    PluginLog,
+    PluginOrganizationSetting,
+    PluginState,
+    PluginWebhookDelivery,
+)
 from .projects import Project
 from .goals import Goal, ProjectGoal
 from .resources import OrganizationResource, ProjectResourceAttachment
@@ -85,6 +96,15 @@ __all__ = [
     "MessengerThreadUserState",
     "Organization",
     "OrganizationSkill",
+    "Plugin",
+    "PluginConfig",
+    "PluginState",
+    "PluginEntity",
+    "PluginJob",
+    "PluginJobRun",
+    "PluginLog",
+    "PluginWebhookDelivery",
+    "PluginOrganizationSetting",
     "Project",
     "Goal",
     "ProjectGoal",

@@ -46,12 +46,60 @@ def test_closeout_governance_instructions_are_hard_gated() -> None:
     for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
         assert "Close-out gate" in content
         assert "issue_passive_followup" in content
-        assert "control-plane issue done" in content
-        assert "control-plane issue block" in content
-        assert "control-plane issue comment" in content
+        assert "octopus issue done" in content
+        assert "octopus issue block" in content
+        assert "octopus issue comment" in content
         assert "issue_review_closeout_missing" in content
-        assert "control-plane issue review" in content
+        assert "octopus issue review" in content
         assert "Do not exit" in content
+
+
+def test_control_plane_instructions_are_runtime_env_and_shell_safe() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    control_plane_skill = (
+        repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    cli_reference = (
+        repo_root
+        / "server"
+        / "skills"
+        / "bundled"
+        / "control-plane"
+        / "references"
+        / "cli-reference.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Do not read or create workspace `.env` files" in control_plane_skill
+    assert (
+        "do not hard-code the managed `.octopus/bin` shim path" in control_plane_skill
+    )
+    assert "$env:OCTOPUS_AGENT_ID" in control_plane_skill
+    assert "octopus agent me" in control_plane_skill
+    assert "defaults `--expected-status` to `todo` and `in_progress`" in cli_reference
+
+
+def test_subtask_coordination_instructions_require_child_execution() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    control_plane_skill = (
+        repo_root / "server" / "skills" / "bundled" / "control-plane" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    default_heartbeat = (
+        repo_root / "server" / "onboarding" / "default" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+    ceo_heartbeat = (
+        repo_root / "server" / "onboarding" / "ceo" / "HEARTBEAT.md"
+    ).read_text(encoding="utf-8")
+
+    for content in (control_plane_skill, default_heartbeat, ceo_heartbeat):
+        assert (
+            "must wait for those child issues to run and report back" in content
+            or "must wait for delegated child issues to run and report back" in content
+        )
+        assert (
+            "Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary"
+            in content
+        )
+        assert "Use `blocked` only for a real blocker" in content
 
 
 def test_step17_agent_instruction_contract_exposes_paths_and_validators() -> None:

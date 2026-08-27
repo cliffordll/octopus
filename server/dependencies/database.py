@@ -1,42 +1,47 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
 import logging
 
-from anyio import CancelScope
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.ext.asyncio import AsyncSessionTransaction
+
+from packages.database.clients import begin_write_transaction
+from packages.database.clients.cleanup import (
+    REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
+    run_shielded_cleanup as _run_shielded_cleanup,
+)
 
 logger = logging.getLogger(__name__)
-
-REQUEST_DB_CLEANUP_TIMEOUT_SECONDS = 2.0
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     session_factory = request.app.state.session_factory
     session = session_factory()
-    transaction = await session.begin()
+    request_method = getattr(request, "method", "GET")
+    write_transaction = request_method not in {"GET", "HEAD", "OPTIONS"}
+    if write_transaction:
+        await begin_write_transaction(session)
+    else:
+        await session.begin()
     try:
         yield session
     except BaseException:
-        await _rollback_after_error(session, transaction)
+        await _rollback_after_error(session)
         raise
     else:
-        await _commit_after_success(session, transaction)
+        await _commit_after_success(session)
     finally:
         await _close_session(session)
 
 
-async def _commit_after_success(
-    session: AsyncSession, transaction: AsyncSessionTransaction
-) -> None:
-    if not transaction.is_active:
+async def _commit_after_success(session: AsyncSession) -> None:
+    if not session.in_transaction():
         return
     error = await _run_shielded_cleanup(
         "commit request database transaction",
-        transaction.commit,
+        session.commit,
         timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     )
     if error is None:
@@ -46,14 +51,12 @@ async def _commit_after_success(
     raise error
 
 
-async def _rollback_after_error(
-    session: AsyncSession, transaction: AsyncSessionTransaction
-) -> None:
-    if not transaction.is_active:
+async def _rollback_after_error(session: AsyncSession) -> None:
+    if not session.in_transaction():
         return
     error = await _run_shielded_cleanup(
         "roll back request database transaction",
-        transaction.rollback,
+        session.rollback,
         timeout_seconds=REQUEST_DB_CLEANUP_TIMEOUT_SECONDS,
     )
     if _cleanup_error_requires_invalidate(error):
@@ -71,72 +74,9 @@ async def _close_session(session: AsyncSession) -> None:
 
 
 def _cleanup_error_requires_invalidate(error: BaseException | None) -> bool:
-    return error is not None and not isinstance(error, TimeoutError)
-
-
-async def _run_shielded_cleanup(
-    action: str,
-    operation: Callable[[], Awaitable[None]],
-    *,
-    timeout_seconds: float,
-) -> BaseException | None:
-    with CancelScope(shield=True):
-        cleanup_coro = operation()
-        cleanup_task = asyncio.ensure_future(cleanup_coro)
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(cleanup_task),
-                timeout=timeout_seconds,
-            )
-            return None
-        except asyncio.CancelledError:
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(cleanup_task),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError:
-                _observe_background_cleanup(action, cleanup_task)
-                logger.warning(
-                    "Database cleanup is still running while trying to %s after cancellation",
-                    action,
-                )
-            except BaseException:
-                logger.warning(
-                    "Failed to %s after cancellation",
-                    action,
-                    exc_info=True,
-                )
-            raise
-        except TimeoutError as exc:
-            _observe_background_cleanup(action, cleanup_task)
-            logger.warning(
-                "Database cleanup is still running while trying to %s after %.1f seconds",
-                action,
-                timeout_seconds,
-            )
-            return exc
-        except BaseException as exc:
-            logger.warning("Failed to %s", action, exc_info=True)
-            return exc
-
-
-def _observe_background_cleanup(
-    action: str, cleanup_task: asyncio.Future[None]
-) -> None:
-    def _consume_result(task: asyncio.Future[None]) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            logger.warning("Background database cleanup was cancelled while %s", action)
-        except BaseException:
-            logger.warning(
-                "Background database cleanup failed while trying to %s",
-                action,
-                exc_info=True,
-            )
-
-    cleanup_task.add_done_callback(_consume_result)
+    return error is not None and not isinstance(
+        error, (TimeoutError, asyncio.CancelledError)
+    )
 
 
 async def _invalidate_session(session: AsyncSession) -> None:

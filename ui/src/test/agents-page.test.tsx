@@ -389,12 +389,9 @@ it("manages runtime providers and models from settings", async () => {
     }
     if (path === "/api/llm/providers" && init?.method === "GET") {
       return respond([
-        { scope: "instance", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
-        { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
+        { scope: "instance", providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true, updatedAt: "2026-06-01T00:00:00Z" },
+        { scope: "instance", providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false, updatedAt: "2026-06-20T00:00:00Z" },
       ]);
-    }
-    if (path === "/api/llm/providers" && init?.method === "GET") {
-      return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ scope: "instance", modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", metadata: { pricing: { inputCostPer1M: 0.12, outputCostPer1M: 0.24 } }, enabled: true }]);
@@ -448,7 +445,7 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getAllByText("Runtime Providers")).toHaveLength(1);
+  expect(dialog.getAllByText("LLM Providers")).toHaveLength(1);
   const englishKimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   expect(englishKimiProvider.queryByRole("button", { name: "编辑" })).not.toBeInTheDocument();
   expect(englishKimiProvider.queryByRole("button", { name: "Edit" })).toBeInTheDocument();
@@ -460,13 +457,15 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: /供应商/ }));
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
+  expect(dialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();
   expect(kimiProvider.getByText("价格：输入 $0.12 / 输出 $0.24 每 100 万 tokens")).toBeInTheDocument();
   expect(kimiProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(openrouterProvider.getByText("GPT-5")).toBeInTheDocument();
+  const providerArticles = await dialog.findAllByRole("article", { name: /provider/ });
+  expect(providerArticles[0]).toHaveAccessibleName("Kimi provider");
   expect(openrouterProvider.getAllByText("Instance").length).toBeGreaterThanOrEqual(2);
   expect(kimiProvider.queryByRole("button", { name: "新增模型" })).not.toBeInTheDocument();
   expect(kimiProvider.queryByRole("button", { name: "编辑" })).toBeInTheDocument();
@@ -477,7 +476,6 @@ it("manages runtime providers and models from settings", async () => {
 
   await userEvent.click(dialog.getByRole("button", { name: "新建 Provider" }));
   const providerDialog = within(screen.getByRole("dialog", { name: "新建 Provider" }));
-  await userEvent.selectOptions(providerDialog.getByLabelText("运行时"), "openclaw_local");
   await userEvent.type(providerDialog.getByLabelText("Provider ID"), "openrouter");
   await userEvent.type(providerDialog.getByLabelText("Provider 名称"), "OpenRouter");
   await userEvent.type(providerDialog.getByLabelText("Base URL"), "https://openrouter.ai/api/v1");
@@ -494,7 +492,7 @@ it("manages runtime providers and models from settings", async () => {
     "/api/llm/providers",
     expect.objectContaining({
       method: "POST",
-      body: expect.stringContaining('"runtimeType":"openclaw_local"'),
+      body: expect.not.stringContaining('"runtimeType"'),
     }),
   );
 
@@ -586,6 +584,32 @@ it("manages runtime providers and models from settings", async () => {
 
 }, 10000);
 
+it("opens global provider settings without an active organization", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs" && init?.method === "GET") {
+      return respond([]);
+    }
+    if (path === "/api/llm/providers" && init?.method === "GET") {
+      return respond([
+        { scope: "instance", providerId: "openai", name: "OpenAI", runtimeType: "opencode_local", enabled: true, hasApiKey: true },
+      ]);
+    }
+    if (path === "/api/llm/providers/openai/models?runtimeType=opencode_local" && init?.method === "GET") {
+      return respond([]);
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/organizations");
+  await userEvent.click(await screen.findByRole("button", { name: "设置" }));
+  const dialog = within(screen.getByRole("dialog", { name: "设置" }));
+
+  expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
+  expect(dialog.queryByText("请选择组织后再配置模型供应商。")).not.toBeInTheDocument();
+  expect(await dialog.findByRole("article", { name: "OpenAI provider" })).toBeInTheDocument();
+});
+
 it("manages runtime providers and models from settings", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs" && init?.method === "GET") {
@@ -599,9 +623,6 @@ it("manages runtime providers and models from settings", async () => {
         { providerId: "kimi", name: "Kimi", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://api.moonshot.cn/v1", enabled: true, hasApiKey: true },
         { providerId: "openrouter", name: "OpenRouter", runtimeType: "opencode_local", protocol: "openai_chat_completions", baseUrl: "https://openrouter.ai/api/v1", enabled: true, hasApiKey: false },
       ]);
-    }
-    if (path === "/api/llm/providers" && init?.method === "GET") {
-      return respond([{ providerId: "openai", name: "OpenAI", runtimeType: "codex_local", enabled: true, hasApiKey: true }]);
     }
     if (path === "/api/llm/providers/kimi/models?runtimeType=opencode_local" && init?.method === "GET") {
       return respond([{ modelId: "kimi/kimi-k2.5", displayName: "Kimi K2.5", enabled: true }]);
@@ -640,7 +661,7 @@ it("manages runtime providers and models from settings", async () => {
   expect(dialog.getByRole("button", { name: /通用/ })).toBeInTheDocument();
   expect(dialog.getByRole("button", { name: /关于/ })).toBeInTheDocument();
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
-  expect(dialog.getByLabelText("运行时")).toBeInTheDocument();
+  expect(dialog.queryByLabelText("运行时")).not.toBeInTheDocument();
   const kimiProvider = within(await dialog.findByRole("article", { name: "Kimi provider" }));
   const openrouterProvider = within(await dialog.findByRole("article", { name: "OpenRouter provider" }));
   expect(kimiProvider.getByText("Kimi K2.5")).toBeInTheDocument();

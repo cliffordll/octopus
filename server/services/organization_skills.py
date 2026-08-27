@@ -853,7 +853,7 @@ def _is_bundled_skill(row: OrganizationSkill) -> bool:
 
 
 def _is_bundled_source_kind(source_kind: str | None) -> bool:
-    return source_kind in {"built_in", "octopus_bundled", "rudder_bundled"}
+    return source_kind in {"built_in", "octopus_bundled", "octopus_bundled"}
 
 
 def _is_read_only_source_kind(source_kind: str | None) -> bool:
@@ -884,11 +884,11 @@ def _source_badge(source_kind: str | None) -> str:
 
 def _legacy_bundled_skill_key(slug: str) -> str | None:
     legacy_slugs = {
-        "control-plane": "rudder",
-        "create-agent": "rudder-create-agent",
-        "create-plugin": "rudder-create-plugin",
+        "control-plane": "octopus",
+        "create-agent": "octopus-create-agent",
+        "create-plugin": "octopus-create-plugin",
     }
-    return f"rudder/{legacy_slugs.get(slug, slug)}"
+    return f"octopus/{legacy_slugs.get(slug, slug)}"
 
 
 def _organization_skill_sort_key(skill: OrganizationSkillListItem) -> tuple[int, str]:

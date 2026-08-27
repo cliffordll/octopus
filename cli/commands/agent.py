@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from typing import Any
 
 from ..client import ApiClient
@@ -39,6 +40,10 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     list_parser = actions.add_parser("list")
     list_parser.add_argument("--org-id", required=True)
     list_parser.set_defaults(handler=list_agents)
+    me_parser = actions.add_parser("me")
+    me_parser.set_defaults(handler=get_current_agent)
+    capabilities_parser = actions.add_parser("capabilities")
+    capabilities_parser.set_defaults(handler=get_capabilities)
     name_suggestion_parser = actions.add_parser("name-suggestion")
     name_suggestion_parser.add_argument("--org-id", required=True)
     name_suggestion_parser.set_defaults(handler=suggest_agent_name)
@@ -320,6 +325,34 @@ def _runtime_probe_config(args: argparse.Namespace) -> dict[str, Any]:
 
 def list_agents(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/orgs/{args.org_id}/agents")
+
+
+def get_current_agent(args: argparse.Namespace, client: ApiClient) -> Any:
+    agent_id = os.environ.get("OCTOPUS_AGENT_ID")
+    if not agent_id:
+        raise ValueError("OCTOPUS_AGENT_ID is required for agent me.")
+    return client.request("GET", f"/api/agents/{agent_id}")
+
+
+def get_capabilities(args: argparse.Namespace, client: ApiClient) -> Any:
+    return {
+        "commands": [
+            "octopus agent me",
+            "octopus agent inbox",
+            "octopus agent capabilities",
+            "octopus issue checkout",
+            "octopus issue heartbeat-context",
+            "octopus issue comment",
+            "octopus issue done",
+            "octopus issue block",
+            "octopus issue review",
+        ],
+        "defaults": {
+            "agentId": "OCTOPUS_AGENT_ID",
+            "runId": "OCTOPUS_RUN_ID",
+            "checkoutExpectedStatuses": ["todo", "in_progress"],
+        },
+    }
 
 
 def suggest_agent_name(args: argparse.Namespace, client: ApiClient) -> Any:

@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import os
 import shutil
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 
-from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_process import local_process_supervisor
 from ..local_skills import (
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -85,7 +84,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         context=context,
         env=env,
     )
-    ensure_control_plane_cli_shim(env, home)
+    ensure_octopus_cli_shim(env, home)
     apply_runtime_context_env(env, context)
     skills_root = Path(tempfile.mkdtemp(prefix="octopus-claude-skills-"))
     loaded_skills = materialize_runtime_skills(
@@ -109,6 +108,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
             loaded_skills=loaded_skills,
             on_log=context.on_log,
             on_process_started=context.on_process_started,
+            on_process_exited=context.on_process_exited,
             cancel_event=context.cancel_event,
         )
         if (
@@ -146,6 +146,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
                 loaded_skills=loaded_skills,
                 on_log=context.on_log,
                 on_process_started=context.on_process_started,
+                on_process_exited=context.on_process_exited,
                 cancel_event=context.cancel_event,
             )
         return result
@@ -164,90 +165,55 @@ async def _run_once(
     loaded_skills: list[dict[str, str | None]],
     on_log,
     on_process_started,
+    on_process_exited,
     cancel_event,
 ) -> RuntimeExecutionResult:
-    process = await asyncio.create_subprocess_exec(
+    process_result = await local_process_supervisor.run(
         command,
         *args,
         cwd=cwd,
         env=env,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **runtime_subprocess_kwargs(),
+        input_data=prompt.encode(),
+        timeout_sec=timeout_sec,
+        cancel_event=cancel_event,
+        on_process_started=on_process_started,
+        on_process_exited=on_process_exited,
     )
-    pid = getattr(process, "pid", None)
-    if on_process_started is not None and isinstance(pid, int):
-        await on_process_started(pid, datetime.now(UTC))
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
-    try:
-        cancelled = (
-            asyncio.create_task(cancel_event.wait())
-            if cancel_event is not None
-            else None
-        )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {communication, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                process.kill()
-                stdout, stderr = await communication
-                await process.wait()
-                return _result(
-                    process.returncode,
-                    stdout,
-                    stderr,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                    loaded_skills=loaded_skills,
-                )
-            cancelled.cancel()
-            if communication not in done:
-                raise TimeoutError
-            stdout, stderr = communication.result()
-        elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        process.kill()
-        stdout, stderr = await communication
-        await process.wait()
+    if process_result.cancelled:
         return _result(
-            process.returncode,
-            stdout,
-            stderr,
+            process_result.exit_code,
+            process_result.stdout,
+            process_result.stderr,
+            signal=process_result.signal,
+            error_message="Run cancelled",
+            loaded_skills=loaded_skills,
+        )
+    if process_result.timed_out:
+        return _result(
+            process_result.exit_code,
+            process_result.stdout,
+            process_result.stderr,
             timed_out=True,
             error_message=f"Timed out after {timeout_sec:g}s",
             loaded_skills=loaded_skills,
         )
-    except asyncio.CancelledError:
-        process.kill()
-        await communication
-        await process.wait()
-        raise
 
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
+    stdout_text = process_result.stdout.decode(errors="replace")
+    stderr_text = process_result.stderr.decode(errors="replace")
     if stdout_text:
         await on_log("stdout", stdout_text)
     if stderr_text:
         await on_log("stderr", stderr_text)
     parsed = parse_stream_json(stdout_text)
     error = None
-    if process.returncode != 0:
+    if process_result.exit_code != 0:
         if login_required(stdout_text, stderr_text, parsed["resultJson"]):
             error = "Claude CLI login required"
         else:
             error = describe_failure(parsed["resultJson"]) or first_line(stderr_text)
-        error = error or f"Claude exited with code {process.returncode}"
+        error = error or f"Claude exited with code {process_result.exit_code}"
     return RuntimeExecutionResult(
-        exit_code=process.returncode,
+        exit_code=process_result.exit_code,
         error_message=error,
         usage_json=parsed["usage"],
         session_id_after=parsed["sessionId"],

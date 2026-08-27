@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { runtimeProvidersApi } from "../api/runtimeProviders";
 import type { AgentRuntimeType, RuntimeModel, RuntimeProvider, RuntimeProviderScope } from "../api/types";
@@ -9,18 +9,11 @@ import { ErrorNotice } from "./ErrorNotice";
 const DEFAULT_PROTOCOL = "openai_chat_completions";
 const PRICING_KEYS = ["inputCostPer1M", "outputCostPer1M"] as const;
 const SETTINGS_RUNTIME_TYPE: AgentRuntimeType = "opencode_local";
-const MODEL_PROVIDER_RUNTIMES: AgentRuntimeType[] = [
-  "opencode_local",
-  "codex_local",
-  "claude_local",
-  "openclaw_local",
-];
-
-export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
+const INSTANCE_PROVIDER_CONTEXT = "instance";
+export function RuntimeProviderSettings({ orgId = INSTANCE_PROVIDER_CONTEXT }: { orgId?: string }) {
   const english = isEnglishLocale();
   const queryClient = useQueryClient();
   const runtimeType = SETTINGS_RUNTIME_TYPE;
-  const [providerRuntimeType, setProviderRuntimeType] = useState<AgentRuntimeType>(SETTINGS_RUNTIME_TYPE);
   const [providerId, setProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -41,13 +34,12 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     queryFn: () => runtimeProvidersApi.listProviders(orgId, runtimeType),
     enabled: Boolean(orgId),
   });
-  const providerRows = providers.data ?? [];
+  const providerRows = Array.isArray(providers.data) ? providers.data : [];
 
   const createProvider = useMutation({
     mutationFn: () =>
       runtimeProvidersApi.createProvider(orgId, {
         scope: providerScope,
-        runtimeType: providerRuntimeType,
         providerId: providerId.trim(),
         name: providerName.trim() || providerId.trim(),
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
@@ -70,7 +62,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
 
   const updateProvider = useMutation({
     mutationFn: () =>
-      runtimeProvidersApi.updateProvider(orgId, providerRuntimeType, editingProvider!.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, editingProvider!.providerId, {
         name: providerName.trim() || editingProvider!.providerId,
         protocol: protocol.trim() || DEFAULT_PROTOCOL,
         baseUrl: baseUrl.trim() || null,
@@ -86,7 +78,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
 
   const toggleProvider = useMutation({
     mutationFn: (provider: RuntimeProvider) =>
-      runtimeProvidersApi.updateProvider(orgId, provider.runtimeType ?? runtimeType, provider.providerId, {
+      runtimeProvidersApi.updateProvider(orgId, runtimeType, provider.providerId, {
         enabled: provider.enabled === false,
       }),
     onSuccess: () => {
@@ -98,7 +90,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   const createModel = useMutation({
     mutationFn: () => {
       const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
-      return runtimeProvidersApi.createModel(orgId, provider?.runtimeType ?? runtimeType, modelDialogProviderId, {
+      return runtimeProvidersApi.createModel(orgId, runtimeType, modelDialogProviderId, {
         scope: provider?.scope ?? "instance",
         modelId: modelId.trim(),
         displayName: modelName.trim() || modelId.trim(),
@@ -107,8 +99,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
       });
     },
     onSuccess: () => {
-      const provider = providerRows.find((row) => row.providerId === modelDialogProviderId);
-      const modelRuntimeType = provider?.runtimeType ?? runtimeType;
+      const modelRuntimeType = runtimeType;
       setModelId("");
       setModelName("");
       setModelDialogProviderId("");
@@ -147,7 +138,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   });
 
   const deleteProvider = useMutation({
-    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, provider.runtimeType ?? runtimeType, provider.providerId),
+    mutationFn: (provider: RuntimeProvider) => runtimeProvidersApi.deleteProvider(orgId, runtimeType, provider.providerId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["llm-providers", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["runtime-model-options", orgId] });
@@ -164,7 +155,6 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   });
 
   function clearProviderForm() {
-    setProviderRuntimeType(SETTINGS_RUNTIME_TYPE);
     setProviderId("");
     setProviderName("");
     setBaseUrl("");
@@ -187,7 +177,6 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
   function openProviderEdit(provider: RuntimeProvider) {
     setEditingProvider(provider);
     setProviderDialogOpen(false);
-    setProviderRuntimeType(provider.runtimeType ?? SETTINGS_RUNTIME_TYPE);
     setProviderId(provider.providerId);
     setProviderName(provider.name ?? "");
     setBaseUrl(provider.baseUrl ?? "");
@@ -272,7 +261,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
     <section className="runtime-settings runtime-provider-settings" aria-label="模型供应商设置">
       <div className="panel-heading runtime-provider-heading">
         <div className="settings-section-heading-copy">
-          <p className="eyebrow">Runtime Providers</p>
+          <p className="eyebrow">LLM Providers</p>
           <div className="runtime-provider-title-line">
             <h3>模型供应商</h3>
             <p className="muted">
@@ -282,14 +271,6 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
         </div>
       </div>
       <section className="runtime-settings-column runtime-provider-section">
-        <label>
-          {english ? "Runtime" : "运行时"}
-          <select value={providerRuntimeType} onChange={(event) => setProviderRuntimeType(event.target.value as AgentRuntimeType)}>
-            {MODEL_PROVIDER_RUNTIMES.map((item) => (
-              <option key={item} value={item}>{runtimeLabel(item)}</option>
-            ))}
-          </select>
-        </label>
         <div className="runtime-settings-title">
           <h4>Provider</h4>
           <div className="runtime-settings-title-actions">
@@ -304,15 +285,15 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
             <ProviderModelGroup
               key={provider.providerId}
               onCreateModel={() => openModelCreate(provider.providerId)}
-              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, provider.runtimeType ?? runtimeType, model)}
+              onDeleteModel={(model) => confirmDeleteModel(provider.providerId, runtimeType, model)}
               onDeleteProvider={() => confirmDeleteProvider(provider)}
-              onEditModel={(model) => openModelEdit(provider.providerId, provider.runtimeType ?? runtimeType, model)}
+              onEditModel={(model) => openModelEdit(provider.providerId, runtimeType, model)}
               onEditProvider={() => openProviderEdit(provider)}
-              onToggleModel={(model) => toggleModelEnabled(provider.providerId, provider.runtimeType ?? runtimeType, model)}
+              onToggleModel={(model) => toggleModelEnabled(provider.providerId, runtimeType, model)}
               onToggleProvider={() => toggleProvider.mutate(provider)}
               orgId={orgId}
               provider={provider}
-              runtimeType={provider.runtimeType ?? runtimeType}
+              runtimeType={runtimeType}
             />
           ))}
         </div>
@@ -333,7 +314,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
           <section aria-label="新建 Provider" aria-modal="true" className="panel task-modal runtime-provider-dialog" role="dialog">
             <div className="task-modal-header">
               <div>
-                <p className="eyebrow">Runtime Provider</p>
+                <p className="eyebrow">LLM Provider</p>
                 <h2>{english ? "New Provider" : "新建 Provider"}</h2>
               </div>
               <button className="secondary small-button" onClick={() => setProviderDialogOpen(false)} type="button">
@@ -341,14 +322,6 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
-              <label>
-                {english ? "Runtime" : "运行时"}
-                <select value={providerRuntimeType} onChange={(event) => setProviderRuntimeType(event.target.value as AgentRuntimeType)}>
-                  {MODEL_PROVIDER_RUNTIMES.map((item) => (
-                    <option key={item} value={item}>{runtimeLabel(item)}</option>
-                  ))}
-                </select>
-              </label>
               <label>
                 {english ? "Scope" : "作用域"}
                 <input disabled value={scopeLabel(providerScope, english)} />
@@ -393,10 +366,9 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
           <section aria-label="编辑 Provider" aria-modal="true" className="panel task-modal runtime-provider-dialog" role="dialog">
             <div className="task-modal-header">
               <div>
-                <p className="eyebrow">Runtime Provider</p>
+                <p className="eyebrow">LLM Provider</p>
                 <h2>{english ? "Edit Provider" : "编辑 Provider"}</h2>
                 <p className="muted">{editingProvider.providerId}</p>
-                <Badge>{runtimeLabel(providerRuntimeType)}</Badge>
                 <Badge>{scopeLabel(editingProvider.scope, english)}</Badge>
               </div>
               <button className="secondary small-button" onClick={clearProviderForm} type="button">
@@ -404,10 +376,6 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
               </button>
             </div>
             <form className="runtime-settings-form" onSubmit={submitProvider}>
-              <label>
-                {english ? "Runtime" : "运行时"}
-                <input disabled value={runtimeLabel(providerRuntimeType)} />
-              </label>
               <label>
                 {english ? "Scope" : "作用域"}
                 <input disabled value={scopeLabel(providerScope, english)} />
@@ -452,7 +420,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
           <section aria-label="新建 Model" aria-modal="true" className="panel task-modal runtime-provider-dialog" role="dialog">
             <div className="task-modal-header">
               <div>
-                <p className="eyebrow">Runtime Model</p>
+                <p className="eyebrow">LLM Model</p>
                 <h2>{english ? "New Model" : "新建 Model"}</h2>
                 <p className="muted">Provider: {modelDialogProviderId}</p>
                 <Badge>{scopeLabel(providerRows.find((provider) => provider.providerId === modelDialogProviderId)?.scope, english)}</Badge>
@@ -497,7 +465,7 @@ export function RuntimeProviderSettings({ orgId }: { orgId: string }) {
           <section aria-label="编辑 Model" aria-modal="true" className="panel task-modal runtime-provider-dialog" role="dialog">
             <div className="task-modal-header">
               <div>
-                <p className="eyebrow">Runtime Model</p>
+                <p className="eyebrow">LLM Model</p>
                 <h2>{english ? "Edit Model" : "编辑 Model"}</h2>
                 <p className="muted">Provider: {editingModel.providerId}</p>
                 <Badge>{scopeLabel(editingModel.model.scope, english)}</Badge>
@@ -623,7 +591,6 @@ function ProviderModelGroup({
       <div className="runtime-provider-group-header">
         <div>
           <strong>{providerName}</strong>
-          <Badge>{runtimeLabel(runtimeType)}</Badge>
           <Badge>{scopeLabel(provider.scope, english)}</Badge>
           <span>{provider.providerId}</span>
           <small>{provider.baseUrl ?? (english ? "No Base URL" : "未设置 Base URL")}</small>
@@ -750,13 +717,6 @@ function scopeLabel(scope: RuntimeProviderScope | undefined, _english: boolean) 
   return "Organization";
 }
 
-function runtimeLabel(runtimeType: AgentRuntimeType) {
-  if (runtimeType === "opencode_local") return "OpenCode";
-  if (runtimeType === "codex_local") return "Codex";
-  if (runtimeType === "claude_local") return "Claude";
-  if (runtimeType === "openclaw_local") return "OpenClaw";
-  return runtimeType;
-}
 
 function modelPricing(metadata: RuntimeModel["metadata"] | undefined) {
   const pricing = metadata?.pricing;

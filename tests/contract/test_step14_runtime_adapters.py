@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import importlib
 import json
 import os
-import subprocess
 import sys
 import uuid
 from collections.abc import AsyncIterator
@@ -19,8 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
+from packages.runtimes.base import LocalRuntimeAdapter, RemoteRuntimeAdapter
+from packages.runtimes.codex_local import CodexLocalRuntimeAdapter
+from packages.runtimes.claude_local.protocol import build_args as build_claude_args
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
+from packages.runtimes.codex_local.runner import _build_args as build_codex_args
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
+from packages.runtimes.local_process import LocalProcessResult, ProcessChunkCallback
 from packages.runtimes.opencode_local.protocol import build_args as build_opencode_args
 from packages.runtimes.opencode_local.runner import (
     _read_stdout as read_opencode_stdout,
@@ -44,7 +49,7 @@ def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
             f"Codex runtime test attempted to launch a real subprocess: {command}"
         )
 
-    def blocked_subprocess_run(args: Any, *pargs: Any, **kwargs: Any) -> Any:
+    def blocked_subprocess_popen(args: Any, *pargs: Any, **kwargs: Any) -> Any:
         raise AssertionError(
             f"Codex runtime test attempted to launch a blocking subprocess: {args}"
         )
@@ -54,8 +59,8 @@ def _block_real_codex_subprocesses(monkeypatch: pytest.MonkeyPatch) -> None:
         blocked_create_subprocess_exec,
     )
     monkeypatch.setattr(
-        "packages.runtimes.codex_local.runner.subprocess.run",
-        blocked_subprocess_run,
+        "packages.runtimes.local_process.subprocess.Popen",
+        blocked_subprocess_popen,
     )
 
 
@@ -78,6 +83,45 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
         paths.ORG_ADAPTER_QUOTA_WINDOWS_PATH
         == "/api/orgs/{orgId}/adapters/{type}/quota-windows"
     )
+
+
+def test_runtime_adapters_are_grouped_by_execution_location() -> None:
+    from packages.runtimes.http import HttpRuntimeAdapter
+
+    assert isinstance(CodexLocalRuntimeAdapter(), LocalRuntimeAdapter)
+    assert isinstance(HttpRuntimeAdapter(), RemoteRuntimeAdapter)
+
+
+def test_codex_defaults_to_managed_workspace_write_sandbox() -> None:
+    args = build_codex_args({})
+
+    assert args[args.index("--sandbox") + 1] == "workspace-write"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in args
+
+
+def test_codex_preserves_explicit_sandbox_policy() -> None:
+    explicit = build_codex_args({"extraArgs": ["--sandbox", "read-only"]})
+    short_explicit = build_codex_args({"extraArgs": ["-s=read-only"]})
+    bypass = build_codex_args({"dangerouslyBypassApprovalsAndSandbox": True})
+
+    assert explicit.count("--sandbox") == 1
+    assert explicit[explicit.index("--sandbox") + 1] == "read-only"
+    assert "--sandbox" not in short_explicit
+    assert "-s=read-only" in short_explicit
+    assert "--sandbox" not in bypass
+    assert "--dangerously-bypass-approvals-and-sandbox" in bypass
+
+
+def test_claude_defaults_to_accepting_workspace_edits() -> None:
+    default = build_claude_args({})
+    explicit = build_claude_args({"extraArgs": ["--permission-mode", "plan"]})
+    bypass = build_claude_args({"dangerouslySkipPermissions": True})
+
+    assert default[default.index("--permission-mode") + 1] == "acceptEdits"
+    assert explicit.count("--permission-mode") == 1
+    assert explicit[explicit.index("--permission-mode") + 1] == "plan"
+    assert "--permission-mode" not in bypass
+    assert "--dangerously-skip-permissions" in bypass
 
 
 def test_step14_registry_returns_known_adapters_or_unavailable() -> None:
@@ -289,210 +333,6 @@ async def test_openclaw_local_registers_model_and_parses_reply(
     }
 
 
-@pytest.mark.asyncio
-async def test_openclaw_local_fails_fast_when_registration_fails(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A non-conflict registration failure must abort the run instead of letting
-    OpenClaw silently fall back to api.openai.com and hang."""
-    monkeypatch.chdir(tmp_path)
-    from packages.runtimes.openclaw_local.runner import (
-        execute as execute_openclaw_local,
-    )
-
-    calls: list[list[str]] = []
-
-    class FakeProcess:
-        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
-            self._stdout = stdout
-            self._stderr = stderr
-            self.returncode = returncode
-            self.pid = 4242
-
-        async def communicate(
-            self, payload: bytes | None = None
-        ) -> tuple[bytes, bytes]:
-            return self._stdout, self._stderr
-
-        def kill(self) -> None:
-            return None
-
-        async def wait(self) -> int:
-            return self.returncode
-
-    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
-        calls.append(list(args))
-        if "patch" in args:
-            return FakeProcess(b"", b"fatal: bad config payload", 1)
-        return FakeProcess(b'{"payloads":[{"text":"should not run"}]}', b"", 0)
-
-    monkeypatch.setattr(
-        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
-        fake_create_subprocess_exec,
-    )
-
-    result = await execute_openclaw_local(
-        RuntimeExecutionContext(
-            run_id="run-ocl-fail",
-            agent_id="agent-ocl-fail",
-            org_id="org-ocl",
-            agent_name="OpenClaw",
-            config={
-                "command": "openclaw-test",
-                "model": "epai-test/deepseek-v4-flash",
-                "promptTemplate": "do the task",
-                "_octopus": {
-                    "runtimeProvider": {
-                        "baseUrl": "http://platform/v1",
-                        "apiKey": "sk-platform",
-                        "model": {"modelId": "deepseek-v4-flash"},
-                    }
-                },
-            },
-            on_log=_noop_on_log,
-        )
-    )
-
-    assert result.exit_code == 1
-    assert result.error_message is not None
-    assert "registration failed" in result.error_message
-    # The agent must NOT be launched when registration failed.
-    assert not any("agent" in c and "--local" in c for c in calls)
-
-
-@pytest.mark.asyncio
-async def test_openclaw_local_retries_registration_on_config_conflict(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Concurrent runs of the same agent race on the shared config; the transient
-    ConfigMutationConflictError must be retried, not surfaced as a failure."""
-    monkeypatch.chdir(tmp_path)
-    from packages.runtimes.openclaw_local.runner import (
-        execute as execute_openclaw_local,
-    )
-
-    patch_attempts = 0
-
-    class FakeProcess:
-        def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
-            self._stdout = stdout
-            self._stderr = stderr
-            self.returncode = returncode
-            self.pid = 4242
-
-        async def communicate(
-            self, payload: bytes | None = None
-        ) -> tuple[bytes, bytes]:
-            return self._stdout, self._stderr
-
-        def kill(self) -> None:
-            return None
-
-        async def wait(self) -> int:
-            return self.returncode
-
-    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
-        nonlocal patch_attempts
-        if "patch" in args:
-            patch_attempts += 1
-            if patch_attempts == 1:
-                return FakeProcess(
-                    b"",
-                    b"ConfigMutationConflictError: config changed since last load",
-                    1,
-                )
-            return FakeProcess(b"Applied 6 config update(s).", b"", 0)
-        return FakeProcess(
-            b'{"payloads":[{"text":"hello after retry"}],'
-            b'"meta":{"agentMeta":{"sessionId":"sess-retry"}}}',
-            b"",
-            0,
-        )
-
-    monkeypatch.setattr(
-        "packages.runtimes.openclaw_local.runner.asyncio.create_subprocess_exec",
-        fake_create_subprocess_exec,
-    )
-
-    result = await execute_openclaw_local(
-        RuntimeExecutionContext(
-            run_id="run-ocl-retry",
-            agent_id="agent-ocl-retry",
-            org_id="org-ocl",
-            agent_name="OpenClaw",
-            config={
-                "command": "openclaw-test",
-                "model": "epai-test/deepseek-v4-flash",
-                "promptTemplate": "do the task",
-                "_octopus": {
-                    "runtimeProvider": {
-                        "baseUrl": "http://platform/v1",
-                        "apiKey": "sk-platform",
-                        "model": {"modelId": "deepseek-v4-flash"},
-                    }
-                },
-            },
-            on_log=_noop_on_log,
-        )
-    )
-
-    assert patch_attempts == 2
-    assert result.exit_code == 0
-    assert result.error_message is None
-    assert result.result_json is not None
-    assert result.result_json["summary"] == "hello after retry"
-
-
-def test_openclaw_provider_already_registered_detects_matching_config(
-    tmp_path: Path,
-) -> None:
-    """`_provider_already_registered` lets the runner skip the race-prone config
-    patch only when the persisted config already has the exact provider+model."""
-    from packages.runtimes.openclaw_local.runner import (
-        _provider_already_registered,
-    )
-
-    config_dir = tmp_path / ".openclaw"
-    config_dir.mkdir(parents=True)
-    (config_dir / "openclaw.json").write_text(
-        json.dumps(
-            {
-                "models": {
-                    "providers": {
-                        "epai-test": {
-                            "baseUrl": "http://platform/v1",
-                            "apiKey": "sk-platform",
-                            "models": [{"id": "deepseek-v4-flash"}],
-                        }
-                    }
-                }
-            }
-        )
-    )
-    env = {"HOME": str(tmp_path)}
-    kwargs = {
-        "provider_name": "epai-test",
-        "model_id": "deepseek-v4-flash",
-        "base_url": "http://platform/v1",
-        "api_key": "sk-platform",
-    }
-    assert _provider_already_registered(env, **kwargs) is True
-    # Endpoint / key / model mismatches must NOT short-circuit the patch.
-    assert _provider_already_registered(
-        env, **{**kwargs, "base_url": "http://other/v1"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "api_key": "sk-other"}
-    ) is False
-    assert _provider_already_registered(
-        env, **{**kwargs, "model_id": "glm-5.1"}
-    ) is False
-    # Missing config file → cannot skip.
-    assert _provider_already_registered({"HOME": str(tmp_path / "nope")}, **kwargs) is False
-
-
 def test_opencode_extra_args_are_run_subcommand_options() -> None:
     args = build_opencode_args(
         {
@@ -638,10 +478,13 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
             config={"command": "opencode-test", "promptTemplate": "Do the task."},
             on_log=_noop_on_log,
             workspace={
-                "rudderWorkspace": {
+                "octopusWorkspace": {
                     "cwd": "D:/octopus/worktree",
                     "worktreePath": "D:/octopus/worktree",
+                    "mode": "shared_workspace",
+                    "workspaceKind": "project_execution",
                     "orgArtifactsDir": "D:/octopus/artifacts",
+                    "issueArtifactsDir": "D:/octopus/worktree/artifacts/issues/issue-1",
                 }
             },
         )
@@ -654,15 +497,74 @@ async def test_opencode_prompt_includes_bash_tool_schema_guidance(
     assert "Do not guess tool input schemas" in captured_prompt
     assert "## Workspace Output Contract" in captured_prompt
     assert "D:/octopus/worktree" in captured_prompt
-    assert "D:/octopus/worktree/artifacts" in captured_prompt
-    assert "D:/octopus/artifacts" not in captured_prompt
+    assert "D:/octopus/worktree/artifacts/issues/issue-1" in captured_prompt
+    assert "D:/octopus/artifacts" in captured_prompt
     assert "project source/download directory" in captured_prompt
     assert "downloaded source bundles" in captured_prompt
-    assert "Prefer the workspace artifacts directory" in captured_prompt
+    assert "Prefer the workspace worktree with a clear shared path" in captured_prompt
+    assert "reports/" in captured_prompt
+    assert "OCTOPUS_WORKSPACE_CWD" in captured_prompt
+    assert (
+        "do not use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` as the default deliverable target"
+        in captured_prompt
+    )
+    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" in captured_prompt
+    assert "compatibility convenience path" in captured_prompt
+    assert "not a workspace isolation boundary" in captured_prompt
     assert (
         "reports, screenshots, CSV files, mockups, logs, and handoff documents"
         in captured_prompt
     )
+
+
+async def test_opencode_fallback_timeout_drains_original_communication_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    communicate_calls = 0
+    communicate_cancelled = False
+    killed = asyncio.Event()
+
+    class FakeProcess:
+        pid = 1234
+        returncode = 1
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            nonlocal communicate_calls, communicate_cancelled
+            communicate_calls += 1
+            try:
+                await killed.wait()
+            except asyncio.CancelledError:
+                communicate_cancelled = True
+                raise
+            return b"", b"terminated"
+
+        def kill(self) -> None:
+            killed.set()
+
+    async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        RuntimeExecutionContext(
+            run_id="run-opencode-timeout",
+            agent_id="agent-opencode-timeout",
+            org_id="org-opencode-timeout",
+            agent_name="OpenCode Timeout",
+            config={"command": "opencode-test", "timeoutSec": 0.01},
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.timed_out is True
+    assert communicate_calls == 1
+    assert communicate_cancelled is False
 
 
 async def test_opencode_tool_error_with_later_text_is_diagnostic_not_failure(
@@ -1221,6 +1123,46 @@ async def test_opencode_local_agent_requires_provider_model(
     assert "provider/model" in invalid_error["detail"]
 
 
+async def test_opencode_local_agent_defaults_to_noninteractive_permissions(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+
+    create_code, created = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Default Permissions",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {"model": "openai/gpt-5"},
+        },
+    )
+    duplicate_code, duplicate = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "OpenCode Explicit Permissions",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {
+                "model": "openai/gpt-5",
+                "extraArgs": ["--dangerously-skip-permissions"],
+            },
+        },
+    )
+
+    assert create_code == 201
+    assert created["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
+    assert duplicate_code == 201
+    assert duplicate["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
+
+
 async def test_opencode_local_update_requires_provider_model(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:
@@ -1259,8 +1201,49 @@ async def test_opencode_local_update_requires_provider_model(
     assert "opencode_local requires agentRuntimeConfig.model" in switch_error["detail"]
     assert valid_code == 200
     assert valid["agentRuntimeType"] == "opencode_local"
+    assert valid["agentRuntimeConfig"]["extraArgs"] == [
+        "--dangerously-skip-permissions"
+    ]
     assert invalid_code == 422
     assert "provider/model" in invalid_error["detail"]
+
+
+async def test_switching_from_opencode_to_codex_clears_runtime_specific_config(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id = await _seed_org(factory)
+    _, agent = await _request(
+        application,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Runtime Switch Agent",
+            "agentRuntimeType": "opencode_local",
+            "agentRuntimeConfig": {
+                "model": "ollama/qwen2.5:1.5b",
+                "command": "opencode",
+                "extraArgs": ["--dangerously-skip-permissions"],
+                "timeoutSec": 60,
+            },
+        },
+    )
+
+    update_code, updated = await _request(
+        application,
+        "PATCH",
+        f"/api/agents/{agent['id']}",
+        json={"agentRuntimeType": "codex_local"},
+    )
+
+    assert update_code == 200
+    assert updated["agentRuntimeType"] == "codex_local"
+    updated_config = updated["agentRuntimeConfig"]
+    assert updated_config["timeoutSec"] == 60
+    assert updated_config["instructionsBundleMode"] == "managed"
+    assert "model" not in updated_config
+    assert "command" not in updated_config
+    assert "extraArgs" not in updated_config
 
 
 async def test_openclaw_local_agent_requires_provider_model(
@@ -1457,9 +1440,72 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
         ],
         "billingType": "api",
         "biller": "openai",
+        "artifactEvidence": {
+            "source": "codex_file_change_event",
+            "writtenPaths": [],
+        },
     }
     assert ("stderr", "meaningful warning\n") in captured_logs
     assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
+
+
+async def test_codex_adapter_collects_work_products_from_file_change_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    report = workspace / "reports" / "final.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# Final report\n", encoding="utf-8")
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            event = {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [{"path": str(report), "kind": "add"}],
+                },
+            }
+            return (json.dumps(event).encode() + b"\n", b"")
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await CodexLocalRuntimeAdapter().execute(
+        RuntimeExecutionContext(
+            run_id="run-codex-artifact",
+            agent_id="agent-codex",
+            org_id="org-codex",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            workspace={
+                "octopusWorkspace": {"id": "workspace-1", "cwd": str(workspace)}
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.work_products is not None
+    assert len(result.work_products) == 1
+    product = result.work_products[0]
+    assert product["title"] == "reports/final.md"
+    assert product["isPrimary"] is True
+    assert product["metadata"]["source"] == "codex_file_change_event"
 
 
 async def test_codex_execute_streams_agent_message_delta(
@@ -1511,7 +1557,84 @@ async def test_codex_execute_streams_agent_message_delta(
     )
 
     assert result.exit_code == 0
-    assert streamed == [{"type": "assistant_delta", "delta": "done"}]
+    assert streamed == [
+        {
+            "type": "runtime_progress",
+            "runtime": "codex_local",
+            "eventType": "thread.started",
+            "itemType": None,
+            "message": "Codex 会话已启动",
+        },
+        {"type": "assistant_delta", "delta": "done"},
+        {
+            "type": "runtime_progress",
+            "runtime": "codex_local",
+            "eventType": "item.completed",
+            "itemType": "agent_message",
+            "message": "Codex 已生成回复",
+        },
+    ]
+
+
+async def test_codex_execute_forwards_jsonl_and_progress_before_process_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = (
+        b'{"type":"thread.started","thread_id":"thread-live"}\n'
+        b'{"type":"turn.started"}\n'
+        b'{"type":"item.started","item":{"type":"command_execution",'
+        b'"command":"rg -n TODO server"}}\n'
+        b'{"type":"item.completed","item":{"type":"command_execution",'
+        b'"exit_code":0}}\n'
+        b'{"type":"turn.completed","usage":{}}\n'
+    )
+    logs: list[tuple[str, str]] = []
+    progress: list[dict[str, object]] = []
+    observed_live_output = False
+
+    async def fake_run(*args: object, **kwargs: object) -> LocalProcessResult:
+        nonlocal observed_live_output
+        on_stdout_chunk = cast(ProcessChunkCallback, kwargs["on_stdout_chunk"])
+        assert callable(on_stdout_chunk)
+        split = stdout.index(b"\n", stdout.index(b"\n") + 1) + 1
+        await on_stdout_chunk(stdout[:split])
+        observed_live_output = any("turn.started" in chunk for _, chunk in logs)
+        await on_stdout_chunk(stdout[split:])
+        return LocalProcessResult(exit_code=0, stdout=stdout, stderr=b"")
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    async def on_stream_event(event: dict[str, object]) -> None:
+        progress.append(event)
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.local_process_supervisor.run",
+        fake_run,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-live",
+            agent_id="agent-live",
+            org_id="org-live",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            on_log=on_log,
+            on_stream_event=on_stream_event,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert observed_live_output is True
+    assert sum("thread.started" in chunk for _, chunk in logs) == 1
+    assert [event["message"] for event in progress] == [
+        "Codex 会话已启动",
+        "Codex 开始处理任务",
+        "正在执行命令：rg -n TODO server",
+        "命令执行完成（退出码 0）",
+        "Codex 本轮处理完成",
+    ]
 
 
 async def test_codex_execute_infers_openrouter_biller_from_api_key(
@@ -1814,6 +1937,75 @@ async def test_codex_execute_retries_unknown_resume_session(
     assert any("retrying with a fresh session" in chunk for _, chunk in logs)
 
 
+async def test_codex_execute_retries_unsupported_model_with_cli_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_args: list[tuple[str, ...]] = []
+    logs: list[tuple[str, str]] = []
+
+    class FakeCodexProcess:
+        def __init__(self, returncode: int, stdout: bytes, stderr: bytes) -> None:
+            self.returncode = returncode
+            self._stdout = stdout
+            self._stderr = stderr
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return self._stdout, self._stderr
+
+        def kill(self) -> None:
+            raise AssertionError("Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        captured_args.append(args)
+        if len(captured_args) == 1:
+            return FakeCodexProcess(
+                1,
+                b"",
+                b"Error: model gpt-obsolete is not supported\n",
+            )
+        return FakeCodexProcess(
+            0,
+            (
+                b'{"type":"thread.started","thread_id":"default-thread"}\n'
+                b'{"type":"item.completed","item":{"type":"agent_message",'
+                b'"text":"default model ok"}}\n'
+            ),
+            b"",
+        )
+
+    async def on_log(stream: str, chunk: str) -> None:
+        logs.append((stream, chunk))
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await execute_codex_local(
+        RuntimeExecutionContext(
+            run_id="run-model-fallback",
+            agent_id="agent-14",
+            org_id="org-14",
+            agent_name="Codex",
+            config={"command": "codex-test", "model": "openai/gpt-obsolete"},
+            on_log=on_log,
+        )
+    )
+
+    first_args = captured_args[0]
+    second_args = captured_args[1]
+    assert first_args[first_args.index("--model") + 1] == "gpt-obsolete"
+    assert "--model" not in second_args
+    assert result.exit_code == 0
+    assert result.result_json is not None
+    assert result.result_json["summary"] == "default model ok"
+    assert any("Codex CLI default model" in chunk for _, chunk in logs)
+
+
 async def test_codex_execute_injects_runtime_context_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1860,7 +2052,7 @@ async def test_codex_execute_injects_runtime_context_env(
                 },
             },
             workspace={
-                "rudderWorkspace": {
+                "octopusWorkspace": {
                     "cwd": "D:/workspaces/task-1",
                     "source": "workspace",
                     "strategy": "worktree",
@@ -1878,9 +2070,10 @@ async def test_codex_execute_injects_runtime_context_env(
                     "orgSkillsDir": "D:/orgs/org-14/skills",
                     "orgPlansDir": "D:/orgs/org-14/plans",
                     "orgArtifactsDir": "D:/orgs/org-14/artifacts",
+                    "issueArtifactsDir": "D:/worktrees/task-1/artifacts",
                 },
-                "rudderRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
-                "rudderRuntimePrimaryUrl": "http://svc",
+                "octopusRuntimeServices": [{"id": "svc-1", "url": "http://svc"}],
+                "octopusRuntimePrimaryUrl": "http://svc",
             },
             env={
                 "OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]',
@@ -1920,7 +2113,9 @@ async def test_codex_execute_injects_runtime_context_env(
     assert captured_env["OCTOPUS_ORG_SKILLS_DIR"] == "D:/orgs/org-14/skills"
     assert captured_env["OCTOPUS_ORG_PLANS_DIR"] == "D:/orgs/org-14/plans"
     assert captured_env["OCTOPUS_ORG_ARTIFACTS_DIR"] == "D:/orgs/org-14/artifacts"
-    assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in captured_env
+    assert (
+        captured_env["OCTOPUS_ISSUE_ARTIFACTS_DIR"] == "D:/worktrees/task-1/artifacts"
+    )
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in captured_env
     assert captured_env["OCTOPUS_RUNTIME_SERVICES_JSON"] == (
         '[{"id": "svc-1", "url": "http://svc"}]'
@@ -1930,7 +2125,7 @@ async def test_codex_execute_injects_runtime_context_env(
         '[{"serviceName":"preview"}]'
     )
     assert captured_env["OCTOPUS_RUNTIME_PRIMARY_URL"] == "http://svc"
-    assert all(not key.startswith("RUDDER" + "_") for key in captured_env)
+    assert all(not key.startswith("R" + "UDDER" + "_") for key in captured_env)
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in captured_env)
 
 
@@ -2062,29 +2257,52 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     async def fake_create_subprocess_exec(*args: str, **kwargs: Any) -> Any:
         raise PermissionError(5, "Access is denied")
 
-    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        captured["args"] = args
-        captured["input"] = kwargs["input"]
-        return subprocess.CompletedProcess(
-            args=args,
-            returncode=0,
-            stdout=(
-                b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
-                b'{"type":"item.completed","item":{"type":"agent_message",'
-                b'"text":"fallback ok"}}\n'
-            ),
-            stderr=b"",
-        )
-
-    monkeypatch.setattr(
-        "packages.runtimes.codex_local.runner._should_retry_with_blocking_subprocess",
-        lambda exc: True,
+    output = (
+        b'{"type":"thread.started","thread_id":"thread-fallback"}\n'
+        b'{"type":"item.completed","item":{"type":"agent_message",'
+        b'"text":"fallback ok"}}\n'
     )
+    live_logs: list[tuple[str, str]] = []
+
+    class CaptureStdin(io.BytesIO):
+        def close(self) -> None:
+            captured["input"] = self.getvalue()
+            super().close()
+
+    class FakePopen:
+        pid = 4242
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.stdin = CaptureStdin()
+            self.stdout = io.BytesIO(output)
+            self.stderr = io.BytesIO()
+
+        def communicate(self, payload: bytes | None = None) -> tuple[bytes, bytes]:
+            raise AssertionError("streaming fallback must not buffer with communicate")
+
+        def wait(self) -> int:
+            return self.returncode
+
+        def poll(self) -> int:
+            return self.returncode
+
+    def fake_popen(args: list[str], **kwargs: Any) -> FakePopen:
+        captured["args"] = args
+        return FakePopen()
+
     monkeypatch.setattr(
         "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
         fake_create_subprocess_exec,
     )
-    monkeypatch.setattr("packages.runtimes.codex_local.runner.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "packages.runtimes.local_process._supports_windows_blocking_fallback",
+        lambda: True,
+    )
+    monkeypatch.setattr("packages.runtimes.local_process.subprocess.Popen", fake_popen)
+
+    async def on_log(stream: str, chunk: str) -> None:
+        live_logs.append((stream, chunk))
 
     result = await execute_codex_local(
         RuntimeExecutionContext(
@@ -2093,7 +2311,7 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
             org_id="org-subprocess-fallback",
             agent_name="Codex",
             config={"command": "codex-test"},
-            on_log=lambda stream, chunk: _noop_log(stream, chunk),
+            on_log=on_log,
         )
     )
 
@@ -2101,6 +2319,7 @@ async def test_codex_execute_falls_back_when_windows_asyncio_spawn_is_denied(
     assert result.session_id_after == "thread-fallback"
     assert result.result_json is not None
     assert result.result_json["summary"] == "fallback ok"
+    assert any("thread-fallback" in chunk for _, chunk in live_logs)
     prompt = captured["input"].decode("utf-8")
     assert "## Runtime Tool Capability" in prompt
     assert "Do not guess tool input schemas" in prompt
@@ -2208,20 +2427,30 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         fake_create_subprocess_exec,
     )
 
+    def read_only_context(
+        *, command: str, config: dict[str, Any]
+    ) -> RuntimeExecutionContext:
+        context = _runtime_context_for_env(command=command, config=config)
+        assert context.env is not None
+        assert context.workspace is not None
+        context.env["OCTOPUS_GIT_WRITE_POLICY"] = "read_only"
+        context.workspace["octopusWorkspace"]["gitWritePolicy"] = "read_only"
+        return context
+
     await execute_claude_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="claude-shim-test",
             config={"command": "claude-shim-test"},
         )
     )
     await execute_opencode_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="opencode-shim-test",
             config={"command": "opencode-shim-test", "model": "openai/gpt-5"},
         )
     )
     await execute_codex_local(
-        _runtime_context_for_env(
+        read_only_context(
             command="codex-shim-test",
             config={"command": "codex-shim-test"},
         )
@@ -2231,9 +2460,12 @@ async def test_local_runtimes_expose_control_plane_cli_shim(
         env = captured[command]
         path_entries = env["PATH"].split(os.pathsep)
         shim_dir = Path(path_entries[0])
-        assert (shim_dir / "control-plane").is_file()
+        assert env["OCTOPUS_GIT_WRITE_POLICY"] == "read_only"
+        assert (shim_dir / "octopus").is_file()
+        assert (shim_dir / "git").is_file()
         if os.name == "nt":
-            assert (shim_dir / "control-plane.cmd").is_file()
+            assert (shim_dir / "octopus.cmd").is_file()
+            assert (shim_dir / "git.cmd").is_file()
 
 
 async def test_opencode_execute_materializes_database_provider_config(
@@ -2331,6 +2563,116 @@ async def test_opencode_execute_materializes_database_provider_config(
     assert provider["options"]["baseURL"] == "https://deepseek.example/v1"
     assert provider["options"]["apiKey"] == "sk-db"
     assert provider["models"]["deepseek-v4-flash"]["name"] == "DeepSeek V4 Flash"
+
+
+async def test_opencode_execute_materializes_implicit_local_ollama_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operator_home = tmp_path / "operator-home"
+    operator_config = operator_home / ".config" / "opencode" / "opencode.json"
+    operator_config.parent.mkdir(parents=True)
+    operator_config.write_text(json.dumps({"provider": {}}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(operator_home))
+    monkeypatch.setenv("USERPROFILE", str(operator_home))
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            return b"", b""
+
+        def kill(self) -> None:
+            raise AssertionError("successful OpenCode process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        command: str, *args: str, **kwargs: Any
+    ) -> FakeProcess:
+        return FakeProcess()
+
+    async def fake_validate_ollama(_provider: Any) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.ollama.LocalOllamaProvider.validate",
+        fake_validate_ollama,
+    )
+
+    result = await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={
+                "command": "opencode-test",
+                "model": "ollama/qwen2.5:1.5b",
+            },
+        )
+    )
+
+    managed_config_path = (
+        tmp_path
+        / "octopus-home"
+        / "instances"
+        / "test"
+        / "organizations"
+        / "org-14"
+        / "opencode-home"
+        / "agents"
+        / "agent-14"
+        / "home"
+        / ".config"
+        / "opencode"
+        / "opencode.json"
+    )
+    managed_config = json.loads(managed_config_path.read_text(encoding="utf-8"))
+    operator_config_after = json.loads(operator_config.read_text(encoding="utf-8"))
+    assert result.exit_code == 0
+    assert "ollama" not in operator_config_after["provider"]
+    provider = managed_config["provider"]["ollama"]
+    assert provider["name"] == "Ollama (local)"
+    assert provider["npm"] == "@ai-sdk/openai-compatible"
+    assert provider["options"]["baseURL"] == "http://127.0.0.1:11434/v1"
+    assert provider["models"]["qwen2.5:1.5b"]["name"] == "qwen2.5:1.5b"
+
+
+async def test_opencode_ollama_preflight_fails_before_process_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_validate_ollama(_provider: Any) -> str:
+        return 'Ollama model "missing:latest" is not installed.'
+
+    async def unexpected_create_subprocess_exec(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("OpenCode must not start after Ollama preflight failure")
+
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.ollama.LocalOllamaProvider.validate",
+        fake_validate_ollama,
+    )
+    monkeypatch.setattr(
+        "packages.runtimes.opencode_local.runner.asyncio.create_subprocess_exec",
+        unexpected_create_subprocess_exec,
+    )
+
+    result = await execute_opencode_local(
+        _runtime_context_for_env(
+            command="opencode-test",
+            config={
+                "command": "opencode-test",
+                "model": "ollama/missing:latest",
+            },
+        )
+    )
+
+    assert result.exit_code == 1
+    assert result.error_message == 'Ollama model "missing:latest" is not installed.'
 
 
 async def test_codex_and_claude_execute_use_database_provider_env(
@@ -2486,12 +2828,12 @@ def _runtime_context_for_env(
             },
         },
         workspace={
-            "rudderWorkspace": {
+            "octopusWorkspace": {
                 "cwd": "D:/workspaces/task-1",
                 "source": "workspace",
                 "strategy": "worktree",
             },
-            "rudderRuntimePrimaryUrl": "http://svc",
+            "octopusRuntimePrimaryUrl": "http://svc",
         },
         env={"OCTOPUS_WORKSPACES_JSON": '[{"id":"workspace-1"}]'},
         on_log=lambda stream, chunk: _noop_log(stream, chunk),

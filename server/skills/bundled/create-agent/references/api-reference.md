@@ -1,4 +1,4 @@
-﻿# control plane Create Agent API Reference
+# control plane Create Agent API Reference
 
 Internal/debug reference for the bundled `create-agent` skill.
 
@@ -10,15 +10,15 @@ Internal/debug reference for the bundled `create-agent` skill.
 
 | CLI command | Primary route |
 | --- | --- |
-| `control-plane agent config index` | `GET /llms/agent-configuration.txt` |
-| `control-plane agent config doc <agentRuntimeType>` | `GET /llms/agent-configuration/:agentRuntimeType.txt` |
-| `control-plane agent config list --org-id <orgId>` | `GET /api/orgs/:orgId/agent-configurations` |
-| `control-plane agent config get <agentId>` | `GET /api/agents/:agentId/configuration` |
-| `control-plane agent hire --org-id <orgId> --payload <json>` | `POST /api/orgs/:orgId/agent-hires` |
-| `control-plane approval get <approvalId>` | `GET /api/approvals/:approvalId` |
-| `control-plane approval comment <approvalId> --body <text>` | `POST /api/approvals/:approvalId/comments` |
-| `control-plane approval resubmit <approvalId> [--payload <json>]` | `POST /api/approvals/:approvalId/resubmit` |
-| `control-plane approval issues <approvalId>` | `GET /api/approvals/:approvalId/issues` |
+| `octopus agent config index` | `GET /llms/agent-configuration.txt` |
+| `octopus agent config doc <agentRuntimeType>` | `GET /llms/agent-configuration/:agentRuntimeType.txt` |
+| `octopus agent config list --org-id <orgId>` | `GET /api/orgs/:orgId/agent-configurations` |
+| `octopus agent config get <agentId>` | `GET /api/agents/:agentId/configuration` |
+| `octopus agent hire --org-id <orgId> --payload <json>` | `POST /api/orgs/:orgId/agent-hires` |
+| `octopus approval get <approvalId>` | `GET /api/approvals/:approvalId` |
+| `octopus approval comment <approvalId> --body <text>` | `POST /api/approvals/:approvalId/comments` |
+| `octopus approval resubmit <approvalId> [--payload <json>]` | `POST /api/approvals/:approvalId/resubmit` |
+| `octopus approval issues <approvalId>` | `GET /api/approvals/:approvalId/issues` |
 
 ## Reflection Endpoints
 
@@ -59,6 +59,7 @@ Representative shape:
     "heartbeat": {
       "enabled": true,
       "intervalSec": 300,
+      "runDiagnosticsOnTimer": false,
       "wakeOnDemand": true,
       "maxConcurrentRuns": 3
     }
@@ -72,7 +73,7 @@ Representative shape:
 
 ## `POST /api/orgs/:orgId/agent-hires`
 
-Canonical hire route used by `control-plane agent hire`.
+Canonical hire route used by `octopus agent hire`.
 
 Request body:
 
@@ -93,6 +94,7 @@ Request body:
     "heartbeat": {
       "enabled": true,
       "intervalSec": 300,
+      "runDiagnosticsOnTimer": false,
       "wakeOnDemand": true,
       "maxConcurrentRuns": 3
     }

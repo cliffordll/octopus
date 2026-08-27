@@ -1,27 +1,25 @@
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import json
 import os
 import re
 import shutil
-import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_process import local_process_supervisor
 from ..local_skills import (
     configure_managed_profile_env,
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
 )
-from ..provider_config import apply_provider_env, model_for_cli
+from ..provider_config import apply_provider_env
 from ..paths import ensure_managed_runtime_home
 from ..session import effective_resume_session_id
 from ..tool_capabilities import (
@@ -29,6 +27,7 @@ from ..tool_capabilities import (
     append_runtime_workspace_guidance,
 )
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+from .model_selection import CodexModelSelection
 
 
 @dataclass(frozen=True)
@@ -86,7 +85,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     managed_home = await _prepare_managed_home(env, context.on_log)
     _prepare_managed_git_config(env)
     if managed_home is not None:
-        ensure_control_plane_cli_shim(env, managed_home)
+        ensure_octopus_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     materialize_runtime_skills(
         runtime_type="codex_local",
@@ -106,11 +105,12 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         runtime_label="Codex",
         on_log=context.on_log,
     )
+    model_selection = CodexModelSelection.from_runtime_config(context.config)
 
     attempt = await _run_attempt(
         context=context,
         command=command,
-        args=_build_args(context.config, session_id),
+        args=_build_args(context.config, session_id, model_selection),
         cwd=cwd,
         prompt=prompt,
         env=env,
@@ -119,6 +119,39 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         billing_type=billing_type,
         biller=biller,
     )
+    using_default_model = False
+    if (
+        not attempt.result.timed_out
+        and (attempt.result.exit_code or 0) != 0
+        and model_selection.should_fallback(
+            stdout=attempt.stdout,
+            stderr=attempt.raw_stderr,
+        )
+    ):
+        await context.on_log(
+            "stderr",
+            (
+                f'[octopus] Codex model "{model_selection.model_id}" is unavailable; '
+                "retrying with the Codex CLI default model.\n"
+            ),
+        )
+        using_default_model = True
+        attempt = await _run_attempt(
+            context=context,
+            command=command,
+            args=_build_args(
+                context.config,
+                session_id,
+                CodexModelSelection(None),
+            ),
+            cwd=cwd,
+            prompt=prompt,
+            env=env,
+            timeout_sec=timeout_sec,
+            loaded_skills=loaded_skills,
+            billing_type=billing_type,
+            biller=biller,
+        )
     if (
         session_id
         and not attempt.result.timed_out
@@ -135,7 +168,11 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         retry = await _run_attempt(
             context=context,
             command=command,
-            args=_build_args(context.config, None),
+            args=_build_args(
+                context.config,
+                None,
+                CodexModelSelection(None) if using_default_model else model_selection,
+            ),
             cwd=cwd,
             prompt=prompt,
             env=env,
@@ -165,37 +202,36 @@ async def _run_attempt(
     billing_type: str,
     biller: str,
 ) -> _RunAttempt:
+    live_output = _CodexLiveOutput(context)
+
+    async def on_blocking_fallback(startup_error: PermissionError) -> None:
+        await context.on_log(
+            "stderr",
+            (
+                "[octopus] asyncio subprocess startup failed on Windows; "
+                "retrying Codex CLI through the managed process fallback: "
+                f"{startup_error}\n"
+            ),
+        )
+
     try:
-        process = await asyncio.create_subprocess_exec(
+        await context.on_log(
+            "stdout", "[octopus] Codex CLI 已启动，正在等待运行时事件。\n"
+        )
+        process_result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
-        )
-    except PermissionError as exc:
-        if _should_retry_with_blocking_subprocess(exc):
-            return await _run_blocking_subprocess_attempt(
-                context=context,
-                command=command,
-                args=args,
-                cwd=cwd,
-                prompt=prompt,
-                env=env,
-                timeout_sec=timeout_sec,
-                loaded_skills=loaded_skills,
-                billing_type=billing_type,
-                biller=biller,
-                startup_error=exc,
-            )
-        return _subprocess_start_error_attempt(
-            exc,
-            loaded_skills=loaded_skills,
-            billing_type=billing_type,
-            biller=biller,
+            input_data=prompt.encode(),
+            timeout_sec=timeout_sec,
+            cancel_event=context.cancel_event,
+            on_process_started=context.on_process_started,
+            on_process_exited=context.on_process_exited,
+            allow_blocking_fallback=True,
+            on_blocking_fallback=on_blocking_fallback,
+            on_stdout_chunk=live_output.on_stdout_chunk,
+            on_stderr_chunk=live_output.on_stderr_chunk,
         )
     except OSError as exc:
         return _subprocess_start_error_attempt(
@@ -204,66 +240,17 @@ async def _run_attempt(
             billing_type=billing_type,
             biller=biller,
         )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
-    try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
+    await live_output.finish()
+    if process_result.cancelled:
+        stderr_text = _strip_benign_stderr(
+            process_result.stderr.decode(errors="replace")
         )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {communication, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                process.kill()
-                stdout, stderr = await communication
-                await process.wait()
-                stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
-                result = RuntimeExecutionResult(
-                    exit_code=process.returncode,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                    result_json={
-                        "stdout": stdout.decode(errors="replace"),
-                        "stderr": stderr_text,
-                        "loadedSkills": loaded_skills,
-                        "billingType": billing_type,
-                        "biller": biller,
-                    },
-                )
-                return _RunAttempt(
-                    result=result,
-                    stdout=stdout.decode(errors="replace"),
-                    stderr=stderr_text,
-                    raw_stderr=stderr.decode(errors="replace"),
-                )
-            cancelled.cancel()
-            if communication not in done:
-                raise TimeoutError
-            stdout, stderr = communication.result()
-        elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        process.kill()
-        stdout, stderr = await communication
-        await process.wait()
-        stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
         result = RuntimeExecutionResult(
-            exit_code=process.returncode,
-            timed_out=True,
-            error_message=f"Timed out after {timeout_sec:g}s",
+            exit_code=process_result.exit_code,
+            signal=process_result.signal,
+            error_message="Run cancelled",
             result_json={
-                "stdout": stdout.decode(errors="replace"),
+                "stdout": process_result.stdout.decode(errors="replace"),
                 "stderr": stderr_text,
                 "loadedSkills": loaded_skills,
                 "billingType": billing_type,
@@ -272,21 +259,37 @@ async def _run_attempt(
         )
         return _RunAttempt(
             result=result,
-            stdout=stdout.decode(errors="replace"),
+            stdout=process_result.stdout.decode(errors="replace"),
             stderr=stderr_text,
-            raw_stderr=stderr.decode(errors="replace"),
+            raw_stderr=process_result.stderr.decode(errors="replace"),
         )
-    except asyncio.CancelledError:
-        process.kill()
-        await communication
-        await process.wait()
-        raise
+    if process_result.timed_out:
+        stderr_text = _strip_benign_stderr(
+            process_result.stderr.decode(errors="replace")
+        )
+        result = RuntimeExecutionResult(
+            exit_code=process_result.exit_code,
+            timed_out=True,
+            error_message=f"Timed out after {timeout_sec:g}s",
+            result_json={
+                "stdout": process_result.stdout.decode(errors="replace"),
+                "stderr": stderr_text,
+                "loadedSkills": loaded_skills,
+                "billingType": billing_type,
+                "biller": biller,
+            },
+        )
+        return _RunAttempt(
+            result=result,
+            stdout=process_result.stdout.decode(errors="replace"),
+            stderr=stderr_text,
+            raw_stderr=process_result.stderr.decode(errors="replace"),
+        )
 
     return await _completed_process_attempt(
-        context=context,
-        returncode=process.returncode,
-        stdout=stdout,
-        stderr=stderr,
+        returncode=process_result.exit_code,
+        stdout=process_result.stdout,
+        stderr=process_result.stderr,
         timed_out=False,
         timeout_sec=timeout_sec,
         loaded_skills=loaded_skills,
@@ -317,88 +320,8 @@ def _subprocess_start_error_attempt(
     return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
 
 
-def _should_retry_with_blocking_subprocess(_: PermissionError) -> bool:
-    return os.name == "nt"
-
-
-async def _run_blocking_subprocess_attempt(
-    *,
-    context: RuntimeExecutionContext,
-    command: str,
-    args: list[str],
-    cwd: str | None,
-    prompt: str,
-    env: dict[str, str],
-    timeout_sec: float,
-    loaded_skills: list[dict[str, str | None]],
-    billing_type: str,
-    biller: str,
-    startup_error: PermissionError,
-) -> _RunAttempt:
-    await context.on_log(
-        "stderr",
-        (
-            "[octopus] asyncio subprocess startup failed on Windows; "
-            f"retrying Codex CLI with blocking subprocess fallback: {startup_error}\n"
-        ),
-    )
-    try:
-        completed = await asyncio.to_thread(
-            subprocess.run,
-            [command, *args],
-            cwd=cwd,
-            env=env,
-            input=prompt.encode(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            **runtime_subprocess_kwargs(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or b""
-        stderr = exc.stderr or b""
-        return await _completed_process_attempt(
-            context=context,
-            returncode=1,
-            stdout=stdout,
-            stderr=stderr,
-            timed_out=True,
-            timeout_sec=timeout_sec,
-            loaded_skills=loaded_skills,
-            billing_type=billing_type,
-            biller=biller,
-        )
-    except OSError as exc:
-        message = str(exc) or exc.__class__.__name__
-        result = RuntimeExecutionResult(
-            exit_code=1,
-            error_message=f"Failed to start Codex CLI: {message}",
-            result_json={
-                "stdout": "",
-                "stderr": message,
-                "loadedSkills": loaded_skills,
-                "billingType": billing_type,
-                "biller": biller,
-            },
-        )
-        return _RunAttempt(result=result, stdout="", stderr=message, raw_stderr=message)
-
-    return await _completed_process_attempt(
-        context=context,
-        returncode=completed.returncode,
-        stdout=completed.stdout or b"",
-        stderr=completed.stderr or b"",
-        timed_out=False,
-        timeout_sec=timeout_sec,
-        loaded_skills=loaded_skills,
-        billing_type=billing_type,
-        biller=biller,
-    )
-
-
 async def _completed_process_attempt(
     *,
-    context: RuntimeExecutionContext,
     returncode: int | None,
     stdout: bytes,
     stderr: bytes,
@@ -410,11 +333,6 @@ async def _completed_process_attempt(
 ) -> _RunAttempt:
     stdout_text = stdout.decode(errors="replace")
     stderr_text = _strip_benign_stderr(stderr.decode(errors="replace"))
-    await _emit_codex_stream_events_from_text(context, stdout_text)
-    if stdout_text:
-        await context.on_log("stdout", stdout_text)
-    if stderr_text:
-        await context.on_log("stderr", stderr_text)
     if timed_out:
         result = RuntimeExecutionResult(
             exit_code=returncode,
@@ -456,6 +374,10 @@ async def _completed_process_attempt(
             "loadedSkills": loaded_skills,
             "billingType": billing_type,
             "biller": biller,
+            "artifactEvidence": {
+                "source": "codex_file_change_event",
+                "writtenPaths": parsed["writtenFiles"],
+            },
         },
     )
     return _RunAttempt(
@@ -467,26 +389,36 @@ async def _completed_process_attempt(
 
 
 def _build_args(
-    config: dict[str, Any], resume_session_id: str | None = None
+    config: dict[str, Any],
+    resume_session_id: str | None = None,
+    model_selection: CodexModelSelection | None = None,
 ) -> list[str]:
     args = ["exec", "--skip-git-repo-check", "--json", "--disable", "plugins"]
+    extra_args = config.get("extraArgs", config.get("args", []))
+    normalized_extra_args = (
+        list(extra_args)
+        if isinstance(extra_args, list)
+        and all(isinstance(argument, str) for argument in extra_args)
+        else []
+    )
     if config.get("search") is True:
         args.insert(0, "--search")
     if config.get("dangerouslyBypassApprovalsAndSandbox") is True:
         args.append("--dangerously-bypass-approvals-and-sandbox")
-    model = model_for_cli(config)
-    if model:
-        args.extend(["--model", model])
+    elif not any(
+        argument in {"--sandbox", "-s"} or argument.startswith(("--sandbox=", "-s="))
+        for argument in normalized_extra_args
+    ):
+        # Agent Runs execute inside a system-managed workspace. Give the CLI
+        # write access to that workspace without granting full host access.
+        args.extend(["--sandbox", "workspace-write"])
+    (model_selection or CodexModelSelection.from_runtime_config(config)).append_to(args)
     reasoning = _string(
         config.get("modelReasoningEffort") or config.get("reasoningEffort")
     )
     if reasoning:
         args.extend(["-c", f"model_reasoning_effort={json.dumps(reasoning)}"])
-    extra_args = config.get("extraArgs", config.get("args", []))
-    if isinstance(extra_args, list) and all(
-        isinstance(argument, str) for argument in extra_args
-    ):
-        args.extend(extra_args)
+    args.extend(normalized_extra_args)
     args.extend(["-c", "skills.bundled.enabled=false"])
     if resume_session_id:
         args.extend(["resume", resume_session_id, "-"])
@@ -499,6 +431,7 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
     session_id: str | None = None
     messages: list[str] = []
     error_message: str | None = None
+    written_files: list[str] = []
     usage = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0}
     for raw_line in stdout.splitlines():
         try:
@@ -522,6 +455,10 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
                 and isinstance(item.get("text"), str)
             ):
                 messages.append(item["text"])
+            elif isinstance(item, dict) and item.get("type") == "file_change":
+                for path in _file_change_paths(item):
+                    if path not in written_files:
+                        written_files.append(path)
         elif event_type == "turn.completed":
             raw_usage = event.get("usage")
             if isinstance(raw_usage, dict):
@@ -543,31 +480,155 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
         "summary": "\n\n".join(messages).strip(),
         "usage": usage,
         "errorMessage": error_message,
+        "writtenFiles": written_files,
     }
 
 
-async def _emit_codex_stream_events_from_text(
-    context: RuntimeExecutionContext, stdout_text: str
+def _file_change_paths(item: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"path", "file_path", "filePath"} and isinstance(child, str):
+                    path = child.strip()
+                    if path and path not in paths:
+                        paths.append(path)
+                elif key in {"changes", "files"}:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(item)
+    return paths
+
+
+class _CodexLiveOutput:
+    """Forward raw Codex output live and emit normalized progress events."""
+
+    def __init__(self, context: RuntimeExecutionContext) -> None:
+        self._context = context
+        self._stdout = bytearray()
+        self._stderr = bytearray()
+
+    async def on_stdout_chunk(self, chunk: bytes) -> None:
+        self._stdout.extend(chunk)
+        await self._drain(self._stdout, stream="stdout")
+
+    async def on_stderr_chunk(self, chunk: bytes) -> None:
+        self._stderr.extend(chunk)
+        await self._drain(self._stderr, stream="stderr")
+
+    async def finish(self) -> None:
+        await self._flush(self._stdout, stream="stdout")
+        await self._flush(self._stderr, stream="stderr")
+
+    async def _drain(self, buffer: bytearray, *, stream: str) -> None:
+        while True:
+            newline = buffer.find(b"\n")
+            if newline < 0:
+                return
+            line = bytes(buffer[: newline + 1])
+            del buffer[: newline + 1]
+            await self._emit_line(stream, line.decode(errors="replace"))
+
+    async def _flush(self, buffer: bytearray, *, stream: str) -> None:
+        if not buffer:
+            return
+        line = bytes(buffer).decode(errors="replace")
+        buffer.clear()
+        await self._emit_line(stream, line)
+
+    async def _emit_line(self, stream: str, line: str) -> None:
+        if stream == "stderr" and _is_benign_stderr_line(line):
+            return
+        await self._context.on_log(stream, line)
+        if stream == "stdout":
+            await _emit_codex_stream_event(self._context, line)
+
+
+async def _emit_codex_stream_event(
+    context: RuntimeExecutionContext, raw_line: str
 ) -> None:
     if context.on_stream_event is None:
         return
-    for raw_line in stdout_text.splitlines():
-        try:
-            event = json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict) or event.get("type") != "item.completed":
-            continue
-        item = event.get("item")
-        if (
-            isinstance(item, dict)
-            and item.get("type") == "agent_message"
-            and isinstance(item.get("text"), str)
-            and item["text"]
-        ):
-            await context.on_stream_event(
-                {"type": "assistant_delta", "delta": item["text"]}
-            )
+    try:
+        event = json.loads(raw_line)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(event, dict):
+        return
+    event_type = event.get("type")
+    item = event.get("item")
+    item = item if isinstance(item, dict) else {}
+    if (
+        event_type == "item.completed"
+        and item.get("type") == "agent_message"
+        and isinstance(item.get("text"), str)
+        and item["text"]
+    ):
+        await context.on_stream_event(
+            {"type": "assistant_delta", "delta": item["text"]}
+        )
+    message = _codex_progress_message(event_type, event, item)
+    if message:
+        await context.on_stream_event(
+            {
+                "type": "runtime_progress",
+                "runtime": "codex_local",
+                "eventType": event_type,
+                "itemType": item.get("type"),
+                "message": message,
+            }
+        )
+
+
+def _codex_progress_message(
+    event_type: object, event: dict[str, Any], item: dict[str, Any]
+) -> str | None:
+    if event_type == "thread.started":
+        return "Codex 会话已启动"
+    if event_type == "turn.started":
+        return "Codex 开始处理任务"
+    item_type = item.get("type")
+    if event_type == "item.started" and item_type == "command_execution":
+        command = _string(item.get("command"))
+        return (
+            f"正在执行命令：{_compact_progress_text(command)}"
+            if command
+            else "正在执行命令"
+        )
+    if event_type == "item.completed" and item_type == "command_execution":
+        exit_code = item.get("exit_code")
+        return (
+            f"命令执行完成（退出码 {exit_code}）"
+            if isinstance(exit_code, int)
+            else "命令执行完成"
+        )
+    if event_type == "item.started" and item_type:
+        return f"开始执行：{item_type}"
+    if event_type == "item.completed" and item_type == "agent_message":
+        return "Codex 已生成回复"
+    if event_type == "item.completed" and item_type:
+        return f"执行完成：{item_type}"
+    if event_type == "turn.completed":
+        return "Codex 本轮处理完成"
+    if event_type in {"error", "turn.failed"}:
+        raw_error = event.get("error")
+        error = raw_error if isinstance(raw_error, dict) else {}
+        message = _string(event.get("message")) or _string(error.get("message"))
+        return (
+            f"Codex 执行失败：{_compact_progress_text(message)}"
+            if message
+            else "Codex 执行失败"
+        )
+    return None
+
+
+def _compact_progress_text(value: str | None, limit: int = 240) -> str:
+    normalized = re.sub(r"\s+", " ", value or "").strip()
+    return normalized if len(normalized) <= limit else f"{normalized[:limit].rstrip()}…"
 
 
 def _integer(value: Any) -> int:

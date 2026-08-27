@@ -1,6 +1,6 @@
-﻿---
+---
 name: create-agent
-description: 通过 `control-plane` CLI 创建新的控制平面 agent，并遵守治理流程。用于检查 adapter 配置、比较已有 agent、草拟 prompt/config，并提交 hire request。
+description: 通过 `octopus` CLI 创建新的控制平面 agent，并遵守治理流程。用于检查 adapter 配置、比较已有 agent、草拟 prompt/config，并提交 hire request。
 ---
 
 # 创建 Agent 技能
@@ -18,7 +18,7 @@ description: 通过 `control-plane` CLI 创建新的控制平面 agent，并遵�
 
 该工作流优先使用 CLI：
 
-- 结构化读取和变更使用 `control-plane ... --json`。
+- 结构化读取和变更使用 `octopus ... --json`。
 - 命令目录以 `references/cli-reference.md` 为准。
 - `references/api-reference.md` 仅用于内部调试或兼容参考。
 - 不要手动创建 agent 目录、说明文件或组织元数据作为降级方案。
@@ -29,7 +29,7 @@ description: 通过 `control-plane` CLI 创建新的控制平面 agent，并遵�
 1. 确认当前身份和组织上下文。
 
 ```sh
-control-plane agent me --json
+octopus agent me --json
 ```
 
 如果返回 `{"error":"Agent authentication required"}`，说明本次运行缺少有效 agent 认证：

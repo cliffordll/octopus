@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
-from ..constants.issue import IssueOriginKind, IssuePriority, IssueStatus
+from ..constants.issue import (
+    DelegationCloseoutPolicyMode,
+    IssueOriginKind,
+    IssuePriority,
+    IssueStatus,
+)
 from .workspace import IssueWorkProduct
 
 
@@ -68,6 +73,8 @@ class IssueDetail(IssueListItem):
     parentId: str | None
     originKind: IssueOriginKind
     originId: str | None
+    originRunId: str | None
+    closeoutPolicy: "DelegationCloseoutPolicy | None"
     issueNumber: int | None
     requestDepth: int
     startedAt: str | None
@@ -112,6 +119,27 @@ class CreateIssuePayload(TypedDict):
     requestDepth: NotRequired[int]
 
 
+class DelegationCloseoutRequirements(TypedDict, total=False):
+    minimumOutputs: int
+    primaryOutputRequired: bool
+
+
+class DelegationCloseoutPolicy(TypedDict):
+    version: Literal[1]
+    mode: DelegationCloseoutPolicyMode
+    requirements: NotRequired[DelegationCloseoutRequirements]
+
+
+class CreateChildIssuesPayload(TypedDict):
+    closeoutPolicy: NotRequired[DelegationCloseoutPolicy]
+    children: list[CreateIssuePayload]
+
+
+class WorkProductDeclarationPayload(TypedDict, total=False):
+    path: str
+    isPrimary: bool
+
+
 class UpdateIssuePayload(TypedDict, total=False):
     title: str
     description: str | None
@@ -129,6 +157,7 @@ class UpdateIssuePayload(TypedDict, total=False):
     hiddenAt: str | None
     reviewDecision: "RecordIssueReviewDecisionPayload"
     requestedStatus: str
+    workProductDeclarations: list[WorkProductDeclarationPayload]
 
 
 IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_followup"]
@@ -136,6 +165,8 @@ IssueReviewDecision = Literal["approve", "request_changes", "blocked", "needs_fo
 
 class CreateIssueCommentPayload(TypedDict):
     body: str
+    requestId: NotRequired[str]
+    workProductDeclarations: NotRequired[list[WorkProductDeclarationPayload]]
 
 
 class CheckoutIssuePayload(TypedDict):

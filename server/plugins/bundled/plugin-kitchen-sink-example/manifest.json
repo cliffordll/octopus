@@ -1,0 +1,90 @@
+{
+  "id": "kitchen-sink",
+  "apiVersion": 1,
+  "version": "0.1.0",
+  "displayName": "Kitchen Sink Example",
+  "description": "Comprehensive fixture covering UI, jobs, webhooks, tools, state, events, metrics, and activity.",
+  "author": "Octopus",
+  "categories": ["example", "regression"],
+  "capabilities": [
+    "activity.log.write",
+    "agent.tools.register",
+    "events.emit",
+    "events.subscribe",
+    "http.outbound",
+    "jobs.schedule",
+    "metrics.write",
+    "organizations.read",
+    "plugin.state.read",
+    "plugin.state.write",
+    "projects.read",
+    "ui.action.register",
+    "ui.commentAnnotation.register",
+    "ui.dashboardWidget.register",
+    "ui.detailTab.register",
+    "ui.page.register",
+    "ui.sidebar.register",
+    "webhooks.receive"
+  ],
+  "entrypoints": {
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui"
+  },
+  "ui": {
+    "slots": [
+      {
+        "type": "page",
+        "id": "kitchen-sink-page",
+        "displayName": "Kitchen Sink",
+        "exportName": "KitchenSinkPage",
+        "routePath": "kitchen-sink"
+      },
+      {
+        "type": "settingsPage",
+        "id": "kitchen-sink-settings",
+        "displayName": "Kitchen Sink",
+        "exportName": "KitchenSinkSettings"
+      },
+      {
+        "type": "dashboardWidget",
+        "id": "kitchen-sink-widget",
+        "displayName": "Kitchen Sink",
+        "exportName": "KitchenSinkWidget"
+      },
+      {
+        "type": "sidebar",
+        "id": "kitchen-sink-sidebar",
+        "displayName": "Kitchen Sink",
+        "exportName": "KitchenSinkSidebar"
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "jobKey": "nightly",
+      "displayName": "Nightly Smoke",
+      "schedule": "0 2 * * *"
+    }
+  ],
+  "webhooks": [
+    {
+      "endpointKey": "smoke",
+      "displayName": "Smoke Webhook"
+    }
+  ],
+  "tools": [
+    {
+      "name": "kitchen.echo",
+      "displayName": "Echo",
+      "description": "Echo a message for plugin tool tests.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

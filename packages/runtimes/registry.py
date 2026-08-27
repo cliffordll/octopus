@@ -8,7 +8,7 @@ from .opencode_local import OpenCodeLocalRuntimeAdapter
 from .openclaw_gateway import OpenClawGatewayRuntimeAdapter
 from .openclaw_local import OpenClawLocalRuntimeAdapter
 from .process import ProcessRuntimeAdapter
-from .types import RuntimeAdapter
+from .types import RuntimeAdapterProtocol
 
 _PROCESS = ProcessRuntimeAdapter()
 _CODEX_LOCAL = CodexLocalRuntimeAdapter()
@@ -17,7 +17,7 @@ _CLAUDE_LOCAL = ClaudeLocalRuntimeAdapter()
 _OPENCODE_LOCAL = OpenCodeLocalRuntimeAdapter()
 _OPENCLAW_GATEWAY = OpenClawGatewayRuntimeAdapter()
 _OPENCLAW_LOCAL = OpenClawLocalRuntimeAdapter()
-_ADAPTERS: dict[str, RuntimeAdapter] = {
+_ADAPTERS: dict[str, RuntimeAdapterProtocol] = {
     "process": _PROCESS,
     "codex_local": _CODEX_LOCAL,
     "http": _HTTP,
@@ -41,7 +41,7 @@ _KNOWN_RUNTIME_TYPES = {
 }
 
 
-def get_runtime_adapter(runtime_type: str) -> RuntimeAdapter:
+def get_runtime_adapter(runtime_type: str) -> RuntimeAdapterProtocol:
     adapter = _ADAPTERS.get(runtime_type)
     if adapter is not None:
         return adapter

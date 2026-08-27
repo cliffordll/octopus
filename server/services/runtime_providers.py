@@ -95,7 +95,7 @@ class RuntimeProviderService:
         actor_type: str,
         actor_id: str,
     ) -> dict[str, Any] | None:
-        _required_text(runtime_type, "runtimeType")
+        runtime_type = _required_text(runtime_type, "runtimeType")
         provider_id = _required_text(provider_id, "providerId")
         existing = await get_llm_provider(self._session, provider_id)
         if existing is None:
@@ -142,7 +142,7 @@ class RuntimeProviderService:
         actor_type: str,
         actor_id: str,
     ) -> dict[str, Any] | None:
-        _required_text(runtime_type, "runtimeType")
+        runtime_type = _required_text(runtime_type, "runtimeType")
         existing = await get_llm_provider(self._session, provider_id)
         if existing is None:
             return None
@@ -201,7 +201,7 @@ class RuntimeProviderService:
             entity_id=row.id,
             details={
                 "scope": INSTANCE_SCOPE,
-                "runtimeType": runtime_type,
+                "runtimeType": None,
                 "providerId": provider_id,
                 "modelId": row.model_id,
             },
@@ -219,7 +219,7 @@ class RuntimeProviderService:
         actor_type: str,
         actor_id: str,
     ) -> dict[str, Any] | None:
-        _required_text(runtime_type, "runtimeType")
+        runtime_type = _required_text(runtime_type, "runtimeType")
         existing = await get_llm_model(self._session, provider_id, model_id)
         if existing is None:
             return None
@@ -239,7 +239,7 @@ class RuntimeProviderService:
             entity_id=row.id,
             details={
                 "scope": INSTANCE_SCOPE,
-                "runtimeType": runtime_type,
+                "runtimeType": None,
                 "providerId": provider_id,
                 "modelId": model_id,
             },
@@ -256,7 +256,7 @@ class RuntimeProviderService:
         actor_type: str,
         actor_id: str,
     ) -> dict[str, Any] | None:
-        _required_text(runtime_type, "runtimeType")
+        runtime_type = _required_text(runtime_type, "runtimeType")
         existing = await get_llm_model(self._session, provider_id, model_id)
         if existing is None:
             return None
@@ -272,7 +272,7 @@ class RuntimeProviderService:
             entity_id=row.id,
             details={
                 "scope": INSTANCE_SCOPE,
-                "runtimeType": runtime_type,
+                "runtimeType": None,
                 "providerId": provider_id,
                 "modelId": model_id,
             },
@@ -515,7 +515,8 @@ def _optional_dict(value: object, field: str) -> dict[str, Any]:
 
 
 def _to_provider(
-    provider: LlmProvider, binding: LlmProviderBinding | None
+    provider: LlmProvider,
+    binding: LlmProviderBinding | None,
 ) -> dict[str, Any]:
     has_api_key = bool(binding and binding.api_key)
     return {

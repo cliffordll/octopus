@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import tempfile
 
 DEFAULT_INSTANCE_ID = "default"
 INSTANCE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -224,3 +225,52 @@ def agent_workspace_root(org_id: str, workspace_key: str) -> Path:
     return (
         ensure_organization_workspace_root(org_id) / "agents" / workspace_key
     ).resolve()
+
+
+def agent_heartbeat_workspace_root(org_id: str, workspace_key: str) -> Path:
+    """Return a heartbeat cwd that cannot be discovered as a parent Git repo."""
+    _validate_workspace_component("organization id", org_id)
+    _validate_workspace_component("agent workspace key", workspace_key)
+    configured = os.environ.get("OCTOPUS_SANDBOX_DIR", "").strip()
+    sandbox_base = (
+        _expand_home_prefix(configured)
+        if configured
+        else Path.home() / ".octopus-sandboxes"
+    )
+    instance_base = (sandbox_base / resolve_octopus_instance_id()).resolve()
+    candidate = (
+        instance_base
+        / "organizations"
+        / org_id
+        / "agents"
+        / workspace_key
+        / "heartbeat-workspace"
+    ).resolve()
+    if not candidate.is_relative_to(instance_base):
+        raise ValueError("Heartbeat workspace resolves outside the sandbox root")
+    if _has_git_ancestor(candidate):
+        instance_base = (
+            Path(tempfile.gettempdir())
+            / "octopus-sandboxes"
+            / resolve_octopus_instance_id()
+        ).resolve()
+        candidate = (
+            instance_base
+            / "organizations"
+            / org_id
+            / "agents"
+            / workspace_key
+            / "heartbeat-workspace"
+        ).resolve()
+        if not candidate.is_relative_to(instance_base) or _has_git_ancestor(candidate):
+            raise ValueError("No heartbeat sandbox root is isolated from Git")
+    return candidate
+
+
+def _has_git_ancestor(path: Path) -> bool:
+    return any((parent / ".git").exists() for parent in (path, *path.parents))
+
+
+def _validate_workspace_component(label: str, value: str) -> None:
+    if not value or value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError(f"Invalid {label} for heartbeat sandbox")

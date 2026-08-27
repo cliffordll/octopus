@@ -28,10 +28,12 @@ async def queue_issue_assignment_wakeup(
     actor_id: str,
     extra_payload: dict[str, Any] | None = None,
     extra_context: dict[str, Any] | None = None,
-) -> None:
+    idempotency_key: str | None = None,
+    suppress_errors: bool = True,
+) -> bool:
     assignee_agent_id = issue.get("assigneeAgentId")
     if not assignee_agent_id or issue["status"] == "backlog":
-        return
+        return False
 
     payload: WakeAgentPayload = {
         "source": source,
@@ -57,17 +59,23 @@ async def queue_issue_assignment_wakeup(
             },
         },
     }
+    if idempotency_key:
+        payload["idempotencyKey"] = idempotency_key
     try:
-        await heartbeat.wakeup(
+        run = await heartbeat.wakeup(
             assignee_agent_id,
             payload,
             actor_type=actor_type,
             actor_id=actor_id,
             execute_immediately=False,
         )
+        return run is not None
     except Exception:
         logger.warning(
             "failed to wake assignee on issue assignment",
             extra={"issue_id": issue["id"]},
             exc_info=True,
         )
+        if not suppress_errors:
+            raise
+        return False

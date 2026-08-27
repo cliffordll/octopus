@@ -4,12 +4,14 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from ..constants.issue import (
+    DELEGATION_CLOSEOUT_POLICY_MODES,
     ISSUE_ORIGIN_KINDS,
     ISSUE_PRIORITIES,
     ISSUE_STATUSES,
 )
 from ..types.issue import (
     CheckoutIssuePayload,
+    CreateChildIssuesPayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
     ListOrgIssuesQuery,
@@ -50,6 +52,14 @@ _CREATE_ISSUE_FIELDS = {
     "requestDepth",
 }
 
+_CREATE_CHILD_ISSUE_FIELDS = {
+    "title",
+    "description",
+    "priority",
+    "assigneeAgentId",
+    "reviewerAgentId",
+}
+
 _UPDATE_ISSUE_FIELDS = {
     "title",
     "description",
@@ -66,6 +76,7 @@ _UPDATE_ISSUE_FIELDS = {
     "reopen",
     "hiddenAt",
     "reviewDecision",
+    "workProductDeclarations",
 }
 
 _REVIEW_DECISIONS = ("approve", "request_changes", "blocked", "needs_followup")
@@ -102,6 +113,25 @@ def _check_status_priority_origin(payload: Mapping[str, Any]) -> None:
         raise ValueError(f"'priority' must be one of {list(ISSUE_PRIORITIES)}")
     if "originKind" in payload and payload["originKind"] not in ISSUE_ORIGIN_KINDS:
         raise ValueError(f"'originKind' must be one of {list(ISSUE_ORIGIN_KINDS)}")
+
+
+def _check_work_product_declarations(payload: Mapping[str, Any]) -> None:
+    if "workProductDeclarations" not in payload:
+        return
+    declarations = payload["workProductDeclarations"]
+    if not isinstance(declarations, list):
+        raise ValueError("'workProductDeclarations' must be a list")
+    for item in declarations:
+        if not isinstance(item, Mapping):
+            raise ValueError("'workProductDeclarations' entries must be objects")
+        _reject_unknown_fields(item, allowed_fields={"path", "isPrimary"})
+        path = item.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError(
+                "'workProductDeclarations[].path' must be a non-empty string"
+            )
+        if "isPrimary" in item and not isinstance(item["isPrimary"], bool):
+            raise ValueError("'workProductDeclarations[].isPrimary' must be a boolean")
 
 
 def validate_list_org_issues_query(
@@ -148,6 +178,90 @@ def validate_create_issue(payload: Mapping[str, Any]) -> CreateIssuePayload:
             raise ValueError("'requestDepth' must be a non-negative integer")
 
     return cast(CreateIssuePayload, payload)
+
+
+def validate_create_child_issues(
+    payload: Mapping[str, Any],
+) -> CreateChildIssuesPayload:
+    _reject_unknown_fields(payload, allowed_fields={"children", "closeoutPolicy"})
+    closeout_policy = _validate_closeout_policy(payload.get("closeoutPolicy"))
+    children = payload.get("children")
+    if not isinstance(children, list) or not children:
+        raise ValueError("'children' is required and must be a non-empty list")
+    if len(children) > 50:
+        raise ValueError("'children' must contain at most 50 entries")
+    validated: list[CreateIssuePayload] = []
+    seen_titles: set[str] = set()
+    for index, child in enumerate(children):
+        if not isinstance(child, Mapping):
+            raise ValueError(f"'children[{index}]' must be an object")
+        _reject_unknown_fields(child, allowed_fields=_CREATE_CHILD_ISSUE_FIELDS)
+        candidate = dict(child)
+        candidate["status"] = "todo"
+        try:
+            validated.append(validate_create_issue(candidate))
+        except ValueError as exc:
+            raise ValueError(f"Invalid children[{index}]: {exc}") from exc
+        if not candidate.get("assigneeAgentId"):
+            raise ValueError(
+                f"'children[{index}].assigneeAgentId' is required for delegated work"
+            )
+        normalized_title = candidate["title"].strip().casefold()
+        if normalized_title in seen_titles:
+            raise ValueError(
+                f"'children[{index}].title' duplicates another child in this batch"
+            )
+        seen_titles.add(normalized_title)
+    return cast(
+        CreateChildIssuesPayload,
+        {"closeoutPolicy": closeout_policy, "children": validated},
+    )
+
+
+def _validate_closeout_policy(value: object) -> dict[str, Any]:
+    if value is None:
+        return {"version": 1, "mode": "child_outputs_are_final"}
+    if not isinstance(value, Mapping):
+        raise ValueError("'closeoutPolicy' must be an object")
+    _reject_unknown_fields(value, allowed_fields={"version", "mode", "requirements"})
+    if value.get("version") != 1:
+        raise ValueError("'closeoutPolicy.version' must be 1")
+    mode = value.get("mode")
+    if mode not in DELEGATION_CLOSEOUT_POLICY_MODES:
+        raise ValueError(
+            "'closeoutPolicy.mode' must be one of "
+            f"{list(DELEGATION_CLOSEOUT_POLICY_MODES)}"
+        )
+    requirements = value.get("requirements")
+    if requirements is not None:
+        if not isinstance(requirements, Mapping):
+            raise ValueError("'closeoutPolicy.requirements' must be an object")
+        _reject_unknown_fields(
+            requirements,
+            allowed_fields={"minimumOutputs", "primaryOutputRequired"},
+        )
+        minimum_outputs = requirements.get("minimumOutputs")
+        if minimum_outputs is not None and (
+            isinstance(minimum_outputs, bool)
+            or not isinstance(minimum_outputs, int)
+            or minimum_outputs < 0
+        ):
+            raise ValueError(
+                "'closeoutPolicy.requirements.minimumOutputs' must be a "
+                "non-negative integer"
+            )
+        primary_required = requirements.get("primaryOutputRequired")
+        if primary_required is not None and not isinstance(primary_required, bool):
+            raise ValueError(
+                "'closeoutPolicy.requirements.primaryOutputRequired' must be a boolean"
+            )
+        if mode == "parent_output_required" and (
+            minimum_outputs == 0 or primary_required is False
+        ):
+            raise ValueError(
+                "'parent_output_required' requires at least one primary output"
+            )
+    return dict(value)
 
 
 def validate_checkout_issue(payload: Mapping[str, Any]) -> CheckoutIssuePayload:
@@ -200,16 +314,30 @@ def validate_update_issue(payload: Mapping[str, Any]) -> UpdateIssuePayload:
             raise ValueError("'reviewDecision' must be an object")
         validate_record_issue_review_decision(decision)
 
+    _check_work_product_declarations(payload)
     return cast(UpdateIssuePayload, payload)
 
 
 def validate_create_issue_comment(
     payload: Mapping[str, Any],
 ) -> CreateIssueCommentPayload:
-    _reject_unknown_fields(payload, allowed_fields={"body"})
+    _reject_unknown_fields(
+        payload,
+        allowed_fields={"body", "requestId", "workProductDeclarations"},
+    )
     body = payload.get("body")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("'body' is required and must be a non-empty string")
+    request_id = payload.get("requestId")
+    if request_id is not None and (
+        not isinstance(request_id, str)
+        or not request_id.strip()
+        or len(request_id) > 128
+    ):
+        raise ValueError(
+            "'requestId' must be a non-empty string of at most 128 characters"
+        )
+    _check_work_product_declarations(payload)
     return cast(CreateIssueCommentPayload, payload)
 
 

@@ -104,7 +104,11 @@ def test_issue_priorities_match_contract() -> None:
 
 
 def test_issue_origin_kinds_match_contract() -> None:
-    assert ISSUE_ORIGIN_KINDS == ("manual", "automation_execution")
+    assert ISSUE_ORIGIN_KINDS == (
+        "manual",
+        "automation_execution",
+        "delegation",
+    )
     assert DEFAULT_ISSUE_ORIGIN_KIND == "manual"
 
 
@@ -214,8 +218,11 @@ def test_validate_update_issue_unknown_field_raises() -> None:
 
 
 def test_validate_create_issue_comment_happy() -> None:
-    payload = validate_create_issue_comment({"body": "Looks good"})
+    payload = validate_create_issue_comment(
+        {"body": "Looks good", "requestId": "request-1"}
+    )
     assert payload["body"] == "Looks good"
+    assert payload.get("requestId") == "request-1"
 
 
 def test_validate_create_issue_comment_blank_body_raises() -> None:

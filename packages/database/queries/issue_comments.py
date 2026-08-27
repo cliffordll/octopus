@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..schema import IssueComment
@@ -32,6 +33,45 @@ async def insert_issue_comment(
     session.add(row)
     await session.flush()
     return row
+
+
+async def get_issue_comment_by_request_id(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    issue_id: str,
+    request_id: str,
+) -> IssueComment | None:
+    return await session.scalar(
+        select(IssueComment).where(
+            IssueComment.org_id == org_id,
+            IssueComment.issue_id == issue_id,
+            IssueComment.request_id == request_id,
+        )
+    )
+
+
+async def insert_issue_comment_idempotent(
+    session: AsyncSession, fields: Mapping[str, Any]
+) -> tuple[IssueComment, bool]:
+    values = dict(fields)
+    request_id = values.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        return await insert_issue_comment(session, values), True
+    try:
+        async with session.begin_nested():
+            row = await insert_issue_comment(session, values)
+        return row, True
+    except IntegrityError:
+        existing = await get_issue_comment_by_request_id(
+            session,
+            org_id=str(values["org_id"]),
+            issue_id=str(values["issue_id"]),
+            request_id=request_id,
+        )
+        if existing is None:
+            raise
+        return existing, False
 
 
 async def list_issue_comments(

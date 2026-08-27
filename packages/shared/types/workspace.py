@@ -24,18 +24,19 @@ from packages.shared.constants.workspace import (
 
 class ExecutionWorkspaceStrategy(TypedDict, total=False):
     type: ExecutionWorkspaceStrategyType
+    mode: str | None
     baseRef: str | None
     branchTemplate: str | None
+    operatorBranch: str | None
     worktreeParentDir: str | None
     provisionCommand: str | None
     teardownCommand: str | None
 
 
-class ProjectExecutionWorkspacePolicy(TypedDict, total=False):
+class ProjectWorkspaceExecutionPolicy(TypedDict, total=False):
     enabled: bool
     defaultMode: ProjectExecutionWorkspaceDefaultMode
     allowIssueOverride: bool
-    defaultProjectWorkspaceId: str | None
     workspaceStrategy: ExecutionWorkspaceStrategy | None
     workspaceRuntime: dict[str, Any] | None
     branchPolicy: dict[str, Any] | None
@@ -67,6 +68,7 @@ class ProjectWorkspace(TypedDict):
     remoteWorkspaceRef: str | None
     sharedWorkspaceKey: str | None
     metadata: dict[str, Any] | None
+    executionWorkspacePolicy: ProjectWorkspaceExecutionPolicy | None
     isPrimary: bool
     runtimeServices: NotRequired[list[WorkspaceRuntimeService]]
     createdAt: str
@@ -88,6 +90,15 @@ class ExecutionWorkspace(TypedDict):
     baseRef: str | None
     branchName: str | None
     providerType: ExecutionWorkspaceProviderType
+    gitWritePolicy: NotRequired[str]
+    issueArtifactsDir: NotRequired[str]
+    workspaceKind: NotRequired[str]
+    codeSourceKind: NotRequired[str]
+    workspaceCwd: NotRequired[str | None]
+    warnings: NotRequired[list[str]]
+    requiresLease: NotRequired[bool]
+    canRun: NotRequired[bool]
+    failureReason: NotRequired[str | None]
     providerRef: str | None
     derivedFromExecutionWorkspaceId: str | None
     lastUsedAt: str
@@ -200,4 +211,5 @@ class CreateProjectWorkspacePayload(TypedDict):
     remoteWorkspaceRef: NotRequired[str | None]
     sharedWorkspaceKey: NotRequired[str | None]
     metadata: NotRequired[dict[str, Any] | None]
+    executionWorkspacePolicy: NotRequired[ProjectWorkspaceExecutionPolicy | None]
     isPrimary: NotRequired[bool]

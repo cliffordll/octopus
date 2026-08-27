@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import json
 import os
 import re
 import subprocess
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from ..common import runtime_subprocess_kwargs
 from ..context_env import apply_runtime_context_env
 from ..environment import clear_inherited_blocking_proxy_env, resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
+from ..local_process import local_process_supervisor
 from ..local_skills import (
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
@@ -32,15 +29,6 @@ _DEFAULT_CONTEXT_WINDOW = 128000
 # OpenClaw resolves --model against its own catalog; for an injected platform
 # provider we register it as an openai-compatible custom provider/model.
 _DEFAULT_API_ADAPTER = "openai-completions"
-
-# Concurrent runs of the same agent (e.g. task execution + heartbeat) race on the
-# shared OpenClaw config read-modify-write; the loser gets a conflict error. The
-# conflict is transient (the other writer finishes), so reload + retry succeeds.
-_CONFIG_CONFLICT_MARKERS = (
-    "ConfigMutationConflictError",
-    "config changed since last load",
-)
-_CONFIG_PATCH_MAX_ATTEMPTS = 4
 
 
 async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
@@ -87,7 +75,7 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     )
     openclaw_agent_id = _normalize_openclaw_agent_id(context.agent_id)
     openclaw_workspace = _openclaw_workspace_path(managed_home, openclaw_agent_id)
-    ensure_control_plane_cli_shim(env, managed_home)
+    ensure_octopus_cli_shim(env, managed_home)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="openclaw_local",
@@ -106,16 +94,6 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
     model_ref, register_error = await _ensure_model_registered(
         context, command, cwd, env, timeout_sec
     )
-    if register_error is not None:
-        # Fail fast: running with an unregistered injected model makes OpenClaw
-        # silently fall back to its built-in OpenAI provider (api.openai.com),
-        # which is unreachable from managed pods and hangs until timeout. A clear
-        # error beats a 240s stall.
-        return RuntimeExecutionResult(
-            exit_code=1,
-            error_message=register_error,
-            result_json=_result_json("", "", "", register_error, loaded_skills),
-        )
 
     session_key = _session_key(context)
     args = _build_args(config, session_key, model_ref)
@@ -158,19 +136,6 @@ async def _ensure_model_registered(
         return raw_model, None
 
     provider_name = _openclaw_provider_name(raw_model.partition("/")[0] or model_id)
-    model_ref = f"{provider_name}/{model_id}"
-    # Skip the race-prone config patch when the per-agent config already has this
-    # provider+model at the same endpoint. The config persists across runs, so
-    # after the first registration most runs take this path and never contend.
-    if _provider_already_registered(
-        env,
-        provider_name=provider_name,
-        model_id=model_id,
-        base_url=base_url,
-        api_key=api_key,
-    ):
-        return model_ref, None
-
     model_meta = provider.get("model")
     display = model_id
     context_window = _DEFAULT_CONTEXT_WINDOW
@@ -202,82 +167,23 @@ async def _ensure_model_registered(
             }
         }
     }
-    patch_timeout = timeout_sec if timeout_sec > 0 else 60.0
-    last_message = ""
-    for attempt in range(_CONFIG_PATCH_MAX_ATTEMPTS):
-        # A concurrent run of the same agent may have registered it meanwhile.
-        if attempt and _provider_already_registered(
-            env,
-            provider_name=provider_name,
-            model_id=model_id,
-            base_url=base_url,
-            api_key=api_key,
-        ):
-            return model_ref, None
-        rc, _out, err = await _run_cli(
-            command,
-            ["config", "patch", "--stdin"],
-            cwd=cwd,
-            env=env,
-            input_text=json.dumps(patch),
-            timeout_sec=patch_timeout,
-        )
-        if rc == 0:
-            return model_ref, None
-        last_message = (
-            _first_meaningful_line(err) or f"config patch exited with {rc}"
-        )
-        # Only conflicts are transient and worth retrying; bail on anything else.
-        if not any(marker in (err or "") for marker in _CONFIG_CONFLICT_MARKERS):
-            break
-        await asyncio.sleep(0.25 * (attempt + 1))
-
-    await context.on_log(
-        "stderr",
-        f"[octopus] OpenClaw model registration failed: {last_message}\n",
+    rc, _out, err = await _run_cli(
+        command,
+        ["config", "patch", "--stdin"],
+        cwd=cwd,
+        env=env,
+        input_text=json.dumps(patch),
+        timeout_sec=timeout_sec if timeout_sec > 0 else 60.0,
     )
-    return model_ref, f"OpenClaw model registration failed: {last_message}"
-
-
-def _openclaw_config_path(env: dict[str, str]) -> Path | None:
-    home = _string(env.get("HOME"))
-    return Path(home) / ".openclaw" / "openclaw.json" if home else None
-
-
-def _provider_already_registered(
-    env: dict[str, str],
-    *,
-    provider_name: str,
-    model_id: str,
-    base_url: str,
-    api_key: str,
-) -> bool:
-    """True when the per-agent OpenClaw config already registers this provider and
-    model at the same endpoint, so the config patch can be safely skipped."""
-    path = _openclaw_config_path(env)
-    if path is None or not path.is_file():
-        return False
-    try:
-        config = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return False
-    if not isinstance(config, dict):
-        return False
-    providers = config.get("models", {})
-    providers = providers.get("providers", {}) if isinstance(providers, dict) else {}
-    provider = providers.get(provider_name) if isinstance(providers, dict) else None
-    if not isinstance(provider, dict):
-        return False
-    if _string(provider.get("baseUrl")) != base_url:
-        return False
-    if _string(provider.get("apiKey")) != api_key:
-        return False
-    models = provider.get("models")
-    if not isinstance(models, list):
-        return False
-    return any(
-        isinstance(m, dict) and _string(m.get("id")) == model_id for m in models
-    )
+    model_ref = f"{provider_name}/{model_id}"
+    if rc != 0:
+        message = _first_meaningful_line(err) or f"config patch exited with {rc}"
+        await context.on_log(
+            "stderr",
+            f"[octopus] OpenClaw model registration failed: {message}\n",
+        )
+        return model_ref, f"OpenClaw model registration failed: {message}"
+    return model_ref, None
 
 
 def _openclaw_provider_name(raw: str) -> str:
@@ -509,64 +415,22 @@ async def _run_cli(
 ) -> tuple[int | None, str, str]:
     """Simple blocking-capable CLI run (used for config patch)."""
     try:
-        process = await asyncio.create_subprocess_exec(
+        result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
+            input_data=input_text.encode() if input_text is not None else None,
+            timeout_sec=timeout_sec,
         )
-    except (PermissionError, OSError):
-        return await asyncio.to_thread(
-            _run_blocking, command, args, cwd, env, input_text, timeout_sec
-        )
-    payload = input_text.encode() if input_text is not None else None
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(payload),
-            timeout=timeout_sec if timeout_sec > 0 else None,
-        )
-    except TimeoutError:
-        process.kill()
-        await process.communicate()
-        return None, "", "timed out"
-    return (
-        process.returncode,
-        stdout.decode(errors="replace"),
-        stderr.decode(errors="replace"),
-    )
-
-
-def _run_blocking(
-    command: str,
-    args: list[str],
-    cwd: str | None,
-    env: dict[str, str],
-    input_text: str | None,
-    timeout_sec: float,
-) -> tuple[int | None, str, str]:
-    try:
-        completed = subprocess.run(
-            [command, *args],
-            cwd=cwd,
-            env=env,
-            input=input_text.encode() if input_text is not None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            **runtime_subprocess_kwargs(),
-        )
-    except subprocess.TimeoutExpired:
-        return None, "", "timed out"
-    except OSError as exc:
+    except (PermissionError, OSError) as exc:
         return 1, "", str(exc)
+    if result.timed_out:
+        return None, "", "timed out"
     return (
-        completed.returncode,
-        (completed.stdout or b"").decode(errors="replace"),
-        (completed.stderr or b"").decode(errors="replace"),
+        result.exit_code,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
     )
 
 
@@ -580,82 +444,26 @@ async def _run_with_lifecycle(
     timeout_sec: float,
 ) -> tuple[int | None, str, str, bool, str | None]:
     try:
-        process = await asyncio.create_subprocess_exec(
+        result = await local_process_supervisor.run(
             command,
             *args,
             cwd=cwd,
             env=env,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            **runtime_subprocess_kwargs(),
+            stdin=subprocess.DEVNULL,
+            timeout_sec=timeout_sec,
+            cancel_event=context.cancel_event,
+            on_process_started=context.on_process_started,
+            on_process_exited=context.on_process_exited,
         )
     except (PermissionError, OSError) as exc:
-        rc, out, err = await asyncio.to_thread(
-            _run_blocking, command, args, cwd, env, None, timeout_sec
-        )
-        if not err:
-            err = str(exc)
-        return rc, out, err, False, None
-
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-
-    communication = asyncio.create_task(process.communicate())
-    cancelled = (
-        asyncio.create_task(context.cancel_event.wait())
-        if context.cancel_event is not None
-        else None
+        return 1, "", str(exc), False, None
+    return (
+        result.exit_code,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+        result.timed_out,
+        result.signal,
     )
-    try:
-        waiters: set[asyncio.Task[Any]] = {communication}
-        if cancelled is not None:
-            waiters.add(cancelled)
-        done, _pending = await asyncio.wait(
-            waiters,
-            timeout=timeout_sec if timeout_sec > 0 else None,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if cancelled is not None and cancelled in done:
-            process.kill()
-            stdout, stderr = await communication
-            await process.wait()
-            return (
-                process.returncode,
-                stdout.decode(errors="replace"),
-                stderr.decode(errors="replace"),
-                False,
-                "SIGTERM",
-            )
-        if communication not in done:
-            # timeout
-            communication.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await communication
-            process.kill()
-            stdout, stderr = await process.communicate()
-            await process.wait()
-            return (
-                process.returncode,
-                stdout.decode(errors="replace"),
-                stderr.decode(errors="replace"),
-                True,
-                None,
-            )
-        stdout, stderr = communication.result()
-        return (
-            process.returncode,
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
-            False,
-            None,
-        )
-    finally:
-        if cancelled is not None and not cancelled.done():
-            cancelled.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await cancelled
 
 
 def _string(value: Any) -> str | None:
