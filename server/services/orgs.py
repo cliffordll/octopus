@@ -13,9 +13,12 @@ from packages.database.queries.organizations import (
     list_organizations,
     update_organization,
 )
+from packages.database.queries.users import get_user_by_id
 from packages.database.schema import Organization
 from packages.shared.constants.organization import OrganizationStatus
 from packages.shared.types.organization import OrganizationDetail, OrganizationSummary
+from server.identity import PrincipalRef
+from server.membership import MemberService
 
 ORG_UPDATE_TO_COLUMN: dict[str, str] = {
     "name": "name",
@@ -36,6 +39,7 @@ def _chat_issue_creation_mode(value: object) -> str:
 class OrgService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._members = MemberService(session)
 
     async def list(self) -> list[OrganizationSummary]:
         rows = await list_organizations(self._session)
@@ -89,7 +93,30 @@ class OrgService:
             entity_id=row.id,
             details=dict(payload),
         )
+        await self._ensure_creator_membership(
+            row.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
         return _to_detail(row)
+
+    async def _ensure_creator_membership(
+        self,
+        org_id: str,
+        *,
+        actor_type: str,
+        actor_id: str,
+    ) -> None:
+        if actor_type not in {"board", "user"}:
+            return
+        if await get_user_by_id(self._session, actor_id) is None:
+            return
+        await self._members.ensure(
+            org_id,
+            PrincipalRef(type="user", id=actor_id),
+            role="owner",
+            status="active",
+        )
 
     async def update(
         self,

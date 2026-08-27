@@ -75,7 +75,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 | 27 | Cost Events / Cost Summary | `docs/step-27-cost-summary/` |
 | 28 | Budget / Governance | `docs/step-28-governance/` |
 | 29 | Plugin Framework | `docs/step-29-plugins/` |
-| 30 | Auth / Actor / Access | `docs/step-30-access/` |
+| 30 | Auth / Principal / Membership / Access | `docs/step-30-access/` |
 
 主依赖链为：
 
@@ -207,7 +207,7 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - activity query 归 Step 25。
 - provider/biller/cost 基础归集和 cost summary 归 Step 27。
 - 真实 quota window 读取、budget 治理联动和 skills analytics 真实归集归 Step 28。
-- local agent JWT/API key、secret/env binding 和真实 actor/access 归 Step 30。
+- local agent JWT/Run Token、secret/env binding 和真实 principal/access 归 Step 30。
 
 ### Step 15: Workspace 与执行产物
 
@@ -347,14 +347,15 @@ Python 实现可以调整内部结构，但不得无证据改变 API 路径、pa
 - 执行顺序：先实现只读 catalog/manifest/registry 和管理 API；再实现生命周期、配置、状态、日志；随后接入 worker、tools、jobs、webhooks、UI bridge；最后补齐 SDK/脚手架兼容和 Linear 等一方插件。
 - 验收：插件管理 API 与上游路径和 payload 对齐；ready/disabled/error/upgrade_pending/uninstalled 状态流转可测试；插件 worker、tool、webhook、job 和 UI bridge 在本地单实例部署可验证；明确不承诺上游尚未完成的云端多实例插件分发能力。
 
-### Step 30: Auth / Actor / Access
+### Step 30: Auth / Principal / Membership / Access
 
 目录：`docs/step-30-access/`
 
-- 目标：按上游证据接入真实认证、actor、授权行为和运行时 secret/env 解析边界，替代开发 actor 数据源。
+- 目标：按上游证据建立 User/Agent Principal、organization Membership、真实认证和访问控制，使 Human 与 Agent 复用同一成员与权限机制，并为 Epaichat 代理身份传递及 System 后台操作提供受限、可审计的边界。
 - 已提前完成：开发 actor/scope、runtime provider/model 配置、provider API key 响应脱敏和 provider env 注入已在前置步骤落地。
-- 交付：身份上下文、访问检查、local agent JWT/API key 兼容入口、secret/env binding 解析和迁移策略。
-- 验收：真实 actor 与开发 actor 复用同一结构边界；runtime env/secret 不泄漏、不改变业务 API。
+- 交付：上游兼容的 `user`、`organization_memberships`、权限与 Auth 表，内部 `PrincipalRef` / `IdentityContext` 封装，Human Password/Session 与 `ProxyTokenAuth`，Agent Run Token、System Context 以及 secret/env binding；不新增统一 identities 表。
+- 执行顺序：先完成 Principal/Membership/Access 基础，再完成 Human Auth 与成员管理，最后接入 Agent/System 凭证与 Runtime Secret；三版分别测试、验收和提交。
+- 验收：Human 与 Agent 复用同一 Membership 和 Permission Grant；数据库/API 保持上游兼容；System 无全局旁路；Session、Token 和 Secret 可撤销、可审计且不泄漏。
 
 ## 6. 可选扩展
 

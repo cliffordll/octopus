@@ -44,11 +44,34 @@ class AgentChainOfCommandEntry(TypedDict):
     title: str | None
 
 
+class AgentMembership(TypedDict):
+    id: str
+    orgId: str
+    principalType: str
+    principalId: str
+    status: str
+    membershipRole: str | None
+    createdAt: str
+    updatedAt: str
+
+
+class AgentPermissionGrant(TypedDict):
+    id: str
+    orgId: str
+    principalType: str
+    principalId: str
+    permissionKey: str
+    scope: dict[str, Any] | None
+    grantedByUserId: str | None
+    createdAt: str
+    updatedAt: str
+
+
 class AgentAccessState(TypedDict):
     canAssignTasks: bool
     taskAssignSource: str
-    membership: None
-    grants: list[dict[str, Any]]
+    membership: AgentMembership | None
+    grants: list[AgentPermissionGrant]
 
 
 class AgentDetail(Agent):

@@ -944,7 +944,11 @@ async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     detail_code, detail = await _request(app, "GET", f"/api/agents/{created['id']}")
     assert detail_code == 200
     assert detail["chainOfCommand"] == []
-    assert detail["access"]["taskAssignSource"] == "none"
+    assert detail["access"]["taskAssignSource"] == "explicit_grant"
+    assert detail["access"]["membership"]["principalId"] == created["id"]
+    assert [grant["permissionKey"] for grant in detail["access"]["grants"]] == [
+        "tasks:assign"
+    ]
 
     patch_code, updated = await _request(
         app,

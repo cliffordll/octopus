@@ -12,6 +12,7 @@ from .access import (
 from .database import get_session
 from .documents import get_document_service
 from .issues import get_issue_service
+from .identity import get_identity_context, require_context_organization_access
 from .orgs import get_org_service
 from .projects import get_project_service
 from .heartbeat import get_heartbeat_service
@@ -28,6 +29,8 @@ __all__ = [
     "require_organization_access",
     "get_org_service",
     "get_issue_service",
+    "get_identity_context",
+    "require_context_organization_access",
     "get_approval_service",
     "get_agent_service",
     "get_project_service",

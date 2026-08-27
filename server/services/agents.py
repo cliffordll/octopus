@@ -84,6 +84,9 @@ from packages.shared.types.agent import (
 from packages.shared.types.heartbeat import InstanceSchedulerHeartbeatAgent
 from packages.shared.types.approval import CreateApprovalPayload
 from packages.runtimes import get_runtime_adapter
+from server.access import PermissionGrantSpec, PrincipalGrantService
+from server.identity import PrincipalRef
+from server.membership import MemberService
 
 from .agent_instructions import (
     materialize_default_instructions_for_new_agent,
@@ -663,6 +666,8 @@ def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
 class AgentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._members = MemberService(session)
+        self._grants = PrincipalGrantService(session)
 
     async def list_for_org(self, org_id: str) -> list[Agent]:
         rows = await list_org_agents(self._session, org_id)
@@ -733,7 +738,7 @@ class AgentService:
         detail: AgentDetail = {
             **self._to_agent(row, await list_enabled_skill_keys(self._session, row.id)),
             "chainOfCommand": await self._chain_of_command(row),
-            "access": self._access_state(row),
+            "access": await self._access_state(row),
         }
         return detail
 
@@ -917,6 +922,14 @@ class AgentService:
             "metadata_json": payload.get("metadata"),
         }
         row = await create_agent(self._session, values)
+        principal = PrincipalRef(type="agent", id=row.id)
+        await self._members.ensure(org_id, principal, role="member", status="active")
+        await self._grants.replace(
+            org_id,
+            principal,
+            [PermissionGrantSpec(permission="tasks:assign")],
+            granted_by_user_id=(actor_id if actor_type in {"board", "user"} else None),
+        )
         agent_home = _ensure_agent_workspace_layout(
             _agent_home_root_from_values(values)
         )
@@ -1784,12 +1797,55 @@ class AgentService:
             manager_id = manager.reports_to
         return chain
 
-    def _access_state(self, row: AgentRow) -> AgentAccessState:
+    async def _access_state(self, row: AgentRow) -> AgentAccessState:
+        principal = PrincipalRef(type="agent", id=row.id)
+        membership = await self._members.get(row.org_id, principal)
+        grants = await self._grants.list(row.org_id, principal)
+        has_task_assign_grant = any(
+            grant.permission_key == "tasks:assign" for grant in grants
+        )
+        can_create_agents = _normalized_permissions(row.permissions, row.role)[
+            "canCreateAgents"
+        ]
+        if row.role == "ceo":
+            task_assign_source = "ceo_role"
+        elif can_create_agents:
+            task_assign_source = "agent_creator"
+        elif has_task_assign_grant:
+            task_assign_source = "explicit_grant"
+        else:
+            task_assign_source = "none"
         return {
-            "canAssignTasks": row.role == "ceo",
-            "taskAssignSource": "ceo_role" if row.role == "ceo" else "none",
-            "membership": None,
-            "grants": [],
+            "canAssignTasks": task_assign_source != "none",
+            "taskAssignSource": task_assign_source,
+            "membership": (
+                {
+                    "id": membership.id,
+                    "orgId": membership.org_id,
+                    "principalType": membership.principal_type,
+                    "principalId": membership.principal_id,
+                    "status": membership.status,
+                    "membershipRole": membership.membership_role,
+                    "createdAt": membership.created_at.isoformat(),
+                    "updatedAt": membership.updated_at.isoformat(),
+                }
+                if membership is not None
+                else None
+            ),
+            "grants": [
+                {
+                    "id": grant.id,
+                    "orgId": grant.org_id,
+                    "principalType": grant.principal_type,
+                    "principalId": grant.principal_id,
+                    "permissionKey": grant.permission_key,
+                    "scope": grant.scope,
+                    "grantedByUserId": grant.granted_by_user_id,
+                    "createdAt": grant.created_at.isoformat(),
+                    "updatedAt": grant.updated_at.isoformat(),
+                }
+                for grant in grants
+            ],
         }
 
     def _to_agent(

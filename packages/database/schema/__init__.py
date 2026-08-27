@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from ._base import Base, new_uuid
+from .access import InstanceUserRoleGrant, PrincipalPermissionGrant
 from .activity_log import ActivityLog
+from .auth import User
 from .agents import Agent
 from .agent_skills import AgentEnabledSkill
 from .agent_state import (
@@ -30,6 +32,7 @@ from .issues import Issue, IssueAttachment
 from .messenger import MessengerThreadUserState
 from .organizations import Organization
 from .organization_skills import OrganizationSkill
+from .organization_memberships import OrgMembership
 from .plugins import (
     Plugin,
     PluginConfig,
@@ -66,6 +69,10 @@ from .workspaces import (
 __all__ = [
     "Base",
     "new_uuid",
+    "User",
+    "OrgMembership",
+    "PrincipalPermissionGrant",
+    "InstanceUserRoleGrant",
     "ActivityLog",
     "Agent",
     "AgentEnabledSkill",
