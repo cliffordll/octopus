@@ -6,7 +6,12 @@ from fastapi import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from packages.database.clients import async_write_transaction
-from server.auth import ProxyTokenAuth, SessionAuth, is_trusted_session_origin
+from server.auth import (
+    ProxyTokenAuth,
+    RunTokenAuth,
+    SessionAuth,
+    is_trusted_session_origin,
+)
 from starlette.responses import JSONResponse
 
 
@@ -34,6 +39,7 @@ class ActorContextMiddleware:
 
 
 def _set_actor_context(request: Request, settings: object) -> None:
+    has_credential = bool(request.headers.get("authorization") or request.cookies)
     if not hasattr(request.state, "actor") and getattr(
         settings, "local_trusted", False
     ):
@@ -51,8 +57,10 @@ def _set_actor_context(request: Request, settings: object) -> None:
                 "runId": run_id,
                 "source": "local_test_header",
             }
-    if not hasattr(request.state, "actor") and getattr(
-        settings, "local_trusted", False
+    if (
+        not hasattr(request.state, "actor")
+        and getattr(settings, "local_trusted", False)
+        and not has_credential
     ):
         request.state.actor = {
             "type": "board",
@@ -86,14 +94,16 @@ async def _resolve_authenticated_actor(request: Request, settings: object) -> No
     issuer = getattr(settings, "proxy_auth_issuer", None)
     audience = getattr(settings, "proxy_auth_audience", None)
     authorization = request.headers.get("authorization")
-    has_proxy_credential = bool(secret and issuer and audience and authorization)
-    if not cookie and not has_proxy_credential:
+    has_bearer_credential = bool(authorization)
+    if not cookie and not has_bearer_credential:
         return
     async with session_factory() as session:
         async with async_write_transaction(session):
             result = await SessionAuth(session).authenticate(cookie) if cookie else None
-            if result is None:
-                if has_proxy_credential:
+            if result is None and authorization:
+                result = await RunTokenAuth(session).authenticate(authorization)
+            if result is None and authorization:
+                if secret and issuer and audience:
                     result = await ProxyTokenAuth(
                         session,
                         secret=str(secret),
@@ -101,13 +111,18 @@ async def _resolve_authenticated_actor(request: Request, settings: object) -> No
                         audience=str(audience),
                     ).authenticate(str(authorization))
             if result is not None:
-                request.state.actor = {
-                    "type": "user",
+                actor = {
+                    "type": result.principal.type,
                     "id": result.principal.id,
-                    "userId": result.principal.id,
                     "orgId": result.org_id,
                     "source": result.source,
                 }
+                if result.principal.type == "user":
+                    actor["userId"] = result.principal.id
+                elif result.principal.type == "agent":
+                    actor["agentId"] = result.principal.id
+                    actor["runId"] = result.run_id
+                request.state.actor = actor
 
 
 def _session_csrf_allowed(request: Request) -> bool:

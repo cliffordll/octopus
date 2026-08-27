@@ -11,6 +11,7 @@ class AuthResult:
     principal: PrincipalRef
     source: str
     org_id: str | None = None
+    run_id: str | None = None
 
 
 class AuthProviderProtocol(Protocol):

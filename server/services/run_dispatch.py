@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from packages.database.clients import async_transaction, async_write_transaction
 from packages.database.clients.cleanup import close_session_shielded
-from packages.database.queries.heartbeat import list_queued_agent_ids
+from packages.database.queries.agents import get_agent_by_id
+from packages.database.queries.heartbeat import get_run, list_queued_agent_ids
+from server.identity.system_access import SystemOperationAccess
 
 from .run_execution import RunExecutionService
 
@@ -21,11 +23,23 @@ class RunDispatchService:
         from .heartbeat import HeartbeatService
 
         session = self._session_factory()
+        run_contexts = {}
         try:
             async with async_write_transaction(session):
                 run_ids = await HeartbeatService(session).claim_queued_for_dispatch(
                     agent_id
                 )
+                for run_id in run_ids:
+                    run = await get_run(session, run_id)
+                    if run is not None:
+                        run_contexts[run_id] = SystemOperationAccess().require(
+                            system_id="run_dispatch",
+                            org_id=run.org_id,
+                            permission="runs:dispatch",
+                            reason="Dispatch a claimed Run to its execution service",
+                            entity_type="run",
+                            entity_id=run.id,
+                        )
         finally:
             await close_session_shielded(session)
         if not run_ids:
@@ -39,8 +53,10 @@ class RunDispatchService:
                         self._session_factory,
                         run_id=run_id,
                         agent_id=agent_id,
+                        identity=run_contexts[run_id],
                     ).run()
                     for run_id in run_ids
+                    if run_id in run_contexts
                 )
             )
             if reviewer_agent_id is not None
@@ -67,6 +83,22 @@ class RunDispatchService:
                     await heartbeat.materialize_due_scheduled_wakeups()
                 )
                 agent_ids = scheduled_agent_ids | await list_queued_agent_ids(session)
+                authorized_agent_ids = set()
+                for agent_id in agent_ids:
+                    agent = await get_agent_by_id(session, agent_id)
+                    if agent is None:
+                        continue
+                    SystemOperationAccess().require(
+                        system_id="heartbeat",
+                        org_id=agent.org_id,
+                        permission="runs:dispatch",
+                        reason="Dispatch Runs discovered by the heartbeat scheduler",
+                        entity_type="agent",
+                        entity_id=agent.id,
+                    )
+                    authorized_agent_ids.add(agent_id)
         finally:
             await close_session_shielded(session)
-        await asyncio.gather(*(self.dispatch_agent(agent_id) for agent_id in agent_ids))
+        await asyncio.gather(
+            *(self.dispatch_agent(agent_id) for agent_id in authorized_agent_ids)
+        )

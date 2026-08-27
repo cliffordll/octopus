@@ -10,6 +10,7 @@ from typing import Any, cast
 import pytest
 
 from server import lifespan as lifespan_module
+from server.identity import IdentityContext, PrincipalRef
 from server.services import heartbeat as heartbeat_module
 from server.services.run_execution import RunExecutionService
 from server.dependencies import database as database_dependency
@@ -22,6 +23,17 @@ from server.lifespan import (
 )
 from server.routes import agents as agent_routes
 from server.routes import chats as chat_routes
+
+
+def _run_dispatch_identity() -> IdentityContext:
+    return IdentityContext(
+        principal=PrincipalRef(type="system", id="run_dispatch"),
+        org_id="org-1",
+        permissions=frozenset({"runs:dispatch"}),
+        source="system_internal",
+        entity_type="run",
+        entity_id="run-1",
+    )
 
 
 class BrokenTransaction:
@@ -243,6 +255,7 @@ async def test_run_execution_rolls_back_and_closes_when_service_fails(
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
+        identity=_run_dispatch_identity(),
     )
     with pytest.raises(RuntimeError, match="adapter failed"):
         await execution.run()
@@ -289,6 +302,7 @@ async def test_run_execution_waits_for_commit_before_cancel_cleanup(
         cast(Any, lambda: session),
         run_id="run-1",
         agent_id="agent-1",
+        identity=_run_dispatch_identity(),
     )
     task = asyncio.create_task(execution.run())
     await commit_started.wait()

@@ -1,6 +1,6 @@
 # Step 30: Auth / Principal / Membership / Access
 
-状态：第一、二批已实现，第三批待开发
+状态：第一、二、三批已实现，待用户验收
 
 ## 1. 目标
 
@@ -434,12 +434,17 @@ server/auth/
   session.py
   proxy_token.py
   run_token.py
+  jwt.py
 
 server/identity/
   principal.py
   context.py
   resolver.py
   system_context.py
+  system_access.py
+
+server/services/
+  runtime_access.py
 
 server/membership/
   service.py
@@ -505,12 +510,13 @@ server/access/
 
 ### 第三批：Agent / System / Secret
 
-状态：待开发。
+状态：已实现，待用户验收。
 
-- 实现 `RunTokenAuth` 和 Runtime Token 注入。
-- 将 System Context 接入 Heartbeat、RunDispatch、RunRecovery、RunFinalization。
-- 实现受控 Secret 解析边界并接入 Runtime Context。
-- 移除生产访问链中的开发 Actor 权限旁路。
+- 使用共享 `HmacJwtCodec` 实现 `RunTokenIssuer`、`RunTokenAuth`，并保持代理 Token 与 Run Token 的认证规则隔离。
+- Run Token 绑定 Agent、组织、Runtime 类型和处于 `running` 状态的 Run；Agent 还必须具有 active Membership。
+- `RuntimeAccessResolver` 在 Adapter 执行边界统一解析 Provider 配置和临时凭证，仅向声明支持本地 Agent JWT 的 Adapter 注入 `RUDDER_API_KEY`。
+- `SystemOperationAccess` 统一创建并校验组织范围内的 System Context；RunDispatch、RunExecution、RunRecovery 和 RunFinalization 已接入对应 capability。
+- `local_trusted` 的隐式 Board Actor 不再覆盖显式 Cookie 或 Bearer 凭证，生产访问链不接受开发测试 Header。
 
 验收重点：Token 与 Agent/Run/org 强绑定，Run 终态失效，System 无全局旁路，Secret 不泄漏。
 
