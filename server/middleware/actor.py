@@ -5,6 +5,10 @@ from collections.abc import Awaitable, Callable
 from fastapi import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from packages.database.clients import async_write_transaction
+from server.auth import ProxyTokenAuth, SessionAuth, is_trusted_session_origin
+from starlette.responses import JSONResponse
+
 
 class ActorContextMiddleware:
     def __init__(self, app: ASGIApp) -> None:
@@ -18,6 +22,14 @@ class ActorContextMiddleware:
         request = Request(scope, receive=receive)
         settings = request.app.state.settings
         _set_actor_context(request, settings)
+        if not hasattr(request.state, "actor"):
+            await _resolve_authenticated_actor(request, settings)
+        if not _session_csrf_allowed(request):
+            await JSONResponse(
+                {"detail": "Session request origin is not trusted"},
+                status_code=403,
+            )(scope, receive, send)
+            return
         await self.app(scope, receive, send)
 
 
@@ -55,4 +67,55 @@ async def actor_context_middleware(
 ) -> object:
     settings = request.app.state.settings
     _set_actor_context(request, settings)
+    if not hasattr(request.state, "actor"):
+        await _resolve_authenticated_actor(request, settings)
+    if not _session_csrf_allowed(request):
+        return JSONResponse(
+            {"detail": "Session request origin is not trusted"}, status_code=403
+        )
     return await call_next(request)
+
+
+async def _resolve_authenticated_actor(request: Request, settings: object) -> None:
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if session_factory is None:
+        return
+    cookie_name = getattr(settings, "auth_session_cookie_name", "octopus_session")
+    cookie = request.cookies.get(cookie_name)
+    secret = getattr(settings, "proxy_auth_secret", None)
+    issuer = getattr(settings, "proxy_auth_issuer", None)
+    audience = getattr(settings, "proxy_auth_audience", None)
+    authorization = request.headers.get("authorization")
+    has_proxy_credential = bool(secret and issuer and audience and authorization)
+    if not cookie and not has_proxy_credential:
+        return
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            result = await SessionAuth(session).authenticate(cookie) if cookie else None
+            if result is None:
+                if has_proxy_credential:
+                    result = await ProxyTokenAuth(
+                        session,
+                        secret=str(secret),
+                        issuer=str(issuer),
+                        audience=str(audience),
+                    ).authenticate(str(authorization))
+            if result is not None:
+                request.state.actor = {
+                    "type": "user",
+                    "id": result.principal.id,
+                    "userId": result.principal.id,
+                    "orgId": result.org_id,
+                    "source": result.source,
+                }
+
+
+def _session_csrf_allowed(request: Request) -> bool:
+    actor = getattr(request.state, "actor", None)
+    if not isinstance(actor, dict) or actor.get("source") != "session":
+        return True
+    return is_trusted_session_origin(
+        method=request.method,
+        origin=request.headers.get("origin"),
+        request_url=str(request.url),
+    )

@@ -1,6 +1,6 @@
 # Step 30: Auth / Principal / Membership / Access
 
-状态：第一批已实现，待用户验收
+状态：第一、二批已实现，第三批待开发
 
 ## 1. 目标
 
@@ -492,14 +492,20 @@ server/access/
 
 ### 第二批：Human Auth 与成员管理
 
+状态：已实现，待用户验收。
+
 - 新增 `session`、`account`、`verification`、`external_user_bindings`、`invites`。
 - 实现 `LocalPasswordAuth`、`SessionAuth`、`ProxyTokenAuth`。
+- `ProxyTokenAuth` 通过 `OCTOPUS_PROXY_AUTH_SECRET`、`OCTOPUS_PROXY_AUTH_ISSUER`、`OCTOPUS_PROXY_AUTH_AUDIENCE` 启用；未完整配置时不接受代理 Token。
+- Human Session 使用 HttpOnly、SameSite Cookie，Cookie 写请求执行同源校验；匿名请求不建立认证数据库事务。
 - 实现 Epaichat 外部身份绑定、邀请和成员管理。
 - 完成本地登录与成员管理 UI；代理调用不重复展示 Octopus 登录页面。
 
 验收重点：Session 安全、代理 Token 验证、外部身份唯一映射、邀请单次接受、权限变更即时生效。
 
 ### 第三批：Agent / System / Secret
+
+状态：待开发。
 
 - 实现 `RunTokenAuth` 和 Runtime Token 注入。
 - 将 System Context 接入 Heartbeat、RunDispatch、RunRecovery、RunFinalization。

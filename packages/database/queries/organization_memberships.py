@@ -28,6 +28,18 @@ async def get_org_membership(
     return result.scalar_one_or_none()
 
 
+async def get_org_membership_by_id(
+    session: AsyncSession, org_id: str, membership_id: str
+) -> OrgMembership | None:
+    result = await session.execute(
+        select(OrgMembership).where(
+            OrgMembership.org_id == org_id,
+            OrgMembership.id == membership_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 async def list_org_memberships(
     session: AsyncSession, org_id: str
 ) -> Sequence[OrgMembership]:

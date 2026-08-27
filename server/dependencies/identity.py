@@ -16,6 +16,11 @@ async def get_identity_context(
     session: AsyncSession = Depends(get_session),
 ) -> IdentityContext:
     actor = require_actor_identity(request)
+    if orgId is not None and actor.org_id is not None and actor.org_id != orgId:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated identity cannot access another organization",
+        )
     source = "unknown"
     raw_actor = getattr(request.state, "actor", None)
     if isinstance(raw_actor, dict):
