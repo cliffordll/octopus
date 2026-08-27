@@ -536,6 +536,7 @@ function ExecutionWorkspacePanel({
 }) {
   const selected = workspaces.find((workspace) => workspace.id === selectedId);
   const selectedDirty = Boolean(status?.git?.dirty);
+  const gitAvailable = Boolean(status?.git?.available);
   const canCleanup = Boolean(status?.canArchive) || (selectedDirty && cleanupDiscardConfirmed && !status?.lease.locked);
   return (
     <section className="project-config-section project-workspace-manager project-config-step-history" aria-label="任务运行记录">
@@ -577,14 +578,30 @@ function ExecutionWorkspacePanel({
                   </div>
                   {workspaceModeNotice(selected.mode) && <p className="issue-action-notice" role="note">{workspaceModeNotice(selected.mode)}</p>}
                   <div className="project-workspace-actions">
-                    <button className="secondary small-button" disabled={diffPending} onClick={() => onLoadDiff(selected.id)} type="button">查看 diff</button>
+                    <button
+                      className="secondary small-button"
+                      disabled={diffPending || !gitAvailable}
+                      onClick={() => onLoadDiff(selected.id)}
+                      title={gitAvailable ? "查看当前工作目录的 Git diff" : "当前工作目录不是 Git 仓库，无法查看 diff"}
+                      type="button"
+                    >
+                      查看 diff
+                    </button>
                     <button className="secondary small-button" disabled={mergePreviewPending || selected.mode === "shared_workspace"} onClick={() => onMergePreview(selected.id)} type="button">检查 merge</button>
                     <button className="secondary small-button" disabled={mergePending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)} onClick={() => onMerge(selected.id)} type="button">merge 到目标分支</button>
                     <button className="secondary small-button" disabled={preparePrPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => onPreparePr(selected.id)} type="button">准备 PR</button>
                     <button className="secondary small-button" disabled={commitPending || !selectedDirty || Boolean(status?.lease.locked)} onClick={() => onCommit(selected.id)} type="button">确认提交</button>
                     <button className="secondary small-button" disabled={createPrPending || selected.mode === "shared_workspace" || !selected.branchName} onClick={() => onCreatePr(selected.id)} type="button">创建 PR</button>
                     <button className="secondary small-button" disabled={pushPending || !selected.branchName || selectedDirty} onClick={() => onPush(selected.id)} type="button">push 分支</button>
-                    <button className="danger small-button" disabled={abandonPending || Boolean(status?.lease.locked)} onClick={() => onAbandon(selected.id)} type="button">放弃结果</button>
+                    <button
+                      className="danger small-button"
+                      disabled={abandonPending || selected.mode === "shared_workspace" || Boolean(status?.lease.locked)}
+                      onClick={() => onAbandon(selected.id)}
+                      title={selected.mode === "shared_workspace" ? "共享工作区由多个任务共同使用，不能按单个任务放弃结果" : "将当前独立工作区标记为已放弃，但保留目录"}
+                      type="button"
+                    >
+                      放弃结果
+                    </button>
                     <div className="workspace-cleanup-action">
                       {selectedDirty && (
                         <label className="workspace-danger-confirm" title="清理目录会丢弃该运行目录的未提交改动">
@@ -592,7 +609,15 @@ function ExecutionWorkspacePanel({
                           <span>丢弃改动</span>
                         </label>
                       )}
-                      <button className="danger small-button workspace-cleanup-button" disabled={cleanupPending || !canCleanup} onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)} type="button">清理目录</button>
+                      <button
+                        className="danger small-button workspace-cleanup-button"
+                        disabled={cleanupPending || selected.mode === "shared_workspace" || !canCleanup}
+                        onClick={() => onCleanup(selected.id, selectedDirty && cleanupDiscardConfirmed)}
+                        title={selected.mode === "shared_workspace" ? "共享工作区是项目主目录，不能按单个任务清理" : "归档并清理当前独立执行目录"}
+                        type="button"
+                      >
+                        清理目录
+                      </button>
                     </div>
                     <button className="danger small-button" disabled={archivePending || !status?.canArchive} onClick={() => onArchive(selected.id)} type="button">归档旧流程</button>
                   </div>
