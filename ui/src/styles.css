@@ -2313,6 +2313,79 @@ button.project-workspace-item:hover,
   width: 100%;
 }
 
+.issue-workspace-action-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.issue-workspace-action-group {
+  align-items: center;
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  padding: 9px 10px;
+}
+
+.issue-workspace-action-group > .project-workspace-actions {
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+.issue-workspace-action-group-danger {
+  background: rgba(180, 83, 9, 0.04);
+  border-color: rgba(180, 83, 9, 0.24);
+}
+
+.issue-workspace-action-label {
+  color: #8792a6;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.issue-acceptance-card {
+  gap: 14px;
+}
+
+.issue-acceptance-subsection {
+  background: #0b111b;
+  border: 1px solid #202a3b;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.issue-acceptance-subheading {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.issue-acceptance-subheading h3 {
+  color: #e8edf5;
+  font-size: 13px;
+  margin: 0;
+}
+
+.issue-acceptance-subheading .eyebrow {
+  margin: 0 0 4px;
+}
+
+.issue-acceptance-subheading .muted {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.issue-review-decision .issue-review-status {
+  background: #0f1724;
+}
+
 .workspace-cleanup-action {
   align-items: center;
   background: rgba(180, 83, 9, 0.08);

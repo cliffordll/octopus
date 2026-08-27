@@ -1087,7 +1087,10 @@ it("shows an issue and records comments and review decisions", async () => {
 
   );
 
-  expect(screen.getByRole("region", { name: "评审" })).toHaveTextContent("等待 Builder 给出 closeout");
+  const acceptance = screen.getByRole("region", { name: "任务验收" });
+  expect(acceptance).toHaveTextContent("等待 Builder 给出 closeout");
+  expect(within(acceptance).getByRole("region", { name: "代码改动" })).toBeInTheDocument();
+  expect(within(acceptance).getByRole("region", { name: "评审结论" })).toBeInTheDocument();
 
   expect(screen.getByRole("button", { name: "需要人工处理" })).toBeInTheDocument();
 

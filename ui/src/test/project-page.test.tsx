@@ -594,7 +594,7 @@ it("shows the shared workspace overwrite notice in run history", async () => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
     if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([workspace]);
     if (path === "/api/execution-workspaces/exec-1/status" && init?.method === "GET") {
-      return respond({ workspace, git: { available: true, branch: "main", dirty: true, entries: ["M ui/src/App.tsx"] }, lease: { locked: false, operationId: null, runId: null }, canArchive: false, operations: [] });
+      return respond({ workspace, git: { available: false, error: "Workspace is not a Git worktree" }, lease: { locked: false, operationId: null, runId: null }, canArchive: false, operations: [] });
     }
     return respond(project);
   });
@@ -604,7 +604,10 @@ it("shows the shared workspace overwrite notice in run history", async () => {
   const runHistory = await screen.findByRole("region", { name: "任务运行记录" });
   expect(await within(runHistory).findByText("共享运行")).toBeInTheDocument();
   expect(runHistory).toHaveTextContent("共享工作区不会隔离文件");
+  expect(within(runHistory).getByRole("button", { name: "查看 diff" })).toBeDisabled();
   expect(within(runHistory).getByRole("button", { name: "检查 merge" })).toBeDisabled();
+  expect(within(runHistory).getByRole("button", { name: "放弃结果" })).toBeDisabled();
+  expect(within(runHistory).getByRole("button", { name: "清理目录" })).toBeDisabled();
 });
 
 it("blocks project configuration save when goal IDs are not UUIDs", async () => {
