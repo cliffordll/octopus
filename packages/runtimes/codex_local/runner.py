@@ -374,6 +374,10 @@ async def _completed_process_attempt(
             "loadedSkills": loaded_skills,
             "billingType": billing_type,
             "biller": biller,
+            "artifactEvidence": {
+                "source": "codex_file_change_event",
+                "writtenPaths": parsed["writtenFiles"],
+            },
         },
     )
     return _RunAttempt(
@@ -427,6 +431,7 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
     session_id: str | None = None
     messages: list[str] = []
     error_message: str | None = None
+    written_files: list[str] = []
     usage = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0}
     for raw_line in stdout.splitlines():
         try:
@@ -450,6 +455,10 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
                 and isinstance(item.get("text"), str)
             ):
                 messages.append(item["text"])
+            elif isinstance(item, dict) and item.get("type") == "file_change":
+                for path in _file_change_paths(item):
+                    if path not in written_files:
+                        written_files.append(path)
         elif event_type == "turn.completed":
             raw_usage = event.get("usage")
             if isinstance(raw_usage, dict):
@@ -471,7 +480,28 @@ def _parse_jsonl(stdout: str) -> dict[str, Any]:
         "summary": "\n\n".join(messages).strip(),
         "usage": usage,
         "errorMessage": error_message,
+        "writtenFiles": written_files,
     }
+
+
+def _file_change_paths(item: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"path", "file_path", "filePath"} and isinstance(child, str):
+                    path = child.strip()
+                    if path and path not in paths:
+                        paths.append(path)
+                elif key in {"changes", "files"}:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(item)
+    return paths
 
 
 class _CodexLiveOutput:

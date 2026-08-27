@@ -180,12 +180,15 @@ async def test_runtime_progress_is_persisted_as_run_event(
 
         assert run is not None
         events = await HeartbeatService(session).list_events(run["id"])
+        assert events is not None
         progress = [
             event for event in events if event["eventType"] == "runtime.progress"
         ]
         assert len(progress) == 1
         assert progress[0]["message"] == "正在执行命令：rg -n TODO server"
-        assert progress[0]["payload"]["runtime"] == "codex_local"
+        payload = progress[0]["payload"]
+        assert payload is not None
+        assert payload["runtime"] == "codex_local"
 
 
 @pytest.fixture
