@@ -8,7 +8,7 @@ from ..constants.project import (
     ProjectResourceAttachmentRole,
     ProjectStatus,
 )
-from .workspace import ProjectExecutionWorkspacePolicy, ProjectWorkspace
+from .workspace import ProjectWorkspace, ProjectWorkspaceExecutionPolicy
 
 
 class OrganizationResource(TypedDict):
@@ -70,7 +70,6 @@ class ProjectDetail(TypedDict):
     color: str | None
     pauseReason: PauseReason | None
     pausedAt: str | None
-    executionWorkspacePolicy: ProjectExecutionWorkspacePolicy | None
     codebase: ProjectCodebase
     resources: list[ProjectResourceAttachment]
     workspaces: list[ProjectWorkspace]
@@ -109,7 +108,6 @@ class ProjectMutationFields(TypedDict, total=False):
     leadAgentId: str | None
     targetDate: str | None
     color: str | None
-    executionWorkspacePolicy: dict[str, Any] | None
     resourceAttachments: list[ProjectResourceAttachmentInput]
     newResources: list[CreateProjectInlineResourceInput]
     archivedAt: str | None
@@ -136,6 +134,7 @@ class ProjectWorkspaceFields(TypedDict, total=False):
     remoteWorkspaceRef: str | None
     sharedWorkspaceKey: str | None
     metadata: dict[str, Any] | None
+    executionWorkspacePolicy: ProjectWorkspaceExecutionPolicy | None
     isPrimary: bool
 
 

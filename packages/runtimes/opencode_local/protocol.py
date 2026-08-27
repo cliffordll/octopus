@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ..session import runtime_session_id
@@ -29,6 +30,9 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
     messages: list[str] = []
     errors: list[str] = []
     tool_errors: list[str] = []
+    written_files: list[str] = []
+    declared_work_products: list[str] = []
+    primary_work_products: list[str] = []
     usage = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0}
     cost_usd = 0.0
     for raw_line in stdout.splitlines():
@@ -48,6 +52,10 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
                 text = string(part.get("text"))
                 if text:
                     messages.append(text)
+                    _append_unique(
+                        declared_work_products,
+                        _declared_work_product_paths_from_text(text),
+                    )
         elif event_type == "step_finish":
             part = event.get("part")
             if isinstance(part, dict):
@@ -64,12 +72,37 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
         elif event_type == "tool_use":
             part = event.get("part")
             if isinstance(part, dict):
+                tool_name = string(part.get("tool"))
                 state = part.get("state")
-                if isinstance(state, dict) and state.get("status") == "error":
-                    text = string(state.get("error"))
-                    if text:
-                        errors.append(text)
-                        tool_errors.append(text)
+                if isinstance(state, dict):
+                    state_input = state.get("input")
+                    if isinstance(state_input, dict):
+                        command = string(state_input.get("command"))
+                        if command:
+                            _append_unique(
+                                declared_work_products,
+                                _declared_work_product_paths_from_text(command),
+                            )
+                            _append_unique(
+                                declared_work_products,
+                                _flag_values(command, "--work-product"),
+                            )
+                            _append_unique(
+                                primary_work_products,
+                                _flag_values(command, "--primary-work-product"),
+                            )
+                        file_path = string(state_input.get("filePath"))
+                        if (
+                            tool_name == "write"
+                            and state.get("status") == "completed"
+                            and file_path
+                        ):
+                            _append_unique(written_files, [file_path])
+                    if state.get("status") == "error":
+                        text = string(state.get("error"))
+                        if text:
+                            errors.append(text)
+                            tool_errors.append(text)
         elif event_type == "error":
             text = error_text(event.get("error") or event.get("message"))
             if text:
@@ -81,7 +114,62 @@ def parse_jsonl(stdout: str) -> dict[str, Any]:
         "costUsd": cost_usd,
         "errorMessage": "\n".join(errors) if errors else None,
         "toolErrors": tool_errors,
+        "writtenFiles": written_files,
+        "declaredWorkProducts": declared_work_products,
+        "primaryWorkProducts": primary_work_products,
     }
+
+
+_WORK_PRODUCT_FLAG_VALUE_RE = r"(?:\"([^\"]+)\"|'([^']+)'|([^\s]+))"
+_WORK_PRODUCT_EXTENSIONS_RE = r"md|txt|docx|pdf|csv|json|html?"
+_WORK_PRODUCT_TOKEN_RE = r"[^\s`'\"<>|:*?]+"
+_WORK_PRODUCT_PATH_RE = re.compile(
+    rf"(?<![\w.-])((?:{_WORK_PRODUCT_TOKEN_RE}/)+{_WORK_PRODUCT_TOKEN_RE}\.(?:{_WORK_PRODUCT_EXTENSIONS_RE}))",
+    re.IGNORECASE,
+)
+_WORK_PRODUCT_FILENAME_RE = re.compile(
+    rf"(?<![\w./-])({_WORK_PRODUCT_TOKEN_RE}\.(?:{_WORK_PRODUCT_EXTENSIONS_RE}))",
+    re.IGNORECASE,
+)
+_WORK_PRODUCT_PATH_STRIP_CHARS = "`'\".,;:()[]{}，。；：（）【】《》"
+
+
+def _flag_values(command: str, flag: str) -> list[str]:
+    pattern = re.compile(rf"{re.escape(flag)}(?:=|\s+){_WORK_PRODUCT_FLAG_VALUE_RE}")
+    values: list[str] = []
+    for match in pattern.finditer(command):
+        value = next((group for group in match.groups() if group), None)
+        if value:
+            values.append(value.replace("\\", "/"))
+    return values
+
+
+def _declared_work_product_paths_from_text(text: str) -> list[str]:
+    if not text.strip():
+        return []
+    paths = [
+        match.group(1).replace("\\", "/")
+        for match in _WORK_PRODUCT_PATH_RE.finditer(text)
+    ]
+    filenames = [match.group(1) for match in _WORK_PRODUCT_FILENAME_RE.finditer(text)]
+    paths.extend(filenames)
+    if "reports/" in text or "reports\\" in text:
+        paths.extend(f"reports/{filename}" for filename in filenames)
+    cleaned = [
+        path.strip(_WORK_PRODUCT_PATH_STRIP_CHARS)
+        for path in paths
+        if path.strip(_WORK_PRODUCT_PATH_STRIP_CHARS)
+    ]
+    unique: list[str] = []
+    _append_unique(unique, cleaned)
+    return unique
+
+
+def _append_unique(target: list[str], values: list[str]) -> None:
+    for value in values:
+        normalized = value.replace("\\", "/")
+        if normalized and normalized not in target:
+            target.append(normalized)
 
 
 def error_text(value: Any) -> str | None:

@@ -1,26 +1,27 @@
 ﻿# Heartbeat Scheduler Guide
 
-本文说明 Octopus / Rudder 系列实现里的 heartbeat 定时任务逻辑、开关层级和 UI 含义。
+本文说明 Octopus / upstream reference 系列实现里的 heartbeat 定时任务逻辑、开关层级和 UI 含义。
 
 核心结论：
 
 ```text
-/instance/settings/heartbeats 管的是 timer heartbeat
+/instance/settings/heartbeats 管的是 agent 状态检测
 不是所有 wakeup 的总开关
 ```
 
-也就是说，关闭该页面中的某个 agent heartbeat，只会关闭该 agent 的定时心跳；如果其他唤醒来源仍然开启，例如任务分配、审批通过、评论 mention、手动 invoke、retry 或 automation，该 agent 仍可能被唤醒。
+也就是说，关闭该页面中的某个 agent heartbeat，只会关闭该 agent 的状态检测；如果其他唤醒来源仍然开启，例如任务分配、审批通过、评论 mention、手动 invoke、retry 或 automation，该 agent 仍可能被唤醒。
 
 ## 核心概念
 
 | 概念 | 作用 |
 | --- | --- |
-| scheduler | server 后台周期任务，按固定间隔扫描 agent timer heartbeat |
-| timer heartbeat | 按 agent 配置的 interval 自动触发的 heartbeat |
+| scheduler | server 后台周期任务，按固定间隔扫描 agent 状态检测配置 |
+| 状态检测 | 按 agent 配置的 interval 记录/更新 agent 健康状态；默认不创建真实 agent run |
 | wakeup request | 一次唤醒请求，来源可能是 timer、assignment、review、manual、automation 等 |
 | heartbeat run | 真正进入执行队列的 run，通常由 wakeup 创建 |
 | agent heartbeat policy | agent runtimeConfig 中的 heartbeat 配置 |
-| preflight | timer 触发前检查 agent 是否确实有可执行任务 |
+| 立即唤醒 | 立即执行一次与定时心跳相同的任务预检；有可执行工作才创建 run |
+| 运行诊断 | 跳过任务预检，强制启动一次 runtime，用于验证运行环境 |
 
 ## 全局 scheduler 开关
 
@@ -69,7 +70,7 @@ HEARTBEAT_SCHEDULER_INTERVAL_MS=30000
 | 字段 | 含义 |
 | --- | --- |
 | `enabled` | 是否允许 timer heartbeat |
-| `intervalSec` | timer heartbeat 间隔；`0` 表示没有有效定时周期 |
+| `intervalSec` | timer heartbeat 间隔；缺失、无效或不大于 `0` 时回退为 300 秒 |
 | `wakeOnDemand` | 是否允许非 timer wakeup，例如 assignment、manual、automation |
 | `preflightEnabled` | timer 触发前是否先检查有没有可执行任务 |
 | `maxConcurrentRuns` | 限制该 agent 可并发运行数量 |
@@ -78,12 +79,16 @@ HEARTBEAT_SCHEDULER_INTERVAL_MS=30000
 
 ```text
 enabled 默认 true
-intervalSec 默认 0
+intervalSec 默认 300 秒
 wakeOnDemand 默认 true
 preflightEnabled 默认 true
 ```
 
-所以一个 agent 即使 `enabled=true`，如果 `intervalSec=0`，也只是“配置未激活”，不会被 timer scheduler 定时跑。
+所以关闭 timer heartbeat 应明确设置 `enabled=false`，不能再用 `intervalSec=0` 表示关闭。
+
+旧字段 `runDiagnosticsOnTimer` 只用于兼容历史配置：仅当配置中没有
+`preflightEnabled` 或 `timerPreflightEnabled` 时，`true` 才解释为显式关闭预检。
+新字段始终优先，避免旧字段绕过明确的资源控制设置。
 
 ## Timer heartbeat 触发流程
 
@@ -100,7 +105,7 @@ server interval tick
   ↓
 检查 enabled 和 intervalSec
   ↓
-检查距离 lastHeartbeatAt 是否超过 intervalSec
+检查距离 lastHeartbeatCheckAt（旧数据回退 lastHeartbeatAt）是否超过 intervalSec
   ↓
 执行 timer preflight
   ↓
@@ -161,6 +166,25 @@ Timer heartbeat 只是唤醒来源之一。
 | automation | 自动化规则触发 |
 
 这些来源通常走 `source !== "timer"` 的路径。
+
+Agent 页面上的两个手动操作有意保持不同语义：
+
+| 操作 | 行为 |
+| --- | --- |
+| `立即唤醒` | 提前执行一次心跳预检；没有可执行任务时只记录 skipped wakeup，不启动 runtime |
+| `运行诊断` | 强制启动 runtime；同一 agent 已有进行中的诊断时复用该 run，不重复启动 |
+
+能够增量上报输出的 `opencode_local` runtime 默认连续 300 秒没有任何输出时会
+结束为 `timed_out`，避免 run 永久停留在 `running`。其他尚未增量上报输出的
+adapter 默认不启用静默超时，避免把合法长任务误判为静默；可以在 agent runtime
+config 中显式设置 `noOutputTimeoutSec`，设置为 `0` 可关闭。
+
+本地 runtime 的进程生命周期统一由 Adapter 侧的公共进程监管层管理：负责启动、
+增量或最终输出收集、取消、超时、退出确认和整个子进程树清理。Heartbeat 只维护
+Run lease、业务取消和终态副作用；Adapter 仍在收集输出时，不会因为 PID 已退出就
+提前把 Run 判为 `process_lost`。只有 server 重启后已经没有活跃 Adapter 的孤儿 Run，
+恢复流程才使用 PID/lease 证据判断进程丢失。Windows 的 Codex 兼容 fallback 也经过
+同一监管层，不再绕过取消和进程树清理。
 
 如果要关闭非 timer wakeup，需要配置：
 

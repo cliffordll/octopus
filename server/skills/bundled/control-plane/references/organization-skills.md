@@ -1,4 +1,4 @@
-﻿# Organization Skills Workflow
+# Organization Skills Workflow
 
 Use this reference when a board user, CEO, or manager asks you to discover, import, inspect, or enable organization skills.
 
@@ -7,7 +7,7 @@ This workflow is now **CLI-first** for the bundled `control-plane` skill.
 For a skill that belongs only to the running agent, do not use organization import or scan commands. Use:
 
 ```bash
-control-plane agent skills create "$OCTOPUS_AGENT_ID" --name "<name>" --description "<description>" --enable --json
+octopus agent skills create "$OCTOPUS_AGENT_ID" --name "<name>" --description "<description>" --enable --json
 ```
 
 Agent-private skill creation writes under `AGENT_HOME/skills` and does not require organization skill mutation permission.
@@ -21,14 +21,14 @@ Agent-private skill creation writes under `AGENT_HOME/skills` and does not requi
 ## Core CLI Surface
 
 ```bash
-control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
-control-plane agent skills enable "<agent-id>" "<selection-ref>" --json
-control-plane agent skills sync "<agent-id>" --desired-skills "<csv>" --json
+octopus skill list --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+octopus skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+octopus skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+octopus skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+octopus agent skills enable "<agent-id>" "<selection-ref>" --json
+octopus agent skills sync "<agent-id>" --desired-skills "<csv>" --json
 ```
 
 Defaults:
@@ -54,7 +54,7 @@ If the user gives a `skills.sh` URL, keep it as `skills.sh` or key-style. Do not
 Preferred managed import:
 
 ```bash
-control-plane skill import \
+octopus skill import \
   --org-id "$OCTOPUS_ORG_ID" \
   --source "https://skills.sh/google-labs-code/stitch-skills/design-md" \
   --json
@@ -63,7 +63,7 @@ control-plane skill import \
 Equivalent key-style import:
 
 ```bash
-control-plane skill import \
+octopus skill import \
   --org-id "$OCTOPUS_ORG_ID" \
   --source "google-labs-code/stitch-skills/design-md" \
   --json
@@ -72,7 +72,7 @@ control-plane skill import \
 GitHub import:
 
 ```bash
-control-plane skill import \
+octopus skill import \
   --org-id "$OCTOPUS_ORG_ID" \
   --source "https://github.com/vercel-labs/agent-browser" \
   --json
@@ -81,7 +81,7 @@ control-plane skill import \
 Local skill scan:
 
 ```bash
-control-plane skill scan-local \
+octopus skill scan-local \
   --org-id "$OCTOPUS_ORG_ID" \
   --roots "/abs/path/to/.agents,/abs/path/to/other-skill-root" \
   --json
@@ -90,7 +90,7 @@ control-plane skill scan-local \
 Shared workspace scan:
 
 ```bash
-control-plane skill scan-projects \
+octopus skill scan-projects \
   --org-id "$OCTOPUS_ORG_ID" \
   --project-ids "<project-id-1>,<project-id-2>" \
   --json
@@ -108,20 +108,20 @@ Notes:
 List skills:
 
 ```bash
-control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Read one skill:
 
 ```bash
-control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Read `SKILL.md` or another file from the package:
 
 ```bash
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path references/notes.md --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path references/notes.md --json
 ```
 
 ## Enable Skills On An Existing Agent
@@ -133,7 +133,7 @@ control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path referenc
 - exact slug when it is unique in the organization
 
 ```bash
-control-plane agent skills enable \
+octopus agent skills enable \
   "<agent-id>" \
   "vercel-labs/agent-browser/agent-browser" \
   --json
@@ -142,14 +142,14 @@ control-plane agent skills enable \
 For multiple skills:
 
 ```bash
-control-plane agent skills enable \
+octopus agent skills enable \
   "<agent-id>" \
   "agent-browser" "design-md" \
   --json
 ```
 
-`control-plane agent skills enable` is additive and preserves existing enabled
-selections. Use `control-plane agent skills sync --desired-skills` only when replacing
+`octopus agent skills enable` is additive and preserves existing enabled
+selections. Use `octopus agent skills sync --desired-skills` only when replacing
 the full optional enabled-skill set intentionally.
 
 ## Permission Model
@@ -160,7 +160,7 @@ the full optional enabled-skill set intentionally.
 
 ## Notes
 
-- Built-in control-plane skills live in the organization library and are always loaded for agent runs.
+- Built-in octopus skills live in the organization library and are always loaded for agent runs.
 - New organizations also seed optional community preset skills into the organization library. They stay organization-managed and default-off for agents.
 - If a skill reference is missing or ambiguous, control plane returns `422`.
 - Prefer linking back to the relevant issue, approval, and agent when commenting about skill changes.

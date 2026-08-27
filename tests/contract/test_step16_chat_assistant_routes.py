@@ -194,8 +194,8 @@ async def test_assistant_json_text_issue_proposal_is_persisted(
                     '{"summary":"我可以为你创建这个任务。",'
                     '"kind":"issue_proposal",'
                     '"structuredPayload":{"issueProposal":{'
-                    '"title":"分析 rudder 源码",'
-                    '"description":"分析 rudder 源码并整理核心架构。",'
+                    '"title":"分析 octopus 源码",'
+                    '"description":"分析 octopus 源码并整理核心架构。",'
                     '"priority":"medium"}}}'
                 )
             }
@@ -208,7 +208,7 @@ async def test_assistant_json_text_issue_proposal_is_persisted(
         application,
         "POST",
         f"/api/chats/{chat['id']}/messages",
-        json={"body": "我想分析一下rudder源码，你能帮我创建一个任务吗？"},
+        json={"body": "我想分析一下octopus源码，你能帮我创建一个任务吗？"},
     )
 
     assert code == 201
@@ -216,8 +216,8 @@ async def test_assistant_json_text_issue_proposal_is_persisted(
     assert assistant_message["kind"] == "issue_proposal"
     assert assistant_message["body"] == "我可以为你创建这个任务。"
     assert assistant_message["structuredPayload"]["issueProposal"] == {
-        "title": "分析 rudder 源码",
-        "description": "分析 rudder 源码并整理核心架构。",
+        "title": "分析 octopus 源码",
+        "description": "分析 octopus 源码并整理核心架构。",
         "priority": "medium",
     }
     assert assistant_message["approvalId"] is not None

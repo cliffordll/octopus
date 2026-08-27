@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -159,6 +160,15 @@ class AgentWakeupRequest(Base):
         ),
         Index("agent_wakeup_requests_company_requested_idx", "org_id", "requested_at"),
         Index("agent_wakeup_requests_agent_requested_idx", "agent_id", "requested_at"),
+        Index(
+            "agent_wakeup_requests_company_agent_idempotency_key_uq",
+            "org_id",
+            "agent_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key is not null"),
+            sqlite_where=text("idempotency_key is not null"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)

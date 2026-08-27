@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401 -- retained for subprocess monkeypatch compatibility
 import os
-from datetime import UTC, datetime
 
-from ..common import runtime_subprocess_kwargs
 from ..environment import resolve_runtime_executable
+from ..local_process import local_process_supervisor
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
 from .protocol import args, configured_env
 
@@ -25,81 +24,45 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         env.update(context.env)
     timeout = context.config.get("timeoutSec", 0)
     timeout_sec = float(timeout) if isinstance(timeout, (float, int)) else 0.0
-    process = await asyncio.create_subprocess_exec(
+    process_result = await local_process_supervisor.run(
         command,
         *process_args,
         cwd=cwd,
         env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **runtime_subprocess_kwargs(),
+        timeout_sec=timeout_sec,
+        cancel_event=context.cancel_event,
+        on_process_started=context.on_process_started,
+        on_process_exited=context.on_process_exited,
     )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    communication = asyncio.create_task(process.communicate())
-    try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
-        )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {communication, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                process.kill()
-                stdout, stderr = await communication
-                await process.wait()
-                return _result(
-                    process.returncode,
-                    stdout,
-                    stderr,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                )
-            cancelled.cancel()
-            if communication not in done:
-                raise TimeoutError
-            stdout, stderr = communication.result()
-        elif timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        process.kill()
-        stdout, stderr = await communication
-        await process.wait()
+    if process_result.cancelled:
         return _result(
-            process.returncode,
-            stdout,
-            stderr,
+            process_result.exit_code,
+            process_result.stdout,
+            process_result.stderr,
+            signal=process_result.signal,
+            error_message="Run cancelled",
+        )
+    if process_result.timed_out:
+        return _result(
+            process_result.exit_code,
+            process_result.stdout,
+            process_result.stderr,
             timed_out=True,
             error_message=f"Timed out after {timeout_sec:g}s",
         )
-    except asyncio.CancelledError:
-        process.kill()
-        await communication
-        await process.wait()
-        raise
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
+    stdout_text = process_result.stdout.decode(errors="replace")
+    stderr_text = process_result.stderr.decode(errors="replace")
     if stdout_text:
         await context.on_log("stdout", stdout_text)
     if stderr_text:
         await context.on_log("stderr", stderr_text)
     error = (
         None
-        if process.returncode == 0
-        else f"Process exited with code {process.returncode}"
+        if process_result.exit_code == 0
+        else f"Process exited with code {process_result.exit_code}"
     )
     return RuntimeExecutionResult(
-        exit_code=process.returncode,
+        exit_code=process_result.exit_code,
         error_message=error,
         result_json={"stdout": stdout_text, "stderr": stderr_text},
     )

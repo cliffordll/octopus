@@ -1,4 +1,4 @@
-﻿# control plane Create Agent CLI Reference
+# control plane Create Agent CLI Reference
 
 Canonical CLI contract for the bundled `create-agent` skill. Prefer these commands over direct `/api` calls.
 
@@ -14,13 +14,13 @@ Canonical CLI contract for the bundled `create-agent` skill. Prefer these comman
 ### Identity and discovery
 
 ```sh
-control-plane agent me --json
-control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent config index
-control-plane agent config doc "<agent-runtime-type>"
-control-plane agent config list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent config get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent me --json
+octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent config index
+octopus agent config doc "<agent-runtime-type>"
+octopus agent config list --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent config get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Use these in order:
@@ -33,12 +33,12 @@ Use these in order:
 ### Organization skills
 
 ```sh
-control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+octopus skill list --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+octopus skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+octopus skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+octopus skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
 ```
 
 Use these before hiring when the new role needs `desiredSkills`.
@@ -52,7 +52,7 @@ Use these before hiring when the new role needs `desiredSkills`.
 ### Canonical hire flow
 
 ```sh
-control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
+octopus agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
   "role": "cto",
   "title": "Chief Technology Officer",
   "reportsTo": "<ceo-agent-id>",
@@ -64,7 +64,7 @@ control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
     "model": "o4-mini",
     "promptTemplate": "# SOUL.md -- CTO Persona\n\nYou are the CTO.\n\n## Mission\nOwn technical strategy, architecture, engineering execution, and quality bars.\n\n## Responsibilities\n- Set technical direction and execution standards.\n- Review architecture and staffing trade-offs.\n- Keep delivery risks visible and actionable.\n\n## Boundaries\n- Do not approve risky shortcuts without naming the trade-off.\n- Escalate product or budget ambiguity instead of guessing.\n\n## Decision Principles\n- Prefer simple architectures with explicit trade-offs.\n- Treat reliability, developer velocity, and product learning as linked constraints.\n\n## Voice\nDirect, specific, and evidence-led.\n\n## Continuity\nPreserve durable technical standards, repeated failure patterns, and long-running architecture decisions in memory or explicit instructions."
   },
-  "runtimeConfig": {"heartbeat": {"enabled": true, "intervalSec": 300, "wakeOnDemand": true, "maxConcurrentRuns": 3}},
+  "runtimeConfig": {"heartbeat": {"enabled": true, "intervalSec": 300, "runDiagnosticsOnTimer": false, "wakeOnDemand": true, "maxConcurrentRuns": 3}},
   "sourceIssueId": "<issue-id>"
 }' --json
 ```
@@ -75,17 +75,17 @@ Canonical semantics:
 - if the organization does not require board approval, the response contains `approval: null` and the agent is created directly
 - if the organization requires board approval, the response contains both `agent` and `approval`, and the new agent stays `pending_approval`
 
-Do not use `control-plane approval create --type hire_agent` as a replacement for `agent hire` during normal skill execution. That is a lower-level compatibility surface and does not preserve the canonical direct-create behavior.
+Do not use `octopus approval create --type hire_agent` as a replacement for `agent hire` during normal skill execution. That is a lower-level compatibility surface and does not preserve the canonical direct-create behavior.
 
 `agentRuntimeConfig.promptTemplate`, when used during hire, is for role/persona content. control plane materializes it as the managed instruction bundle's `SOUL.md`. Write it as a durable SOUL document with mission, responsibilities, boundaries, decision principles, voice, and continuity when the role has ongoing authority. Do not include control plane's shared operating contract in this field; supported local runtimes inject that contract from code.
 
 ### Approval follow-up
 
 ```sh
-control-plane approval get "<approval-id>" --json
-control-plane approval comment "<approval-id>" --body "<markdown>" --json
-control-plane approval resubmit "<approval-id>" --payload '{"...":"..."}' --json
-control-plane approval issues "<approval-id>" --json
+octopus approval get "<approval-id>" --json
+octopus approval comment "<approval-id>" --body "<markdown>" --json
+octopus approval resubmit "<approval-id>" --payload '{"...":"..."}' --json
+octopus approval issues "<approval-id>" --json
 ```
 
 Notes:
@@ -125,8 +125,8 @@ Issue linkage rule:
 Post-hire adjustments use the normal agent and skill surfaces:
 
 ```sh
-control-plane agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent skills enable "<agent-id>" "<selection-ref>" --json
-control-plane agent skills sync "<agent-id>" --desired-skills "<csv>" --json
-control-plane agent local-cli "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent get "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent skills enable "<agent-id>" "<selection-ref>" --json
+octopus agent skills sync "<agent-id>" --desired-skills "<csv>" --json
+octopus agent local-cli "<agent-id-or-shortname>" --org-id "$OCTOPUS_ORG_ID" --json
 ```

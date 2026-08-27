@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import pytest
+from dataclasses import replace
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -73,6 +74,9 @@ async def session(
 @pytest.fixture
 def app(session_factory: async_sessionmaker[AsyncSession]) -> FastAPI:
     fastapi_app.state.session_factory = session_factory
+    fastapi_app.state.settings = replace(
+        fastapi_app.state.settings, local_trusted=False
+    )
     return fastapi_app
 
 

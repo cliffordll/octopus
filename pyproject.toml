@@ -1,7 +1,7 @@
 [project]
 name = "octopus"
 version = "0.1.0"
-description = "Octopus: Python compatibility rewrite of the upstream control-plane server"
+description = "Octopus: Python compatibility rewrite of the upstream octopus server"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16",
@@ -21,7 +21,6 @@ dependencies = [
 ]
 
 [project.scripts]
-control-plane = "cli.__main__:main"
 octopus = "cli.__main__:main"
 server = "server:main"
 
@@ -35,7 +34,7 @@ packages = ["cli", "server", "packages"]
 [dependency-groups]
 dev = [
     "ruff>=0.6",
-    "pyright>=1.1.409",
+    "pyright>=1.1.410",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "types-pyyaml>=6.0",
@@ -61,7 +60,9 @@ exclude = [
     ".octopus",
     ".codex-pytest-write-check",
     ".pytest-tmp*",
-    ".tmp-pytest",
+    ".review-pytest-temp",
+    ".tmp",
+    ".tmp-pytest*",
     ".venv",
     ".uv-cache*",
 ]
@@ -75,5 +76,7 @@ extend-exclude = [
     "server/skills",
     ".codex-pytest-write-check",
     ".pytest-tmp*",
-    ".tmp-pytest",
+    ".review-pytest-temp",
+    ".tmp",
+    ".tmp-pytest*",
 ]

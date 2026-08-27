@@ -1,4 +1,4 @@
-# OpenClaw Gateway 实现方案
+﻿# OpenClaw Gateway 实现方案
 
 本文说明 Octopus 支持 `openclaw_gateway` runtime 的上游依据、实现边界和验收标准。
 
@@ -15,11 +15,11 @@ Gateway WebSocket 协议，不复用 `http` runtime。
 
 ## 上游依据
 
-参考上游 Rudder：
+参考上游 upstream reference：
 
 ```text
-D:\coding\rudder\packages\agent-runtimes\openclaw-gateway
-D:\coding\rudder\server\src\__tests__\openclaw-gateway-adapter.test.ts
+D:\coding\upstream-reference\packages\agent-runtimes\openclaw-gateway
+D:\coding\upstream-reference\server\src\__tests__\openclaw-gateway-adapter.test.ts
 ```
 
 关键行为：
@@ -269,4 +269,3 @@ UI/CLI 测试：
 ## 本地验证记录
 
 - `uv run pytest tests/contract/test_openclaw_gateway_runtime.py tests/contract/test_step14_runtime_adapters.py::test_step14_registry_returns_known_adapters_or_unavailable tests/contract/test_step14_runtime_adapters.py::test_openclaw_gateway_runtime_metadata_reports_environment_support -q`：14 passed。
-

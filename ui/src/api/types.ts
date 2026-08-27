@@ -165,7 +165,18 @@ export type IssueStatus =
   | "blocked"
   | "cancelled";
 export type IssuePriority = "critical" | "high" | "medium" | "low";
-export type IssueOriginKind = "manual" | "automation_execution";
+export type IssueOriginKind = "manual" | "automation_execution" | "delegation";
+export type DelegationCloseoutPolicyMode =
+  | "child_outputs_are_final"
+  | "parent_output_required";
+export interface DelegationCloseoutPolicy {
+  version: 1;
+  mode: DelegationCloseoutPolicyMode;
+  requirements?: {
+    minimumOutputs?: number;
+    primaryOutputRequired?: boolean;
+  };
+}
 export type IssueReviewDecision = "approve" | "request_changes" | "blocked" | "needs_followup";
 
 export interface IssueListItem {
@@ -324,14 +335,44 @@ export interface IssueDetail extends IssueListItem {
   reviewerAgentId: string | null;
   reviewerUserId: string | null;
   parentId: string | null;
+  originRunId: string | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
   issueNumber: number | null;
   requestDepth: number;
   startedAt: string | null;
   completedAt: string | null;
   cancelledAt?: string | null;
+  executionWorkspaceId?: string | null;
   workProducts?: IssueWorkProduct[];
   documentSummaries?: IssueDocumentSummary[];
   createdAt: string;
+}
+
+export interface IssueChildOutput extends IssueListItem {
+  parentId: string | null;
+  originRunId: string | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
+  assigneeUserId: string | null;
+  reviewerAgentId: string | null;
+  reviewerUserId: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  lastCloseout?: ActivityEvent | null;
+  workProducts?: IssueWorkProduct[];
+}
+
+export interface IssueChildrenResponse {
+  parent: IssueListItem;
+  children: IssueChildOutput[];
+  activeChildCount: number;
+  settledChildCount: number;
+  blockedChildCount: number;
+  totalChildCount: number;
+  parentExecutionStage: string;
+  includeWorkProducts: boolean;
+  delegationOriginRunId: string | null;
+  closeoutPolicy: DelegationCloseoutPolicy | null;
 }
 
 export interface IssueDocumentSummary {
@@ -785,6 +826,113 @@ export interface WorkspaceRuntimeService {
   updatedAt: string;
 }
 
+export interface ExecutionWorkspace {
+  id: string;
+  orgId: string;
+  projectId: string;
+  projectWorkspaceId: string | null;
+  sourceIssueId: string | null;
+  mode: string;
+  strategyType: string;
+  name: string;
+  status: string;
+  cwd: string | null;
+  repoUrl: string | null;
+  baseRef: string | null;
+  branchName: string | null;
+  providerType: string;
+  providerRef: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExecutionWorkspaceStatus {
+  workspace: ExecutionWorkspace;
+  git: { available: boolean; branch?: string | null; dirty?: boolean; entries?: string[]; summary?: string | null; error?: string | null } | null;
+  lease: { locked: boolean; operationId: string | null; runId: string | null };
+  canArchive: boolean;
+  operations: WorkspaceOperation[];
+}
+
+export interface WorkspaceFileTreeNode {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  children?: WorkspaceFileTreeNode[];
+  size?: number | null;
+  modifiedAt?: string | null;
+}
+
+export interface ExecutionWorkspaceFiles {
+  workspaceId: string;
+  root: string | null;
+  available: boolean;
+  error: string | null;
+  tree: WorkspaceFileTreeNode[];
+  truncated: boolean;
+}
+
+export interface ExecutionWorkspaceDiff {
+  available: boolean;
+  stat?: string;
+  diff: string;
+  error: string | null;
+}
+
+export interface ExecutionWorkspaceCommitResult {
+  committed: boolean;
+  commit: string | null;
+  message: string;
+  branch: string | null;
+  remoteUrl: string | null;
+  url: string | null;
+  stat: string;
+  stdout: string;
+  stderr: string;
+}
+
+export interface ExecutionWorkspaceMergePreview {
+  available: boolean;
+  canMerge: boolean;
+  conflict: boolean;
+  conflictFiles: string[];
+  targetRef: string | null;
+  targetCommit?: string | null;
+  sourceBranch?: string | null;
+  sourceCommit?: string | null;
+  preview: string;
+  error: string | null;
+}
+
+export interface ExecutionWorkspaceMergeResult {
+  merged: boolean;
+  targetRef: string;
+  sourceCommit: string;
+  mergedCommit: string | null;
+  stdout: string;
+  stderr: string;
+}
+
+export interface ExecutionWorkspacePullRequestPlan {
+  remote: string;
+  remoteUrl: string | null;
+  sourceBranch: string;
+  targetRef: string;
+  compareUrl: string | null;
+  command: string;
+}
+
+export interface ExecutionWorkspacePullRequestResult {
+  created: boolean;
+  url: string | null;
+  remote: string;
+  sourceBranch: string;
+  targetRef: string;
+  stdout: string;
+  stderr: string;
+}
+
 export interface ProjectWorkspace {
   id: string;
   orgId: string;
@@ -802,6 +950,7 @@ export interface ProjectWorkspace {
   remoteWorkspaceRef: string | null;
   sharedWorkspaceKey: string | null;
   metadata: Record<string, unknown> | null;
+  executionWorkspacePolicy: Record<string, unknown> | null;
   isPrimary: boolean;
   runtimeServices?: WorkspaceRuntimeService[];
   createdAt: string;
@@ -822,6 +971,7 @@ export interface CreateProjectWorkspacePayload {
   remoteWorkspaceRef?: string | null;
   sharedWorkspaceKey?: string | null;
   metadata?: Record<string, unknown> | null;
+  executionWorkspacePolicy?: Record<string, unknown> | null;
   isPrimary?: boolean;
 }
 
@@ -884,7 +1034,6 @@ export interface ProjectDetail {
   color: string | null;
   pauseReason: "manual" | "budget" | "system" | null;
   pausedAt: string | null;
-  executionWorkspacePolicy: Record<string, unknown> | null;
   codebase?: ProjectCodebase;
   resources: ProjectResourceAttachment[];
   workspaces?: ProjectWorkspace[];
@@ -901,7 +1050,6 @@ export interface CreateProjectPayload {
   goalIds?: string[];
   leadAgentId?: string | null;
   targetDate?: string | null;
-  executionWorkspacePolicy?: Record<string, unknown> | null;
   resourceAttachments?: ProjectResourceAttachmentInput[];
   newResources?: CreateProjectInlineResourceInput[];
 }
@@ -1123,7 +1271,7 @@ export interface CreateRuntimeProviderPayload {
   enabled?: boolean;
 }
 
-export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "runtimeType" | "providerId">>;
+export type UpdateRuntimeProviderPayload = Partial<Omit<CreateRuntimeProviderPayload, "providerId">>;
 
 export interface CreateRuntimeModelPayload {
   scope?: RuntimeProviderScope;
@@ -1236,6 +1384,12 @@ export interface WakeAgentPayload {
   idempotencyKey?: string | null;
   forceFreshSession?: boolean;
 }
+
+export interface WakeupSkippedResult {
+  status: "skipped";
+}
+
+export type WakeupResult = HeartbeatRun | WakeupSkippedResult;
 
 export interface AgentSkillAnalytics {
   agentId?: string;

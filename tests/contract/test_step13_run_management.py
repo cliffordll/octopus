@@ -25,6 +25,7 @@ from packages.database.schema import (
     HeartbeatRun,
     Organization,
 )
+from packages.runtimes.types import RuntimeExecutionResult
 from server.app import create_app
 from server.services.heartbeat import HeartbeatService
 
@@ -126,6 +127,68 @@ def test_step13_events_contract_accepts_incremental_query_window() -> None:
 
     assert parameters["after_seq"].default == 0
     assert parameters["limit"].default == 200
+
+
+async def test_runtime_progress_is_persisted_as_run_event(
+    monkeypatch: pytest.MonkeyPatch, engine: AsyncEngine
+) -> None:
+    class ProgressAdapter:
+        type = "process"
+
+        async def execute(self, context: Any) -> RuntimeExecutionResult:
+            assert context.on_stream_event is not None
+            await context.on_stream_event(
+                {
+                    "type": "runtime_progress",
+                    "runtime": "codex_local",
+                    "eventType": "item.started",
+                    "itemType": "command_execution",
+                    "message": "正在执行命令：rg -n TODO server",
+                }
+            )
+            return RuntimeExecutionResult(exit_code=0, result_json={"ok": True})
+
+    monkeypatch.setattr(
+        "server.services.heartbeat.get_runtime_adapter",
+        lambda runtime_type: ProgressAdapter(),
+    )
+    factory = create_session_factory(engine)
+    async with factory() as session:
+        org = Organization(
+            url_key="runtime-progress",
+            name="Runtime Progress",
+            issue_prefix="RPG",
+        )
+        session.add(org)
+        await session.flush()
+        agent = Agent(
+            org_id=org.id,
+            name="Progress Agent",
+            status="idle",
+            agent_runtime_type="process",
+            runtime_config={},
+        )
+        session.add(agent)
+        await session.flush()
+
+        run = await HeartbeatService(session).wakeup(
+            agent.id,
+            {},
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+        assert run is not None
+        events = await HeartbeatService(session).list_events(run["id"])
+        assert events is not None
+        progress = [
+            event for event in events if event["eventType"] == "runtime.progress"
+        ]
+        assert len(progress) == 1
+        assert progress[0]["message"] == "正在执行命令：rg -n TODO server"
+        payload = progress[0]["payload"]
+        assert payload is not None
+        assert payload["runtime"] == "codex_local"
 
 
 @pytest.fixture
@@ -265,7 +328,12 @@ async def test_cancel_interrupts_active_process_run(
             },
         )
         invocation = asyncio.create_task(
-            _request(application, "POST", f"/api/agents/{agent['id']}/wakeup", json={})
+            _request(
+                application,
+                "POST",
+                f"/api/agents/{agent['id']}/heartbeat/invoke",
+                json={},
+            )
         )
         run_id: str | None = None
         observed_statuses: list[str] = []
@@ -328,7 +396,14 @@ def test_lifespan_scheduler_executes_timer_wakeup(
             f"/api/orgs/{org['id']}/agents",
             json={
                 "name": "Timer Runner",
-                "runtimeConfig": {"heartbeat": {"enabled": True, "intervalSec": 0.1}},
+                "runtimeConfig": {
+                    "heartbeat": {
+                        "enabled": True,
+                        "intervalSec": 0.1,
+                        "runDiagnosticsOnTimer": True,
+                        "preflightEnabled": False,
+                    }
+                },
                 "agentRuntimeConfig": {
                     "command": sys.executable,
                     "args": ["-c", "print('timer-ok')"],

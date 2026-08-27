@@ -1,28 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
+import mimetypes
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 from ..context_env import apply_runtime_context_env
-from ..common import runtime_subprocess_kwargs
 from ..environment import resolve_runtime_executable
 from ..instructions import runtime_prompt_from_config
 from ..local_skills import (
     desired_skills_from_config,
-    ensure_control_plane_cli_shim,
+    ensure_octopus_cli_shim,
     materialize_runtime_skills,
     prepare_managed_home,
 )
+from ..local_process import local_process_supervisor
 from ..session import effective_resume_session_id
 from ..tool_capabilities import (
     append_runtime_tool_guidance,
     append_runtime_workspace_guidance,
 )
 from ..types import RuntimeExecutionContext, RuntimeExecutionResult
+from .ollama import LocalOllamaProvider
 from .protocol import (
     auth_required,
     build_args,
@@ -73,13 +73,27 @@ async def execute(context: RuntimeExecutionContext) -> RuntimeExecutionResult:
         )
     if context.env:
         env.update(context.env)
+    local_ollama = LocalOllamaProvider.from_runtime_config(context.config, env)
+    if local_ollama is not None:
+        validation_error = await local_ollama.validate()
+        if validation_error is not None:
+            return _result(
+                1,
+                "",
+                validation_error,
+                error_message=validation_error,
+                model=string(context.config.get("model")),
+            )
     home = await prepare_managed_home(
         runtime_type="opencode_local",
         context=context,
         env=env,
     )
-    ensure_control_plane_cli_shim(env, home)
-    _materialize_runtime_provider_config(home, context.config)
+    ensure_octopus_cli_shim(env, home)
+    runtime_provider = _runtime_provider_config(context.config)
+    if runtime_provider is None and local_ollama is not None:
+        runtime_provider = local_ollama.execution_provider()
+    _materialize_runtime_provider_config(home, runtime_provider)
     apply_runtime_context_env(env, context)
     loaded_skills = materialize_runtime_skills(
         runtime_type="opencode_local",
@@ -147,73 +161,54 @@ async def _run_once(
     timeout_sec: float,
     loaded_skills: list[dict[str, str | None]],
 ) -> RuntimeExecutionResult:
-    process = await asyncio.create_subprocess_exec(
+    line_buffer = bytearray()
+
+    async def on_stdout_chunk(chunk: bytes) -> None:
+        await context.on_log("stdout", chunk.decode(errors="replace"))
+        line_buffer.extend(chunk)
+        while True:
+            newline = line_buffer.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(line_buffer[: newline + 1])
+            del line_buffer[: newline + 1]
+            await _emit_opencode_stream_event(context, line.decode(errors="replace"))
+
+    async def on_stderr_chunk(chunk: bytes) -> None:
+        await context.on_log("stderr", chunk.decode(errors="replace"))
+
+    process_result = await local_process_supervisor.run(
         command,
         *args,
         cwd=cwd,
         env=env,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        **runtime_subprocess_kwargs(),
+        input_data=prompt.encode(),
+        timeout_sec=timeout_sec,
+        cancel_event=context.cancel_event,
+        on_process_started=context.on_process_started,
+        on_process_exited=context.on_process_exited,
+        on_stdout_chunk=on_stdout_chunk,
+        on_stderr_chunk=on_stderr_chunk,
     )
-    pid = getattr(process, "pid", None)
-    if context.on_process_started is not None and isinstance(pid, int):
-        await context.on_process_started(pid, datetime.now(UTC))
-    if not _supports_streaming_process(process):
-        return await _execute_with_communicate(
-            process=process,
-            context=context,
-            prompt=prompt,
-            timeout_sec=timeout_sec,
+    if line_buffer:
+        await _emit_opencode_stream_event(
+            context, bytes(line_buffer).decode(errors="replace")
+        )
+    stdout_text = process_result.stdout.decode(errors="replace")
+    stderr_text = process_result.stderr.decode(errors="replace")
+    if process_result.cancelled:
+        return _result(
+            process_result.exit_code,
+            stdout_text,
+            stderr_text,
+            signal=process_result.signal,
+            error_message="Run cancelled",
+            model=string(context.config.get("model")),
             loaded_skills=loaded_skills,
         )
-    stdout_task = asyncio.create_task(_read_stdout(process, context))
-    stderr_task = asyncio.create_task(_read_stderr(process, context))
-    stdin_task = asyncio.create_task(_write_stdin(process, prompt))
-    wait_task = asyncio.create_task(process.wait())
-    try:
-        cancelled = (
-            asyncio.create_task(context.cancel_event.wait())
-            if context.cancel_event is not None
-            else None
-        )
-        if cancelled is not None:
-            done, _ = await asyncio.wait(
-                {wait_task, cancelled},
-                timeout=timeout_sec if timeout_sec > 0 else None,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancelled in done:
-                process.kill()
-                await process.wait()
-                await stdin_task
-                stdout_text = await stdout_task
-                stderr_text = await stderr_task
-                return _result(
-                    process.returncode,
-                    stdout_text,
-                    stderr_text,
-                    signal="SIGTERM",
-                    error_message="Run cancelled",
-                    model=string(context.config.get("model")),
-                    loaded_skills=loaded_skills,
-                )
-            cancelled.cancel()
-            if wait_task not in done:
-                raise TimeoutError
-        elif timeout_sec > 0:
-            await asyncio.wait_for(wait_task, timeout=timeout_sec)
-        else:
-            await wait_task
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        await stdin_task
-        stdout_text = await stdout_task
-        stderr_text = await stderr_task
+    if process_result.timed_out:
         return _result(
-            process.returncode,
+            process_result.exit_code,
             stdout_text,
             stderr_text,
             timed_out=True,
@@ -221,23 +216,9 @@ async def _run_once(
             model=string(context.config.get("model")),
             loaded_skills=loaded_skills,
         )
-    except asyncio.CancelledError:
-        process.kill()
-        await process.wait()
-        for task in (stdin_task, stdout_task, stderr_task, wait_task):
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(stdin_task, stdout_task, stderr_task, wait_task)
-        raise
-    finally:
-        with contextlib.suppress(asyncio.CancelledError):
-            await stdin_task
-
-    stdout_text = await stdout_task
-    stderr_text = await stderr_task
     parsed = parse_jsonl(stdout_text)
     error = parsed["errorMessage"]
-    exit_code = process.returncode
+    exit_code = process_result.exit_code
     final_error = error
     if error and (exit_code or 0) == 0 and not parsed["summary"]:
         exit_code = 1
@@ -255,6 +236,7 @@ async def _run_once(
         result_json=_result_json(
             stdout_text, stderr_text, parsed, model, error, loaded_skills
         ),
+        work_products=_work_products_from_opencode_writes(context, parsed),
     )
 
 
@@ -279,72 +261,6 @@ def _result(
         session_id_after=parsed["sessionId"],
         result_json=_result_json(
             stdout_text, stderr_text, parsed, model, error_message, loaded_skills or []
-        ),
-    )
-
-
-async def _write_stdin(process: asyncio.subprocess.Process, prompt: str) -> None:
-    if process.stdin is None:
-        return
-    process.stdin.write(prompt.encode())
-    await process.stdin.drain()
-    process.stdin.close()
-
-
-async def _execute_with_communicate(
-    *,
-    process: asyncio.subprocess.Process,
-    context: RuntimeExecutionContext,
-    prompt: str,
-    timeout_sec: float,
-    loaded_skills: list[dict[str, str | None]],
-) -> RuntimeExecutionResult:
-    communication = asyncio.create_task(process.communicate(prompt.encode()))
-    try:
-        if timeout_sec > 0:
-            stdout, stderr = await asyncio.wait_for(
-                asyncio.shield(communication), timeout=timeout_sec
-            )
-        else:
-            stdout, stderr = await communication
-    except TimeoutError:
-        process.kill()
-        stdout, stderr = await communication
-        return _result(
-            getattr(process, "returncode", None),
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
-            timed_out=True,
-            error_message=f"Timed out after {timeout_sec:g}s",
-            model=string(context.config.get("model")),
-            loaded_skills=loaded_skills,
-        )
-    stdout_text = stdout.decode(errors="replace")
-    stderr_text = stderr.decode(errors="replace")
-    if stdout_text:
-        await _emit_opencode_stream_events_from_text(context, stdout_text)
-        await context.on_log("stdout", stdout_text)
-    if stderr_text:
-        await context.on_log("stderr", stderr_text)
-    parsed = parse_jsonl(stdout_text)
-    error = parsed["errorMessage"]
-    exit_code = getattr(process, "returncode", None)
-    final_error = error
-    if error and (exit_code or 0) == 0 and not parsed["summary"]:
-        exit_code = 1
-    elif error and (exit_code or 0) == 0 and parsed["summary"]:
-        final_error = None
-    if (exit_code or 0) != 0 and not error:
-        error = first_line(stderr_text) or f"OpenCode exited with code {exit_code}"
-        final_error = error
-    model = string(context.config.get("model"))
-    return RuntimeExecutionResult(
-        exit_code=exit_code,
-        error_message=final_error,
-        usage_json=parsed["usage"],
-        session_id_after=parsed["sessionId"],
-        result_json=_result_json(
-            stdout_text, stderr_text, parsed, model, error, loaded_skills
         ),
     )
 
@@ -411,31 +327,9 @@ async def _emit_opencode_stream_event(
         await context.on_stream_event({"type": "assistant_delta", "delta": text})
 
 
-async def _emit_opencode_stream_events_from_text(
-    context: RuntimeExecutionContext, stdout_text: str
-) -> None:
-    if context.on_stream_event is None:
-        return
-    for raw_line in stdout_text.splitlines():
-        await _emit_opencode_stream_event(context, raw_line)
-
-
-def _supports_streaming_process(process: object) -> bool:
-    return (
-        getattr(process, "stdin", None) is not None
-        and getattr(process, "stdout", None) is not None
-        and getattr(process, "stderr", None) is not None
-        and callable(getattr(process, "wait", None))
-    )
-
-
 def _materialize_runtime_provider_config(
-    home: os.PathLike[str] | str, config: dict
+    home: os.PathLike[str] | str, provider: dict | None
 ) -> None:
-    runtime_context = config.get("_octopus")
-    if not isinstance(runtime_context, dict):
-        return
-    provider = runtime_context.get("runtimeProvider")
     if not isinstance(provider, dict):
         return
     provider_id = string(provider.get("providerId"))
@@ -493,12 +387,160 @@ def _materialize_runtime_provider_config(
     )
 
 
+def _runtime_provider_config(config: dict) -> dict | None:
+    runtime_context = config.get("_octopus")
+    if not isinstance(runtime_context, dict):
+        return None
+    provider = runtime_context.get("runtimeProvider")
+    return provider if isinstance(provider, dict) else None
+
+
 def _read_opencode_config(config_path: Path) -> dict:
     try:
         value = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _work_products_from_opencode_writes(
+    context: RuntimeExecutionContext, parsed: dict
+) -> list[dict[str, object]]:
+    workspace_root = _workspace_root(context)
+    if workspace_root is None:
+        return []
+    written_files = parsed.get("writtenFiles")
+    if not isinstance(written_files, list):
+        return []
+    declared_paths = _normalized_path_set(parsed.get("declaredWorkProducts"))
+    primary_paths = _normalized_path_set(parsed.get("primaryWorkProducts"))
+    candidates: list[tuple[str, Path, bytes]] = []
+    seen: set[str] = set()
+    for value in written_files:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            path = Path(value).expanduser().resolve()
+        except OSError:
+            continue
+        if not _is_relative_to(path, workspace_root) or not path.is_file():
+            continue
+        rel_path = path.relative_to(workspace_root).as_posix()
+        if rel_path in seen or _is_excluded_work_product_path(rel_path):
+            continue
+        try:
+            content = path.read_bytes()
+        except OSError:
+            continue
+        if not content:
+            continue
+        seen.add(rel_path)
+        candidates.append((rel_path, path, content))
+    if not candidates:
+        return []
+
+    primary_path = next(
+        (rel for rel, _, _ in candidates if rel in primary_paths),
+        None,
+    )
+    if primary_path is None:
+        primary_path = next(
+            (rel for rel, _, _ in candidates if rel in declared_paths),
+            candidates[0][0] if len(candidates) == 1 else None,
+        )
+
+    workspace_ref = _workspace_ref(context)
+    products: list[dict[str, object]] = []
+    for rel_path, path, content in candidates:
+        products.append(
+            {
+                "title": rel_path,
+                "type": "document"
+                if path.suffix.lower() in {".md", ".txt"}
+                else "artifact",
+                "provider": "octopus",
+                "externalId": f"opencode_write:{workspace_ref}:{rel_path}",
+                "status": "active",
+                "reviewState": "none",
+                "isPrimary": rel_path == primary_path,
+                "summary": "File written by OpenCode during this run.",
+                "content": content,
+                "contentType": mimetypes.guess_type(path.name)[0] or "text/plain",
+                "filename": path.name,
+                "metadata": {
+                    "source": "opencode_write_event",
+                    "workspacePath": rel_path,
+                    "byteSize": len(content),
+                },
+            }
+        )
+    return products
+
+
+def _workspace_root(context: RuntimeExecutionContext) -> Path | None:
+    workspace_context = context.workspace
+    workspace = None
+    if isinstance(workspace_context, dict):
+        candidate = workspace_context.get("octopusWorkspace")
+        workspace = candidate if isinstance(candidate, dict) else workspace_context
+    cwd = workspace.get("cwd") if isinstance(workspace, dict) else None
+    if not isinstance(cwd, str) or not cwd.strip():
+        cwd = context.config.get("cwd")
+    if not isinstance(cwd, str) or not cwd.strip():
+        return None
+    try:
+        root = Path(cwd).expanduser().resolve()
+    except OSError:
+        return None
+    return root if root.is_dir() else None
+
+
+def _workspace_ref(context: RuntimeExecutionContext) -> str:
+    workspace_context = context.workspace
+    if isinstance(workspace_context, dict):
+        workspace = workspace_context.get("octopusWorkspace")
+        if isinstance(workspace, dict):
+            workspace_id = string(workspace.get("id"))
+            if workspace_id:
+                return workspace_id
+    return context.run_id
+
+
+def _normalized_path_set(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {
+        item.replace("\\", "/").strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    }
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _is_excluded_work_product_path(rel_path: str) -> bool:
+    parts = set(Path(rel_path).parts)
+    return bool(
+        parts
+        & {
+            ".git",
+            ".mypy_cache",
+            ".octopus",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "__pycache__",
+            "build",
+            "dist",
+            "node_modules",
+        }
+    )
 
 
 def _result_json(
@@ -520,4 +562,10 @@ def _result_json(
         "toolErrors": parsed.get("toolErrors", []),
         "modelUnavailable": model_unavailable(stdout_text, stderr_text, error),
         "authRequired": auth_required(stdout_text, stderr_text, error),
+        "artifactEvidence": {
+            "source": "opencode_write_event",
+            "writtenPaths": parsed.get("writtenFiles", []),
+            "declaredPaths": parsed.get("declaredWorkProducts", []),
+            "primaryPaths": parsed.get("primaryWorkProducts", []),
+        },
     }

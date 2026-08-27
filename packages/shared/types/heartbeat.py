@@ -52,6 +52,13 @@ class HeartbeatRun(TypedDict):
     externalRunId: str | None
     processPid: int | None
     processStartedAt: str | None
+    processExitedAt: str | None
+    executionLeaseExpiresAt: str | None
+    terminalEffectsPending: bool
+    terminalEffectsCompletedJson: list[str] | None
+    terminalEffectsAttemptCount: int
+    terminalEffectsNextAttemptAt: str | None
+    terminalEffectsLastError: str | None
     retryOfRunId: str | None
     processLossRetryCount: int
     contextSnapshot: dict[str, Any] | None
@@ -76,6 +83,7 @@ class HeartbeatRunEvent(TypedDict):
     color: str | None
     message: str | None
     payload: dict[str, Any] | None
+    idempotencyKey: str | None
     createdAt: str
 
 

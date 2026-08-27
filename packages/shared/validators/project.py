@@ -12,6 +12,7 @@ from ..constants.project import (
     PROJECT_RESOURCE_ATTACHMENT_ROLES,
     PROJECT_STATUSES,
 )
+from .workspace import validate_project_workspace_execution_policy
 from ..types.project import (
     CreateProjectInlineResourceInput,
     CreateProjectPayload,
@@ -32,7 +33,6 @@ _PROJECT_FIELDS = {
     "leadAgentId",
     "targetDate",
     "color",
-    "executionWorkspacePolicy",
     "resourceAttachments",
     "newResources",
     "archivedAt",
@@ -63,6 +63,7 @@ _PROJECT_WORKSPACE_FIELDS = {
     "remoteWorkspaceRef",
     "sharedWorkspaceKey",
     "metadata",
+    "executionWorkspacePolicy",
     "isPrimary",
 }
 
@@ -189,12 +190,6 @@ def _validate_project_fields(
             raise ValueError(
                 "'color' must be a 6-digit hex value or supported gradient"
             )
-    if (
-        "executionWorkspacePolicy" in payload
-        and payload["executionWorkspacePolicy"] is not None
-    ):
-        if not isinstance(payload["executionWorkspacePolicy"], dict):
-            raise ValueError("'executionWorkspacePolicy' must be an object or null")
     if "archivedAt" in payload and payload["archivedAt"] is not None:
         try:
             datetime.fromisoformat(str(payload["archivedAt"]).replace("Z", "+00:00"))
@@ -241,6 +236,7 @@ def _validate_project_workspace_fields(
     payload: Mapping[str, Any], *, require_name: bool
 ) -> dict[str, Any]:
     _reject_unknown_fields(payload, allowed_fields=_PROJECT_WORKSPACE_FIELDS)
+    result = dict(payload)
     if require_name:
         name = payload.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -266,9 +262,19 @@ def _validate_project_workspace_fields(
     if "metadata" in payload and payload["metadata"] is not None:
         if not isinstance(payload["metadata"], dict):
             raise ValueError("'metadata' must be an object or null")
+    if (
+        "executionWorkspacePolicy" in payload
+        and payload["executionWorkspacePolicy"] is not None
+    ):
+        policy = payload["executionWorkspacePolicy"]
+        if not isinstance(policy, Mapping):
+            raise ValueError("'executionWorkspacePolicy' must be an object or null")
+        result["executionWorkspacePolicy"] = (
+            validate_project_workspace_execution_policy(policy)
+        )
     if "isPrimary" in payload and not isinstance(payload["isPrimary"], bool):
         raise ValueError("'isPrimary' must be a boolean")
-    return dict(payload)
+    return result
 
 
 def validate_create_project_workspace(

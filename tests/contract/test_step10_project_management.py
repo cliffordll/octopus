@@ -10,13 +10,13 @@ import uuid
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import Table, text
+from sqlalchemy import Table, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.schema import Base, Organization
+from packages.database.schema import Base, Organization, ProjectWorkspace
 from server.app import create_app
 
 
@@ -212,6 +212,21 @@ async def test_project_workspace_routes_manage_primary_workspace(
         await session.commit()
         org_id = org.id
 
+    rejected_code, rejected = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/projects",
+        json={
+            "name": "Invalid Project Policy",
+            "executionWorkspacePolicy": {
+                "enabled": True,
+                "defaultMode": "shared_workspace",
+            },
+        },
+    )
+    assert rejected_code == 422
+    assert "executionWorkspacePolicy" in str(rejected)
+
     create_code, project = await _request(
         app,
         "POST",
@@ -219,6 +234,7 @@ async def test_project_workspace_routes_manage_primary_workspace(
         json={"name": "Workspace Project", "status": "planned"},
     )
     assert create_code == 201
+    assert "executionWorkspacePolicy" not in project
 
     first_code, first = await _request(
         app,
@@ -232,6 +248,11 @@ async def test_project_workspace_routes_manage_primary_workspace(
             "repoRef": "main",
             "defaultRef": "main",
             "sharedWorkspaceKey": "project-a-local",
+            "executionWorkspacePolicy": {
+                "enabled": True,
+                "defaultMode": "shared_workspace",
+                "workspaceStrategy": {"mode": "shared_workspace"},
+            },
         },
     )
     assert first_code == 201
@@ -239,6 +260,7 @@ async def test_project_workspace_routes_manage_primary_workspace(
     assert first["name"] == "Local checkout"
     assert first["cwd"] == "D:/workspaces/project-a"
     assert first["isPrimary"] is True
+    assert first["executionWorkspacePolicy"]["defaultMode"] == "shared_workspace"
 
     second_code, second = await _request(
         app,
@@ -249,10 +271,16 @@ async def test_project_workspace_routes_manage_primary_workspace(
             "sourceType": "local_path",
             "cwd": "D:/workspaces/project-b",
             "isPrimary": True,
+            "executionWorkspacePolicy": {
+                "enabled": True,
+                "defaultMode": "isolated_workspace",
+                "workspaceStrategy": {"type": "git_worktree"},
+            },
         },
     )
     assert second_code == 201
     assert second["isPrimary"] is True
+    assert second["executionWorkspacePolicy"]["defaultMode"] == "isolated_workspace"
 
     list_code, workspaces = await _request(
         app, "GET", f"/api/projects/{project['id']}/workspaces"
@@ -265,17 +293,56 @@ async def test_project_workspace_routes_manage_primary_workspace(
         app,
         "PATCH",
         f"/api/projects/{project['id']}/workspaces/{first['id']}",
-        json={"name": "Primary checkout", "isPrimary": True},
+        json={
+            "name": "Primary checkout",
+            "isPrimary": True,
+            "executionWorkspacePolicy": {
+                "enabled": True,
+                "defaultMode": "operator_branch",
+                "workspaceStrategy": {
+                    "type": "git_worktree",
+                    "operatorBranch": "release",
+                },
+            },
+        },
     )
     assert patch_code == 200
     assert patched["name"] == "Primary checkout"
     assert patched["isPrimary"] is True
+    assert patched["executionWorkspacePolicy"]["defaultMode"] == "operator_branch"
+
+    async with session_factory() as session:
+        stored_policy = await session.scalar(
+            select(ProjectWorkspace.execution_workspace_policy).where(
+                ProjectWorkspace.id == first["id"]
+            )
+        )
+    assert stored_policy == patched["executionWorkspacePolicy"]
 
     detail_code, detail = await _request(app, "GET", f"/api/projects/{project['id']}")
     assert detail_code == 200
     assert detail["primaryWorkspace"]["id"] == first["id"]
+    assert (
+        detail["primaryWorkspace"]["executionWorkspacePolicy"]["defaultMode"]
+        == "operator_branch"
+    )
     assert detail["codebase"]["localFolder"] == "D:/workspaces/project-a"
     assert detail["codebase"]["scope"] == "project"
+
+    rejected_delete_code, rejected_delete = await _request(
+        app, "DELETE", f"/api/projects/{project['id']}/workspaces/{first['id']}"
+    )
+    assert rejected_delete_code == 422
+    assert "another project workspace as default" in str(rejected_delete)
+
+    promote_code, promoted = await _request(
+        app,
+        "PATCH",
+        f"/api/projects/{project['id']}/workspaces/{second['id']}",
+        json={"isPrimary": True},
+    )
+    assert promote_code == 200
+    assert promoted["isPrimary"] is True
 
     delete_code, deleted = await _request(
         app, "DELETE", f"/api/projects/{project['id']}/workspaces/{first['id']}"

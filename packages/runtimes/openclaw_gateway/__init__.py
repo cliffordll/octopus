@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin
+from ..base import RemoteRuntimeAdapter
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -12,14 +12,16 @@ from .environment import test_environment as test_openclaw_environment
 from .runner import execute as execute_openclaw
 
 
-class OpenClawGatewayRuntimeAdapter(RuntimeCapabilityMixin):
+class OpenClawGatewayRuntimeAdapter(RemoteRuntimeAdapter):
     type = "openclaw_gateway"
     agent_configuration_doc = (
         "Configure url, authToken, headers, payloadTemplate, sessionKeyStrategy, "
         "timeoutSec and waitTimeoutMs for the OpenClaw Gateway WebSocket endpoint."
     )
 
-    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+    async def _execute_runtime(
+        self, context: RuntimeExecutionContext
+    ) -> RuntimeExecutionResult:
         return await execute_openclaw(context)
 
     async def test_environment(

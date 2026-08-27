@@ -272,6 +272,37 @@ async def test_agent_runtime_config_prepares_organization_skills_root(
     ]
 
 
+async def test_opencode_runtime_config_prepares_noninteractive_permissions(
+    session: AsyncSession, tmp_path, monkeypatch
+) -> None:
+    from server.services.agents import AgentService, prepare_agent_runtime_config
+
+    monkeypatch.setenv("OCTOPUS_HOME", str(tmp_path / "octopus-home"))
+    monkeypatch.setenv("OCTOPUS_INSTANCE_ID", "test")
+    org = await _seed_org(session)
+    service = AgentService(session)
+
+    async with async_transaction(session):
+        agent = await service.create_agent(
+            org.id,
+            {
+                "name": "OpenCode Runtime",
+                "agentRuntimeType": "opencode_local",
+                "agentRuntimeConfig": {"model": "openai/gpt-5"},
+            },
+            actor_type="board",
+            actor_id="local-board",
+        )
+
+    row = (
+        await session.execute(select(Agent).where(Agent.id == agent["id"]))
+    ).scalar_one()
+    row.agent_runtime_config.pop("extraArgs", None)
+    config = await prepare_agent_runtime_config(session, row)
+
+    assert config["extraArgs"] == ["--dangerously-skip-permissions"]
+
+
 async def test_agent_config_revision_and_runtime_session_reset_write_activity(
     session: AsyncSession,
 ) -> None:
@@ -399,6 +430,7 @@ async def test_wakeup_executes_process_runtime_and_records_failed_run(
     assert [event.event_type for event in events] == [
         "lifecycle",
         "lifecycle",
+        "workspace.preflight",
         "adapter.invoke",
         "error",
     ]

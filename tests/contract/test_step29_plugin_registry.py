@@ -517,7 +517,7 @@ async def test_step29_plugin_tool_routes_discover_and_execute_builtin_git(
         application,
         "POST",
         f"/api/plugins/{installed['id']}/tools/git.status/execute",
-        json_body={"context": {"workspace": {"rudderWorkspace": {"cwd": str(repo)}}}},
+        json_body={"context": {"workspace": {"octopusWorkspace": {"cwd": str(repo)}}}},
     )
 
     assert tools_code == 200

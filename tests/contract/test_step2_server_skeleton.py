@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
+import logging
+
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
@@ -7,6 +11,7 @@ from pytest import MonkeyPatch
 import server
 import server.__main__ as server_module
 from server.app import app
+from server.app_logging import _CancelledSqliteTerminateFilter
 
 
 def test_app_registers_orgs_route() -> None:
@@ -15,6 +20,7 @@ def test_app_registers_orgs_route() -> None:
 
 
 def test_orgs_route_requires_actor_context() -> None:
+    app.state.settings = replace(app.state.settings, local_trusted=False)
     client = TestClient(app)
 
     response = client.get("/api/orgs")
@@ -74,3 +80,28 @@ def test_python_module_entrypoint_delegates_to_server_main(
     server_module.run()
 
     assert called == ["main"]
+
+
+def test_sqlalchemy_pool_cancelled_termination_log_is_filtered() -> None:
+    filter_item = _CancelledSqliteTerminateFilter()
+    cancelled_record = logging.LogRecord(
+        "sqlalchemy.pool.impl.AsyncAdaptedQueuePool",
+        logging.ERROR,
+        __file__,
+        1,
+        "Exception terminating connection %r",
+        ("connection",),
+        (asyncio.CancelledError, asyncio.CancelledError("cancelled"), None),
+    )
+    runtime_record = logging.LogRecord(
+        "sqlalchemy.pool.impl.AsyncAdaptedQueuePool",
+        logging.ERROR,
+        __file__,
+        1,
+        "Exception terminating connection %r",
+        ("connection",),
+        (RuntimeError, RuntimeError("database failed"), None),
+    )
+
+    assert filter_item.filter(cancelled_record) is False
+    assert filter_item.filter(runtime_record) is True

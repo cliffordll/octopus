@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin
+from ..base import LocalRuntimeAdapter
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -13,7 +13,7 @@ from .runner import execute as execute_codex
 from .skills import skill_snapshot
 
 
-class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
+class CodexLocalRuntimeAdapter(LocalRuntimeAdapter):
     type = "codex_local"
     supports_local_agent_jwt = True
     agent_configuration_doc = (
@@ -48,5 +48,7 @@ class CodexLocalRuntimeAdapter(RuntimeCapabilityMixin):
             materialize=materialize,
         )
 
-    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+    async def _execute_runtime(
+        self, context: RuntimeExecutionContext
+    ) -> RuntimeExecutionResult:
         return await execute_codex(context)

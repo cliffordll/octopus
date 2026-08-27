@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.activity_log import insert_activity_log
 from packages.database.queries.issue_comments import (
-    insert_issue_comment,
+    insert_issue_comment_idempotent,
     list_issue_comments,
 )
 from packages.database.queries.issue_attachments import (
@@ -24,7 +24,14 @@ from packages.database.queries.issues import (
     update_issue,
 )
 from packages.database.queries.organizations import increment_issue_counter
-from packages.database.schema import Asset, Issue, IssueAttachment, IssueComment
+from packages.database.schema import (
+    ActivityLog,
+    Agent,
+    Asset,
+    Issue,
+    IssueAttachment,
+    IssueComment,
+)
 from packages.shared.constants.issue import (
     IssueOriginKind,
     IssuePriority,
@@ -36,8 +43,10 @@ from packages.shared.constants.issue import (
     DEFAULT_ISSUE_STATUS,
 )
 from packages.shared.types.issue import (
+    CreateChildIssuesPayload,
     CreateIssueCommentPayload,
     CreateIssuePayload,
+    DelegationCloseoutPolicy,
     IssueDetail,
     IssueListItem,
     UpdateIssuePayload,
@@ -46,8 +55,17 @@ from packages.shared.types.issue_attachment import (
     IssueAttachment as IssueAttachmentType,
 )
 from .workspaces import WorkspaceService
+from .delegation_closeout import (
+    DEFAULT_DELEGATION_CLOSEOUT_POLICY,
+    DELEGATION_ORIGIN_KIND,
+    DelegationBatchStore,
+    normalize_closeout_policy,
+)
 from .documents import DocumentService
 from .goals import GoalService
+from .issue_completion import IssueCompletionGovernance
+from .issue_hierarchy import IssueHierarchyPolicy
+from .parent_closeout_governance import ParentCloseoutGovernance
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
 _REOPENABLE_STATUSES = {"done", "cancelled"}
@@ -192,6 +210,253 @@ class IssueService:
             return None
         return await self._to_detail(row)
 
+    async def get_child_outputs(
+        self,
+        issue_id: str,
+        *,
+        include_work_products: bool = False,
+        delegation_origin_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        parent = await get_issue_by_id(self._session, issue_id)
+        if parent is None:
+            return None
+        criteria = [
+            Issue.org_id == parent.org_id,
+            Issue.parent_id == parent.id,
+            Issue.hidden_at.is_(None),
+        ]
+        if delegation_origin_run_id is not None:
+            criteria.extend(
+                (
+                    Issue.origin_kind == DELEGATION_ORIGIN_KIND,
+                    Issue.origin_run_id == delegation_origin_run_id,
+                )
+            )
+        children = (
+            (
+                await self._session.execute(
+                    select(Issue).where(*criteria).order_by(Issue.created_at, Issue.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        workspace = WorkspaceService(self._session)
+        child_items: list[dict[str, Any]] = []
+        active_statuses = {"backlog", "todo", "in_progress", "in_review"}
+        terminal_statuses = {"done", "blocked", "cancelled"}
+        for child in children:
+            item: dict[str, Any] = dict(_to_list_item(child))
+            item.update(
+                {
+                    "parentId": child.parent_id,
+                    "originRunId": child.origin_run_id,
+                    "closeoutPolicy": normalize_closeout_policy(child.closeout_policy),
+                    "assigneeUserId": child.assignee_user_id,
+                    "reviewerAgentId": child.reviewer_agent_id,
+                    "reviewerUserId": child.reviewer_user_id,
+                    "startedAt": child.started_at.isoformat()
+                    if child.started_at
+                    else None,
+                    "completedAt": child.completed_at.isoformat()
+                    if child.completed_at
+                    else None,
+                    "cancelledAt": child.cancelled_at.isoformat()
+                    if child.cancelled_at
+                    else None,
+                    "lastCloseout": await self._latest_child_closeout(child),
+                }
+            )
+            if include_work_products:
+                item["workProducts"] = await workspace.list_work_products_for_issue(
+                    child.id
+                )
+            child_items.append(item)
+        active_count = sum(1 for child in children if child.status in active_statuses)
+        settled_count = sum(
+            1 for child in children if child.status in terminal_statuses
+        )
+        blocked_count = sum(
+            1 for child in children if child.status in {"blocked", "cancelled"}
+        )
+        latest_policy_child = next(
+            (
+                child
+                for child in reversed(children)
+                if child.closeout_policy is not None
+            ),
+            None,
+        )
+        return {
+            "parent": dict(_to_list_item(parent)),
+            "children": child_items,
+            "activeChildCount": active_count,
+            "settledChildCount": settled_count,
+            "blockedChildCount": blocked_count,
+            "totalChildCount": len(children),
+            "parentExecutionStage": _parent_execution_stage(
+                child_items, parent_status=parent.status
+            ),
+            "includeWorkProducts": include_work_products,
+            "delegationOriginRunId": delegation_origin_run_id,
+            "closeoutPolicy": (
+                normalize_closeout_policy(latest_policy_child.closeout_policy)
+                if latest_policy_child is not None
+                else None
+            ),
+        }
+
+    async def create_child_issues(
+        self,
+        parent_issue_id: str,
+        payload: CreateChildIssuesPayload,
+        *,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None = None,
+    ) -> tuple[IssueDetail, list[IssueDetail], bool]:
+        parent = await get_issue_by_id(self._session, parent_issue_id)
+        if parent is None:
+            raise ValueError("Parent issue not found")
+        parent = await IssueHierarchyPolicy(self._session).lock_root(
+            parent.id, parent.org_id
+        )
+        if parent is None:
+            raise ValueError("Parent issue not found")
+
+        existing_batch = await DelegationBatchStore(
+            self._session
+        ).existing_for_creation(parent, origin_run_id=run_id)
+        if existing_batch is not None:
+            return (
+                await self._to_detail(parent),
+                [await self._to_detail(child) for child in existing_batch.children],
+                False,
+            )
+
+        if parent.status in {"done", "cancelled"}:
+            raise ValueError("Closed parent issue cannot create child issues")
+        if parent.status in {"backlog", "todo"}:
+            updated_parent = await update_issue(
+                self._session,
+                parent.id,
+                {
+                    "status": "in_progress",
+                    "started_at": parent.started_at or datetime.now(UTC),
+                },
+            )
+            if updated_parent is not None:
+                parent = updated_parent
+
+        agent_ids: set[str] = set()
+        for child in payload["children"]:
+            assignee_agent_id = child.get("assigneeAgentId")
+            reviewer_agent_id = child.get("reviewerAgentId")
+            if isinstance(assignee_agent_id, str):
+                agent_ids.add(assignee_agent_id)
+            if isinstance(reviewer_agent_id, str):
+                agent_ids.add(reviewer_agent_id)
+        referenced_agents = (
+            (await self._session.execute(select(Agent).where(Agent.id.in_(agent_ids))))
+            .scalars()
+            .all()
+        )
+        agents_by_id = {agent.id: agent for agent in referenced_agents}
+        invalid_agent_ids = sorted(
+            agent_id
+            for agent_id in agent_ids
+            if agent_id not in agents_by_id
+            or agents_by_id[agent_id].org_id != parent.org_id
+        )
+        if invalid_agent_ids:
+            raise ValueError(
+                "Child agents must exist in the parent organization: "
+                + ", ".join(invalid_agent_ids)
+            )
+
+        children: list[IssueDetail] = []
+        closeout_policy = payload.get(
+            "closeoutPolicy", DEFAULT_DELEGATION_CLOSEOUT_POLICY
+        )
+        for child in payload["children"]:
+            child_payload: CreateIssuePayload = {
+                **child,
+                "parentId": parent.id,
+                "status": "todo",
+            }
+            children.append(
+                await self.create_issue(
+                    parent.org_id,
+                    child_payload,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    run_id=run_id,
+                    origin_run_id=run_id,
+                    closeout_policy=closeout_policy,
+                    origin_kind=DELEGATION_ORIGIN_KIND,
+                )
+            )
+
+        await insert_activity_log(
+            self._session,
+            org_id=parent.org_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.children_created",
+            entity_type="issue",
+            entity_id=parent.id,
+            run_id=run_id,
+            details={
+                "childIssueIds": [child["id"] for child in children],
+                "childCount": len(children),
+                "mode": "atomic_batch",
+                "originRunId": run_id,
+                "closeoutPolicy": closeout_policy,
+            },
+        )
+        return await self._to_detail(parent), children, True
+
+    async def commit_child_issues(self) -> None:
+        """Commit a completed child batch before its dispatch tasks are scheduled."""
+
+        await self._session.commit()
+
+    async def end_child_batch_preflight(self) -> None:
+        """End the access-check read transaction before taking the batch write lock."""
+
+        await self._session.rollback()
+
+    async def _latest_child_closeout(self, child: Issue) -> dict[str, Any] | None:
+        result = await self._session.execute(
+            select(ActivityLog)
+            .where(
+                ActivityLog.org_id == child.org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == child.id,
+                ActivityLog.action.in_(
+                    (
+                        "issue.updated",
+                        "issue.comment_added",
+                        "issue.review_decision_recorded",
+                        "issue.review_closeout_missing",
+                        "issue.closure_needs_operator_review",
+                    )
+                ),
+            )
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "action": row.action,
+            "runId": row.run_id,
+            "details": row.details,
+            "createdAt": row.created_at.isoformat(),
+        }
+
     async def list_comments(self, issue_id: str) -> list[IssueComment]:
         issue = await get_issue_by_id(self._session, issue_id)
         if issue is None:
@@ -223,6 +488,9 @@ class IssueService:
         actor_type: str,
         actor_id: str,
         run_id: str | None = None,
+        origin_run_id: str | None = None,
+        closeout_policy: DelegationCloseoutPolicy | None = None,
+        origin_kind: IssueOriginKind | None = None,
     ) -> IssueDetail:
         values = {
             ISSUE_CREATE_TO_COLUMN[key]: value
@@ -230,6 +498,12 @@ class IssueService:
             if key in ISSUE_CREATE_TO_COLUMN
         }
         values["org_id"] = org_id
+        if origin_run_id is not None:
+            values["origin_run_id"] = origin_run_id
+        if closeout_policy is not None:
+            values["closeout_policy"] = dict(closeout_policy)
+        if origin_kind is not None:
+            values["origin_kind"] = origin_kind
         values.setdefault("status", DEFAULT_ISSUE_STATUS)
         values.setdefault("priority", DEFAULT_ISSUE_PRIORITY)
         values.setdefault("origin_kind", DEFAULT_ISSUE_ORIGIN_KIND)
@@ -299,6 +573,60 @@ class IssueService:
         if current is None:
             return None
 
+        done_requested = payload.get("status") == "done" or (
+            payload.get("status") == "in_review"
+            and payload.get("requestedStatus") == "done"
+        )
+        hierarchy_mutation_requested = (
+            done_requested
+            or "parentId" in payload
+            or "status" in payload
+            or payload.get("reopen") is True
+            or payload.get("reviewDecision") is not None
+        )
+        if hierarchy_mutation_requested:
+            locked = await IssueHierarchyPolicy(self._session).lock_root(
+                current.id, current.org_id
+            )
+            if locked is None:
+                return None
+            current = locked
+        if done_requested and await ParentCloseoutGovernance(
+            self._session
+        ).record_closeout_request_if_required(
+            current,
+            run_id=run_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            comment=payload.get("comment"),
+            declarations=[
+                dict(item) for item in payload.get("workProductDeclarations", [])
+            ],
+        ):
+            refreshed = await get_issue_by_id(self._session, current.id)
+            assert refreshed is not None
+            return await self._to_detail(refreshed)
+
+        if done_requested:
+            declarations = [
+                dict(item) for item in payload.get("workProductDeclarations", [])
+            ]
+            if declarations:
+                await self._reject_done_with_open_descendants(current)
+            if await IssueCompletionGovernance(
+                self._session
+            ).record_request_if_declared(
+                current,
+                run_id=run_id,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                comment=payload.get("comment"),
+                declarations=declarations,
+            ):
+                refreshed = await get_issue_by_id(self._session, current.id)
+                assert refreshed is not None
+                return await self._to_detail(refreshed)
+
         values = {
             ISSUE_UPDATE_TO_COLUMN[key]: value
             for key, value in payload.items()
@@ -342,6 +670,9 @@ class IssueService:
         if payload.get("reopen") and "status" not in values:
             if current.status in _REOPENABLE_STATUSES:
                 values["status"] = "todo"
+
+        if values.get("status") in {"backlog", "todo", "in_progress", "in_review"}:
+            await IssueHierarchyPolicy(self._session).assert_open_ancestors(current)
 
         effective_values = {
             "status": values.get("status", current.status),
@@ -395,29 +726,18 @@ class IssueService:
         return await self._to_detail(row)
 
     async def _reject_done_with_open_descendants(self, parent: Issue) -> None:
-        rows = (
-            (
-                await self._session.execute(
-                    select(Issue).where(Issue.org_id == parent.org_id)
-                )
-            )
-            .scalars()
-            .all()
+        unsettled = await IssueHierarchyPolicy(self._session).unsettled_descendants(
+            parent
         )
-        children_by_parent: dict[str, list[Issue]] = {}
-        for row in rows:
-            if row.parent_id is not None:
-                children_by_parent.setdefault(row.parent_id, []).append(row)
-
-        stack = list(children_by_parent.get(parent.id, []))
-        while stack:
-            child = stack.pop()
-            stack.extend(children_by_parent.get(child.id, []))
-            if child.status in {"done", "cancelled"}:
-                continue
+        for child in unsettled:
+            if child.status in {"blocked", "cancelled"}:
+                raise ValueError(
+                    "Cannot mark issue done while child issues are blocked or cancelled. "
+                    f"Retry, replace, or explicitly resolve child issue {child.identifier or child.id} first."
+                )
             raise ValueError(
                 "Cannot mark issue done while child issues are still open. "
-                f"Complete or cancel child issue {child.identifier or child.id} first."
+                f"Complete child issue {child.identifier or child.id} first."
             )
 
     async def _apply_parent_values(
@@ -439,6 +759,12 @@ class IssueService:
         parent = await get_issue_by_id(self._session, parent_id)
         if parent is None or parent.org_id != org_id:
             raise ValueError("Parent issue not found")
+        parent = await IssueHierarchyPolicy(self._session).lock_root(
+            parent.id, parent.org_id
+        )
+        if parent is None:
+            raise ValueError("Parent issue not found")
+        await IssueHierarchyPolicy(self._session).assert_can_accept_descendant(parent)
         if issue_id is not None:
             await self._assert_parent_does_not_cycle(issue_id, parent_id, org_id)
         values["request_depth"] = parent.request_depth + 1
@@ -481,16 +807,21 @@ class IssueService:
         title = values.get("title")
         if actor_type != "agent" or not parent_id or not isinstance(title, str):
             return None
-        result = await self._session.execute(
-            select(Issue)
-            .where(
-                Issue.org_id == values["org_id"],
-                Issue.parent_id == parent_id,
-                Issue.title == title,
-                Issue.hidden_at.is_(None),
+        criteria = [
+            Issue.org_id == values["org_id"],
+            Issue.parent_id == parent_id,
+            Issue.title == title,
+            Issue.hidden_at.is_(None),
+        ]
+        if values.get("origin_kind") == DELEGATION_ORIGIN_KIND:
+            criteria.extend(
+                (
+                    Issue.origin_kind == DELEGATION_ORIGIN_KIND,
+                    Issue.origin_run_id == values.get("origin_run_id"),
+                )
             )
-            .order_by(Issue.created_at, Issue.id)
-            .limit(1)
+        result = await self._session.execute(
+            select(Issue).where(*criteria).order_by(Issue.created_at, Issue.id).limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -614,7 +945,12 @@ class IssueService:
         )
         return await self._to_detail(row)
 
-    async def get_heartbeat_context(self, issue_id: str) -> dict[str, Any] | None:
+    async def get_heartbeat_context(
+        self,
+        issue_id: str,
+        *,
+        delegation_origin_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
         detail = await self.get_by_id(issue_id)
         if detail is None:
             return None
@@ -624,6 +960,34 @@ class IssueService:
         issue_documents_prompt = _build_issue_documents_prompt(
             plan_document=plan_document,
             document_summaries=document_summaries,
+        )
+        aggregated_work_products = await WorkspaceService(
+            self._session
+        ).list_work_products_for_issue(issue_id, include_child_primary=True)
+        child_primary_work_products = _child_primary_work_products(
+            aggregated_work_products
+        )
+        child_outputs = await self.get_child_outputs(
+            issue_id,
+            include_work_products=True,
+            delegation_origin_run_id=delegation_origin_run_id,
+        )
+        closeout_policy = child_outputs.get("closeoutPolicy") if child_outputs else None
+        if delegation_origin_run_id is not None and child_outputs is not None:
+            batch_child_ids = {
+                str(child.get("id")) for child in child_outputs.get("children", [])
+            }
+            child_primary_work_products = [
+                product
+                for product in child_primary_work_products
+                if str(product.get("sourceIssueId")) in batch_child_ids
+            ]
+        child_work_products_prompt = _build_child_work_products_prompt(
+            child_primary_work_products,
+            closeout_policy=closeout_policy,
+        )
+        blocked_child_issues = _blocked_child_issues(
+            child_outputs.get("children", []) if child_outputs else []
         )
         issue = {
             "id": detail["id"],
@@ -649,8 +1013,138 @@ class IssueService:
             "planDocument": plan_document,
             "legacyPlanDocument": None,
             "issueDocumentsPrompt": issue_documents_prompt,
+            "childPrimaryWorkProducts": child_primary_work_products,
+            "childWorkProductsPrompt": child_work_products_prompt,
+            "childOutputs": child_outputs,
+            "childIssues": child_outputs.get("children", []) if child_outputs else [],
+            "parentExecutionStage": child_outputs.get("parentExecutionStage")
+            if child_outputs
+            else "no_children",
+            "blockedChildIssues": blocked_child_issues,
+            "delegationOriginRunId": delegation_origin_run_id,
+            "closeoutPolicy": closeout_policy,
             "wakeComment": None,
         }
+
+    async def record_child_replaced(
+        self,
+        old_child: IssueDetail,
+        replacement: IssueDetail,
+        *,
+        reason: object,
+        actor_type: str,
+        actor_id: str,
+        run_id: str | None = None,
+    ) -> None:
+        replaced_at = datetime.now(UTC)
+        await self._session.execute(
+            update(Issue)
+            .where(
+                Issue.id == old_child["id"],
+                Issue.org_id == old_child["orgId"],
+                Issue.hidden_at.is_(None),
+            )
+            .values(hidden_at=replaced_at, updated_at=replaced_at)
+        )
+        await insert_activity_log(
+            self._session,
+            org_id=old_child["orgId"],
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.child_replaced",
+            entity_type="issue",
+            entity_id=old_child["id"],
+            run_id=run_id,
+            details={
+                "replacementIssueId": replacement["id"],
+                "reason": reason,
+                "retiredAt": replaced_at.isoformat(),
+            },
+        )
+
+    async def lock_and_get_child_replacement(
+        self, child_id: str, org_id: str
+    ) -> IssueDetail | None:
+        """Serialize replacement creation and replay an existing replacement."""
+
+        await self._session.execute(
+            update(Issue)
+            .where(Issue.id == child_id, Issue.org_id == org_id)
+            .values(updated_at=Issue.updated_at)
+        )
+        result = await self._session.execute(
+            select(ActivityLog.details)
+            .where(
+                ActivityLog.org_id == org_id,
+                ActivityLog.entity_type == "issue",
+                ActivityLog.entity_id == child_id,
+                ActivityLog.action == "issue.child_replaced",
+            )
+            .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+            .limit(1)
+        )
+        details = result.scalar_one_or_none()
+        replacement_id = (
+            details.get("replacementIssueId") if isinstance(details, dict) else None
+        )
+        if not isinstance(replacement_id, str):
+            return None
+        return await self.get_by_id(replacement_id)
+
+    async def record_incomplete_accepted(
+        self,
+        issue: IssueDetail,
+        *,
+        reason: str,
+        actor_type: str,
+        actor_id: str,
+        child_issue_ids: Sequence[str] | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        if not child_issue_ids:
+            raise ValueError("At least one child issue must be selected")
+        rows = (
+            (
+                await self._session.execute(
+                    select(Issue).where(
+                        Issue.id.in_(list(child_issue_ids)),
+                        Issue.org_id == issue["orgId"],
+                        Issue.parent_id == issue["id"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        origins = {row.origin_run_id for row in rows}
+        if len(rows) != len(set(child_issue_ids)) or len(origins) != 1:
+            raise ValueError(
+                "Accepted child issues must belong to one delegation batch"
+            )
+        origin_run_id = next(iter(origins))
+        if origin_run_id is None and any(
+            row.origin_kind == DELEGATION_ORIGIN_KIND for row in rows
+        ):
+            raise ValueError("Accepted child issues are not a delegated batch")
+        details: dict[str, Any] = {
+            "reason": reason,
+            "childIssueIds": list(child_issue_ids),
+        }
+        if origin_run_id is not None:
+            details["delegationOriginRunId"] = origin_run_id
+        if len(child_issue_ids) == 1:
+            details["childIssueId"] = child_issue_ids[0]
+        await insert_activity_log(
+            self._session,
+            org_id=issue["orgId"],
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="issue.incomplete_accepted",
+            entity_type="issue",
+            entity_id=issue["id"],
+            run_id=run_id,
+            details=details,
+        )
 
     async def add_comment(
         self,
@@ -665,17 +1159,28 @@ class IssueService:
         if issue is None:
             raise ValueError("Issue not found")
 
+        request_id = payload.get("requestId")
         values: dict[str, Any] = {
             "org_id": issue.org_id,
             "issue_id": issue.id,
             "body": payload["body"],
+            "request_id": request_id,
         }
         if actor_type == "agent":
             values["author_agent_id"] = actor_id
         else:
             values["author_user_id"] = actor_id
 
-        comment = await insert_issue_comment(self._session, values)
+        comment, created = await insert_issue_comment_idempotent(self._session, values)
+        if not created:
+            expected_author = (
+                comment.author_agent_id
+                if actor_type == "agent"
+                else comment.author_user_id
+            )
+            if comment.body != payload["body"] or expected_author != actor_id:
+                raise ValueError("Comment requestId was already used")
+            return comment
         await insert_activity_log(
             self._session,
             org_id=issue.org_id,
@@ -779,6 +1284,125 @@ class IssueService:
 _ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT = 12_000
 
 
+def _parent_execution_stage(
+    children: Sequence[Mapping[str, Any]], *, parent_status: str | None = None
+) -> str:
+    if parent_status in {"done", "blocked", "cancelled"}:
+        return f"parent_{parent_status}"
+    if not children:
+        return "no_children"
+    statuses = {str(child.get("status") or "") for child in children}
+    if statuses & {"backlog", "todo", "in_progress", "in_review"}:
+        return "children_active"
+    if statuses & {"blocked", "cancelled"}:
+        return "children_blocked"
+    if statuses <= {"done"}:
+        return "children_settled"
+    return "children_mixed"
+
+
+def _blocked_child_issues(
+    children: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for child in children:
+        status = child.get("status")
+        if status not in {"blocked", "cancelled"}:
+            continue
+        work_products = child.get("workProducts")
+        result.append(
+            {
+                "id": child.get("id"),
+                "identifier": child.get("identifier"),
+                "title": child.get("title"),
+                "status": status,
+                "lastCloseout": child.get("lastCloseout"),
+                "workProductCount": len(work_products)
+                if isinstance(work_products, Sequence)
+                else 0,
+            }
+        )
+    return result
+
+
+def _child_primary_work_products(
+    work_products: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for product in work_products:
+        metadata = product.get("metadata")
+        if (
+            not isinstance(metadata, Mapping)
+            or metadata.get("parentAggregated") is not True
+        ):
+            continue
+        result.append(
+            {
+                "id": product.get("id"),
+                "issueId": product.get("issueId"),
+                "title": product.get("title"),
+                "type": product.get("type"),
+                "summary": product.get("summary"),
+                "url": product.get("url"),
+                "contentPath": product.get("contentPath"),
+                "sourceIssueId": metadata.get("sourceIssueId"),
+                "sourceIssueIdentifier": metadata.get("sourceIssueIdentifier"),
+                "sourceIssueTitle": metadata.get("sourceIssueTitle"),
+            }
+        )
+    return result
+
+
+def _build_child_work_products_prompt(
+    child_primary_work_products: Sequence[Mapping[str, Any]],
+    *,
+    closeout_policy: object = None,
+) -> str:
+    if not child_primary_work_products:
+        return ""
+    lines = [
+        "## Child Primary Work Products",
+        "",
+        "Direct child issues have completed and exposed these primary deliverables.",
+    ]
+    for product in child_primary_work_products:
+        child_label = str(
+            product.get("sourceIssueIdentifier")
+            or product.get("sourceIssueTitle")
+            or product.get("sourceIssueId")
+            or "child issue"
+        )
+        title = str(product.get("title") or "Untitled work product")
+        summary = str(product.get("summary") or "").strip()
+        location = str(product.get("contentPath") or product.get("url") or "").strip()
+        line = f"- {child_label}: {title}"
+        if summary:
+            line += f" — {summary}"
+        if location:
+            line += f" ({location})"
+        lines.append(line)
+    policy_mode = (
+        closeout_policy.get("mode") if isinstance(closeout_policy, Mapping) else None
+    )
+    if policy_mode == "child_outputs_are_final":
+        lines.extend(
+            [
+                "",
+                "These child deliverables are the final outputs for this delegation batch. The parent Agent must review and summarize the child results, record the parent closeout, and then close the parent issue without creating a duplicate parent artifact.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Use them as source material for the parent issue's final deliverable.",
+                "Create a parent-owned final report or deliverable that synthesizes these child outputs. Do not merely point the user at child task artifacts.",
+                "Write the final deliverable to the user-requested path or a clear shared path under `$OCTOPUS_WORKSPACE_CWD` such as `reports/<name>.md` so Octopus can register it as this parent issue's own primary work product. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback, not as the default target for shared project work. Then close out the parent issue.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def _build_issue_documents_prompt(
     *,
     plan_document: Mapping[str, Any] | None,
@@ -831,7 +1455,7 @@ def _build_issue_documents_prompt(
             title_text = f" - {title}" if title else ""
             lines.append(
                 f"- `{key}`{title_text}{revision_text}. Fetch with "
-                f"`control-plane issue documents get {issue_id} {key} --json`."
+                f"`octopus issue documents get {issue_id} {key} --json`."
             )
         sections.append("\n".join(lines))
 
@@ -850,7 +1474,7 @@ def _truncate_issue_document_body(body: str) -> str:
     return (
         body[:_ISSUE_DOCUMENT_PROMPT_BODY_CHAR_LIMIT].rstrip()
         + "\n\n[Document truncated in prompt. Fetch the full document with the "
-        "control-plane CLI.]"
+        "octopus CLI.]"
     )
 
 
@@ -910,6 +1534,12 @@ def _to_detail(row: Issue) -> IssueDetail:
         parentId=row.parent_id,
         originKind=cast(IssueOriginKind, row.origin_kind),
         originId=row.origin_id,
+        originRunId=row.origin_run_id,
+        closeoutPolicy=(
+            normalize_closeout_policy(row.closeout_policy)
+            if row.closeout_policy is not None
+            else None
+        ),
         issueNumber=row.issue_number,
         requestDepth=row.request_depth,
         startedAt=row.started_at.isoformat() if row.started_at else None,

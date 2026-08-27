@@ -223,10 +223,17 @@ async def test_chat_message_invokes_selected_codex_agent_and_persists_reply(
     env = kwargs["env"]
     assert isinstance(env, dict)
     assert env["OCTOPUS_ORG_ARTIFACTS_DIR"] == str(org_root / "artifacts")
+    chat_workspace = json.loads(env["OCTOPUS_WORKSPACES_JSON"])[0]
+    assert chat_workspace["mode"] == "organization_scratch"
+    assert chat_workspace["workspaceKind"] == "organization_scratch"
+    assert chat_workspace["metadata"]["resolvedMode"] == "organization_scratch"
+    assert chat_workspace["warnings"] == [
+        f'Chat has no primary issue workspace. Run will start in organization scratch workspace "{org_root}".'
+    ]
     assert "OCTOPUS_CONVERSATION_ARTIFACTS_DIR" not in env
     assert "OCTOPUS_ISSUE_ARTIFACTS_DIR" not in env
     assert "OCTOPUS_RUN_ARTIFACTS_DIR" not in env
-    assert all(not key.startswith("RUDDER" + "_") for key in env)
+    assert all(not key.startswith("R" + "UDDER" + "_") for key in env)
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in env)
     assert envelope["recentMessages"][-1] == {
         "id": envelope["recentMessages"][-1]["id"],

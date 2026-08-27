@@ -34,9 +34,8 @@ from packages.database.schema import (
 from server.app import create_app
 from server.services.heartbeat import (
     _issue_passive_followup_delay,
-    dispatch_all_queued_runs,
-    dispatch_queued_agent,
 )
+from server.services.run_dispatch import RunDispatchService
 
 
 def test_agent_dependencies_preserve_existing_exports_with_heartbeat_service() -> None:
@@ -997,6 +996,7 @@ async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
     assert created["runtimeConfig"]["heartbeat"] == {
         "enabled": True,
         "intervalSec": 300,
+        "runDiagnosticsOnTimer": False,
         "wakeOnDemand": True,
         "preflightEnabled": True,
         "maxConcurrentRuns": 3,
@@ -1018,6 +1018,43 @@ async def test_agent_create_materializes_upstream_heartbeat_policy_defaults(
     )
     assert config_code == 200
     assert config["runtimeConfig"]["heartbeat"] == created["runtimeConfig"]["heartbeat"]
+
+
+async def test_agent_materializes_legacy_timer_diagnostics_as_disabled_preflight(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="legacy-timer-diagnostics")
+
+    create_code, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Legacy timer diagnostics",
+            "role": "engineer",
+            "runtimeConfig": {
+                "heartbeat": {
+                    "enabled": True,
+                    "intervalSec": 300,
+                    "runDiagnosticsOnTimer": True,
+                }
+            },
+        },
+    )
+    assert create_code == 201
+    heartbeat = created["runtimeConfig"]["heartbeat"]
+    assert heartbeat["runDiagnosticsOnTimer"] is True
+    assert heartbeat["preflightEnabled"] is False
+
+    async with session_factory() as session:
+        persisted = await session.get(Agent, created["id"])
+    assert persisted is not None
+    assert persisted.runtime_config["heartbeat"]["preflightEnabled"] is False
+
+    detail_code, detail = await _request(app, "GET", f"/api/agents/{created['id']}")
+    assert detail_code == 200
+    assert detail["runtimeConfig"]["heartbeat"]["preflightEnabled"] is False
 
 
 async def test_agent_archive_route_terminates_and_hides_agent(
@@ -1493,7 +1530,7 @@ async def test_agent_runtime_state_sessions_and_reset_routes(
     assert reset["stateJson"] == {"resume": True}
 
 
-async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
+async def test_agent_runtime_diagnostic_executes_process_adapter_and_exposes_run(
     app: FastAPI,
     session_factory: async_sessionmaker,
 ) -> None:
@@ -1516,12 +1553,19 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     wake_code, run = await _request(
         app,
         "POST",
-        f"/api/agents/{created['id']}/wakeup",
-        json={"reason": "contract-run"},
+        f"/api/agents/{created['id']}/heartbeat/invoke",
     )
     assert wake_code == 202
     assert run["status"] == "queued"
     assert run["invocationSource"] == "on_demand"
+    assert run["runPurpose"] == "heartbeat"
+    duplicate_code, duplicate = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/heartbeat/invoke",
+    )
+    assert duplicate_code == 202
+    assert duplicate["id"] == run["id"]
     await _wait_for_dispatch(app)
 
     list_code, runs = await _request(app, "GET", f"/api/orgs/{org_id}/heartbeat-runs")
@@ -1532,6 +1576,7 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert detail_code == 200
     assert detail["status"] == "succeeded"
     assert detail["resultJson"]["stdout"].strip() == "adapter-ok"
+    assert detail["processExitedAt"] is not None
 
     events_code, events = await _request(
         app, "GET", f"/api/heartbeat-runs/{run['id']}/events"
@@ -1540,7 +1585,9 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert [event["eventType"] for event in events] == [
         "lifecycle",
         "lifecycle",
+        "workspace.preflight",
         "adapter.invoke",
+        "lifecycle",
         "lifecycle",
         "log",
         "lifecycle",
@@ -1549,8 +1596,10 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert [event["message"].strip() for event in events] == [
         "run queued",
         "run started",
+        "workspace context prepared",
         "adapter invocation",
-        events[3]["message"].strip(),
+        events[4]["message"].strip(),
+        "child process exited with code 0",
         "adapter-ok",
         "run succeeded",
     ]
@@ -1561,6 +1610,310 @@ async def test_agent_wakeup_executes_process_adapter_and_exposes_run(
     assert state_code == 200
     assert state["lastRunId"] == run["id"]
     assert state["lastRunStatus"] == "succeeded"
+
+    next_code, next_run = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/heartbeat/invoke",
+    )
+    assert next_code == 202
+    assert next_run["id"] != run["id"]
+    await _wait_for_dispatch(app)
+
+
+async def test_concurrent_runtime_diagnostics_share_one_sqlite_run(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="diagnostic-single-flight")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Diagnostic Single Flight",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "import time; time.sleep(0.2)"],
+            },
+        },
+    )
+    path = f"/api/agents/{created['id']}/heartbeat/invoke"
+
+    first, second = await asyncio.gather(
+        _request(app, "POST", path),
+        _request(app, "POST", path),
+    )
+
+    assert first[0] == 202
+    assert second[0] == 202
+    assert first[1]["id"] == second[1]["id"]
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == created["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == created["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(runs) == 1
+    assert len(wakeups) == 1
+    await _wait_for_dispatch(app)
+
+
+async def test_agent_wakeup_skips_runtime_when_no_work_is_actionable(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="manual-wakeup-no-work")
+    _, created = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={"name": "No work"},
+    )
+
+    wake_code, result = await _request(
+        app,
+        "POST",
+        f"/api/agents/{created['id']}/wakeup",
+    )
+
+    assert wake_code == 202
+    assert result == {"status": "skipped"}
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun).where(HeartbeatRun.agent_id == created["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest).where(
+                        AgentWakeupRequest.agent_id == created["id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert runs == []
+    assert len(wakeups) == 1
+    assert wakeups[0].status == "skipped"
+    assert wakeups[0].error == "heartbeat.preflight.no_actionable_work"
+
+
+async def test_create_assigned_issue_dispatches_assignee_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="create-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Create Dispatch Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('created issue dispatched')"],
+            },
+        },
+    )
+
+    create_code, issue = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/issues",
+        json={
+            "title": "Dispatch on create",
+            "status": "todo",
+            "assigneeAgentId": agent["id"],
+        },
+    )
+
+    assert create_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        runs = (
+            (
+                await session.execute(
+                    select(HeartbeatRun)
+                    .where(HeartbeatRun.agent_id == agent["id"])
+                    .order_by(HeartbeatRun.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wakeups = (
+            (
+                await session.execute(
+                    select(AgentWakeupRequest)
+                    .where(AgentWakeupRequest.agent_id == agent["id"])
+                    .order_by(AgentWakeupRequest.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    task_runs = [
+        run
+        for run in runs
+        if run.run_purpose == "task_execution"
+        and run.context_snapshot
+        and run.context_snapshot.get("issueId") == issue["id"]
+    ]
+    assert len(task_runs) == 1
+    assert task_runs[0].status == "failed"
+    assert task_runs[0].error_code == "closeout_missing"
+    assert task_runs[0].invocation_source == "assignment"
+    assert task_runs[0].context_snapshot["wakeReason"] == "issue_assigned"
+    assert wakeups[0].source == "assignment"
+    assert wakeups[0].reason == "issue_assigned"
+
+
+async def test_issue_comment_dispatches_assignee_wakeup_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="comment-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "Comment Dispatch Agent",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('comment dispatched')"],
+            },
+        },
+    )
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                identifier="COM-1",
+                title="Dispatch on comment",
+                status="todo",
+                priority="medium",
+                assignee_agent_id=agent["id"],
+            )
+        )
+        await session.commit()
+
+    comment_code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "Please continue."},
+    )
+
+    assert comment_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        run = (
+            await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.agent_id == agent["id"],
+                    HeartbeatRun.invocation_source == "assignment",
+                )
+            )
+        ).scalar_one()
+
+    assert run.status == "failed"
+    assert run.error_code == "closeout_missing"
+    assert run.run_purpose == "task_execution"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["wakeReason"] == "issue_comment_added"
+
+
+async def test_issue_comment_mention_dispatches_mentioned_agent_without_scheduler(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    import sys
+
+    org_id = await _seed_org(session_factory, key="mention-dispatch")
+    _, agent = await _request(
+        app,
+        "POST",
+        f"/api/orgs/{org_id}/agents",
+        json={
+            "name": "MentionHelper",
+            "agentRuntimeConfig": {
+                "command": sys.executable,
+                "args": ["-c", "print('mention dispatched')"],
+            },
+        },
+    )
+    issue_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Issue(
+                id=issue_id,
+                org_id=org_id,
+                identifier="MEN-1",
+                title="Dispatch on mention",
+                status="todo",
+                priority="medium",
+            )
+        )
+        await session.commit()
+
+    comment_code, _ = await _request(
+        app,
+        "POST",
+        f"/api/issues/{issue_id}/comments",
+        json={"body": "@MentionHelper please take a look."},
+    )
+
+    assert comment_code == 200
+    await _wait_for_dispatch(app)
+
+    async with session_factory() as session:
+        run = (
+            await session.execute(
+                select(HeartbeatRun).where(
+                    HeartbeatRun.agent_id == agent["id"],
+                    HeartbeatRun.invocation_source == "on_demand",
+                )
+            )
+        ).scalar_one()
+
+    assert run.status == "succeeded"
+    assert run.context_snapshot is not None
+    assert run.context_snapshot["wakeReason"] == "issue_comment_mentioned"
 
 
 async def test_successful_issue_run_without_closeout_queues_passive_followup(
@@ -1622,6 +1975,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
     _, detail = await _request(app, "GET", f"/api/heartbeat-runs/{run['id']}")
     assert detail["status"] == "failed"
     assert detail["errorCode"] == "closeout_missing"
+    assert "octopus issue done" in detail["error"]
     issue_code, issue_after = await _request(app, "GET", f"/api/issues/{issue['id']}")
     assert issue_code == 200
     assert issue_after["status"] == "in_progress"
@@ -1665,13 +2019,22 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
             )
         ).scalar_one_or_none()
         issue_row = await session.get(Issue, issue["id"])
+        premature_activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue["id"],
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one_or_none()
         assert issue_row is not None
         assert issue_row.execution_run_id is None
         assert issue_row.checkout_run_id is None
 
     assert followup_run is None
+    assert premature_activity is None
 
-    await dispatch_queued_agent(app.state.session_factory, agent["id"])
+    await RunDispatchService(app.state.session_factory).dispatch_agent(agent["id"])
 
     async with session_factory() as session:
         followup_run = (
@@ -1688,7 +2051,7 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         wakeup_row.requested_at = datetime.now(UTC) - timedelta(seconds=1)
         await session.commit()
 
-    await dispatch_all_queued_runs(app.state.session_factory)
+    await RunDispatchService(app.state.session_factory).dispatch_all()
 
     async with session_factory() as session:
         followup_run = (
@@ -1702,6 +2065,8 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
         assert followup_run.run_purpose == "closeout_followup"
         assert followup_run.status == "failed"
         assert followup_run.error_code == "closeout_missing"
+        assert followup_run.error is not None
+        assert "octopus issue done" in followup_run.error
         assert followup_run.context_snapshot is not None
         assert followup_run.context_snapshot["wakeReason"] == "issue_passive_followup"
         assert followup_run.context_snapshot["wakeSource"] == "passive_issue_followup"
@@ -1711,6 +2076,25 @@ async def test_successful_issue_run_without_closeout_queues_passive_followup(
             followup_run.context_snapshot["passiveFollowup"]["reason"]
             == "missing_closure"
         )
+        second_followup = (
+            await session.execute(
+                select(AgentWakeupRequest).where(
+                    AgentWakeupRequest.agent_id == agent["id"],
+                    AgentWakeupRequest.reason == "issue_passive_followup",
+                    AgentWakeupRequest.id != rows[0].id,
+                )
+            )
+        ).scalar_one_or_none()
+        premature_activity = (
+            await session.execute(
+                select(ActivityLog).where(
+                    ActivityLog.entity_id == issue["id"],
+                    ActivityLog.action == "issue.closure_needs_operator_review",
+                )
+            )
+        ).scalar_one_or_none()
+        assert second_followup is None
+        assert premature_activity is None
         assert issue_row.execution_run_id is None
         assert issue_row.checkout_run_id is None
 
@@ -2010,7 +2394,7 @@ async def test_successful_issue_run_with_closeout_comment_skips_passive_followup
     assert rows == []
 
 
-async def test_successful_issue_run_without_closeout_is_failed_and_records_event(
+async def test_successful_issue_run_without_closeout_is_failed_for_passive_followup(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -2065,14 +2449,13 @@ async def test_successful_issue_run_without_closeout_is_failed_and_records_event
                     ActivityLog.action == "issue.closure_needs_operator_review",
                 )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
 
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
-    assert "control-plane issue done" in (final.error or "")
-    assert activity.run_id == run_id
-    assert activity.details["originRunId"] == run_id
-    assert activity.details["attempts"] == 1
+    assert final.error is not None
+    assert "octopus issue done" in final.error
+    assert activity is None
 
 
 async def test_user_comment_after_successful_issue_run_skips_passive_followup(
@@ -2240,7 +2623,7 @@ async def test_scheduled_passive_followup_skips_after_user_comment(
     assert runs == []
 
 
-async def test_issue_comment_skips_scheduled_passive_followup_without_assignment_wakeup(
+async def test_issue_comment_skips_passive_followup_and_queues_comment_instruction(
     app: FastAPI,
     session_factory: async_sessionmaker,
     monkeypatch: pytest.MonkeyPatch,
@@ -2319,7 +2702,8 @@ async def test_issue_comment_skips_scheduled_passive_followup_without_assignment
     assert len(closeout_wakeups) == 1
     assert closeout_wakeups[0].status == "skipped"
     assert closeout_wakeups[0].error == "Issue has user comment after missing closeout"
-    assert comment_wakeups == []
+    assert len(comment_wakeups) == 1
+    assert comment_wakeups[0].status == "queued"
 
 
 async def test_issue_passive_followup_endpoint_rejects_after_user_comment(
@@ -2822,7 +3206,7 @@ async def test_passive_followup_exhaustion_with_reviewer_queues_convergence_revi
     assert activity.details["previousRunId"] == run_id
 
 
-async def test_successful_passive_followup_without_closeout_is_failed_and_escalated(
+async def test_passive_followup_without_closeout_fails_immediately(
     session_factory: async_sessionmaker,
 ) -> None:
     from packages.database.schema import ActivityLog, Agent, HeartbeatRun, Issue
@@ -2886,15 +3270,14 @@ async def test_successful_passive_followup_without_closeout_is_failed_and_escala
                     ActivityLog.action == "issue.closure_needs_operator_review",
                 )
             )
-        ).scalar_one()
+        ).scalar_one_or_none()
 
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
-    assert "control-plane issue done" in (final.error or "")
+    assert final.error is not None
+    assert "octopus issue done" in final.error
     assert issue.status == "in_progress"
-    assert activity.run_id == run_id
-    assert activity.details["originRunId"] == origin_run_id
-    assert activity.details["attempts"] == 1
+    assert activity is None
 
 
 async def test_successful_reviewer_run_without_decision_queues_review_closeout(
@@ -3138,7 +3521,7 @@ async def test_review_closeout_missing_success_without_decision_is_failed(
 
     assert final.status == "failed"
     assert final.error_code == "closeout_missing"
-    assert "control-plane issue review" in (final.error or "")
+    assert "octopus issue review" in (final.error or "")
     assert activity.run_id == closeout_run_id
     assert activity.details["originRunId"] == origin_run_id
 
@@ -3401,7 +3784,26 @@ async def test_agent_actor_cannot_invoke_another_agent(
         headers={"x-test-agent-id": caller["id"], "x-test-org-id": org_id},
     )
     assert code == 403
-    assert body["detail"] == "Agent can only invoke itself"
+    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
+
+
+async def test_agent_actor_cannot_wakeup_itself(
+    app: FastAPI,
+    session_factory: async_sessionmaker,
+) -> None:
+    org_id = await _seed_org(session_factory, key="agent-self-wakeup")
+    _, agent = await _request(
+        app, "POST", f"/api/orgs/{org_id}/agents", json={"name": "Caller"}
+    )
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/agents/{agent['id']}/wakeup",
+        json={},
+        headers={"x-test-agent-id": agent["id"], "x-test-org-id": org_id},
+    )
+    assert code == 403
+    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
 
 
 async def test_agent_cannot_list_other_organization(

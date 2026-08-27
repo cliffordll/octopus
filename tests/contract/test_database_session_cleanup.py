@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 import inspect
+import logging
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from server import lifespan as lifespan_module
+from server.services import heartbeat as heartbeat_module
+from server.services.run_execution import RunExecutionService
 from server.dependencies import database as database_dependency
 from server.dependencies.database import get_session
 from server.lifespan import (
@@ -44,6 +47,15 @@ class BrokenSession:
     async def begin(self) -> BrokenTransaction:
         return self.transaction
 
+    def in_transaction(self) -> bool:
+        return self.transaction.is_active
+
+    async def rollback(self) -> None:
+        await self.transaction.rollback()
+
+    async def commit(self) -> None:
+        await self.transaction.commit()
+
     async def close(self) -> None:
         self.close_called = True
         raise RuntimeError("close connection is already broken")
@@ -74,23 +86,24 @@ class SlowDisposeEngine:
         await asyncio.sleep(10)
 
 
-class EmptyAsyncContext:
-    async def __aenter__(self) -> object:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        return None
-
-
 class SchedulerTestSession:
+    def __init__(self) -> None:
+        self.transaction_active = False
+
     async def __aenter__(self) -> "SchedulerTestSession":
         return self
 
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    def begin(self) -> EmptyAsyncContext:
-        return EmptyAsyncContext()
+    async def begin(self) -> None:
+        self.transaction_active = True
+
+    async def commit(self) -> None:
+        self.transaction_active = False
+
+    async def rollback(self) -> None:
+        self.transaction_active = False
 
 
 async def test_get_session_preserves_original_exception_when_cleanup_fails() -> None:
@@ -178,11 +191,136 @@ def test_cleanup_timeout_does_not_require_connection_invalidation() -> None:
         database_dependency._cleanup_error_requires_invalidate(TimeoutError()) is False
     )
     assert (
+        database_dependency._cleanup_error_requires_invalidate(asyncio.CancelledError())
+        is False
+    )
+    assert (
         database_dependency._cleanup_error_requires_invalidate(
             RuntimeError("connection is broken")
         )
         is True
     )
+
+
+async def test_heartbeat_dispatch_session_close_survives_task_cancellation() -> None:
+    session = SlowCloseSession()
+    task = asyncio.create_task(
+        heartbeat_module._shielded_session_close(session)  # type: ignore[arg-type]
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+
+    await task
+
+    assert session.close_finished is True
+
+
+async def test_run_execution_rolls_back_and_closes_when_service_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TrackingSession:
+        def __init__(self) -> None:
+            self.rolled_back = False
+            self.closed = False
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FailingHeartbeatService:
+        def __init__(self, _session: object, **_kwargs: object) -> None:
+            return None
+
+        async def execute_claimed_run(self, _run_id: str) -> None:
+            raise RuntimeError("adapter failed")
+
+    session = TrackingSession()
+    monkeypatch.setattr(heartbeat_module, "HeartbeatService", FailingHeartbeatService)
+
+    execution = RunExecutionService(  # type: ignore[arg-type]
+        cast(Any, lambda: session),
+        run_id="run-1",
+        agent_id="agent-1",
+    )
+    with pytest.raises(RuntimeError, match="adapter failed"):
+        await execution.run()
+
+    assert session.rolled_back is True
+    assert session.closed is True
+
+
+async def test_run_execution_waits_for_commit_before_cancel_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit_started = asyncio.Event()
+    allow_commit = asyncio.Event()
+
+    class TrackingSession:
+        def __init__(self) -> None:
+            self.commit_finished = False
+            self.rollback_after_commit = False
+            self.close_after_commit = False
+
+        async def commit(self) -> None:
+            commit_started.set()
+            await allow_commit.wait()
+            self.commit_finished = True
+
+        async def rollback(self) -> None:
+            self.rollback_after_commit = self.commit_finished
+
+        async def close(self) -> None:
+            self.close_after_commit = self.commit_finished
+
+    class SuccessfulHeartbeatService:
+        def __init__(self, _session: object, **_kwargs: object) -> None:
+            return None
+
+        async def execute_claimed_run(self, _run_id: str) -> None:
+            return None
+
+    session = TrackingSession()
+    monkeypatch.setattr(
+        heartbeat_module, "HeartbeatService", SuccessfulHeartbeatService
+    )
+    execution = RunExecutionService(  # type: ignore[arg-type]
+        cast(Any, lambda: session),
+        run_id="run-1",
+        agent_id="agent-1",
+    )
+    task = asyncio.create_task(execution.run())
+    await commit_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert session.rollback_after_commit is False
+    assert session.close_after_commit is False
+
+    allow_commit.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert session.rollback_after_commit is True
+    assert session.close_after_commit is True
+
+
+async def test_dispatch_task_failure_is_observed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger=heartbeat_module.logger.name)
+
+    async def fail() -> None:
+        raise RuntimeError("dispatch failed")
+
+    tasks: set[asyncio.Task[object]] = set()
+    task = asyncio.create_task(fail())
+    heartbeat_module.track_dispatch_task(tasks, task)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert tasks == set()
+    assert "heartbeat dispatch task failed" in caplog.text
 
 
 async def test_dispose_engine_times_out() -> None:
@@ -213,19 +351,21 @@ async def test_heartbeat_scheduler_recovers_orphaned_runs_on_each_tick(
         async def tick_timers(self, _org_id: str) -> list[object]:
             return []
 
-    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
-        nonlocal dispatch_calls
-        dispatch_calls += 1
-        if dispatch_calls >= 2:
-            tick_complete.set()
+    class FakeRunDispatchService:
+        def __init__(self, _session_factory: object) -> None:
+            return None
+
+        async def dispatch_all(self) -> None:
+            nonlocal dispatch_calls
+            dispatch_calls += 1
+            if dispatch_calls >= 2:
+                tick_complete.set()
 
     async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
         return [SimpleNamespace(id="org-1")]
 
     monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
-    monkeypatch.setattr(
-        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
-    )
+    monkeypatch.setattr(lifespan_module, "RunDispatchService", FakeRunDispatchService)
     monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
 
     def _make_session_factory() -> SchedulerTestSession:
@@ -269,16 +409,18 @@ async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
         async def tick_timers(self, _org_id: str) -> list[object]:
             return []
 
-    async def fake_dispatch_all_queued_runs(_session_factory: object) -> None:
-        return None
+    class FakeRunDispatchService:
+        def __init__(self, _session_factory: object) -> None:
+            return None
+
+        async def dispatch_all(self) -> None:
+            return None
 
     async def fake_list_organizations(_session: object) -> list[SimpleNamespace]:
         return []
 
     monkeypatch.setattr(lifespan_module, "HeartbeatService", FakeHeartbeatService)
-    monkeypatch.setattr(
-        lifespan_module, "dispatch_all_queued_runs", fake_dispatch_all_queued_runs
-    )
+    monkeypatch.setattr(lifespan_module, "RunDispatchService", FakeRunDispatchService)
     monkeypatch.setattr(lifespan_module, "list_organizations", fake_list_organizations)
 
     def _make_session_factory() -> SchedulerTestSession:
@@ -287,7 +429,7 @@ async def test_heartbeat_scheduler_cooperative_stop_waits_for_active_tick(
     stop_event = asyncio.Event()
     task = asyncio.create_task(
         _heartbeat_scheduler(
-            _make_session_factory,
+            _make_session_factory,  # type: ignore[arg-type]
             30,
             stop_event,  # type: ignore[arg-type]
         )

@@ -185,7 +185,7 @@ def test_runtime_context_env_falls_back_to_agent_memory_paths_from_octopus() -> 
                     "agentSkillsRootPath": "D:/agents/agent-24/skills",
                 }
             },
-            workspace={"rudderWorkspace": {"cwd": "D:/workspaces/task-24"}},
+            workspace={"octopusWorkspace": {"cwd": "D:/workspaces/task-24"}},
             on_log=_noop_on_log,
         ),
     )
@@ -196,7 +196,7 @@ def test_runtime_context_env_falls_back_to_agent_memory_paths_from_octopus() -> 
     assert env["OCTOPUS_AGENT_MEMORY_DIR"] == "D:/agents/agent-24/memory"
     assert env["OCTOPUS_AGENT_LIFE_DIR"] == "D:/agents/agent-24/life"
     assert env["OCTOPUS_AGENT_SKILLS_DIR"] == "D:/agents/agent-24/skills"
-    assert all(not key.startswith("RUDDER" + "_") for key in env)
+    assert all(not key.startswith("R" + "UDDER" + "_") for key in env)
     assert all(not key.startswith("CONTROL" + "_PLANE_") for key in env)
 
 

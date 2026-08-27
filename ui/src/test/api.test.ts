@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { approvalsApi } from "../api/approvals";
 import { activityApi } from "../api/activity";
 import { agentsApi } from "../api/agents";
@@ -349,13 +349,15 @@ describe("project API", () => {
       .mockReturnValueOnce(jsonResponse({ id: "project-1", name: "Console" }, 201))
       .mockReturnValueOnce(jsonResponse({ id: "attachment-1", resourceId: "resource-1" }, 201))
       .mockReturnValueOnce(jsonResponse({ id: "attachment-1", role: "reference" }))
-      .mockReturnValueOnce(jsonResponse({ id: "attachment-1" }));
+      .mockReturnValueOnce(jsonResponse({ id: "attachment-1" }))
+      .mockReturnValueOnce(jsonResponse([{ id: "wp-1", title: "report.md" }]));
     vi.stubGlobal("fetch", fetchMock);
 
     await projectsApi.create("org-1", { name: "Console", status: "planned" });
     await projectsApi.addResource("project-1", { resourceId: "resource-1", role: "working_set" });
     await projectsApi.updateResource("project-1", "attachment-1", { role: "reference" });
     await projectsApi.removeResource("project-1", "attachment-1");
+    await projectsApi.listWorkProducts("project-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -374,6 +376,11 @@ describe("project API", () => {
       4,
       "/api/projects/project-1/resources/attachment-1",
       expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects/project-1/work-products",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 });

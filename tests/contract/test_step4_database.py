@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import sqlite3
 from collections.abc import AsyncIterator
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy import Table, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -95,6 +97,7 @@ def test_issue_indexes_match_upstream() -> None:
         "issues_company_reviewer_agent_status_idx",
         "issues_company_reviewer_user_status_idx",
         "issues_company_parent_idx",
+        "issues_delegation_batch_idx",
         "issues_company_project_idx",
         "issues_company_origin_idx",
         "issues_company_project_workspace_idx",
@@ -147,6 +150,141 @@ async def test_upgrade_to_head_creates_first_batch_tables(tmp_path: Path) -> Non
         "activity_log",
         "alembic_version",
     }
+
+
+@pytest.mark.asyncio
+async def test_run_recovery_migration_adds_lease_and_terminal_effects(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "run-recovery-migration.db"
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    await upgrade_to_head(database_url)
+
+    engine = create_database_engine(database_url)
+    try:
+        async with engine.connect() as conn:
+            run_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(text("pragma table_info(heartbeat_runs)"))
+                )
+            }
+            event_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(text("pragma table_info(heartbeat_run_events)"))
+                )
+            }
+            run_indexes = {
+                row[1]
+                for row in (
+                    await conn.execute(text("pragma index_list(heartbeat_runs)"))
+                )
+            }
+            wakeup_indexes = {
+                row[1]
+                for row in (
+                    await conn.execute(text("pragma index_list(agent_wakeup_requests)"))
+                )
+            }
+    finally:
+        await engine.dispose()
+
+    assert {
+        "process_exited_at",
+        "execution_owner_token",
+        "execution_lease_expires_at",
+        "terminal_effects_pending",
+        "terminal_effects_json",
+        "terminal_effects_claim_token",
+        "terminal_effects_attempt_count",
+        "terminal_effects_last_error",
+    } <= run_columns
+    assert "idempotency_key" in event_columns
+    assert "heartbeat_runs_status_execution_lease_created_idx" in run_indexes
+    assert "agent_wakeup_requests_company_agent_idempotency_key_uq" in wakeup_indexes
+
+
+@pytest.mark.asyncio
+async def test_run_recovery_migration_repairs_partially_materialized_schema(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "partially-materialized-run-recovery.db"
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    await asyncio.to_thread(
+        command.upgrade, _build_config(database_url), "20260701_000025"
+    )
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "alter table heartbeat_runs add column process_exited_at datetime"
+        )
+        connection.execute(
+            "alter table heartbeat_run_events add column idempotency_key text"
+        )
+        connection.execute(
+            "create unique index heartbeat_run_events_run_idempotency_key_uq "
+            "on heartbeat_run_events (run_id, idempotency_key) "
+            "where idempotency_key is not null"
+        )
+        connection.executemany(
+            "insert into agent_wakeup_requests "
+            "(id, org_id, agent_id, source, status, coalesced_count, "
+            "idempotency_key, requested_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "older-wakeup",
+                    "org-1",
+                    "agent-1",
+                    "assignment",
+                    "completed",
+                    0,
+                    "duplicate-key",
+                    "2026-08-12 00:00:00",
+                ),
+                (
+                    "newer-wakeup",
+                    "org-1",
+                    "agent-1",
+                    "assignment",
+                    "queued",
+                    0,
+                    "duplicate-key",
+                    "2026-08-13 00:00:00",
+                ),
+            ],
+        )
+
+    await upgrade_to_head(database_url)
+
+    with sqlite3.connect(db_path) as connection:
+        revision = connection.execute(
+            "select version_num from alembic_version"
+        ).fetchone()
+        run_columns = {
+            row[1] for row in connection.execute("pragma table_info(heartbeat_runs)")
+        }
+        agent_columns = {
+            row[1] for row in connection.execute("pragma table_info(agents)")
+        }
+        issue_columns = {
+            row[1] for row in connection.execute("pragma table_info(issues)")
+        }
+        wakeup_keys = connection.execute(
+            "select id, idempotency_key from agent_wakeup_requests order by id"
+        ).fetchall()
+
+    assert revision == ("20260826_000031",)
+    assert "process_exited_at" in run_columns
+    assert "execution_owner_token" in run_columns
+    assert "terminal_effects_pending" in run_columns
+    assert "last_heartbeat_check_at" in agent_columns
+    assert "closeout_policy" in issue_columns
+    assert "closeout_mode" not in issue_columns
+    assert wakeup_keys == [
+        ("newer-wakeup", "duplicate-key"),
+        ("older-wakeup", None),
+    ]
 
 
 @pytest.mark.asyncio

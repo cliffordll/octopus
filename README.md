@@ -1,8 +1,8 @@
 # Octopus
 
-Octopus 是上游控制面 `server` 的 Python 兼容重实现。当前仓库主要提供 FastAPI server、数据库迁移、运行时编排、组织/任务/智能体/对话等服务端能力。
+Octopus 是一个本地优先的智能体控制面。当前仓库主要提供 FastAPI server、数据库迁移、运行时编排、组织/任务/智能体/对话等服务端能力，以及 `ui/` 下的 Vite + React 前端。
 
-本文档只覆盖本地启动项目必须掌握的基础操作：依赖安装、数据库配置和迁移、服务启动、文件存储配置、常用验证与本地数据清理。
+本文档覆盖本地开发必须掌握的完整流程：依赖安装、环境变量、数据库迁移、server/UI 启动、组织初始化、常用验证、运行目录和本地数据清理。
 
 如需理解项目定位和完整开发计划，先看：
 
@@ -10,18 +10,131 @@ Octopus 是上游控制面 `server` 的 Python 兼容重实现。当前仓库主
 - `docs/DESIGN.md`：整体架构设计。
 - `docs/FEATURE.md`：整体开发计划。
 
-## 1. 环境准备
+## 快速入口：启动和测试
+
+这部分是日常开发最常用的命令。第一次配置看「1. 依赖和环境准备」，数据库、目录、环境变量细节看后面的详细章节。
+
+### 启动 server
+
+终端 1，在仓库根目录执行：
+
+```powershell
+$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
+$env:OCTOPUS_INSTANCE_ID = "dev"
+$env:OCTOPUS_LOCAL_TRUSTED = "1"
+$env:OCTOPUS_AUTO_MIGRATE = "1"
+$env:OCTOPUS_STORAGE_PROVIDER = "local_disk"
+uv run alembic upgrade head
+.\.venv\Scripts\python.exe -m server
+```
+
+启动后检查：
+
+```powershell
+curl.exe http://127.0.0.1:8000/api/health
+```
+
+### 启动 UI
+
+终端 2：
+
+```powershell
+cd ui
+npm run dev -- --host 127.0.0.1 --port 5175
+```
+
+UI 默认把 `/api` 代理到 `http://127.0.0.1:8000`，所以要先启动 server。
+
+访问：
+
+```text
+UI:     http://127.0.0.1:5175
+server: http://127.0.0.1:8000
+health: http://127.0.0.1:8000/api/health
+```
+
+### 可选：统一 dev 脚本
+
+如果你想用一个命令同时拉起 server 和 UI，可以从仓库根目录执行：
+
+```powershell
+.\scripts\dev.ps1
+```
+
+这个脚本会检查端口占用，并把输出写到 `.octopus/dev-logs/`。
+
+### 测试命令
+
+提交前完整检查统一使用仓库脚本：
+
+```powershell
+uv run python scripts/verify.py
+```
+
+首次 clone 或重新配置仓库后，安装本仓库的 git hook：
+
+```powershell
+.\scripts\install-git-hooks.ps1
+```
+
+安装后，普通 `git commit` 不会自动执行全量测试。需要完整提交门禁时，显式设置环境变量：
+
+```powershell
+$env:OCTOPUS_FULL_VERIFY = "1"
+try {
+  git commit -m "<message>"
+} finally {
+  Remove-Item Env:OCTOPUS_FULL_VERIFY -ErrorAction SilentlyContinue
+}
+```
+
+只有 `OCTOPUS_FULL_VERIFY=1` 时，hook 才会执行 ruff format check、ruff check、pyright、pytest、UI typecheck 和 UI test；任一失败都会阻止提交。未明确要求全量测试时，应继续使用本次修改对应的专项验证，并通过 `git commit --no-verify` 提交。
+### 测试失败时先看这里
+
+先确认依赖是同步过的：
+
+```powershell
+uv sync
+cd ui
+npm install
+cd ..
+```
+
+常见失败和处理方式：
+
+| 现象 | 处理方式 |
+| --- | --- |
+| `OCTOPUS_FULL_VERIFY=1` 的提交被验证门禁阻止 | 按失败输出修复后重跑 `uv run python scripts/verify.py`，通过后再提交。 |
+| `uv run pyright .` 报缺包、找不到模块 | 先执行 `uv sync`。如果正在运行 server 导致 `.venv` 文件被锁，先停 server，或改用 `uv run --no-sync pyright .`。 |
+| `uv run ruff format --check .` 失败 | 运行 `uv run ruff format .`，再重新执行 `uv run python scripts/verify.py`。 |
+| `uv run pytest` 失败但不知道是哪一个测试 | 用失败输出里的完整节点重跑：`uv run pytest path\to\test_file.py::test_name -q -vv -x`。 |
+| 数据库、迁移、本地数据相关测试失败 | 确认没有连到旧数据库：`Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue`。需要本地 server 数据库时再执行 `uv run alembic upgrade head`。 |
+| UI `npm run typecheck` 或 `npm test` 报依赖缺失 | 在 `ui/` 下执行 `npm install`，再重跑对应命令。 |
+| UI 测试失败但不知道如何缩小范围 | 用文件名重跑：`npm test -- project-page.test.tsx`。如果是某个断言失败，先看 Vitest 输出里的测试名和 DOM 片段。 |
+| 运行 UI 测试后 `ui/package-lock.json` 发生无关变化 | 先看 `git diff -- ui/package-lock.json`。如果只是 npm 自动更新子依赖版本，且本次任务不涉及依赖升级，不要提交这个 lockfile 漂移。 |
+
+## 1. 依赖和环境准备
 
 要求：
 
 - Python `>= 3.12`
 - `uv`
+- Node.js `>= 20`
+- `npm`
 - Windows PowerShell，或 macOS/Linux shell
 
-安装依赖：
+安装后端依赖：
 
 ```powershell
 uv sync
+```
+
+安装 UI 依赖：
+
+```powershell
+cd ui
+npm install
+cd ..
 ```
 
 如果使用 PostgreSQL，需要安装 async driver：
@@ -101,7 +214,7 @@ PowerShell：
 
 ```powershell
 $env:OCTOPUS_HOME = ".octopus"
-$env:OCTOPUS_INSTANCE_ID = "local-pg"
+$env:OCTOPUS_INSTANCE_ID = "default"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_DATABASE_URL = "postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
@@ -112,7 +225,7 @@ macOS / Linux：
 
 ```bash
 export OCTOPUS_HOME=".octopus"
-export OCTOPUS_INSTANCE_ID="local-pg"
+export OCTOPUS_INSTANCE_ID="default"
 export OCTOPUS_LOCAL_TRUSTED=1
 export OCTOPUS_AUTO_MIGRATE=1
 export OCTOPUS_DATABASE_URL="postgresql+asyncpg://octopus:octopus@127.0.0.1:5432/octopus"
@@ -236,9 +349,9 @@ $env:OCTOPUS_STORAGE_FORCE_PATH_STYLE = "0"
 
 bucket 需要提前创建；当前 server 不负责自动创建 bucket。
 
-## 6. 启动服务
+## 6. 启动细节和端口排查
 
-Windows 本地开发优先使用统一 dev 脚本：
+Windows 本地开发也可以使用统一 dev 脚本：
 
 ```powershell
 .\scripts\dev.ps1
@@ -324,7 +437,7 @@ npm run dev -- --host 127.0.0.1 --port 5175
 http://127.0.0.1:5175
 ```
 
-如果 `5174` 已被上游 Rudder 或其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
+如果 `5174` 已被其他项目占用，不要用它验证 Octopus UI；以当前 Octopus checkout 启动出的端口为准。
 
 ## 7. 创建一个组织
 
@@ -425,6 +538,7 @@ workspace、runtime home、skills 的区别见 `docs/guides/skills.md`；任务�
 - `.octopus/instances/<instance_id>/organizations/<org_id>/workspaces`：组织、项目、智能体相关工作区；可通过 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID` 调整。
 - `.octopus/instances/<instance_id>/organizations/<org_id>/codex-home/agents/<agent_id>`：Codex managed `CODEX_HOME`。
 - `.octopus/instances/<instance_id>/organizations/<org_id>/<runtime>-home`：OpenCode/Claude 等 runtime 的 managed home。
+- `~/.octopus-sandboxes/<instance_id>/organizations/<org_id>/agents/<agent_workspace_key>/heartbeat-workspace`：无 issue heartbeat 的只读工作目录；可通过 `OCTOPUS_SANDBOX_DIR` 覆盖。该目录不能位于 Git 仓库内，否则自动回退到系统临时 sandbox 根目录。
 
 路径规则：
 
@@ -461,7 +575,7 @@ Stop-Process -Id <OwningProcess> -Force
 ```
 
 ```powershell
-$env:OCTOPUS_HOME = "D:\coding\octopus\.octopus"
+$env:OCTOPUS_HOME = (Join-Path (Get-Location) ".octopus")
 $env:OCTOPUS_INSTANCE_ID = "dev"
 $env:OCTOPUS_AUTO_MIGRATE = "1"
 $env:OCTOPUS_LOCAL_TRUSTED = "1"
@@ -490,21 +604,97 @@ dev      step-29 或正在开发的下一步功能实例
 step28   step-28-bug-fix 等旧分支验证实例
 ```
 
-## 11. 常用验证命令
+## 11. 测试和验证命令（详细）
 
-提交前执行四步验证：
+后端提交前常用验证：
 
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
-uv run pytest
 uv run pyright .
+uv run pytest
 ```
 
 如果 Windows 上 `uv run` 因正在运行的 server 锁定 `.venv\Scripts\server.exe`，先停止 server，或使用已同步环境：
 
 ```powershell
 uv run --no-sync pyright .
+```
+
+只跑某个后端测试文件：
+
+```powershell
+uv run pytest tests\contract\test_step15_workspace_contract.py -q
+```
+
+UI 验证：
+
+```powershell
+cd ui
+npm run typecheck
+npm test
+npm run build
+```
+
+只跑某个 UI 测试：
+
+```powershell
+cd ui
+npm test -- project-page.test.tsx
+```
+
+### 常见失败处理
+
+Pyright 找不到依赖或类型：
+
+```powershell
+uv sync
+uv run pyright .
+```
+
+如果 Windows 上正在运行的 server 锁住 `.venv`，先停 server；只做静态检查时也可以使用：
+
+```powershell
+uv run --no-sync pyright .
+```
+
+Ruff 格式检查失败：
+
+```powershell
+uv run ruff format .
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Pytest 失败时先用失败节点缩小范围：
+
+```powershell
+uv run pytest tests\contract\test_step15_workspace_contract.py::test_name -q -vv -x
+```
+
+如果失败涉及本地数据库或迁移，先确认没有误连旧数据库：
+
+```powershell
+Remove-Item Env:OCTOPUS_DATABASE_URL -ErrorAction SilentlyContinue
+uv run alembic upgrade head
+```
+
+UI 依赖或 Vitest 失败时：
+
+```powershell
+cd ui
+npm install
+npm run typecheck
+npm test -- project-page.test.tsx
+```
+
+如果 `npm install` 或测试命令改动了 `ui/package-lock.json`，先检查 diff；只有明确升级依赖时才提交 lockfile。
+
+提交前检查补充：
+
+```powershell
+git diff --check
+# 如需检查历史项目关键词，使用 rg 扫描但不要把旧关键词写回仓库文档。
 ```
 
 ## 12. 清理本地数据
@@ -538,6 +728,7 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 | `OCTOPUS_LOCAL_TRUSTED` | `false` | 本地调试 actor 注入 |
 | `OCTOPUS_HOME` | `~/.octopus` | Octopus instance home 根目录 |
 | `OCTOPUS_INSTANCE_ID` | `default` | Octopus 本地实例 ID，用于隔离默认数据库和文件侧数据目录 |
+| `OCTOPUS_SANDBOX_DIR` | `~/.octopus-sandboxes` | 无 issue heartbeat 的独立工作目录根；若位于 Git 仓库内则回退到系统临时目录 |
 | `OCTOPUS_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS` | `5` | server 收到停止信号后等待现有连接和任务结束的最长秒数 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED` | `true` | 是否启动 server 全局 heartbeat scheduler；UI 设置里的 `心跳` 不修改该环境变量 |
 | `OCTOPUS_HEARTBEAT_SCHEDULER_INTERVAL_SECONDS` | `5` | scheduler 周期，单位秒 |
@@ -551,6 +742,13 @@ $env:OCTOPUS_LOCAL_TRUSTED = "1"
 | `OCTOPUS_STORAGE_SECRET_KEY` | 空 | MinIO/S3 secret key |
 | `OCTOPUS_STORAGE_REGION` | `us-east-1` | MinIO/S3 region |
 | `OCTOPUS_STORAGE_FORCE_PATH_STYLE` | MinIO 默认为 `true` | 是否使用 path-style S3 地址 |
+
+环境变量注意事项：
+
+- `$env:OCTOPUS_HOME = ".octopus"` 是相对路径，实际目录取决于启动 server 时的当前工作目录。为了避免混淆，本地开发建议写成绝对路径，例如 `<repo-root>\.octopus`。
+- `OCTOPUS_INSTANCE_ID` 用来隔离同一个 `OCTOPUS_HOME` 下的多套本地数据，例如 `default`、`dev`、`step28`。
+- 不设置 `OCTOPUS_DATABASE_URL` 时，默认 SQLite 会跟随 `OCTOPUS_HOME` 和 `OCTOPUS_INSTANCE_ID`。显式设置 `OCTOPUS_DATABASE_URL` 后，数据库位置以该变量为准。
+- 本地 API/UI 调试通常需要 `OCTOPUS_LOCAL_TRUSTED=1`，否则没有真实 actor 来源时部分 API 会返回 actor context 未配置错误。
 
 ## 14. 延伸文档
 

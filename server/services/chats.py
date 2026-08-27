@@ -761,11 +761,16 @@ class ChatService:
                 if isinstance(env_payload, dict)
                 else None
             )
-            workspace_data = workspace_payload.get("rudderWorkspace")
+            workspace_data = workspace_payload.get("octopusWorkspace")
         if isinstance(workspace_data, dict) and isinstance(
             workspace_data.get("cwd"), str
         ):
             config["cwd"] = workspace_data["cwd"]
+        # Persist the user message and Workspace preparation, then release the
+        # database transaction before the potentially long Adapter call. A
+        # write-intent session will reserve a fresh short transaction when the
+        # result is persisted below.
+        await self._session.commit()
         transcript: list[ChatStreamTranscriptEntry] = []
 
         async def capture_stream_event(event: dict[str, Any]) -> None:

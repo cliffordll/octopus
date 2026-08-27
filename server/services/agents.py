@@ -123,6 +123,7 @@ _DEFAULT_HEARTBEAT_INTERVAL_SEC = HEARTBEAT_INTERVAL_DEFAULT_SEC
 _DEFAULT_HEARTBEAT_POLICY: dict[str, Any] = {
     "enabled": True,
     "intervalSec": _DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    "runDiagnosticsOnTimer": False,
     "wakeOnDemand": True,
     "preflightEnabled": True,
     "maxConcurrentRuns": AGENT_RUN_CONCURRENCY_DEFAULT,
@@ -180,6 +181,11 @@ def _materialize_heartbeat_runtime_config(
         config["heartbeat"] = dict(_DEFAULT_HEARTBEAT_POLICY)
     elif isinstance(heartbeat, dict):
         materialized = {**_DEFAULT_HEARTBEAT_POLICY, **heartbeat}
+        if "preflightEnabled" not in heartbeat:
+            if isinstance(heartbeat.get("timerPreflightEnabled"), bool):
+                materialized["preflightEnabled"] = heartbeat["timerPreflightEnabled"]
+            elif heartbeat.get("runDiagnosticsOnTimer") is True:
+                materialized["preflightEnabled"] = False
         interval = materialized.get("intervalSec")
         if (
             not isinstance(interval, (int, float))
@@ -196,7 +202,7 @@ def _is_hidden_system_agent_metadata(metadata: dict[str, Any] | None) -> bool:
         return False
     return (
         metadata.get("hidden") is True
-        or metadata.get("systemManaged") == "rudder_copilot"
+        or metadata.get("systemManaged") == "octopus_copilot"
     )
 
 
@@ -562,7 +568,9 @@ async def prepare_agent_runtime_config(
     extra_octopus: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     await OrganizationSkillService(session).list(row.org_id)
-    config = _runtime_config_with_context(row, base_config)
+    config = _normalize_runtime_config_defaults(
+        row.agent_runtime_type, _runtime_config_with_context(row, base_config)
+    )
     configured_skills = (
         _string_list(extra_octopus.get("desiredSkills"))
         if extra_octopus and "desiredSkills" in extra_octopus
@@ -583,6 +591,58 @@ async def prepare_agent_runtime_config(
 
 
 _PROVIDER_MODEL_RUNTIME_TYPES = {"opencode_local", "openclaw_local"}
+_OPENCODE_SKIP_PERMISSIONS_ARG = "--dangerously-skip-permissions"
+_RUNTIME_SWITCH_RESET_FIELDS = frozenset(
+    {
+        "args",
+        "command",
+        "dangerouslyBypassApprovalsAndSandbox",
+        "env",
+        "extraArgs",
+        "model",
+        "modelReasoningEffort",
+        "probeArgs",
+        "reasoningEffort",
+        "search",
+        "sessionId",
+        "sessionIdBefore",
+    }
+)
+
+
+def _runtime_config_after_switch(
+    previous_runtime_type: str,
+    next_runtime_type: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    if previous_runtime_type == next_runtime_type:
+        return config
+    return {
+        key: value
+        for key, value in config.items()
+        if key not in _RUNTIME_SWITCH_RESET_FIELDS
+    }
+
+
+def _normalize_runtime_config_defaults(
+    runtime_type: str, config: dict[str, Any]
+) -> dict[str, Any]:
+    extra_args = config.get("extraArgs")
+    normalized_args = list(extra_args) if isinstance(extra_args, list) else []
+    if runtime_type == "opencode_local" and (
+        _OPENCODE_SKIP_PERMISSIONS_ARG not in normalized_args
+    ):
+        normalized_args.append(_OPENCODE_SKIP_PERMISSIONS_ARG)
+    if runtime_type != "opencode_local":
+        normalized_args = [
+            arg for arg in normalized_args if arg != _OPENCODE_SKIP_PERMISSIONS_ARG
+        ]
+    normalized = {**config}
+    if normalized_args:
+        normalized["extraArgs"] = normalized_args
+    else:
+        normalized.pop("extraArgs", None)
+    return config if normalized == config else normalized
 
 
 def _validate_runtime_config(runtime_type: str, config: dict[str, Any]) -> None:
@@ -829,8 +889,9 @@ class AgentService:
             name = self._deduplicate_name(requested_name, existing)
         agent_id = str(uuid.uuid4())
         agent_runtime_type = payload.get("agentRuntimeType", DEFAULT_AGENT_RUNTIME_TYPE)
-        agent_runtime_config = normalize_instructions_paths(
-            dict(payload.get("agentRuntimeConfig", {}))
+        agent_runtime_config = _normalize_runtime_config_defaults(
+            agent_runtime_type,
+            normalize_instructions_paths(dict(payload.get("agentRuntimeConfig", {}))),
         )
         _validate_runtime_config(agent_runtime_type, agent_runtime_config)
         values: dict[str, Any] = {
@@ -941,22 +1002,37 @@ class AgentService:
         if "desiredSkills" in patch:
             desired_skills = cast(list[str], patch.pop("desiredSkills"))
         replace_runtime_config = patch.pop("replaceAgentRuntimeConfig", False)
-        if "agentRuntimeConfig" in patch and not replace_runtime_config:
-            patch["agentRuntimeConfig"] = {
-                **existing.agent_runtime_config,
-                **cast(dict[str, Any], patch["agentRuntimeConfig"]),
-            }
-        if "agentRuntimeConfig" in patch:
-            patch["agentRuntimeConfig"] = normalize_instructions_paths(
-                cast(dict[str, Any], patch["agentRuntimeConfig"])
-            )
         next_runtime_type = cast(
             str, patch.get("agentRuntimeType", existing.agent_runtime_type)
         )
-        next_runtime_config = cast(
-            dict[str, Any],
-            patch.get("agentRuntimeConfig", existing.agent_runtime_config),
+        if "agentRuntimeConfig" in patch:
+            submitted_runtime_config = normalize_instructions_paths(
+                cast(dict[str, Any], patch["agentRuntimeConfig"])
+            )
+            if replace_runtime_config:
+                candidate_runtime_config = submitted_runtime_config
+            else:
+                preserved_runtime_config = _runtime_config_after_switch(
+                    existing.agent_runtime_type,
+                    next_runtime_type,
+                    existing.agent_runtime_config,
+                )
+                candidate_runtime_config = {
+                    **preserved_runtime_config,
+                    **submitted_runtime_config,
+                }
+        else:
+            candidate_runtime_config = _runtime_config_after_switch(
+                existing.agent_runtime_type,
+                next_runtime_type,
+                existing.agent_runtime_config,
+            )
+        next_runtime_config = _normalize_runtime_config_defaults(
+            next_runtime_type,
+            candidate_runtime_config,
         )
+        if next_runtime_config is not existing.agent_runtime_config:
+            patch["agentRuntimeConfig"] = next_runtime_config
         _validate_runtime_config(next_runtime_type, next_runtime_config)
         field_map = {
             "name": "name",

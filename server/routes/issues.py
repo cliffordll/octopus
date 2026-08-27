@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import uuid
 from typing import Any, cast
 
@@ -19,6 +18,8 @@ from packages.shared.api_paths.issue_attachments import (
 from packages.shared.api_paths.heartbeat import ISSUE_HEARTBEAT_RUNS_PATH
 from packages.shared.api_paths.issues import (
     ISSUE_CHECKOUT_PATH,
+    ISSUE_CHILDREN_BATCH_PATH,
+    ISSUE_CHILDREN_PATH,
     ISSUE_COMMENT_LIST_PATH,
     ISSUE_DOCUMENT_DETAIL_PATH,
     ISSUE_DOCUMENT_REVISIONS_PATH,
@@ -28,13 +29,15 @@ from packages.shared.api_paths.issues import (
     ISSUE_HEARTBEAT_CONTEXT_PATH,
     ISSUE_LIST_MISSING_ORG_PATH,
     ISSUE_PASSIVE_FOLLOWUP_PATH,
+    ISSUE_RETRY_CHILD_PATH,
+    ISSUE_REPLACE_CHILD_PATH,
+    ISSUE_ACCEPT_INCOMPLETE_PATH,
     ISSUE_REVIEW_DECISION_PATH,
     ISSUE_WORK_PRODUCTS_PATH,
     ORG_ISSUE_LIST_PATH,
     WORK_PRODUCT_DETAIL_PATH,
 )
 from packages.shared.types.heartbeat import HeartbeatRun, WakeAgentPayload
-from packages.shared.types.agent import Agent
 from packages.shared.types.issue import (
     DocumentRevision,
     IssueDetail,
@@ -46,6 +49,7 @@ from packages.shared.types.issue import (
 from packages.shared.types.issue_attachment import IssueAttachment
 from packages.shared.types.workspace import IssueWorkProduct
 from packages.shared.validators.issue import (
+    validate_create_child_issues,
     validate_create_issue,
     validate_create_issue_comment,
     validate_checkout_issue,
@@ -74,9 +78,29 @@ from ..dependencies.issues import get_issue_service
 from ..dependencies.documents import get_document_service
 from ..dependencies.database import get_session
 from ..dependencies.workspaces import get_workspace_service
-from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.heartbeat import (
+    HeartbeatService,
+    track_dispatch_task,
+)
+from ..services.run_dispatch import RunDispatchService
 from ..services.issue_assignment_wakeup import queue_issue_assignment_wakeup
+from ..services.child_dispatch import ChildDispatchCoordinator
+from ..services.child_recovery import (
+    ChildRecoveryCoordinator,
+    ChildRecoveryUnavailable,
+)
+from ..services.issue_comment_wakeup import IssueCommentWakeupCoordinator
+from ..services.parent_child_control import (
+    ParentChildControlAuthorizer,
+    ParentChildControlContext,
+    ParentChildControlDenied,
+)
 from ..services.issue_review_wakeup import queue_issue_review_wakeup
+from ..services.run_admission import (
+    DirectRunCreationDenied,
+    RunAdmissionPolicy,
+    RunAdoptionDenied,
+)
 from ..services.agents import AgentService
 from ..services.issues import IssueCheckoutConflictError, IssueService
 from ..services.documents import DocumentService
@@ -84,7 +108,6 @@ from ..services.workspaces import WorkspaceService
 from ..storage import StorageService, get_storage_service
 
 router = APIRouter(tags=["issues"])
-_MENTION_PATTERN = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_.-]*)")
 
 
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
@@ -92,17 +115,14 @@ def _schedule_dispatch(request: Request, agent_id: str) -> None:
         # Let the request-scoped transaction close before the dispatcher claims
         # the queued run with a separate session.
         await asyncio.sleep(0.05)
-        await dispatch_queued_agent(request.app.state.session_factory, agent_id)
+        await RunDispatchService(request.app.state.session_factory).dispatch_agent(
+            agent_id
+        )
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
-    tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
-    task.add_done_callback(tasks.discard)
-
-
-def _mentioned_tokens(body: str) -> set[str]:
-    return {match.group(1).strip().lower() for match in _MENTION_PATTERN.finditer(body)}
+    track_dispatch_task(tasks, task)
 
 
 def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
@@ -126,69 +146,6 @@ def _issue_execute_unavailable_detail(wakeup: Any | None) -> str:
     if wakeup.status == "skipped" and wakeup.error:
         return f"Issue execution was skipped: {wakeup.error}"
     return "Issue assignee is not invokable"
-
-
-async def _mentioned_agents(
-    agent_service: AgentService, org_id: str, body: str
-) -> list[Agent]:
-    tokens = _mentioned_tokens(body)
-    if not tokens:
-        return []
-    agents = await agent_service.list_for_org(org_id)
-    mentioned: list[Agent] = []
-    for agent in agents:
-        aliases = {
-            value.lower()
-            for value in (agent["id"], agent["name"], agent["urlKey"])
-            if isinstance(value, str) and value
-        }
-        if tokens & aliases:
-            mentioned.append(agent)
-    return mentioned
-
-
-async def _queue_issue_comment_mention_wakeup(
-    heartbeat: HeartbeatService,
-    issue: IssueDetail,
-    *,
-    mentioned_agent_id: str,
-    comment_id: str,
-    comment_body: str,
-    actor_type: str,
-    actor_id: str,
-) -> None:
-    payload: WakeAgentPayload = {
-        "source": "on_demand",
-        "triggerDetail": "system",
-        "reason": "issue_comment_mentioned",
-        "payload": {
-            "issueId": issue["id"],
-            "mutation": "comment_mention",
-            "commentId": comment_id,
-        },
-        "contextSnapshot": {
-            "issueId": issue["id"],
-            "source": "issue.comment",
-            "wakeSource": "mention",
-            "wakeReason": "issue_comment_mentioned",
-            "commentId": comment_id,
-            "commentBody": comment_body,
-            "issue": {
-                "id": issue["id"],
-                "title": issue["title"],
-                "description": issue.get("description"),
-                "status": issue["status"],
-                "priority": issue["priority"],
-            },
-        },
-    }
-    await heartbeat.wakeup(
-        mentioned_agent_id,
-        payload,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        execute_immediately=False,
-    )
 
 
 @router.get(ISSUE_LIST_MISSING_ORG_PATH)
@@ -285,6 +242,9 @@ async def create_issue_route(
         actor_type="agent" if actor.actor_type == "agent" else "user",
         actor_id=actor.actor_id,
     )
+    assignee_agent_id = issue.get("assigneeAgentId")
+    if assignee_agent_id and issue["status"] != "backlog":
+        _schedule_dispatch(request, assignee_agent_id)
     await queue_issue_review_wakeup(
         heartbeat,
         issue,
@@ -302,6 +262,69 @@ async def create_issue_route(
     ):
         _schedule_dispatch(request, reviewer_agent_id)
     return issue
+
+
+@router.post(ISSUE_CHILDREN_BATCH_PATH)
+async def create_issue_children_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    body: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    try:
+        payload = validate_create_child_issues(body)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    actor = require_actor_identity(request)
+    access_parent = await service.get_by_id(id)
+    if access_parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Parent issue not found",
+        )
+    assert_organization_access(request, access_parent["orgId"])
+    canonical_parent_id = access_parent["id"]
+    await service.end_child_batch_preflight()
+    try:
+        parent, children, created = await service.create_child_issues(
+            canonical_parent_id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+        dispatch = await ChildDispatchCoordinator(
+            heartbeat,
+            queue_assignment=queue_issue_assignment_wakeup,
+        ).materialize(
+            children,
+            created=created,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+        )
+        await service.commit_child_issues()
+    except ValueError as exc:
+        status_code = (
+            http_status.HTTP_404_NOT_FOUND
+            if str(exc) == "Parent issue not found"
+            else http_status.HTTP_422_UNPROCESSABLE_CONTENT
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail=str(exc),
+        ) from exc
+    for agent_id in dispatch.agent_ids:
+        _schedule_dispatch(request, agent_id)
+    return {
+        "parent": parent,
+        "children": children,
+        "created": created,
+        "dispatchAgentIds": list(dispatch.agent_ids),
+    }
 
 
 @router.get(ISSUE_DETAIL_PATH)
@@ -339,6 +362,280 @@ async def list_issue_heartbeat_runs_route(
     return runs
 
 
+@router.post(ISSUE_RETRY_CHILD_PATH)
+async def retry_child_issue_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> dict[str, Any]:
+    actor = require_actor_identity(request)
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    assert_organization_access(request, detail["orgId"])
+    parent_id = detail.get("parentId")
+    parent = await service.get_by_id(parent_id) if parent_id else None
+    if parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Issue is not a child issue",
+        )
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=parent, child=detail),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    try:
+        retried = await ChildRecoveryCoordinator(service, heartbeat).retry(
+            detail,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ChildRecoveryUnavailable as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    return dict(retried)
+
+
+@router.post(ISSUE_REPLACE_CHILD_PATH, status_code=http_status.HTTP_201_CREATED)
+async def replace_child_issue_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> IssueDetail:
+    actor = require_actor_identity(request)
+    old_child = await service.get_by_id(id)
+    if old_child is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    assert_organization_access(request, old_child["orgId"])
+    await service.end_child_batch_preflight()
+    existing_replacement = await service.lock_and_get_child_replacement(
+        old_child["id"], old_child["orgId"]
+    )
+    if existing_replacement is not None:
+        return existing_replacement
+    parent_id = old_child.get("parentId")
+    if not parent_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Issue is not a child issue",
+        )
+    parent = await service.get_by_id(parent_id)
+    if parent is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Parent issue not found",
+        )
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=parent, child=old_child),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    if old_child.get("executionRunId") or old_child.get("checkoutRunId"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Child issue execution is still active or being finalized",
+        )
+    if old_child["status"] == "done" and old_child.get("workProducts"):
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Completed child issue already has registered work products",
+        )
+    try:
+        await ChildRecoveryCoordinator(
+            service, heartbeat
+        ).require_failed_retry_before_replacement(old_child["id"])
+    except ChildRecoveryUnavailable as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    title = body.get("title") or f"Replacement for {old_child['title']}"
+    description = body.get("description") or old_child.get("description")
+    payload = validate_create_issue(
+        {
+            "title": title,
+            "description": description,
+            "status": "todo",
+            "parentId": parent_id,
+            "projectId": old_child.get("projectId"),
+            "goalId": old_child.get("goalId"),
+            "assigneeAgentId": body.get("assigneeAgentId")
+            or old_child.get("assigneeAgentId"),
+        }
+    )
+    replacement = await service.create_issue(
+        old_child["orgId"],
+        payload,
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+        origin_run_id=old_child.get("originRunId"),
+        closeout_policy=old_child.get("closeoutPolicy"),
+        origin_kind=old_child.get("originKind"),
+    )
+    await service.record_child_replaced(
+        old_child,
+        replacement,
+        reason=body.get("reason"),
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    await queue_issue_assignment_wakeup(
+        heartbeat,
+        replacement,
+        reason="issue_assigned",
+        mutation="replace_child",
+        context_source="issue.replace_child",
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
+        suppress_errors=False,
+    )
+    assignee_agent_id = replacement.get("assigneeAgentId")
+    if assignee_agent_id:
+        _schedule_dispatch(request, assignee_agent_id)
+    return replacement
+
+
+@router.post(ISSUE_ACCEPT_INCOMPLETE_PATH)
+async def accept_incomplete_issue_route(
+    id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    service: IssueService = Depends(get_issue_service),
+    heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+) -> IssueDetail:
+    actor = require_actor_identity(request)
+    if actor.actor_type == "agent":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Only a human operator can accept incomplete child work",
+        )
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Issue not found"
+        )
+    assert_organization_access(request, detail["orgId"])
+    try:
+        await ParentChildControlAuthorizer(heartbeat).authorize(
+            ParentChildControlContext(parent=detail),
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ParentChildControlDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    reason = body.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="reason is required",
+        )
+    child_ids: list[str] = []
+    raw_child_ids = body.get("childIssueIds")
+    raw_child_id = body.get("childIssueId")
+    if isinstance(raw_child_id, str) and raw_child_id.strip():
+        child_ids.append(raw_child_id.strip())
+    if isinstance(raw_child_ids, list):
+        child_ids.extend(
+            child_id.strip()
+            for child_id in raw_child_ids
+            if isinstance(child_id, str) and child_id.strip()
+        )
+    child_ids = list(dict.fromkeys(child_ids))
+    if not child_ids:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="childIssueIds must identify at least one blocked or cancelled child",
+        )
+    for child_id in child_ids:
+        child = await service.get_by_id(child_id)
+        if child is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail=f"Child issue {child_id} not found",
+            )
+        if (
+            child.get("orgId") != detail["orgId"]
+            or child.get("parentId") != detail["id"]
+        ):
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"Issue {child_id} is not a child of {detail['id']}",
+            )
+        if child.get("status") not in {"blocked", "cancelled"}:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"Child issue {child_id} is not blocked or cancelled",
+            )
+    await service.record_incomplete_accepted(
+        detail,
+        reason=reason.strip(),
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        child_issue_ids=child_ids,
+        run_id=actor.run_id,
+    )
+    updated = await service.update_issue(
+        id,
+        {
+            "status": "in_progress",
+            "comment": f"Accepted incomplete delivery: {reason.strip()}",
+        },
+        actor_type=actor.actor_type,
+        actor_id=actor.actor_id,
+        run_id=actor.run_id,
+    )
+    assert updated is not None
+    child_outputs = await service.get_child_outputs(id)
+    settled_child_ids = (
+        child_ids
+        if child_ids
+        else [
+            str(child["id"])
+            for child in (child_outputs or {}).get("children", [])
+            if child.get("status") in {"done", "blocked", "cancelled"}
+        ]
+    )
+    for child_id in settled_child_ids:
+        parent_agent_id = await heartbeat.queue_parent_continuation_for_settled_child(
+            child_id,
+            expected_org_id=detail["orgId"],
+        )
+        if parent_agent_id:
+            _schedule_dispatch(request, parent_agent_id)
+    return updated
+
+
 @router.get(ISSUE_HEARTBEAT_CONTEXT_PATH)
 async def get_issue_heartbeat_context_route(
     id: str,
@@ -355,6 +652,27 @@ async def get_issue_heartbeat_context_route(
     context = await service.get_heartbeat_context(id)
     assert context is not None
     return context
+
+
+@router.get(ISSUE_CHILDREN_PATH)
+async def list_issue_children_route(
+    id: str,
+    request: Request,
+    service: IssueService = Depends(get_issue_service),
+    includeWorkProducts: bool = Query(default=False),
+) -> dict[str, Any]:
+    detail = await service.get_by_id(id)
+    if detail is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    assert_organization_access(request, detail["orgId"])
+    result = await service.get_child_outputs(
+        id, include_work_products=includeWorkProducts
+    )
+    assert result is not None
+    return result
 
 
 @router.post(ISSUE_CHECKOUT_PATH)
@@ -383,14 +701,27 @@ async def checkout_issue_route(
     if actor.actor_type == "agent" and actor.actor_id != payload["agentId"]:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail="Agent actor cannot checkout for another agent",
+            detail="Agent cannot checkout for another agent",
         )
+    try:
+        checkout_run_id = await RunAdmissionPolicy(heartbeat).checkout_run_id(
+            issue_id=detail["id"],
+            requested_agent_id=payload["agentId"],
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            actor_run_id=actor.run_id,
+        )
+    except RunAdoptionDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     try:
         updated = await service.checkout_issue(
             id,
             payload,
             actor_type=actor.actor_type,
             actor_id=actor.actor_id,
+            checkout_run_id=checkout_run_id,
         )
     except IssueCheckoutConflictError as exc:
         raise HTTPException(
@@ -402,18 +733,19 @@ async def checkout_issue_route(
             status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Issue not found",
         )
-    await queue_issue_assignment_wakeup(
-        heartbeat,
-        updated,
-        reason="issue_checked_out",
-        mutation="checkout",
-        context_source="issue.checkout",
-        actor_type="agent" if actor.actor_type == "agent" else "user",
-        actor_id=actor.actor_id,
-    )
-    assignee_agent_id = updated.get("assigneeAgentId")
-    if assignee_agent_id and updated["status"] != "backlog":
-        _schedule_dispatch(request, assignee_agent_id)
+    if checkout_run_id is None:
+        await queue_issue_assignment_wakeup(
+            heartbeat,
+            updated,
+            reason="issue_checked_out",
+            mutation="checkout",
+            context_source="issue.checkout",
+            actor_type="agent" if actor.actor_type == "agent" else "user",
+            actor_id=actor.actor_id,
+        )
+        assignee_agent_id = updated.get("assigneeAgentId")
+        if assignee_agent_id and updated["status"] != "backlog":
+            _schedule_dispatch(request, assignee_agent_id)
     return updated
 
 
@@ -432,6 +764,15 @@ async def execute_issue_route(
             detail="Issue not found",
         )
     assert_organization_access(request, detail["orgId"])
+    actor = require_actor_identity(request)
+    try:
+        RunAdmissionPolicy(heartbeat).require_direct_creation_authority(
+            actor_type=actor.actor_type
+        )
+    except DirectRunCreationDenied as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
     assignee_agent_id = detail.get("assigneeAgentId")
     if not assignee_agent_id:
         raise HTTPException(
@@ -443,25 +784,25 @@ async def execute_issue_route(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Reopen the issue before execution",
         )
-    active = await heartbeat.get_active_for_issue(id)
+    canonical_issue_id = detail["id"]
+    active = await heartbeat.get_active_for_issue(canonical_issue_id)
     if active is not None:
         return active
 
-    actor = require_actor_identity(request)
-    idempotency_key = f"issue:{id}:execute:{uuid.uuid4()}"
+    idempotency_key = f"issue:{canonical_issue_id}:execute:{uuid.uuid4()}"
     payload: WakeAgentPayload = {
         "source": "assignment",
         "triggerDetail": "system",
         "reason": "issue_execute",
         "idempotencyKey": idempotency_key,
-        "payload": {"issueId": id, "mutation": "execute"},
+        "payload": {"issueId": canonical_issue_id, "mutation": "execute"},
         "contextSnapshot": {
-            "issueId": id,
+            "issueId": canonical_issue_id,
             "source": "issue.execute",
             "wakeSource": "assignment",
             "wakeReason": "issue_execute",
             "issue": {
-                "id": id,
+                "id": canonical_issue_id,
                 "title": detail["title"],
                 "description": detail.get("description"),
                 "status": detail["status"],
@@ -507,7 +848,7 @@ async def execute_issue_route(
         actor_id=actor.actor_id,
         action="issue.executed",
         entity_type="issue",
-        entity_id=id,
+        entity_id=canonical_issue_id,
         agent_id=assignee_agent_id,
         run_id=enriched["id"],
         details={
@@ -582,12 +923,16 @@ async def update_issue_route(
         actor = require_actor_identity(request)
         if (
             actor.actor_type == "agent"
-            and payload.get("status") == "done"
+            and payload.get("status") is not None
             and detail.get("assigneeAgentId") != actor.actor_id
         ):
             raise HTTPException(
                 status_code=http_status.HTTP_403_FORBIDDEN,
-                detail="Only the checkout owner can mark issue done",
+                detail=(
+                    "Only the checkout owner can mark issue done"
+                    if payload.get("status") == "done"
+                    else "Only the assigned Agent can change issue status"
+                ),
             )
         assignee_done_requested_review = (
             actor.actor_type == "agent"
@@ -728,6 +1073,16 @@ async def update_issue_route(
         assignee_agent_id = updated.get("assigneeAgentId")
         if assignee_agent_id:
             _schedule_dispatch(request, assignee_agent_id)
+    if detail["status"] != updated["status"] and updated["status"] in {
+        "done",
+        "cancelled",
+        "blocked",
+    }:
+        parent_agent_id = await heartbeat.queue_parent_continuation_for_settled_child(
+            updated["id"]
+        )
+        if parent_agent_id:
+            _schedule_dispatch(request, parent_agent_id)
     return updated
 
 
@@ -766,6 +1121,7 @@ async def create_issue_comment_route(
     service: IssueService = Depends(get_issue_service),
     agent_service: AgentService = Depends(get_agent_service),
     heartbeat: HeartbeatService = Depends(get_heartbeat_service),
+    session: AsyncSession = Depends(get_session),
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     detail = await service.get_by_id(id)
@@ -783,63 +1139,38 @@ async def create_issue_comment_route(
             detail=str(exc),
         ) from exc
     actor = require_actor_identity(request)
-    comment = await service.add_comment(
-        id,
-        payload,
-        actor_type=actor.actor_type,
-        actor_id=actor.actor_id,
-        run_id=actor.run_id,
-    )
-    user_intervention_stopped_followup = (
-        actor.actor_type != "agent"
-        and await heartbeat.skip_scheduled_issue_passive_followups(
+    try:
+        comment = await service.add_comment(
+            id,
+            payload,
+            actor_type=actor.actor_type,
+            actor_id=actor.actor_id,
+            run_id=actor.run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if actor.actor_type != "agent":
+        await heartbeat.skip_scheduled_issue_passive_followups(
             id,
             reason="Issue has user comment after missing closeout",
         )
+    wakeup_result = await IssueCommentWakeupCoordinator(
+        session,
+        heartbeat,
+        agent_service,
+        service,
+    ).process(
+        issue=detail,
+        comment_id=comment.id,
+        comment_body=comment.body,
+        actor_type="agent" if actor.actor_type == "agent" else "user",
+        actor_id=actor.actor_id,
     )
-    mentioned_agents = await _mentioned_agents(
-        agent_service, detail["orgId"], comment.body
-    )
-    mentioned_agent_ids = {mentioned["id"] for mentioned in mentioned_agents}
-    assignee_agent_id = detail.get("assigneeAgentId")
-    issue_status = detail.get("status")
-    skip_assignee_comment_wakeup = issue_status in {"backlog", "done", "cancelled"}
-    comment_targets_assignee = not mentioned_agent_ids or (
-        assignee_agent_id is not None and assignee_agent_id in mentioned_agent_ids
-    )
-    queued_assignee_wakeup = not (
-        user_intervention_stopped_followup
-        or skip_assignee_comment_wakeup
-        or not comment_targets_assignee
-        or (actor.actor_type == "agent" and actor.actor_id == assignee_agent_id)
-    )
-    if queued_assignee_wakeup:
-        await queue_issue_assignment_wakeup(
-            heartbeat,
-            detail,
-            reason="issue_comment_added",
-            mutation="comment",
-            context_source="issue.comment",
-            actor_type="agent" if actor.actor_type == "agent" else "user",
-            actor_id=actor.actor_id,
-            extra_payload={"commentId": comment.id},
-            extra_context={"commentId": comment.id, "commentBody": comment.body},
-        )
-    for mentioned in mentioned_agents:
-        mentioned_agent_id = mentioned["id"]
-        if actor.actor_type == "agent" and actor.actor_id == mentioned_agent_id:
-            continue
-        if queued_assignee_wakeup and mentioned_agent_id == assignee_agent_id:
-            continue
-        await _queue_issue_comment_mention_wakeup(
-            heartbeat,
-            detail,
-            mentioned_agent_id=mentioned_agent_id,
-            comment_id=comment.id,
-            comment_body=comment.body,
-            actor_type="agent" if actor.actor_type == "agent" else "user",
-            actor_id=actor.actor_id,
-        )
+    for agent_id in wakeup_result.dispatch_agent_ids:
+        _schedule_dispatch(request, agent_id)
     return {
         "id": comment.id,
         "issueId": comment.issue_id,
@@ -894,7 +1225,9 @@ async def record_issue_review_decision_route(
         )
     await heartbeat.cancel_open_issue_review_wakeups(
         id,
-        reason="review already resolved",
+        resolving_actor_type=actor.actor_type,
+        resolving_actor_id=actor.actor_id,
+        resolving_run_id=actor.run_id,
     )
     return updated
 

@@ -16,7 +16,12 @@ WakeupRequestStatus = Literal[
     "cancelled",
 ]
 HeartbeatRunStatus = Literal[
-    "queued", "running", "succeeded", "failed", "cancelled", "timed_out"
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "timed_out",
 ]
 HeartbeatRunPurpose = Literal[
     "task_execution", "closeout_followup", "review", "heartbeat"

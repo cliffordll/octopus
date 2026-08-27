@@ -1,6 +1,6 @@
-﻿---
+---
 name: control-plane
-description: 通过 `control-plane` CLI 与控制平面交互，在 heartbeat 中管理任务、审批、评论、问题文档和组织技能。仅用于控制平面协作，不用于直接完成业务领域工作。
+description: 通过 `octopus` CLI 与控制平面交互，在 heartbeat 中管理任务、审批、评论、问题文档和组织技能。仅用于控制平面协作，不用于直接完成业务领域工作。
 ---
 
 # 控制平面技能
@@ -9,8 +9,8 @@ description: 通过 `control-plane` CLI 与控制平面交互，在 heartbeat �
 
 该技能优先使用 CLI：
 
-- 控制平面操作使用 `control-plane ... --json`。
-- 需要发现可用命令时，使用 `control-plane agent capabilities --json`。
+- 控制平面操作使用 `octopus ... --json`。
+- 需要发现可用命令时，使用 `octopus agent capabilities --json`。
 - 稳定命令目录参考 `references/cli-reference.md`。
 - `references/api-reference.md` 仅作为内部调试或兼容参考，不是常规 agent 接口。
 - 只有当 CLI 命令返回非零并给出诊断错误，或 runtime/打包问题导致 CLI 返回 0 但 stdout 为空时，才允许降级到 API，并需要在 issue 评论或 run notes 中记录原因。
@@ -39,28 +39,33 @@ description: 通过 `control-plane` CLI 与控制平面交互，在 heartbeat �
 
 - 不要在正常 heartbeat 中向用户索要 `OCTOPUS_API_KEY`。
 - 不要硬编码 API URL。
+- 不要读取或创建 workspace `.env` 文件来恢复 `OCTOPUS_*`；这些值由 runtime 直接注入进程环境。
+- 本地 adapter 和 packaged desktop 会把 `control-plane` 放到 `PATH`；不要硬编码 managed `.octopus/bin` shim 路径。
+- 手工检查环境变量时使用当前 shell 的正确语法：PowerShell 使用 `$env:OCTOPUS_AGENT_ID`，POSIX shell 使用 `$OCTOPUS_AGENT_ID`。
 - 优先读取注入的上下文并使用 CLI 完成控制平面协作。
 
 ## Close-out gate（关闭门禁）
 
-退出活跃 issue heartbeat 前，必须先让匹配的 `control-plane` close-out 命令成功执行。最终 assistant 总结不是关闭信号。先执行 CLI 命令，确认命令成功，再退出。
+退出活跃 issue heartbeat 前，必须先让匹配的 `octopus` close-out 命令成功执行。最终 assistant 总结不是关闭信号。先执行 CLI 命令，确认命令成功，再退出。
 
 不要在 issue 没有 `reviewerAgentId` 时声称“已触发 reviewer”。没有任何 reviewer 时，`issue done` 会直接把任务改成 `done`，系统拒绝进入 `in_review`。只有 `reviewerUserId` 时进入人工评审，不会创建 reviewer agent run。
+
+当完成命令声明了 `--work-product` 或 `--primary-work-product` 时，Run 收尾会先验证文件真实存在，因此命令可能暂时返回 `in_progress`。只要命令执行成功，就表示关闭请求已经可靠记录，不要因为仍在验证而重复提交。声明的文件不存在时，Run 会失败，issue 会进入 `blocked`。
 
 如果 `OCTOPUS_WAKE_REASON=issue_passive_followup`：
 
 - 这次运行只用于补齐上一次成功运行缺失的 close-out 信号，不要先开始新的实现任务。
 - 检查 issue 当前状态后，必须执行且只需执行以下一种命令：
-  - `control-plane issue done "<issue-id-or-identifier>" --comment "<markdown>" --json`
-  - `control-plane issue block "<issue-id-or-identifier>" --comment "<markdown>" --json`
-  - `control-plane issue comment "<issue-id-or-identifier>" --body "<markdown>" --json`
+  - `octopus issue done "<issue-id-or-identifier>" --comment "<markdown>" --json`
+  - `octopus issue block "<issue-id-or-identifier>" --comment "<markdown>" --json`
+  - `octopus issue comment "<issue-id-or-identifier>" --body "<markdown>" --json`
 - 不要只用最终回复说明“已完成”“需要跟进”或“稍后处理”。在上面任一命令成功前，Do not exit。
 
 如果 `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`：
 
 - 这次运行只用于补齐 reviewer run 缺失的评审结论，不要把它当成新的执行任务。
-- 必须执行一次 `control-plane issue review "<issue-id-or-identifier>" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`。
-- 不要用 `control-plane issue comment` 代替 reviewer 结论。在 `control-plane issue review` 成功前，Do not exit。
+- 必须执行一次 `octopus issue review "<issue-id-or-identifier>" --decision approve|request_changes|needs_followup|blocked --comment "<markdown>" --json`。
+- 不要用 `octopus issue comment` 代替 reviewer 结论。在 `octopus issue review` 成功前，Do not exit。
 
 ## 适用场景
 

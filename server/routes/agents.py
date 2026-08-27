@@ -124,7 +124,12 @@ from ..dependencies.workspaces import get_workspace_service
 from ..services.agents import AgentConflictError, AgentService
 from ..services.agent_instructions import AgentInstructionsService
 from ..services.agent_memory import AgentMemoryService
-from ..services.heartbeat import HeartbeatService, dispatch_queued_agent
+from ..services.heartbeat import (
+    HeartbeatService,
+    track_dispatch_task,
+)
+from ..services.run_dispatch import RunDispatchService
+from ..services.run_admission import DirectRunCreationDenied, RunAdmissionPolicy
 from ..services.workspaces import WorkspaceService
 
 router = APIRouter(tags=["agents"])
@@ -133,13 +138,14 @@ router = APIRouter(tags=["agents"])
 def _schedule_dispatch(request: Request, agent_id: str) -> None:
     async def dispatch_after_commit() -> None:
         await asyncio.sleep(0.01)
-        await dispatch_queued_agent(request.app.state.session_factory, agent_id)
+        await RunDispatchService(request.app.state.session_factory).dispatch_agent(
+            agent_id
+        )
 
     task = asyncio.create_task(dispatch_after_commit())
     tasks = getattr(request.app.state, "heartbeat_dispatch_tasks", set())
-    tasks.add(task)
     request.app.state.heartbeat_dispatch_tasks = tasks
-    task.add_done_callback(tasks.discard)
+    track_dispatch_task(tasks, task)
 
 
 async def _get_agent_or_404(
@@ -1027,17 +1033,29 @@ async def _invoke_agent(
     *,
     service: AgentService,
     heartbeat: HeartbeatService,
+    preflight: bool = False,
+    diagnostic: bool = False,
 ) -> HeartbeatRun | dict[str, str]:
     await _get_agent_or_404(id, request=request, service=service)
     actor = require_actor_identity(request)
-    if actor.actor_type == "agent" and actor.actor_id != id:
+    try:
+        RunAdmissionPolicy(heartbeat).require_direct_creation_authority(
+            actor_type=actor.actor_type
+        )
+    except DirectRunCreationDenied as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Agent can only invoke itself",
-        )
+            detail=str(exc),
+        ) from exc
     try:
-        payload = validate_wake_agent(body)
-        run = await heartbeat.wakeup(
+        request_body = dict(body)
+        if diagnostic:
+            request_body["reason"] = "runtime_diagnostic"
+            request_body["idempotencyKey"] = f"runtime-diagnostic:{id}"
+        payload = validate_wake_agent(request_body)
+        use_preflight = preflight and payload.get("source", "on_demand") == "on_demand"
+        invoke = heartbeat.wakeup_if_actionable if use_preflight else heartbeat.wakeup
+        run = await invoke(
             id,
             payload,
             actor_type=actor.actor_type,
@@ -1054,10 +1072,11 @@ async def _invoke_agent(
         ) from exc
     if run is None:
         return {"status": "skipped"}
-    await heartbeat.record_invoked_activity(
-        run, actor_type=actor.actor_type, actor_id=actor.actor_id
-    )
-    if run["status"] == "queued":
+    if not diagnostic:
+        await heartbeat.record_invoked_activity(
+            run, actor_type=actor.actor_type, actor_id=actor.actor_id
+        )
+    if run["status"] == "queued" and not heartbeat.last_wakeup_reused:
         _schedule_dispatch(request, id)
     return run
 
@@ -1076,6 +1095,7 @@ async def wake_agent_route(
         body,
         service=service,
         heartbeat=heartbeat,
+        preflight=True,
     )
 
 
@@ -1092,6 +1112,7 @@ async def invoke_agent_heartbeat_route(
         {},
         service=service,
         heartbeat=heartbeat,
+        diagnostic=True,
     )
 
 

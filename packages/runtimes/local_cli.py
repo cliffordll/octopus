@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from .common import RuntimeCapabilityMixin
+from .base import LocalRuntimeAdapter
 from .process import ProcessRuntimeAdapter
 from .types import RuntimeEnvironmentTestResult, RuntimeExecutionContext
 
 
-class LocalCliRuntimeAdapter(RuntimeCapabilityMixin):
+class LocalCliRuntimeAdapter(LocalRuntimeAdapter):
     def __init__(
         self,
         runtime_type: str,
@@ -17,13 +17,14 @@ class LocalCliRuntimeAdapter(RuntimeCapabilityMixin):
         default_args: list[str] | None = None,
         models: list[dict[str, str]] | None = None,
     ) -> None:
+        super().__init__()
         self.type = runtime_type
         self._default_command = default_command
         self._default_args = default_args or []
         self._models = models or []
         self._process = ProcessRuntimeAdapter()
 
-    async def execute(self, context: RuntimeExecutionContext):
+    async def _execute_runtime(self, context: RuntimeExecutionContext):
         config = dict(context.config)
         config.setdefault("command", self._default_command)
         config.setdefault("args", self._default_args)

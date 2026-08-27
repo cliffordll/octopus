@@ -68,8 +68,13 @@ secrets.json
 logs/
 tmp/
 pytest-tmp/
+pytest-cache-files-*/
 .codex-pytest-write-check/
+.review-pytest-temp/
 .pytest-tmp*/
+.tmp/
+tests/.tmp-pytest*/
+.uv-*cache/
 .octopus/
 .octopus-test-tmp/
 

@@ -1,6 +1,6 @@
-﻿---
+---
 name: control-plane
-description: Interact with the control plane through the `control-plane` CLI to manage tasks, approvals, comments, issue documents, and organization skills during heartbeats. Use for control plane coordination only, not for the domain work itself.
+description: Interact with the control plane through the `octopus` CLI to manage tasks, approvals, comments, issue documents, and organization skills during heartbeats. Use for control plane coordination only, not for the domain work itself.
 ---
 
 # control-plane skill
@@ -9,10 +9,10 @@ You run in **heartbeats**: short execution windows triggered by control plane. E
 
 This skill is now **CLI-first**.
 
-- Use `control-plane ... --json` for control-plane work.
-- Use `control-plane agent capabilities --json` when you need machine-readable discovery of supported commands.
+- Use `octopus ... --json` for octopus work.
+- Use `octopus agent capabilities --json` when you need machine-readable discovery of supported commands.
 - Use `references/cli-reference.md` for the stable command catalog.
-- Treat `references/api-reference.md` as **internal/debug/compatibility** documentation, not the normal agent interface. API fallback is allowed only when a CLI command exits nonzero with a diagnostic error, or when a runtime/packaging bug makes a required `control-plane ... --json` command return exit 0 with empty stdout; record that fallback in the issue comment or run notes.
+- Treat `references/api-reference.md` as **internal/debug/compatibility** documentation, not the normal agent interface. API fallback is allowed only when a CLI command exits nonzero with a diagnostic error, or when a runtime/packaging bug makes a required `octopus ... --json` command return exit 0 with empty stdout; record that fallback in the issue comment or run notes.
 - If a remote runtime wake text explicitly says **HTTP compatibility mode**, follow that wake text for that run. Otherwise use the CLI.
 
 ## Authentication
@@ -38,8 +38,10 @@ Rules:
 
 - Never ask for `OCTOPUS_API_KEY` inside a normal heartbeat.
 - Never hard-code the API URL.
-- For local adapters and packaged desktop, `control-plane` is expected to already be on `PATH`.
-- In manual local CLI mode outside heartbeats, use `control-plane agent local-cli <agent-ref> --org-id <org-id>` to mint an agent key, optionally install bundled control-plane skills locally, and print the required `OCTOPUS_*` exports.
+- Do not read or create workspace `.env` files to recover `OCTOPUS_*` values. These values are injected into the process environment by the runtime.
+- For local adapters and packaged desktop, `octopus` is expected to already be on `PATH`; do not hard-code the managed `.octopus/bin` shim path.
+- Use shell-correct environment syntax when you must inspect variables manually: PowerShell uses `$env:OCTOPUS_AGENT_ID`; POSIX shells use `$OCTOPUS_AGENT_ID`.
+- In manual local CLI mode outside heartbeats, use `octopus agent local-cli <agent-ref> --org-id <org-id>` to mint an agent key, optionally install bundled control-plane skills locally, and print the required `OCTOPUS_*` exports.
 
 ## Shared Workspace
 
@@ -53,8 +55,9 @@ Important files and conventions:
 - If a run or chat is linked to a project, control plane injects only that project's attached resources into the runtime context.
 - If you need broader org-wide resources, query the org resource catalog explicitly instead of assuming it is already in the prompt.
 - Use Workspaces for disk-backed shared files, plans, and skill packages.
-- When you need to place durable generated output on disk, prefer the current workspace's `artifacts/` directory. In a shared workspace, put auto-captured issue deliverables under `artifacts/issues/<current-issue-id>/`. Do not rely on files written to the organization artifacts root being auto-registered as work products. Use `/tmp` only for transient scratch files and temporary verification artifacts.
-- For other shared output, prefer the managed workspace paths control plane injected for this run such as `$OCTOPUS_ORG_PLANS_DIR`, `$OCTOPUS_ORG_SKILLS_DIR`, and the active `$OCTOPUS_WORKSPACE_CWD` or `$OCTOPUS_ORG_WORKSPACE_ROOT`. Do not invent new top-level `projects/` folders.
+- When you need to place durable generated output on disk for a project-linked shared workspace, use the path the task/user specifies or a clear shared path under `$OCTOPUS_WORKSPACE_CWD`, such as `reports/<name>.md`. This is the default for reports, summaries, CSV files, screenshots, and handoff documents in shared project work.
+- `$OCTOPUS_ORG_ARTIFACTS_DIR` and the compatibility `$OCTOPUS_ISSUE_ARTIFACTS_DIR` are managed artifact locations, not the default target for shared project work. Use `$OCTOPUS_ISSUE_ARTIFACTS_DIR` only as a compatibility fallback or when the task explicitly asks for issue-scoped artifact storage; it is not a physical isolation boundary.
+- For other shared output, prefer the managed workspace paths control plane injected for this run such as `$OCTOPUS_ORG_PLANS_DIR`, `$OCTOPUS_ORG_SKILLS_DIR`, and the active `$OCTOPUS_WORKSPACE_CWD` or `$OCTOPUS_ORG_WORKSPACE_ROOT`. Do not invent new top-level `projects/` folders. Use `/tmp` only for transient scratch files and temporary verification artifacts.
 - If a `resources.md` file exists, treat it like a normal workspace file rather than a reserved control plane surface.
 - Agent-specific files live under `workspaces/agents/<workspace-key>/...`.
 - New projects do not create or configure their own workspace roots.
@@ -66,7 +69,7 @@ Follow this order unless the wake context clearly requires a different first ste
 **Step 1 — Identity.** If identity is not already known, run:
 
 ```bash
-control-plane agent me --json
+octopus agent me --json
 ```
 
 Use the result for your id, org, role, budget, and `chainOfCommand`.
@@ -74,8 +77,8 @@ Use the result for your id, org, role, budget, and `chainOfCommand`.
 **Step 2 — Approval follow-up.** If `OCTOPUS_APPROVAL_ID` is set, review it first:
 
 ```bash
-control-plane approval get "$OCTOPUS_APPROVAL_ID" --json
-control-plane approval issues "$OCTOPUS_APPROVAL_ID" --json
+octopus approval get "$OCTOPUS_APPROVAL_ID" --json
+octopus approval issues "$OCTOPUS_APPROVAL_ID" --json
 ```
 
 For each linked issue:
@@ -86,7 +89,7 @@ For each linked issue:
 **Step 3 — Get assignments.** Prefer the compact inbox:
 
 ```bash
-control-plane agent inbox --json
+octopus agent inbox --json
 ```
 
 Inbox rows include a `relationship` field:
@@ -105,7 +108,7 @@ reviewer, prioritize it first.
 **Step 4 — Mention-triggered wakes.** If `OCTOPUS_WAKE_COMMENT_ID` is set, read the relevant issue context before doing anything else on that task:
 
 ```bash
-control-plane issue context "$OCTOPUS_TASK_ID" --wake-comment-id "$OCTOPUS_WAKE_COMMENT_ID" --json
+octopus issue context "$OCTOPUS_TASK_ID" --wake-comment-id "$OCTOPUS_WAKE_COMMENT_ID" --json
 ```
 
 If the comment explicitly asks you to take ownership, you may self-assign by checkout. Otherwise respond only if useful and continue with your assigned work.
@@ -114,19 +117,19 @@ An `@Name` mention is a request for attention or collaboration. It does not tran
 **Step 5 — Checkout before work.** Never start work without checkout.
 
 ```bash
-control-plane issue checkout "<issue-id-or-identifier>" --json
+octopus issue checkout "<issue-id-or-identifier>" --json
 ```
 
 Rules:
 
-- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID`
+- `issue checkout` defaults `--agent-id` from `OCTOPUS_AGENT_ID` and defaults `--expected-status` to `todo` and `in_progress`
 - mutating CLI commands automatically attach `OCTOPUS_RUN_ID` when present
 - a `409` means another agent owns the task; do not retry it
 
 **Step 6 — Understand context.** Prefer the compact heartbeat context instead of replaying everything:
 
 ```bash
-control-plane issue context "<issue-id-or-identifier>" --json
+octopus issue context "<issue-id-or-identifier>" --json
 ```
 
 Comment reading rules:
@@ -135,7 +138,7 @@ Comment reading rules:
 - if you already know the thread and only need updates, use:
 
 ```bash
-control-plane issue comments list "<issue-id-or-identifier>" --after "<last-comment-id>" --order asc --json
+octopus issue comments list "<issue-id-or-identifier>" --after "<last-comment-id>" --order asc --json
 ```
 
 - use the full comment list only when cold-starting or when incremental context is not enough
@@ -161,9 +164,9 @@ the previous successful run did not leave a close-out signal. Do not do fresh
 implementation work first. Inspect current issue state, then execute exactly
 one of these commands before exiting:
 
-- work is complete: `control-plane issue done "<issue-id-or-identifier>" --comment "<markdown>" --json`
-- work is blocked: `control-plane issue block "<issue-id-or-identifier>" --comment "<markdown>" --json`
-- work remains open but has a clear next step: `control-plane issue comment "<issue-id-or-identifier>" --body "<markdown>" --json`
+- work is complete: `octopus issue done "<issue-id-or-identifier>" --comment "<markdown>" --json`
+- work is blocked: `octopus issue block "<issue-id-or-identifier>" --comment "<markdown>" --json`
+- work remains open but has a clear next step: `octopus issue comment "<issue-id-or-identifier>" --body "<markdown>" --json`
 
 For passive follow-up, a final assistant answer such as "done", "looks good",
 or "I will follow up" is not enough. Do not exit until one of the three CLI
@@ -178,57 +181,63 @@ permission to take over implementation unless explicitly asked:
 - approve:
 
 ```bash
-control-plane issue review "<issue-id-or-identifier>" --decision approve --comment "<markdown>" --json
+octopus issue review "<issue-id-or-identifier>" --decision approve --comment "<markdown>" --json
 ```
 
 - request changes and return the issue to the assignee:
 
 ```bash
-control-plane issue review "<issue-id-or-identifier>" --decision request_changes --comment "<markdown>" --json
+octopus issue review "<issue-id-or-identifier>" --decision request_changes --comment "<markdown>" --json
 ```
 
 - keep the issue in its current review/blocker state because specific evidence
   or follow-up is still missing:
 
 ```bash
-control-plane issue review "<issue-id-or-identifier>" --decision needs_followup --comment "<markdown>" --json
+octopus issue review "<issue-id-or-identifier>" --decision needs_followup --comment "<markdown>" --json
 ```
 
 - block the issue:
 
 ```bash
-control-plane issue review "<issue-id-or-identifier>" --decision blocked --comment "<markdown>" --json
+octopus issue review "<issue-id-or-identifier>" --decision blocked --comment "<markdown>" --json
 ```
 
 Use `blocked` to confirm a human/external blocker. The comment must name the next human action; control plane records a human handoff and removes the issue from repeated reviewer pickup until the board changes the issue.
 
 If `OCTOPUS_WAKE_REASON=issue_review_closeout_missing`, your previous reviewer
-run succeeded without `control-plane issue review`. This is a correction run,
+run succeeded without `octopus issue review`. This is a correction run,
 not a new review assignment. Inspect current state and execute exactly one
-`control-plane issue review ... --decision approve|request_changes|needs_followup|blocked --comment ... --json`
-command before exiting. Do not use `control-plane issue comment` as the
+`octopus issue review ... --decision approve|request_changes|needs_followup|blocked --comment ... --json`
+command before exiting. Do not use `octopus issue comment` as the
 reviewer outcome in this wake.
 
 - progress-only update:
 
 ```bash
-control-plane issue comment "<issue-id-or-identifier>" --body "<markdown>" [--image "<path>"] --json
+octopus issue comment "<issue-id-or-identifier>" --body "<markdown>" [--image "<path>"] --json
 ```
 
 - completion:
 
 ```bash
-control-plane issue done "<issue-id-or-identifier>" --comment "<markdown>" [--image "<path>"] --json
+octopus issue done "<issue-id-or-identifier>" --comment "<markdown>" [--image "<path>"] --json
 ```
 
 If the issue has a reviewer, this command means "ready for review" and moves
 the issue to `in_review`; it does not bypass the reviewer or directly complete
 the issue.
 
+When completion declares `--work-product` or `--primary-work-product`, the
+command may return the issue as `in_progress` while Run finalization verifies
+that the declared files really exist. A successful command is the durable
+close-out request: do not retry it just because validation is still pending.
+Missing declared files fail the Run and leave the issue blocked.
+
 - blocker:
 
 ```bash
-control-plane issue block "<issue-id-or-identifier>" --comment "<markdown>" [--image "<path>"] --json
+octopus issue block "<issue-id-or-identifier>" --comment "<markdown>" [--image "<path>"] --json
 ```
 
 - generic patch when workflow commands are not enough:
@@ -238,46 +247,52 @@ Add `--image "<path>"` one or more times when the close-out/progress comment sho
 If your comment mentions a screenshot path or uses a screenshot as validation evidence, attach that file with `--image "<path>"`. Do not leave only a local `/tmp/...` or workspace image path in the comment, because board users may not be able to inspect it from control plane.
 
 ```bash
-control-plane issue update "<issue-id-or-identifier>" ... --json
+octopus issue update "<issue-id-or-identifier>" ... --json
 ```
 
 **Step 9 — Delegate if needed.** When the issue or user asks to split work into
 subtasks, child tasks, or parallel delegated tasks, those product-visible
-subtasks must be real Octopus child issues. Create them with the generic create
-surface before treating the work as delegated:
+subtasks must be real Octopus child issues. Persist the complete split atomically
+before treating the work as delegated:
+
+Write the complete child array as a UTF-8 JSON file first, then submit the file without shell-escaping the JSON. The CLI validates the complete file before sending any write request:
 
 ```bash
-control-plane issue create --org-id "$OCTOPUS_ORG_ID" ... [--label-id "<label-id>"] [--label "<label-name>"] --json
+octopus issue create-children "<parent-id-or-identifier>" --children-file "<children.json>" [--parent-output-required] --json
 ```
+
+Child outputs are final by default, but the parent Agent is always resumed after the child set settles so it can summarize the results and close the parent issue. Use `--parent-output-required` only when the current instruction explicitly requires a separate parent-owned final artifact.
+
+Never test this write command by creating a placeholder child on the real parent issue.
 
 Before delegating child issues, list available agents when you need to choose the executor:
 
 ```bash
-control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
-Before creating a child issue, list existing children for the parent and reuse the existing child when the title already matches:
+Before creating child issues, list existing children for the parent. A retry in
+the same parent Run must reuse that Run's persisted batch instead of submitting
+another split; a later parent Run may create a new delegation batch:
 
 ```bash
-control-plane issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
+octopus issue list --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --json
 ```
 
-Delegated child issues must be assigned explicitly and should be moved into executable work:
+Every child in the JSON file must include `assigneeAgentId`; never assign a
+delegated child issue to yourself. If you will do that work inside the parent
+run, do not create a child issue for it. Do not create a summary/merge/report
+child: after all real parallel children settle, the parent run resumes and owns
+the final synthesis and deliverable.
 
-```bash
-control-plane issue create --org-id "$OCTOPUS_ORG_ID" --parent-id "<parent-id-or-identifier>" --title "<subtask title>" --description "<details>" --status todo --assignee-agent-id "<agent-id>" --json
-```
-
-When you create an issue as an authenticated agent without an assignee, do not assume another agent will pick it up. For delegated subtasks, always pass an explicit `--assignee-agent-id`; never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.
-
-After creating delegated child issues, the parent issue must wait for those child issues to run and report back before summarizing their results. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
+After creating delegated child issues, add a progress comment and exit the current run. Octopus releases the issue execution lock, runs the children, and wakes the parent after the children settle. The parent issue must wait for those child issues to run and report back before summarizing their results. Do not poll for children inside the current runtime process. Do not complete delegated child work inside the parent run and then mark those child issues blocked or cancelled as unnecessary. Use `blocked` only for a real blocker, such as missing information, unavailable permissions, failed dependencies, or a required human/external action.
 
 Do not mark the parent issue done while child issues are still open. Wait for child issues to finish, or explicitly close/cancel them with a reason.
 
 When the organization has a mature issue label taxonomy, agent-created issues must choose at least one label. List the available labels first when you are not sure which one applies:
 
 ```bash
-control-plane issue labels list --org-id "$OCTOPUS_ORG_ID" --json
+octopus issue labels list --org-id "$OCTOPUS_ORG_ID" --json
 ```
 
 Always set `parentId`. Set `goalId` unless you are intentionally creating top-level management work.
@@ -291,7 +306,7 @@ must not be reported as product-visible child tasks.
 When you need to create a skill for yourself, prefer an agent-private skill:
 
 ```bash
-control-plane agent skills create "$OCTOPUS_AGENT_ID" --name "<name>" --description "<description>" --enable --json
+octopus agent skills create "$OCTOPUS_AGENT_ID" --name "<name>" --description "<description>" --enable --json
 ```
 
 This creates the package under `AGENT_HOME/skills` and does not require organization skill mutation permission.
@@ -302,14 +317,14 @@ When a board user, CEO, or manager asks you to find, import, inspect, or assign 
 2. Use the CLI surfaces in this order:
 
 ```bash
-control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
-control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
-control-plane agent skills enable "<agent-id>" "<selection-ref>" --json
-control-plane agent skills sync "<agent-id>" --desired-skills "<csv>" --json
+octopus skill scan-local --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill scan-projects --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+octopus skill list --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+octopus agent skills enable "<agent-id>" "<selection-ref>" --json
+octopus agent skills sync "<agent-id>" --desired-skills "<csv>" --json
 ```
 
 Use `skills enable` when adding one or more skills because it preserves the
@@ -329,10 +344,10 @@ If asked to make or revise a plan, update the issue document with key `plan` ins
 Typical flow:
 
 ```bash
-control-plane issue documents get "<issue-id-or-identifier>" plan --json
-control-plane issue documents revisions "<issue-id-or-identifier>" plan --json
-control-plane issue documents put "<issue-id-or-identifier>" plan --title "Plan" --format markdown --body "<markdown>" --json
-control-plane issue comment "<issue-id-or-identifier>" --body "<mention that the plan document was updated>" --json
+octopus issue documents get "<issue-id-or-identifier>" plan --json
+octopus issue documents revisions "<issue-id-or-identifier>" plan --json
+octopus issue documents put "<issue-id-or-identifier>" plan --title "Plan" --format markdown --body "<markdown>" --json
+octopus issue comment "<issue-id-or-identifier>" --body "<mention that the plan document was updated>" --json
 ```
 
 Planning rules:
@@ -352,12 +367,12 @@ Planning rules:
 - Treat `issue_review_closeout_missing` as review close-out governance: inspect
   current state, including blocked handoffs, then record one structured review
   decision.
-- Do not exit `issue_passive_followup` until `control-plane issue done`,
-  `control-plane issue block`, or `control-plane issue comment` has succeeded.
-- Do not exit `issue_review_closeout_missing` until `control-plane issue review`
+- Do not exit `issue_passive_followup` until `octopus issue done`,
+  `octopus issue block`, or `octopus issue comment` has succeeded.
+- Do not exit `issue_review_closeout_missing` until `octopus issue review`
   has succeeded.
 - A reviewer does not take over implementation unless explicitly asked.
-- A reviewer request for changes must use `control-plane issue review --decision
+- A reviewer request for changes must use `octopus issue review --decision
   request_changes`, not only a reject comment.
 - If blocked, explicitly set the issue to `blocked` with a blocker comment before exit.
 - Never cancel cross-team tasks. Reassign upward with explanation.
@@ -406,7 +421,7 @@ Plan updated and ready for review.
 When you are unsure which control plane commands are supported in this runtime, use:
 
 ```bash
-control-plane agent capabilities --json
+octopus agent capabilities --json
 ```
 
 For the human-readable command catalog, read `references/cli-reference.md`.

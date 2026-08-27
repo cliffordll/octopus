@@ -1,6 +1,6 @@
-﻿---
+---
 name: create-agent
-description: Create new agents in control plane through the `control-plane` CLI with governance-aware hiring. Use when you need to inspect adapter configuration options, compare existing agent configs, draft a new agent prompt/config, and submit a hire request.
+description: Create new agents in control plane through the `octopus` CLI with governance-aware hiring. Use when you need to inspect adapter configuration options, compare existing agent configs, draft a new agent prompt/config, and submit a hire request.
 ---
 
 # Create Agent Skill
@@ -18,7 +18,7 @@ If you do not have this permission, escalate to your CEO or board.
 
 This workflow is **CLI-first**.
 
-- Use `control-plane ... --json` for structured reads and mutations.
+- Use `octopus ... --json` for structured reads and mutations.
 - Use `references/cli-reference.md` as the canonical command catalog for this skill.
 - Treat `references/api-reference.md` as internal/debug/compatibility documentation, not the normal runtime interface.
 - Do not create agent directories, instruction files, or org metadata manually as a fallback.
@@ -29,7 +29,7 @@ This workflow is **CLI-first**.
 1. Confirm identity and organization context.
 
 ```sh
-control-plane agent me --json
+octopus agent me --json
 ```
 
 If this returns `{"error":"Agent authentication required"}`, treat it as a run-auth failure:
@@ -41,33 +41,33 @@ If this returns `{"error":"Agent authentication required"}`, treat it as a run-a
 2. Discover available adapter configuration docs for this control plane instance.
 
 ```sh
-control-plane agent config index
+octopus agent config index
 ```
 
 3. Read adapter-specific docs for the runtime you plan to use.
 
 ```sh
-control-plane agent config doc codex_local
-control-plane agent config doc claude_local
+octopus agent config doc codex_local
+octopus agent config doc claude_local
 ```
 
 4. Compare existing agents and redacted configurations in your organization.
 
 ```sh
-control-plane agent list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent config list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane agent config get "<agent-id>" --json
+octopus agent list --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent config list --org-id "$OCTOPUS_ORG_ID" --json
+octopus agent config get "<agent-id>" --json
 ```
 
 5. If the role needs organization skills on day one, inspect or import them before hiring.
 
 ```sh
-control-plane skill list --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
-control-plane skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
-control-plane skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
-control-plane skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
-control-plane skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
+octopus skill list --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill get "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --json
+octopus skill file "<skill-id>" --org-id "$OCTOPUS_ORG_ID" --path SKILL.md --json
+octopus skill import --org-id "$OCTOPUS_ORG_ID" --source "<source>" --json
+octopus skill scan-local --org-id "$OCTOPUS_ORG_ID" --roots "<csv>" --json
+octopus skill scan-projects --org-id "$OCTOPUS_ORG_ID" --project-ids "<csv>" --workspace-ids "<csv>" --json
 ```
 
 6. Draft the hire payload.
@@ -106,7 +106,7 @@ Draft `promptTemplate` as a durable SOUL document, not a one-line command. Use t
 7. Submit the canonical hire request.
 
 ```sh
-control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
+octopus agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
   "role": "cto",
   "title": "Chief Technology Officer",
   "reportsTo": "<ceo-agent-id>",
@@ -118,7 +118,7 @@ control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
     "model": "o4-mini",
     "promptTemplate": "# SOUL.md -- CTO Persona\n\nYou are the CTO.\n\n## Mission\nOwn technical strategy, architecture, engineering execution, and quality bars.\n\n## Responsibilities\n- Set technical direction and execution standards.\n- Review architecture and staffing trade-offs.\n- Keep delivery risks visible and actionable.\n\n## Boundaries\n- Do not approve risky shortcuts without naming the trade-off.\n- Escalate product or budget ambiguity instead of guessing.\n\n## Decision Principles\n- Prefer simple architectures with explicit trade-offs.\n- Treat reliability, developer velocity, and product learning as linked constraints.\n\n## Voice\nDirect, specific, and evidence-led.\n\n## Continuity\nPreserve durable technical standards, repeated failure patterns, and long-running architecture decisions in memory or explicit instructions."
   },
-  "runtimeConfig": {"heartbeat": {"enabled": true, "intervalSec": 300, "wakeOnDemand": true, "maxConcurrentRuns": 3}},
+  "runtimeConfig": {"heartbeat": {"enabled": true, "intervalSec": 300, "runDiagnosticsOnTimer": false, "wakeOnDemand": true, "maxConcurrentRuns": 3}},
   "sourceIssueId": "<issue-id>"
 }' --json
 ```
@@ -128,30 +128,30 @@ control-plane agent hire --org-id "$OCTOPUS_ORG_ID" --payload '{
 - if the organization does not require approval, it creates the agent directly and returns `"approval": null`
 - if the organization requires approval, it creates the agent in `pending_approval` and returns both `agent` and `approval`
 
-Do **not** substitute `control-plane approval create --type hire_agent` for this step unless you are doing low-level debugging. That bypasses the canonical direct-create vs pending-approval behavior.
+Do **not** substitute `octopus approval create --type hire_agent` for this step unless you are doing low-level debugging. That bypasses the canonical direct-create vs pending-approval behavior.
 
 8. Handle governance state.
 
 If the hire response includes `approval`, monitor and discuss on the approval thread:
 
 ```sh
-control-plane approval get "<approval-id>" --json
-control-plane approval comment "<approval-id>" --body "## CTO hire request submitted
+octopus approval get "<approval-id>" --json
+octopus approval comment "<approval-id>" --body "## CTO hire request submitted
 
 - Approval: [<approval-id>](/<prefix>/messenger/approvals/<approval-id>)
 - Pending agent: [<agent-ref>](/<prefix>/agents/<agent-url-key-or-id>)
 - Source issue: [<issue-ref>](/<prefix>/issues/<issue-identifier-or-id>)
 
 Updated prompt and adapter config per board feedback." --json
-control-plane approval resubmit "<approval-id>" --payload '{"title":"Revised title","agentRuntimeConfig":{"cwd":"/abs/path/to/repo","model":"o4-mini"}}' --json
-control-plane approval issues "<approval-id>" --json
+octopus approval resubmit "<approval-id>" --payload '{"title":"Revised title","agentRuntimeConfig":{"cwd":"/abs/path/to/repo","model":"o4-mini"}}' --json
+octopus approval issues "<approval-id>" --json
 ```
 
 When the board approves, you may be woken with `OCTOPUS_APPROVAL_ID`:
 
 ```sh
-control-plane approval get "$OCTOPUS_APPROVAL_ID" --json
-control-plane approval issues "$OCTOPUS_APPROVAL_ID" --json
+octopus approval get "$OCTOPUS_APPROVAL_ID" --json
+octopus approval issues "$OCTOPUS_APPROVAL_ID" --json
 ```
 
 For each linked issue, either:
@@ -172,7 +172,7 @@ Before sending a hire request:
 - include mission, responsibilities, boundaries, decision principles, voice, and continuity when the role has ongoing authority
 - prefer `sourceIssueId` or `sourceIssueIds` in the hire payload instead of manual approval linking
 - if board requests revision, update the payload and resubmit through the approval flow
-- do not report success unless `control-plane agent hire` itself succeeded and you can cite the returned `agent.id` or `approval.id`
+- do not report success unless `octopus agent hire` itself succeeded and you can cite the returned `agent.id` or `approval.id`
 - creating local directories or instruction files is not evidence that an agent exists in control plane
 
 For canonical command syntax and examples, read:

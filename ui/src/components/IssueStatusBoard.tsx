@@ -91,7 +91,8 @@ export function IssueStatusBoard({
                   >
                     <div className="project-issue-card-topline">
                       <span className="identifier">{issue.identifier ?? "-"}</span>
-                      <Badge>{priorityLabel(issue.priority)}</Badge>
+                      <Badge>阶段：{statusLabel(issue.status)}</Badge>
+                      <Badge>优先级：{priorityLabel(issue.priority)}</Badge>
                     </div>
                     <span className="project-issue-title">{issue.title}</span>
                     <dl className="project-issue-card-meta">

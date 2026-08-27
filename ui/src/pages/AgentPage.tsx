@@ -11,21 +11,24 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
-import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
-import { listRuntimeModelOptions, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels, validateModelReference } from "../utils/runtimeModels";
+import { runDescriptor, runIssueLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
+import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 300;
+const LIVE_AGENT_REFETCH_INTERVAL_MS = 5000;
+const LIVE_RUN_REFETCH_INTERVAL_MS = 3000;
 const DEFAULT_HEARTBEAT_POLICY = {
   enabled: true,
   intervalSec: DEFAULT_HEARTBEAT_INTERVAL_SEC,
+  runDiagnosticsOnTimer: false,
   wakeOnDemand: true,
   preflightEnabled: true,
   maxConcurrentRuns: 3,
 };
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
 const RUN_SOURCE_HELP = [
-  ["timer", "定时心跳到点触发，用来检查智能体是否需要继续工作。"],
+  ["timer", "心跳到期触发；默认先检查是否有可执行任务，关闭空跑预检查后每次到期均创建真实 agent run。"],
   ["assignment", "任务分配后触发，通常来自 issue 指派给该智能体。"],
   ["automation", "系统规则或工作流事件自动触发，不是手动、定时或直接任务分配。"],
   ["on_demand", "用户在 UI 或 API 中手动触发一次运行。"],
@@ -80,7 +83,16 @@ function applyHeartbeatConfig(
   runtimeConfig: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
-  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(runtimeConfig), ...patch };
+  const current = heartbeatConfigFromRuntimeConfig(runtimeConfig);
+  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...current };
+  if (!Object.hasOwn(current, "preflightEnabled")) {
+    if (typeof current.timerPreflightEnabled === "boolean") {
+      heartbeat.preflightEnabled = current.timerPreflightEnabled;
+    } else if (current.runDiagnosticsOnTimer === true) {
+      heartbeat.preflightEnabled = false;
+    }
+  }
+  Object.assign(heartbeat, patch);
   return { ...runtimeConfig, heartbeat };
 }
 
@@ -94,7 +106,7 @@ type HeartbeatConfigFieldsProps = {
 };
 
 function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) {
-  const heartbeat = { ...DEFAULT_HEARTBEAT_POLICY, ...heartbeatConfigFromRuntimeConfig(value) };
+  const heartbeat = heartbeatConfigFromRuntimeConfig(applyHeartbeatConfig(value, {}));
   const enabled = booleanConfigValue(heartbeat, "enabled", true);
   const wakeOnDemand = booleanConfigValue(heartbeat, "wakeOnDemand", true);
   const preflightEnabled = booleanConfigValue(heartbeat, "preflightEnabled", true);
@@ -106,16 +118,16 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
   return (
     <div className="agent-property-list">
       <label className="agent-property-row">
-        <span>定时心跳</span>
+        <span>状态检测</span>
         <select value={enabled ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("enabled", event.target.value === "enabled")}>
           <option value="enabled">启用</option>
           <option value="disabled">关闭</option>
         </select>
       </label>
       <label className="agent-property-row">
-        <span>心跳间隔秒数</span>
+        <span>状态检测间隔秒数</span>
         <input
-          aria-label="心跳间隔秒数"
+          aria-label="状态检测间隔秒数"
           min="0"
           placeholder={String(DEFAULT_HEARTBEAT_INTERVAL_SEC)}
           type="number"
@@ -124,7 +136,7 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
         />
       </label>
       <label className="agent-property-row">
-        <span>按需唤醒</span>
+        <span>允许手动诊断</span>
         <select value={wakeOnDemand ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("wakeOnDemand", event.target.value === "enabled")}>
           <option value="enabled">启用</option>
           <option value="disabled">关闭</option>
@@ -154,9 +166,8 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
 
 function validatedAgentRuntimeConfig(runtime: AgentRuntimeType, value: string): Record<string, unknown> {
   const config = readJsonObject(value, "Agent runtime config");
-  if (!supportsRuntimeModels(runtime)) return config;
   const model = typeof config.model === "string" ? config.model.trim() : "";
-  return { ...config, model: validateModelReference(model) };
+  return applyRuntimeModelConfig(config, runtime, model);
 }
 
 function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
@@ -300,6 +311,8 @@ function formatRunTime(value?: string | null): string {
 
 function summarizeRun(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录。";
+  const terminalReason = runTerminalReasonLabel(run);
+  if (terminalReason) return terminalReason;
   if (run.error?.trim()) return run.error.trim();
   const summary = run.resultJson?.summary ?? run.resultJson?.result ?? run.resultJson?.message;
   return typeof summary === "string" && summary.trim() ? summary.trim() : run.id;
@@ -548,7 +561,7 @@ function AgentRunDetail({
       <div className="agent-run-detail-header">
         <div>
           <div className="meta-line">
-            <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+            <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
             <Badge>{sourceLabel(run.invocationSource)}</Badge>
             {run.triggerDetail && <Badge>{run.triggerDetail}</Badge>}
           </div>
@@ -606,7 +619,7 @@ function AgentRunDetail({
           {!eventsLoading && events.length === 0 && <p className="muted">暂无事件。</p>}
           {events.length > 0 && (
             <div className="agent-run-events compact">
-              {events.slice(0, 6).map((event) => (
+              {events.slice(-6).map((event) => (
                 <article className="agent-run-event compact" key={event.id}>
                   <div className="agent-run-event-header">
                     <span>#{event.seq}</span>
@@ -799,7 +812,7 @@ function AgentQueuePanel({
                       ) : issueLabel ? (
                       <span>{issueLabel}</span>
                     ) : null}
-                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                    <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
                   </div>
                 </article>
               );
@@ -851,11 +864,12 @@ export function AgentPage() {
   const [memoryDraft, setMemoryDraft] = useState("");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId) });
-  const organizationAgents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
+  const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId), refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS });
+  const organizationAgents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId), refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS });
   const runtimeState = useQuery({
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
+    refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS,
   });
   const inbox = useQuery({
     queryKey: ["agent-inbox", agentId],
@@ -918,6 +932,7 @@ export function AgentPage() {
   const runs = useQuery({
     queryKey: ["heartbeat-runs", orgId, agentId],
     queryFn: () => heartbeatApi.list(orgId, agentId),
+    refetchInterval: LIVE_RUN_REFETCH_INTERVAL_MS,
   });
   useEffect(() => {
     if (!agent.data) return;
@@ -956,6 +971,8 @@ export function AgentPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
     },
   });
   const wakeup = useMutation({
@@ -963,6 +980,8 @@ export function AgentPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] });
       void queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agent", agentId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
     },
   });
   const rollbackRevision = useMutation({
@@ -1079,6 +1098,7 @@ export function AgentPage() {
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
+        replaceAgentRuntimeConfig: true,
         runtimeConfig: materializeHeartbeatRuntimeConfig(readJsonObject(runtimeConfig, "Runtime config")),
         budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars || 0) * 100),
       });
@@ -1108,6 +1128,17 @@ export function AgentPage() {
     } catch (error) {
       setConfigurationError(error instanceof Error ? error.message : "配置格式无效");
     }
+  }
+  function changeRuntime(nextRuntime: AgentRuntimeType) {
+    const nextConfig = runtimeConfigAfterSwitch(
+      readJsonObjectSafe(agentRuntimeConfig),
+      runtime,
+      nextRuntime,
+    );
+    setRuntime(nextRuntime);
+    setAgentRuntimeConfig(JSON.stringify(nextConfig, null, 2));
+    setRuntimeTestResult(null);
+    setConfigurationError(null);
   }
   function setRuntimeModelInput(modelId: string) {
     try {
@@ -1148,6 +1179,8 @@ export function AgentPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["heartbeat-runs", orgId, agentId] }),
         queryClient.invalidateQueries({ queryKey: ["agent-runtime-state", agentId] }),
+        queryClient.invalidateQueries({ queryKey: ["agent", agentId] }),
+        queryClient.invalidateQueries({ queryKey: ["agents", orgId] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-run-events", run.id] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-run-log", run.id] }),
         queryClient.invalidateQueries({ queryKey: ["heartbeat-run-workspace-operations", run.id] }),
@@ -1388,8 +1421,8 @@ export function AgentPage() {
             <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
             <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
             <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
-            <button className="secondary" disabled={operationalDisabled || wakeup.isPending} type="button" onClick={() => wakeup.mutate()}>唤醒</button>
-            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行心跳</button>
+            <button className="secondary" disabled={isPaused || operationalDisabled || wakeup.isPending} title="立即执行一次心跳检查，有待办任务时才启动运行" type="button" onClick={() => wakeup.mutate()}>立即唤醒</button>
+            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行诊断</button>
           </div>
         )}
       </header>
@@ -1405,7 +1438,7 @@ export function AgentPage() {
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/memory`}>记忆</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
-            <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行记录</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/budget`}>预算</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
@@ -1732,7 +1765,7 @@ export function AgentPage() {
                     <div className="agent-property-list">
                       <label className="agent-property-row">
                         <span>Runtime</span>
-                        <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeType)}>
+                        <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => changeRuntime(event.target.value as AgentRuntimeType)}>
                           {adapterOptions.map((adapter) => (
                             <option key={adapter.type} value={adapter.type}>{adapter.displayName}</option>
                           ))}
@@ -1742,9 +1775,9 @@ export function AgentPage() {
                       {supportsRuntimeModels(runtime) && (
                         <label className="agent-property-row">
                           <span>模型配置</span>
-                          {runtimeModelOptions.length > 0 ? (
+                          {runtime === "codex_local" || runtimeModelOptions.length > 0 ? (
                             <select value={selectedRuntimeModel} onChange={(event) => selectRuntimeModel(event.target.value)}>
-                              <option value="">选择模型</option>
+                              <option value="">{runtime === "codex_local" ? "使用 Codex 默认模型" : "选择模型"}</option>
                               {runtimeModelOptions.map((model) => (
                                 <option key={`${model.providerId}:${model.modelId}`} value={runtimeModelReference(model)}>
                                   {runtimeModelLabel(model)}
@@ -1806,7 +1839,7 @@ export function AgentPage() {
                   </section>
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
-                      <h2>运行策略</h2>
+                      <h2>心跳与运行策略</h2>
                       <p className="muted">技能偏好和运行上下文策略。</p>
                     </div>
                     <div className="agent-property-list">
@@ -1815,8 +1848,8 @@ export function AgentPage() {
                         <div className="runtime-config-summary">
                           <div className="runtime-config-summary-text">
                             <h3>心跳策略</h3>
-                            <span className="muted">配置 timer heartbeat 间隔、按需唤醒和并发限制</span>
-                            <small>默认启用，300s 间隔，按需唤醒开启</small>
+                            <span className="muted">心跳检查、手动诊断和并发限制</span>
+                            <small>默认每 300s 检查一次；有可执行任务时才启动运行，允许手动诊断</small>
                           </div>
                           <button
                             aria-label={heartbeatPolicyExpanded ? "收起心跳策略" : "展开心跳策略"}
@@ -2205,7 +2238,7 @@ export function AgentPage() {
                     {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
                     <small title={summarizeRun(run)}>{summarizeRun(run)}</small>
                   </span>
-                  <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
                 </button>
               ))}
             </aside>
