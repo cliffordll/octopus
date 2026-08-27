@@ -11,7 +11,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
-import { runDescriptor, runIssueLabel } from "../utils/runDisplay";
+import { runDescriptor, runIssueLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
 import { applyRuntimeModelConfig, listRuntimeModelOptions, runtimeConfigAfterSwitch, runtimeModelLabel, runtimeModelReference, supportsRuntimeModels } from "../utils/runtimeModels";
 
 const ROLES: AgentRole[] = ["ceo", "cto", "cmo", "cfo", "engineer", "designer", "pm", "qa", "devops", "researcher", "general"];
@@ -311,6 +311,8 @@ function formatRunTime(value?: string | null): string {
 
 function summarizeRun(run: HeartbeatRun | null): string {
   if (!run) return "暂无运行记录。";
+  const terminalReason = runTerminalReasonLabel(run);
+  if (terminalReason) return terminalReason;
   if (run.error?.trim()) return run.error.trim();
   const summary = run.resultJson?.summary ?? run.resultJson?.result ?? run.resultJson?.message;
   return typeof summary === "string" && summary.trim() ? summary.trim() : run.id;
@@ -559,7 +561,7 @@ function AgentRunDetail({
       <div className="agent-run-detail-header">
         <div>
           <div className="meta-line">
-            <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+            <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
             <Badge>{sourceLabel(run.invocationSource)}</Badge>
             {run.triggerDetail && <Badge>{run.triggerDetail}</Badge>}
           </div>
@@ -810,7 +812,7 @@ function AgentQueuePanel({
                       ) : issueLabel ? (
                       <span>{issueLabel}</span>
                     ) : null}
-                    <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                    <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
                   </div>
                 </article>
               );
@@ -2236,7 +2238,7 @@ export function AgentPage() {
                     {runIssueLabel(run) && <small>{runIssueLabel(run)}</small>}
                     <small title={summarizeRun(run)}>{summarizeRun(run)}</small>
                   </span>
-                  <StatusPill status={run.status}>{statusLabel(run.status)}</StatusPill>
+                  <StatusPill status={run.status}>{runStatusLabel(run)}</StatusPill>
                 </button>
               ))}
             </aside>
