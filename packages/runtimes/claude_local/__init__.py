@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin
+from ..base import LocalRuntimeAdapter
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -13,7 +13,7 @@ from .runner import execute as execute_claude
 from .skills import skill_snapshot
 
 
-class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
+class ClaudeLocalRuntimeAdapter(LocalRuntimeAdapter):
     type = "claude_local"
     supports_local_agent_jwt = True
     agent_configuration_doc = (
@@ -22,7 +22,9 @@ class ClaudeLocalRuntimeAdapter(RuntimeCapabilityMixin):
     quota_provider = "anthropic"
     _models = [{"id": "claude-sonnet-4.5", "label": "Claude Sonnet 4.5"}]
 
-    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+    async def _execute_runtime(
+        self, context: RuntimeExecutionContext
+    ) -> RuntimeExecutionResult:
         return await execute_claude(context)
 
     async def test_environment(

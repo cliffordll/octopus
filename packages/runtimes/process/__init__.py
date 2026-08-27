@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..common import RuntimeCapabilityMixin
+from ..base import LocalRuntimeAdapter
 from ..environment import aggregate_status, cli_hello_probe_check
 from ..types import (
     RuntimeEnvironmentTestResult,
@@ -10,10 +10,12 @@ from ..types import (
 from .runner import execute as execute_process
 
 
-class ProcessRuntimeAdapter(RuntimeCapabilityMixin):
+class ProcessRuntimeAdapter(LocalRuntimeAdapter):
     type = "process"
 
-    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+    async def _execute_runtime(
+        self, context: RuntimeExecutionContext
+    ) -> RuntimeExecutionResult:
         return await execute_process(context)
 
     async def test_environment(self, config: dict) -> RuntimeEnvironmentTestResult:

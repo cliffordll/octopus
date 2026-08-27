@@ -562,4 +562,10 @@ def _result_json(
         "toolErrors": parsed.get("toolErrors", []),
         "modelUnavailable": model_unavailable(stdout_text, stderr_text, error),
         "authRequired": auth_required(stdout_text, stderr_text, error),
+        "artifactEvidence": {
+            "source": "opencode_write_event",
+            "writtenPaths": parsed.get("writtenFiles", []),
+            "declaredPaths": parsed.get("declaredWorkProducts", []),
+            "primaryPaths": parsed.get("primaryWorkProducts", []),
+        },
     }

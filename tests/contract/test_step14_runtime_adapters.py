@@ -19,11 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import ActivityLog, AgentEnabledSkill, Base, Organization
+from packages.runtimes.base import LocalRuntimeAdapter, RemoteRuntimeAdapter
+from packages.runtimes.codex_local import CodexLocalRuntimeAdapter
 from packages.runtimes.claude_local.protocol import build_args as build_claude_args
 from packages.runtimes.claude_local.runner import execute as execute_claude_local
 from packages.runtimes.codex_local.runner import _build_args as build_codex_args
 from packages.runtimes.codex_local.runner import execute as execute_codex_local
-from packages.runtimes.local_process import LocalProcessResult
+from packages.runtimes.local_process import LocalProcessResult, ProcessChunkCallback
 from packages.runtimes.opencode_local.protocol import build_args as build_opencode_args
 from packages.runtimes.opencode_local.runner import (
     _read_stdout as read_opencode_stdout,
@@ -81,6 +83,13 @@ def test_step14_runtime_contract_exposes_adapter_paths() -> None:
         paths.ORG_ADAPTER_QUOTA_WINDOWS_PATH
         == "/api/orgs/{orgId}/adapters/{type}/quota-windows"
     )
+
+
+def test_runtime_adapters_are_grouped_by_execution_location() -> None:
+    from packages.runtimes.http import HttpRuntimeAdapter
+
+    assert isinstance(CodexLocalRuntimeAdapter(), LocalRuntimeAdapter)
+    assert isinstance(HttpRuntimeAdapter(), RemoteRuntimeAdapter)
 
 
 def test_codex_defaults_to_managed_workspace_write_sandbox() -> None:
@@ -1431,9 +1440,72 @@ async def test_codex_execute_reports_loaded_skills_and_filtered_runtime_metadata
         ],
         "billingType": "api",
         "biller": "openai",
+        "artifactEvidence": {
+            "source": "codex_file_change_event",
+            "writtenPaths": [],
+        },
     }
     assert ("stderr", "meaningful warning\n") in captured_logs
     assert all("telemetry" not in chunk.lower() for _, chunk in captured_logs)
+
+
+async def test_codex_adapter_collects_work_products_from_file_change_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    report = workspace / "reports" / "final.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# Final report\n", encoding="utf-8")
+
+    class FakeCodexProcess:
+        returncode = 0
+
+        async def communicate(
+            self, payload: bytes | None = None
+        ) -> tuple[bytes, bytes]:
+            event = {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [{"path": str(report), "kind": "add"}],
+                },
+            }
+            return (json.dumps(event).encode() + b"\n", b"")
+
+        def kill(self) -> None:
+            raise AssertionError("successful Codex process must not be killed")
+
+    async def fake_create_subprocess_exec(
+        *args: str, **kwargs: Any
+    ) -> FakeCodexProcess:
+        return FakeCodexProcess()
+
+    monkeypatch.setattr(
+        "packages.runtimes.codex_local.runner.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await CodexLocalRuntimeAdapter().execute(
+        RuntimeExecutionContext(
+            run_id="run-codex-artifact",
+            agent_id="agent-codex",
+            org_id="org-codex",
+            agent_name="Codex",
+            config={"command": "codex-test"},
+            workspace={
+                "octopusWorkspace": {"id": "workspace-1", "cwd": str(workspace)}
+            },
+            on_log=_noop_on_log,
+        )
+    )
+
+    assert result.work_products is not None
+    assert len(result.work_products) == 1
+    product = result.work_products[0]
+    assert product["title"] == "reports/final.md"
+    assert product["isPrimary"] is True
+    assert product["metadata"]["source"] == "codex_file_change_event"
 
 
 async def test_codex_execute_streams_agent_message_delta(
@@ -1522,7 +1594,7 @@ async def test_codex_execute_forwards_jsonl_and_progress_before_process_exit(
 
     async def fake_run(*args: object, **kwargs: object) -> LocalProcessResult:
         nonlocal observed_live_output
-        on_stdout_chunk = kwargs["on_stdout_chunk"]
+        on_stdout_chunk = cast(ProcessChunkCallback, kwargs["on_stdout_chunk"])
         assert callable(on_stdout_chunk)
         split = stdout.index(b"\n", stdout.index(b"\n") + 1) + 1
         await on_stdout_chunk(stdout[:split])

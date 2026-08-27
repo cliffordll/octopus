@@ -45,7 +45,7 @@ class RuntimeEnvironmentTestResult:
     checks: list[dict[str, Any]]
 
 
-class RuntimeAdapter(Protocol):
+class RuntimeAdapterProtocol(Protocol):
     type: str
 
     async def execute(

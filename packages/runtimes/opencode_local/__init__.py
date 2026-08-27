@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..common import RuntimeCapabilityMixin
+from ..base import LocalRuntimeAdapter
 from ..types import (
     RuntimeEnvironmentTestResult,
     RuntimeExecutionContext,
@@ -14,14 +14,16 @@ from .runner import execute as execute_opencode
 from .skills import skill_snapshot
 
 
-class OpenCodeLocalRuntimeAdapter(RuntimeCapabilityMixin):
+class OpenCodeLocalRuntimeAdapter(LocalRuntimeAdapter):
     type = "opencode_local"
     supports_local_agent_jwt = True
     agent_configuration_doc = (
         "Configure cwd, model, variant, env and OpenCode CLI options."
     )
 
-    async def execute(self, context: RuntimeExecutionContext) -> RuntimeExecutionResult:
+    async def _execute_runtime(
+        self, context: RuntimeExecutionContext
+    ) -> RuntimeExecutionResult:
         return await execute_opencode(context)
 
     async def test_environment(
