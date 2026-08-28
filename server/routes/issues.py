@@ -1416,7 +1416,11 @@ async def upsert_issue_document_route(
         document_key = validate_issue_document_key(key)
         payload = validate_upsert_issue_document(body)
         actor = require_actor_identity(request)
-        document, created, _ = await document_service.upsert_issue_document(
+        (
+            document,
+            created,
+            _revision_created,
+        ) = await document_service.upsert_issue_document(
             org_id=detail["orgId"],
             issue_id=id,
             key=document_key,

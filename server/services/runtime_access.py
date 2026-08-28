@@ -48,7 +48,7 @@ class RuntimeAccessResolver:
             config=config,
         )
         resolved_env = dict(env) if env is not None else {}
-        if adapter.supports_local_agent_jwt:
+        if getattr(adapter, "supports_local_agent_jwt", False):
             resolved_env["RUDDER_API_KEY"] = self._run_tokens.issue(
                 agent_id=agent_id,
                 org_id=org_id,
