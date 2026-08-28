@@ -32,6 +32,17 @@ export interface OrganizationMember {
   updatedAt: string;
 }
 
+export interface OrganizationHierarchyMember {
+  id: string;
+  orgId: string;
+  principalType: "user" | "agent";
+  principalId: string;
+  displayName: string;
+  status: "pending" | "active" | "suspended";
+  role: string;
+  reportsTo: string | null;
+}
+
 export type PermissionKey =
   | "agents:create"
   | "agents:manage"
@@ -82,6 +93,18 @@ export const accessApi = {
     jsonRequest<OrganizationInvite>(`/api/invites/${encodeURIComponent(token)}/accept`, "POST", {}),
   members: (orgId: string): Promise<OrganizationMember[]> =>
     request<OrganizationMember[]>(`/api/orgs/${encodeURIComponent(orgId)}/members`),
+  hierarchy: (orgId: string): Promise<OrganizationHierarchyMember[]> =>
+    request<OrganizationHierarchyMember[]>(`/api/orgs/${encodeURIComponent(orgId)}/hierarchy`),
+  updateManager: (
+    orgId: string,
+    memberId: string,
+    managerId: string | null,
+  ): Promise<OrganizationHierarchyMember> =>
+    jsonRequest<OrganizationHierarchyMember>(
+      `/api/orgs/${encodeURIComponent(orgId)}/hierarchy/${encodeURIComponent(memberId)}/manager`,
+      "PATCH",
+      { managerId },
+    ),
   updatePermissions: (
     orgId: string,
     memberId: string,

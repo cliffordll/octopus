@@ -16,6 +16,7 @@ from packages.database.queries.invites import (
 )
 from packages.database.schema import Invite
 from server.identity import PrincipalRef
+from server.organization_hierarchy import OrganizationHierarchyService
 from server.roles import RoleService
 
 
@@ -23,6 +24,7 @@ class InvitationService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._roles = RoleService(session)
+        self._hierarchy = OrganizationHierarchyService(session)
 
     async def create(
         self,
@@ -80,13 +82,14 @@ class InvitationService:
             if row.accepted_by_user_id != user_id:
                 raise ValueError("Invite was already accepted")
             return row
-        await self._roles.ensure(
+        role = await self._roles.ensure(
             "organization",
             row.org_id,
             PrincipalRef(type="user", id=user_id),
             role="member",
             status="active",
         )
+        await self._hierarchy.assign_default(row.org_id, role.id)
         return claimed
 
     async def revoke(self, org_id: str, invite_id: str) -> Invite | None:

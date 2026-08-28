@@ -29,6 +29,7 @@ from server.identity import (
     SystemIdentityContextFactory,
 )
 from server.identity.resolver import IdentityContextResolver
+from server.organization_hierarchy import OrganizationHierarchyService
 from server.roles import RoleAccessService, RoleService
 from server.roles.management import RoleManagementService
 from server.services.agents import AgentService
@@ -64,6 +65,7 @@ def test_access_foundation_tables_use_unified_access_model() -> None:
         "principal_id",
         "status",
         "role",
+        "reports_to",
     }.issubset(roles.columns.keys())
     assert "roles_scope_principal_uq" in {
         constraint.name for constraint in roles.constraints
@@ -95,11 +97,112 @@ async def test_access_foundation_migration_creates_compatible_tables(
                     text("pragma index_list(permissions)")
                 )
             }
+            role_columns = {
+                row[1]
+                for row in await connection.execute(text("pragma table_info(roles)"))
+            }
+            role_indexes = {
+                row[1]
+                for row in await connection.execute(text("pragma index_list(roles)"))
+            }
     finally:
         await migrated_engine.dispose()
 
     assert table_names == {"users", "roles", "permissions"}
     assert "permissions_scope_key_idx" in permission_indexes
+    assert "reports_to" in role_columns
+    assert "roles_scope_reports_to_idx" in role_indexes
+
+
+async def test_human_and_agent_share_organization_hierarchy(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            org_id = await _seed_org(session, key="hierarchy")
+            await _seed_user(session, "owner-user")
+            await _seed_user(session, "manager-user")
+            agent = Agent(org_id=org_id, name="Engineer", role="engineer")
+            session.add(agent)
+            await session.flush()
+
+            roles = RoleService(session)
+            owner = await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="user", id="owner-user"),
+                role="owner",
+            )
+            manager = await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="user", id="manager-user"),
+                role="member",
+            )
+            agent_role = await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="agent", id=agent.id),
+                role="member",
+            )
+            hierarchy = OrganizationHierarchyService(session)
+
+            default_members = await hierarchy.list(org_id)
+            assert (
+                next(
+                    item for item in default_members if item.role.id == manager.id
+                ).reports_to
+                == owner.id
+            )
+            updated = await hierarchy.set_manager(org_id, agent_role.id, manager.id)
+            members = await hierarchy.list(org_id)
+
+            assert updated.reports_to == manager.id
+            assert {member.role.principal_type for member in members} == {
+                "user",
+                "agent",
+            }
+            assert (
+                next(
+                    item for item in members if item.role.id == agent_role.id
+                ).reports_to
+                == manager.id
+            )
+
+
+async def test_organization_hierarchy_rejects_reporting_cycles(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            org_id = await _seed_org(session, key="hierarchy-cycle")
+            await _seed_user(session, "cycle-owner")
+            await _seed_user(session, "cycle-a")
+            await _seed_user(session, "cycle-b")
+            roles = RoleService(session)
+            await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="user", id="cycle-owner"),
+                role="owner",
+            )
+            first = await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="user", id="cycle-a"),
+                role="member",
+            )
+            second = await roles.ensure(
+                "organization",
+                org_id,
+                PrincipalRef(type="user", id="cycle-b"),
+                role="member",
+            )
+            hierarchy = OrganizationHierarchyService(session)
+            await hierarchy.set_manager(org_id, second.id, first.id)
+
+            with pytest.raises(ValueError, match="cycle"):
+                await hierarchy.set_manager(org_id, first.id, second.id)
 
 
 async def test_user_and_agent_share_role_service(

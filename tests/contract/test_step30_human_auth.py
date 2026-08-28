@@ -141,6 +141,7 @@ def test_organization_owner_can_manage_members_and_invites(
         ).json()
         org_id = organization["id"]
         members = client.get(f"/api/orgs/{org_id}/members")
+        hierarchy = client.get(f"/api/orgs/{org_id}/hierarchy")
         created = client.post(
             f"/api/orgs/{org_id}/invites",
             json={"allowedJoinTypes": "human"},
@@ -153,6 +154,19 @@ def test_organization_owner_can_manage_members_and_invites(
     assert members.json()[0]["principalId"] == registered.json()["user"]["id"]
     assert members.json()[0]["displayName"]
     assert isinstance(members.json()[0]["permissions"], list)
+    assert hierarchy.status_code == 200
+    assert hierarchy.json() == [
+        {
+            "id": members.json()[0]["id"],
+            "orgId": org_id,
+            "principalType": "user",
+            "principalId": registered.json()["user"]["id"],
+            "displayName": members.json()[0]["displayName"],
+            "status": "active",
+            "role": "owner",
+            "reportsTo": None,
+        }
+    ]
     assert created.status_code == 201
     assert inspected.status_code == 200
     assert inspected.json()["allowedJoinTypes"] == "human"

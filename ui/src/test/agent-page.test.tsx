@@ -551,7 +551,6 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   expect(await screen.findByRole("heading", { name: "身份" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "权限" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "API 密钥" })).toBeInTheDocument();
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
@@ -673,6 +672,10 @@ it("saves heartbeat policy from the agent configuration form", async () => {
       body: expect.stringContaining('"heartbeat":{"enabled":true,"intervalSec":450,"runDiagnosticsOnTimer":false,"wakeOnDemand":true,"preflightEnabled":false,"maxConcurrentRuns":3}'),
     }),
   );
+  const saveCall = fetchMock.mock.calls.find(
+    ([path, init]) => path === "/api/agents/agent-1" && init?.method === "PATCH",
+  );
+  expect(JSON.parse(String(saveCall?.[1]?.body))).not.toHaveProperty("reportsTo");
 });
 
 it("materializes the default heartbeat policy from the agent configuration form", async () => {

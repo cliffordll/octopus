@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { accessApi } from "../api/access";
 import { agentsApi } from "../api/agents";
 import { heartbeatApi } from "../api/heartbeat";
 import { issuesApi } from "../api/issues";
@@ -831,7 +832,6 @@ export function AgentPage() {
   const [title, setTitle] = useState("");
   const [role, setRole] = useState<AgentRole>("general");
   const [capabilities, setCapabilities] = useState("");
-  const [reportsTo, setReportsTo] = useState("");
   const [runtime, setRuntime] = useState<AgentRuntimeType>("process");
   const [budgetMonthlyDollars, setBudgetMonthlyDollars] = useState("0");
   const [agentRuntimeConfig, setAgentRuntimeConfig] = useState("{}");
@@ -865,7 +865,10 @@ export function AgentPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const agent = useQuery({ queryKey: ["agent", agentId], queryFn: () => agentsApi.get(agentId), refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS });
-  const organizationAgents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId), refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS });
+  const organizationHierarchy = useQuery({ queryKey: ["organization-hierarchy", orgId], queryFn: () => accessApi.hierarchy(orgId), refetchInterval: LIVE_AGENT_REFETCH_INTERVAL_MS });
+  const hierarchyMembers = Array.isArray(organizationHierarchy.data) ? organizationHierarchy.data : [];
+  const hierarchyMember = hierarchyMembers.find((member) => member.principalType === "agent" && member.principalId === agentId);
+  const hierarchyManager = hierarchyMembers.find((member) => member.id === hierarchyMember?.reportsTo);
   const runtimeState = useQuery({
     queryKey: ["agent-runtime-state", agentId],
     queryFn: () => agentsApi.runtimeState(agentId),
@@ -940,7 +943,6 @@ export function AgentPage() {
     setTitle(agent.data.title ?? "");
     setRole(agent.data.role);
     setCapabilities(agent.data.capabilities ?? "");
-    setReportsTo(agent.data.reportsTo ?? "");
     setRuntime(agent.data.agentRuntimeType);
     setBudgetMonthlyDollars(String(((agent.data.budgetMonthlyCents ?? 0) / 100).toFixed(2)));
     setAgentRuntimeConfig(JSON.stringify(agent.data.agentRuntimeConfig ?? {}, null, 2));
@@ -1093,7 +1095,6 @@ export function AgentPage() {
         name: name.trim(),
         title: title.trim() || null,
         role,
-        reportsTo: reportsTo || null,
         capabilities: capabilities.trim() || null,
         desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
@@ -1529,7 +1530,7 @@ export function AgentPage() {
                 <dl className="agent-properties">
                   <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
                   <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
-                  <div><dt>上级</dt><dd>{agent.data.reportsTo ?? "未设置"}</dd></div>
+                  <div><dt>上级</dt><dd>{hierarchyManager?.displayName ?? "组织负责人"}</dd></div>
                   <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
                 </dl>
               </section>
@@ -1744,15 +1745,13 @@ export function AgentPage() {
                           {ROLES.map((item) => <option key={item}>{item}</option>)}
                         </select>
                       </label>
-                      <label className="agent-property-row">
-                        <span>上级智能体</span>
-                        <select value={reportsTo} onChange={(event) => setReportsTo(event.target.value)}>
-                          <option value="">未设置</option>
-                          {(organizationAgents.data ?? [])
-                            .filter((item) => item.id !== agentId)
-                            .map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                        </select>
-                      </label>
+                      <div className="agent-property-row">
+                        <span>直属上级</span>
+                        <span className="agent-property-managed-value">
+                          <strong>{hierarchyManager?.displayName ?? "组织负责人"}</strong>
+                          <Link to={`/orgs/${orgId}/structure`}>在组织架构中调整</Link>
+                        </span>
+                      </div>
                       <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
                     </div>
                   </section>

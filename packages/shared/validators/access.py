@@ -48,3 +48,10 @@ def validate_create_invite(body: dict[str, Any]) -> dict[str, Any]:
     if defaults is not None and not isinstance(defaults, dict):
         raise ValueError("defaultsPayload must be an object or null")
     return {"allowedJoinTypes": allowed, "defaultsPayload": defaults}
+
+
+def validate_hierarchy_manager(body: dict[str, Any]) -> str | None:
+    manager_id = body.get("managerId")
+    if manager_id is not None and (not isinstance(manager_id, str) or not manager_id):
+        raise ValueError("managerId must be a non-empty string or null")
+    return manager_id

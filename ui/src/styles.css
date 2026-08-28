@@ -1754,12 +1754,49 @@ small {
   color: #ffffff;
 }
 
+.organization-structure-content {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.organization-structure-content > .organization-structure-header {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 18px 24px 16px;
+}
+
+.organization-structure-content > .error-notice {
+  flex: 0 0 auto;
+  margin: 12px 24px 0;
+}
+
+.organization-structure-content > .organization-empty-state {
+  margin: 24px;
+}
+
 .organization-chart {
   background: #0c111b;
-  border: 1px solid #202a3b;
-  border-radius: 14px;
-  min-height: 560px;
-  overflow: hidden;
+  border: 0;
+  border-top: 1px solid #202a3b;
+  border-radius: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  scrollbar-color: #33425b #0c111b;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.organization-chart-canvas {
+  min-height: 100%;
+  min-width: 100%;
   position: relative;
 }
 
@@ -1789,12 +1826,16 @@ small {
   color: #e8edf5;
   display: flex;
   gap: 12px;
-  min-height: 108px;
+  height: 132px;
   padding: 14px;
   position: absolute;
   text-decoration: none;
   transition: border-color .16s ease, background .16s ease, transform .16s ease;
   width: 210px;
+}
+
+.organization-chart-card.adjusting {
+  padding-bottom: 40px;
 }
 
 .organization-chart-card:hover {
@@ -1817,6 +1858,12 @@ small {
   justify-content: center;
 }
 
+.organization-chart-avatar.user {
+  background: #213b32;
+  border-color: #356455;
+  color: #d9fff0;
+}
+
 .organization-chart-copy {
   display: flex;
   flex: 1;
@@ -1826,6 +1873,7 @@ small {
 }
 
 .organization-chart-copy strong,
+.organization-chart-copy a,
 .organization-chart-copy span,
 .organization-chart-copy small {
   overflow: hidden;
@@ -1838,6 +1886,17 @@ small {
   font-size: 13px;
 }
 
+.organization-chart-copy a {
+  color: #e8edf5;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.organization-chart-copy a:hover {
+  color: #8fc4ff;
+}
+
 .organization-chart-copy span {
   color: #b8c2d4;
   font-size: 12px;
@@ -1846,6 +1905,45 @@ small {
 .organization-chart-copy small {
   color: #8792a6;
   font-size: 11px;
+}
+
+.organization-chart-manager-button {
+  bottom: 9px;
+  font-size: 11px;
+  min-height: 26px;
+  padding: 4px 8px;
+  position: absolute;
+  right: 10px;
+}
+
+.organization-manager-dialog {
+  background: #111722;
+  border: 1px solid #2b374a;
+  border-radius: 14px;
+  box-shadow: 0 24px 72px rgb(0 0 0 / 42%);
+  display: grid;
+  gap: 18px;
+  max-width: 480px;
+  padding: 22px;
+  width: 100%;
+}
+
+.organization-manager-dialog h2,
+.organization-manager-dialog p {
+  margin: 0;
+}
+
+.organization-manager-dialog label {
+  display: grid;
+  gap: 8px;
+}
+
+.organization-manager-dialog .modal-actions {
+  border-top: 1px solid #202938;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 16px;
 }
 
 .project-empty-state {
@@ -6907,6 +7005,20 @@ pre {
 .agent-property-row > span:first-child {
   color: #8792a6;
   font-size: 12px;
+}
+
+.agent-property-managed-value {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.agent-property-managed-value a {
+  color: #73b6ff;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .agent-property-row input,

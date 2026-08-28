@@ -9,15 +9,20 @@ afterEach(() => {
 });
 
 it("shows current reporting relationships in the organization structure", async () => {
-  const agents = [
-    { id: "agent-ceo", name: "Founder", role: "ceo", status: "idle", reportsTo: null },
-    { id: "agent-1", name: "Builder", role: "engineer", status: "active", reportsTo: "agent-ceo" },
+  const members = [
+    { id: "role-owner", orgId: "org-1", principalType: "user", principalId: "user-owner", displayName: "Owner", role: "owner", status: "active", reportsTo: null },
+    { id: "role-ceo", orgId: "org-1", principalType: "agent", principalId: "agent-ceo", displayName: "Founder", role: "member", status: "active", reportsTo: "role-owner" },
+    { id: "role-human", orgId: "org-1", principalType: "user", principalId: "user-1", displayName: "Human 1", role: "member", status: "active", reportsTo: "role-owner" },
+    { id: "role-builder", orgId: "org-1", principalType: "agent", principalId: "agent-1", displayName: "Builder", role: "member", status: "active", reportsTo: "role-ceo" },
   ];
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs" && init?.method === "GET") {
       return respond([{ id: "org-1", name: "核心团队", status: "active" }]);
     }
-    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond(agents);
+    if (path === "/api/orgs/org-1/hierarchy") return respond(members);
+    if (path === "/api/orgs/org-1/hierarchy/role-builder/manager" && init?.method === "PATCH") {
+      return respond({ ...members[3], reportsTo: "role-human" });
+    }
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -31,6 +36,23 @@ it("shows current reporting relationships in the organization structure", async 
     .toHaveAttribute("href", "/orgs/org-1/members");
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("向 Founder 汇报")).toBeInTheDocument();
+  expect(screen.getByText("Owner")).toBeInTheDocument();
+  expect(screen.getByText("Human 1")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "组织关系画布" })).toContainElement(
+    screen.getByTestId("organization-chart-canvas"),
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "调整架构" }));
+  await userEvent.click(
+    within(screen.getByRole("article", { name: /Builder/ })).getByRole("button", { name: "调整上级" }),
+  );
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "直属上级" }), "role-human");
+  await userEvent.click(screen.getByRole("button", { name: "保存调整" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/hierarchy/role-builder/manager",
+    expect.objectContaining({ method: "PATCH", body: JSON.stringify({ managerId: "role-human" }) }),
+  );
 });
 
 it("shows the organization workspace file tree and editor", async () => {
@@ -162,15 +184,15 @@ it("keeps the selected workspace file from the path query", async () => {
 });
 
 it("routes an organization root to the empty structure state", async () => {
-  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
-    if (path === "/api/orgs/org-empty/agents" && init?.method === "GET") return respond([]);
+  const fetchMock = vi.fn((path: string) => {
+    if (path === "/api/orgs/org-empty/hierarchy") return respond([]);
     return respond([]);
   });
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-empty");
 
-  expect(await screen.findByText("暂无智能体。创建首个智能体以建立组织架构。")).toBeInTheDocument();
+  expect(await screen.findByText("暂无组织成员。邀请 Human 或创建智能体以建立组织架构。")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "新建智能体" })).toHaveAttribute(
     "href",
     "/orgs/org-empty/agents/new",

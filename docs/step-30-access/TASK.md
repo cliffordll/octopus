@@ -48,6 +48,7 @@ principal_type   user | agent
 principal_id
 role             root | owner | member
 status           pending | active | suspended
+reports_to       同组织上级 Role ID；Human 与 Agent 共用
 created_at
 updated_at
 ```
@@ -64,6 +65,10 @@ updated_at
 - `owner`、`member` 只能存在于组织作用域。
 - Agent 只能拥有所属组织的 Role，不能拥有实例 Role。
 - 同一主体在同一作用域只有一个当前 Role；修改角色时更新该行。
+- 组织级 Role 同时作为组织成员节点；`reports_to` 表达成员之间的统一汇报关系。
+- 组织 Owner 是根节点，不能设置上级；其他成员默认直属组织 Owner。
+- Human 和 Agent 都可以成为上级或下属，关系变更必须拒绝跨组织、停用成员和循环引用。
+- Agent 的旧 `agents.reports_to` 只保留兼容语义；统一组织架构以 Role 关系为准。
 
 ### `permissions`
 

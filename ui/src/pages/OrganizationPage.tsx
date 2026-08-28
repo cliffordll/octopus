@@ -1,11 +1,11 @@
 ﻿import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PropsWithChildren } from "react";
 import { Link, Navigate, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { agentsApi } from "../api/agents";
+import { accessApi, type OrganizationHierarchyMember } from "../api/access";
 import { organizationSkillsApi } from "../api/organizationSkills";
 import { organizationsApi } from "../api/organizations";
 import { projectsApi } from "../api/projects";
-import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
+import type { OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { MemberAccessSettings } from "../components/MemberAccessSettings";
@@ -159,37 +159,38 @@ export function OrganizationIndexPage() {
 }
 
 const ORG_CARD_WIDTH = 210;
-const ORG_CARD_HEIGHT = 108;
+const ORG_CARD_HEIGHT = 132;
 const ORG_GAP_X = 34;
 const ORG_GAP_Y = 82;
 const ORG_PADDING = 56;
+const ORG_CANVAS_PADDING = 64;
 
 interface OrganizationNode {
-  agent: Agent;
+  member: OrganizationHierarchyMember;
   children: OrganizationNode[];
 }
 
 interface LayoutNode {
-  agent: Agent;
+  member: OrganizationHierarchyMember;
   x: number;
   y: number;
   children: LayoutNode[];
 }
 
-function buildOrganizationTree(agents: Agent[]): OrganizationNode[] {
-  const nodes = new Map(agents.map((agent) => [agent.id, { agent, children: [] as OrganizationNode[] }]));
+function buildOrganizationTree(members: OrganizationHierarchyMember[]): OrganizationNode[] {
+  const nodes = new Map(members.map((member) => [member.id, { member, children: [] as OrganizationNode[] }]));
   const roots: OrganizationNode[] = [];
   for (const node of nodes.values()) {
-    const parentId = node.agent.reportsTo;
+    const parentId = node.member.reportsTo;
     const parent = parentId ? nodes.get(parentId) : undefined;
-    if (parent && parent.agent.id !== node.agent.id) {
+    if (parent && parent.member.id !== node.member.id) {
       parent.children.push(node);
     } else {
       roots.push(node);
     }
   }
   const sortNodes = (items: OrganizationNode[]) => {
-    items.sort((left, right) => left.agent.name.localeCompare(right.agent.name));
+    items.sort((left, right) => left.member.displayName.localeCompare(right.member.displayName));
     items.forEach((item) => sortNodes(item.children));
   };
   sortNodes(roots);
@@ -212,7 +213,7 @@ function layoutNode(node: OrganizationNode, x: number, y: number): LayoutNode {
     return result;
   });
   return {
-    agent: node.agent,
+    member: node.member,
     children,
     x: x + (width - ORG_CARD_WIDTH) / 2,
     y,
@@ -251,18 +252,34 @@ function collectEdges(nodes: LayoutNode[]): Array<{ parent: LayoutNode; child: L
   return edges;
 }
 
+function fitOrganizationChart(viewport: HTMLDivElement, bounds: { width: number; height: number }): number {
+  const width = viewport.clientWidth || 800;
+  const height = viewport.clientHeight || 560;
+  const availableWidth = Math.max(width - 40, 1);
+  const availableHeight = Math.max(height - 40, 1);
+  return Math.min(
+    Math.max(Math.min(availableWidth / bounds.width, availableHeight / bounds.height), 0.35),
+    1,
+  );
+}
+
 export function OrganizationStructurePage() {
   const { orgId = "" } = useParams();
   const viewportRef = useRef<HTMLDivElement>(null);
+  const centeredRef = useRef(false);
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const agents = useQuery({
-    queryKey: ["agents", orgId],
-    queryFn: () => agentsApi.list(orgId),
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 560 });
+  const [adjusting, setAdjusting] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [managerId, setManagerId] = useState("");
+  const queryClient = useQueryClient();
+  const hierarchy = useQuery({
+    queryKey: ["organization-hierarchy", orgId],
+    queryFn: () => accessApi.hierarchy(orgId),
   });
-  const agentList = Array.isArray(agents.data) ? agents.data : [];
-  const agentNameById = new Map(agentList.map((agent) => [agent.id, agent.name]));
-  const organizationTree = useMemo(() => buildOrganizationTree(agentList), [agentList]);
+  const memberList = Array.isArray(hierarchy.data) ? hierarchy.data : [];
+  const memberNameById = new Map(memberList.map((member) => [member.id, member.displayName]));
+  const organizationTree = useMemo(() => buildOrganizationTree(memberList), [memberList]);
   const layout = useMemo(() => layoutForest(organizationTree), [organizationTree]);
   const nodes = useMemo(() => flattenLayout(layout), [layout]);
   const edges = useMemo(() => collectEdges(layout), [layout]);
@@ -273,94 +290,222 @@ export function OrganizationStructurePage() {
       height: Math.max(...nodes.map((node) => node.y + ORG_CARD_HEIGHT)) + ORG_PADDING,
     };
   }, [nodes]);
+  const canvasWidth = Math.max(viewportSize.width, bounds.width * zoom + ORG_CANVAS_PADDING * 2);
+  const canvasHeight = Math.max(viewportSize.height, bounds.height * zoom + ORG_CANVAS_PADDING * 2);
+  const canvasOffset = {
+    x: Math.max(ORG_CANVAS_PADDING, (canvasWidth - bounds.width * zoom) / 2),
+    y: Math.max(ORG_CANVAS_PADDING, (canvasHeight - bounds.height * zoom) / 2),
+  };
 
   useEffect(() => {
-    if (!viewportRef.current || nodes.length === 0) return;
-    const width = viewportRef.current.clientWidth || 800;
-    const fitZoom = Math.min(Math.max((width - 40) / bounds.width, 0.45), 1);
-    setZoom(fitZoom);
-    setPan({ x: Math.max(20, (width - bounds.width * fitZoom) / 2), y: 20 });
-  }, [bounds, nodes.length]);
+    if (!viewportRef.current) return;
+    const viewport = viewportRef.current;
+    const measure = () => {
+      setViewportSize({
+        width: viewport.clientWidth || 800,
+        height: viewport.clientHeight || 560,
+      });
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  useEffect(() => {
+    if (!viewportRef.current || nodes.length === 0 || centeredRef.current) return;
+    const viewport = viewportRef.current;
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = 0;
+      centeredRef.current = true;
+    });
+  }, [canvasWidth, nodes.length]);
+
+  const updateManager = useMutation({
+    mutationFn: () => {
+      if (!editingMemberId) throw new Error("请选择需要调整的成员");
+      return accessApi.updateManager(orgId, editingMemberId, managerId || null);
+    },
+    onSuccess: () => {
+      setEditingMemberId(null);
+      setManagerId("");
+      void queryClient.invalidateQueries({ queryKey: ["organization-hierarchy", orgId] });
+      void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
+    },
+  });
+  const editingMember = memberList.find((member) => member.id === editingMemberId) ?? null;
+  const excludedManagerIds = useMemo(() => {
+    if (!editingMemberId) return new Set<string>();
+    const excluded = new Set<string>([editingMemberId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const member of memberList) {
+        if (member.reportsTo && excluded.has(member.reportsTo) && !excluded.has(member.id)) {
+          excluded.add(member.id);
+          changed = true;
+        }
+      }
+    }
+    return excluded;
+  }, [editingMemberId, memberList]);
+
+  function openManagerEditor(member: OrganizationHierarchyMember) {
+    setEditingMemberId(member.id);
+    setManagerId(member.reportsTo ?? "");
+  }
 
   function fitChart() {
     if (!viewportRef.current) return;
-    const width = viewportRef.current.clientWidth || 800;
-    const fitZoom = Math.min(Math.max((width - 40) / bounds.width, 0.45), 1);
-    setZoom(fitZoom);
-    setPan({ x: Math.max(20, (width - bounds.width * fitZoom) / 2), y: 20 });
+    const viewport = viewportRef.current;
+    setZoom(fitOrganizationChart(viewport, bounds));
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2);
+    });
   }
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+    <OrgWorkspace contentClassName="org-content-full organization-structure-content" orgId={orgId}>
+      <header className="page-header organization-structure-header">
         <div>
           <p className="eyebrow">Organization</p>
           <h1>组织架构</h1>
-          <p className="muted">按上游组织图布局展示智能体汇报关系。</p>
+          <p className="muted">Human 与 Agent 共用一套汇报关系。可在画布内上下、左右滚动查看完整架构。</p>
         </div>
-        {agentList.length > 0 && (
+        {memberList.length > 0 && (
           <div className="org-chart-controls org-page-actions">
+            <button
+              className={adjusting ? "primary small-button" : "secondary small-button"}
+              type="button"
+              onClick={() => {
+                setAdjusting((value) => !value);
+                setEditingMemberId(null);
+              }}
+            >
+              {adjusting ? "完成调整" : "调整架构"}
+            </button>
             <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.min(value * 1.2, 1.8))}>+</button>
             <button className="secondary small-button" type="button" onClick={() => setZoom((value) => Math.max(value * 0.8, 0.35))}>-</button>
             <button className="secondary small-button" type="button" onClick={fitChart}>Fit</button>
           </div>
         )}
       </header>
-      {agents.error && <ErrorNotice error={agents.error} />}
-      {agents.isSuccess && agentList.length === 0 ? (
+      {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
+      {hierarchy.isSuccess && memberList.length === 0 ? (
         <section className="panel organization-empty-state">
-          <p className="muted">暂无智能体。创建首个智能体以建立组织架构。</p>
+          <p className="muted">暂无组织成员。邀请 Human 或创建智能体以建立组织架构。</p>
           <Link className="button" to={`/orgs/${orgId}/agents/new`}>新建智能体</Link>
         </section>
       ) : (
-        <section className="organization-chart" ref={viewportRef}>
-          <svg aria-hidden className="organization-chart-edges">
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              {edges.map(({ parent, child }) => {
-                const x1 = parent.x + ORG_CARD_WIDTH / 2;
-                const y1 = parent.y + ORG_CARD_HEIGHT;
-                const x2 = child.x + ORG_CARD_WIDTH / 2;
-                const y2 = child.y;
-                const midY = (y1 + y2) / 2;
-                return (
-                  <path
-                    d={`M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`}
-                    fill="none"
-                    key={`${parent.agent.id}-${child.agent.id}`}
-                  />
-                );
-              })}
-            </g>
-          </svg>
+        <section aria-label="组织关系画布" className="organization-chart" ref={viewportRef}>
           <div
-            className="organization-chart-layer"
-            style={{
-              height: bounds.height,
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              width: bounds.width,
-            }}
+            className="organization-chart-canvas"
+            data-testid="organization-chart-canvas"
+            style={{ height: canvasHeight, width: canvasWidth }}
           >
-            {nodes.map(({ agent, x, y }) => (
-              <Link
-                aria-label={`${agent.name} ${agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}`}
-                className="organization-chart-card"
-                key={agent.id}
-                style={{ left: x, top: y }}
-                to={`/orgs/${orgId}/agents/${agent.id}`}
-              >
-                <div className="organization-chart-avatar">{agent.name.slice(0, 1).toUpperCase()}</div>
-                <div className="organization-chart-copy">
-                  <strong>{agent.name}</strong>
-                  <span>{agent.title ?? agent.role}</span>
-                  <small>{agent.agentRuntimeType ?? "runtime"}</small>
-                  <small>{agent.reportsTo ? `向 ${agentNameById.get(agent.reportsTo) ?? "未知智能体"} 汇报` : "直属组织"}</small>
-                </div>
-                <Badge>{statusLabel(agent.status)}</Badge>
-              </Link>
-            ))}
+            <svg
+              aria-hidden
+              className="organization-chart-edges"
+              style={{ height: canvasHeight, width: canvasWidth }}
+            >
+              <g transform={`translate(${canvasOffset.x}, ${canvasOffset.y}) scale(${zoom})`}>
+                {edges.map(({ parent, child }) => {
+                  const x1 = parent.x + ORG_CARD_WIDTH / 2;
+                  const y1 = parent.y + ORG_CARD_HEIGHT;
+                  const x2 = child.x + ORG_CARD_WIDTH / 2;
+                  const y2 = child.y;
+                  const midY = (y1 + y2) / 2;
+                  return (
+                    <path
+                      d={`M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`}
+                      fill="none"
+                      key={`${parent.member.id}-${child.member.id}`}
+                    />
+                  );
+                })}
+              </g>
+            </svg>
+            <div
+              className="organization-chart-layer"
+              style={{
+                height: bounds.height,
+                left: canvasOffset.x,
+                top: canvasOffset.y,
+                transform: `scale(${zoom})`,
+                width: bounds.width,
+              }}
+            >
+              {nodes.map(({ member, x, y }) => (
+                <article
+                  aria-label={`${member.displayName} ${member.reportsTo ? `向 ${memberNameById.get(member.reportsTo) ?? "未知成员"} 汇报` : "组织负责人"}`}
+                  className={`organization-chart-card ${adjusting ? "adjusting" : ""}`}
+                  key={member.id}
+                  style={{ left: x, top: y }}
+                >
+                  <div className={`organization-chart-avatar ${member.principalType}`}>{member.displayName.slice(0, 1).toUpperCase()}</div>
+                  <div className="organization-chart-copy">
+                    {member.principalType === "agent" ? (
+                      <Link to={`/orgs/${orgId}/agents/${member.principalId}`}>{member.displayName}</Link>
+                    ) : (
+                      <strong>{member.displayName}</strong>
+                    )}
+                    <span>{member.principalType === "agent" ? "Agent" : "Human"} · {member.role}</span>
+                    <small>{member.reportsTo ? `向 ${memberNameById.get(member.reportsTo) ?? "未知成员"} 汇报` : "组织负责人"}</small>
+                  </div>
+                  <Badge>{member.status === "active" ? "有效" : member.status}</Badge>
+                  {adjusting && member.role !== "owner" ? (
+                    <button className="organization-chart-manager-button" type="button" onClick={() => openManagerEditor(member)}>
+                      调整上级
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
+      {editingMember ? (
+        <div className="modal-backdrop" role="presentation">
+          <form
+            aria-label="调整上级"
+            className="modal-card organization-manager-dialog"
+            onSubmit={(event) => {
+              event.preventDefault();
+              updateManager.mutate();
+            }}
+          >
+            <div>
+              <p className="eyebrow">Reporting line</p>
+              <h2>调整 {editingMember.displayName} 的上级</h2>
+              <p className="muted">Human 与 Agent 都可以作为上级。系统会阻止循环汇报关系。</p>
+            </div>
+            <label>
+              直属上级
+              <select value={managerId} onChange={(event) => setManagerId(event.target.value)} required>
+                <option value="" disabled>请选择上级</option>
+                {memberList
+                  .filter((member) => member.status === "active" && !excludedManagerIds.has(member.id))
+                  .map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.displayName}（{member.principalType === "agent" ? "Agent" : "Human"}）
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {updateManager.error && <ErrorNotice error={updateManager.error} />}
+            <div className="modal-actions">
+              <button className="secondary" type="button" onClick={() => setEditingMemberId(null)}>取消</button>
+              <button disabled={updateManager.isPending || !managerId} type="submit">保存调整</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </OrgWorkspace>
   );
 }

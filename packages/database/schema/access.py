@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     DateTime,
+    ForeignKey,
     Index,
     String,
     Text,
@@ -72,6 +73,7 @@ class Role(Base):
             "status",
         ),
         Index("roles_scope_status_idx", "scope_type", "scope_id", "status"),
+        Index("roles_scope_reports_to_idx", "scope_type", "scope_id", "reports_to"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
@@ -81,6 +83,9 @@ class Role(Base):
     principal_id: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    reports_to: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("roles.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

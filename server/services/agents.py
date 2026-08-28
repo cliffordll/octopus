@@ -92,6 +92,7 @@ from server.access import (
 )
 from server.identity import PrincipalRef
 from server.identity.resolver import IdentityContextResolver
+from server.organization_hierarchy import OrganizationHierarchyService
 from server.roles import RoleService
 
 from .agent_instructions import (
@@ -668,6 +669,7 @@ class AgentService:
         self._session = session
         self._roles = RoleService(session)
         self._permissions = PermissionService(session)
+        self._hierarchy = OrganizationHierarchyService(session)
 
     async def list_for_org(self, org_id: str) -> list[Agent]:
         rows = await list_org_agents(self._session, org_id)
@@ -929,8 +931,22 @@ class AgentService:
         }
         row = await create_agent(self._session, values)
         principal = PrincipalRef(type="agent", id=row.id)
-        await self._roles.ensure(
+        access_role = await self._roles.ensure(
             "organization", org_id, principal, role="member", status="active"
+        )
+        manager_role = (
+            await self._roles.get(
+                "organization",
+                org_id,
+                PrincipalRef(type="agent", id=manager_id),
+            )
+            if manager_id is not None
+            else None
+        )
+        await self._hierarchy.set_manager(
+            org_id,
+            access_role.id,
+            manager_role.id if manager_role is not None else None,
         )
         await self._permissions.replace(
             "organization",
@@ -1078,6 +1094,27 @@ class AgentService:
         row = await update_agent(self._session, agent_id, values)
         if row is None:
             return None
+        if "reportsTo" in payload:
+            access_role = await self._roles.get(
+                "organization",
+                row.org_id,
+                PrincipalRef(type="agent", id=row.id),
+            )
+            manager_role = (
+                await self._roles.get(
+                    "organization",
+                    row.org_id,
+                    PrincipalRef(type="agent", id=payload["reportsTo"]),
+                )
+                if payload["reportsTo"] is not None
+                else None
+            )
+            if access_role is not None:
+                await self._hierarchy.set_manager(
+                    row.org_id,
+                    access_role.id,
+                    manager_role.id if manager_role is not None else None,
+                )
         if desired_skills is not None:
             desired_skills = await replace_enabled_skill_keys(
                 self._session,
