@@ -25,6 +25,10 @@ const PERMISSIONS: Array<{ key: PermissionKey; label: string }> = [
   { key: "workspaces:manage", label: "管理工作区" },
 ];
 
+function permissionLabel(permission: PermissionKey): string {
+  return PERMISSIONS.find((item) => item.key === permission)?.label ?? permission;
+}
+
 function MemberRow({ member, orgId }: { member: OrganizationMember; orgId: string }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -46,6 +50,7 @@ function MemberRow({ member, orgId }: { member: OrganizationMember; orgId: strin
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: ["organization-members", orgId] }),
   });
+  const permissionLabels = member.permissions.map((grant) => permissionLabel(grant.permissionKey));
 
   function toggle(permission: PermissionKey) {
     setSelected((current) =>
@@ -62,19 +67,32 @@ function MemberRow({ member, orgId }: { member: OrganizationMember; orgId: strin
           <small>{member.principalType === "agent" ? "智能体" : "Human"} · {member.role}</small>
         </span>
         <span className={`status-pill ${member.status}`}>{member.status === "active" ? "有效" : member.status}</span>
-        <button className="ghost" onClick={() => setEditing((value) => !value)} type="button">
-          {editing ? "取消" : "编辑权限"}
-        </button>
-        {member.role !== "owner" && (
-          <button
-            className="ghost"
-            disabled={statusChange.isPending}
-            onClick={() => statusChange.mutate()}
-            type="button"
-          >
-            {member.status === "suspended" ? "恢复成员" : "暂停成员"}
+        <div
+          aria-label="已授权权限"
+          className="member-permission-preview"
+          title={permissionLabels.length ? permissionLabels.join("、") : "未单独授权"}
+        >
+          {permissionLabels.length ? (
+            permissionLabels.map((label) => <span className="badge" key={label}>{label}</span>)
+          ) : (
+            <span className="muted">未单独授权</span>
+          )}
+        </div>
+        <div className="member-actions">
+          <button className="ghost" onClick={() => setEditing((value) => !value)} type="button">
+            {editing ? "取消" : "编辑权限"}
           </button>
-        )}
+          {member.role !== "owner" && (
+            <button
+              className="ghost"
+              disabled={statusChange.isPending}
+              onClick={() => statusChange.mutate()}
+              type="button"
+            >
+              {member.status === "suspended" ? "恢复成员" : "暂停成员"}
+            </button>
+          )}
+        </div>
       </div>
       {editing ? (
         <div className="permission-editor">
@@ -93,13 +111,7 @@ function MemberRow({ member, orgId }: { member: OrganizationMember; orgId: strin
           {save.error && <ErrorNotice error={save.error} />}
           <button disabled={save.isPending} onClick={() => save.mutate()} type="button">保存权限</button>
         </div>
-      ) : (
-        <div className="permission-summary">
-          {member.permissions.length
-            ? member.permissions.map((grant) => <span className="badge" key={grant.permissionKey}>{PERMISSIONS.find((item) => item.key === grant.permissionKey)?.label ?? grant.permissionKey}</span>)
-            : <span className="muted">未单独授权</span>}
-        </div>
-      )}
+      ) : null}
     </article>
   );
 }
@@ -141,12 +153,12 @@ export function MemberAccessSettings({ orgId }: { orgId?: string }) {
   }
 
   return (
-    <section className="settings-empty-section access-settings" aria-label="成员与权限">
+    <section className="settings-empty-section access-settings" aria-label="组织成员">
       <div className="settings-section-heading-copy">
-        <p className="eyebrow">Members & Access</p>
+        <p className="eyebrow">Organization Members</p>
         <div className="runtime-provider-title-line">
-          <h3>成员与权限</h3>
-          <p className="muted">Human 与智能体使用同一套组织成员和授权规则。</p>
+          <h1>组织成员</h1>
+          <p className="muted">管理成员、邀请和组织权限。Human 与智能体使用同一套授权规则。</p>
         </div>
       </div>
       {(members.error || invites.error) && <ErrorNotice error={members.error || invites.error} />}

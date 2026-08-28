@@ -153,3 +153,42 @@ it("preserves an invitation destination while the human signs in", async () => {
     "/login?next=%2Finvite%2Ftoken-1",
   );
 });
+
+it("shows organization members on a dedicated organization page", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs" && init?.method === "GET") {
+      return respond([{ id: "org-1", name: "核心团队", status: "active" }]);
+    }
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/members") {
+      return respond([
+        {
+          id: "member-1",
+          orgId: "org-1",
+          principalType: "user",
+          principalId: "user-1",
+          displayName: "Owner",
+          status: "active",
+          role: "owner",
+          permissions: [{ permissionKey: "users:invite", scope: null }],
+          createdAt: "2026-08-28T00:00:00Z",
+          updatedAt: "2026-08-28T00:00:00Z",
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/invites") return respond([]);
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/members");
+
+  expect(await screen.findByRole("heading", { name: "组织成员" })).toBeInTheDocument();
+  expect(await screen.findByText("Owner")).toBeInTheDocument();
+  const organizationNavigation = within(screen.getByRole("navigation", { name: "组织导航" }));
+  expect(organizationNavigation.getByRole("link", { name: "成员" })).toHaveClass("active");
+
+  await userEvent.click(screen.getByRole("button", { name: "设置" }));
+  const settings = within(screen.getByRole("dialog", { name: "设置" }));
+  expect(settings.queryByText("成员与权限")).not.toBeInTheDocument();
+});

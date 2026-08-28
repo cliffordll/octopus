@@ -10,7 +10,7 @@ import { SidebarAccountMenu } from "./SidebarAccountMenu";
 
 function organizationTarget(pathname: string, orgId: string) {
   const section = pathname.match(
-    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|heartbeat-runs|run-intelligence|settings)/,
+    /^\/orgs\/[^/]+\/(chats|messenger|issues|agents|projects|approvals|structure|members|heartbeat-runs|run-intelligence|settings)/,
   )?.[1];
   return `/orgs/${orgId}/${section ?? "issues"}`;
 }
@@ -28,7 +28,7 @@ export function AppShell() {
   const quickCreateRef = useRef<HTMLDivElement>(null);
   const isOrganizationWorkspace = location.pathname.startsWith("/orgs/");
   const isMessagesArea = /^\/orgs\/[^/]+\/(chats|messenger|approvals)/.test(location.pathname);
-  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|projects|heartbeat-runs|run-intelligence|resources|workspaces|goals|skills|settings)/.test(location.pathname);
+  const isOrganizationArea = /^\/orgs\/[^/]+\/(structure|members|projects|heartbeat-runs|run-intelligence|resources|workspaces|goals|skills|settings)/.test(location.pathname);
   const activeOrganizationId = location.pathname.match(/^\/orgs\/([^/]+)/)?.[1];
   const organizations = useQuery({
     queryKey: ["organizations"],

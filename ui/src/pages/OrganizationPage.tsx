@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type { Agent, OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { MemberAccessSettings } from "../components/MemberAccessSettings";
 import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
 import { sourceLabel, statusLabel } from "../utils/display";
 
@@ -139,6 +140,15 @@ export function OrganizationCostsPage() {
         </div>
       </header>
       <OrganizationCostPanel orgId={orgId} />
+    </OrgWorkspace>
+  );
+}
+
+export function OrganizationMembersPage() {
+  const { orgId = "" } = useParams();
+  return (
+    <OrgWorkspace contentClassName="organization-members-content" orgId={orgId}>
+      <MemberAccessSettings orgId={orgId} />
     </OrgWorkspace>
   );
 }
@@ -1478,6 +1488,10 @@ export function OrgNavigation({ orgId }: { orgId: string }) {
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/structure`}>
             <span aria-hidden="true" className="context-entry-icon">O</span>
             <span>组织架构</span>
+          </NavLink>
+          <NavLink className="local-nav-primary" to={`/orgs/${orgId}/members`}>
+            <span aria-hidden="true" className="context-entry-icon">M</span>
+            <span>成员</span>
           </NavLink>
           <NavLink className="local-nav-primary" to={`/orgs/${orgId}/heartbeat-runs`}>
             <span aria-hidden="true" className="context-entry-icon">H</span>

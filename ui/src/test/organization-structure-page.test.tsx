@@ -27,6 +27,8 @@ it("shows current reporting relationships in the organization structure", async 
   expect(await screen.findByRole("heading", { name: "组织架构" })).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "工作区" }))
     .toHaveAttribute("href", "/orgs/org-1/workspaces");
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "成员" }))
+    .toHaveAttribute("href", "/orgs/org-1/members");
   expect(await screen.findByText("Builder")).toBeInTheDocument();
   expect(await screen.findByText("向 Founder 汇报")).toBeInTheDocument();
 });

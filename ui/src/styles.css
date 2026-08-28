@@ -550,9 +550,14 @@ small {
   padding: 0;
 }
 
+.settings-empty-section h1,
 .settings-empty-section h3,
 .settings-empty-section p {
   margin: 0;
+}
+
+.organization-members-content .tertiary-detail-frame {
+  height: 100%;
 }
 
 .storage-settings-card {
@@ -11368,14 +11373,33 @@ textarea {
 
 .member-heading {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: 36px minmax(140px, 1fr) 72px minmax(160px, 1.3fr) 176px;
 }
 
-.permission-summary,
 .permission-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.member-permission-preview {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.member-permission-preview .badge {
+  flex: 0 0 auto;
+}
+
+.member-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
 }
 
 .permission-editor {
@@ -11414,5 +11438,9 @@ textarea {
   .access-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .permission-grid {
+    grid-template-columns: 1fr;
   }
 }
