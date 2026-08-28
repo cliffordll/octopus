@@ -133,6 +133,9 @@ it("creates the first agent as the organization CEO", async () => {
     if (path === "/api/orgs/org-empty/agents/name-suggestion" && init?.method === "GET") {
       return respond({ name: "Founder" });
     }
+    if (path === "/api/orgs/org-empty/adapters/codex_local/models" && init?.method === "GET") {
+      return respond([{ id: "gpt-5", label: "GPT-5" }]);
+    }
     if (path === "/api/orgs/org-empty/agent-hires" && init?.method === "POST") {
       return respond({ agent: { id: "agent-ceo", name: "Founder", role: "ceo", status: "idle" }, approval: null }, 201);
     }
@@ -146,7 +149,7 @@ it("creates the first agent as the organization CEO", async () => {
 
   await userEvent.type(screen.getByLabelText("智能体名称"), "Founder");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.type(await screen.findByLabelText("模型配置"), "openai/gpt-5");
+  await userEvent.selectOptions(await screen.findByLabelText("模型配置"), "openai/gpt-5");
   await userEvent.click(screen.getByRole("button", { name: "创建 CEO" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -189,6 +192,7 @@ it("lets the server name a hired agent when the name is blank", async () => {
       method: "POST",
       body: JSON.stringify({
         role: "qa",
+        reportsTo: "agent-ceo",
         agentRuntimeType: "process",
         agentRuntimeConfig: {},
       }),
@@ -288,6 +292,7 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
       body: JSON.stringify({
         name: "OpenClaw Agent",
         role: "engineer",
+        reportsTo: "agent-1",
         agentRuntimeType: "openclaw_gateway",
         agentRuntimeConfig: {
           url: "wss://gateway.example/ws",
@@ -299,7 +304,7 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
   );
 }, 10000);
 
-it("hires agents as the CEO actor and opens the pending approval agent", async () => {
+it("hires agents as the current Human and assigns the CEO as manager", async () => {
   const ceo = { id: "agent-ceo", orgId: "org-1", name: "CEO", role: "ceo", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
   const pendingAgent = { id: "agent-pending", orgId: "org-1", name: "Reviewer", role: "qa", status: "pending_approval", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0 };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
@@ -336,8 +341,8 @@ it("hires agents as the CEO actor and opens the pending approval agent", async (
   const hireCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/orgs/org-1/agent-hires" && init?.method === "POST");
   expect(hireCall).toBeTruthy();
   const headers = hireCall?.[1]?.headers as Headers;
-  expect(headers.get("x-test-agent-id")).toBe("agent-ceo");
-  expect(headers.get("x-test-org-id")).toBe("org-1");
+  expect(headers.get("x-test-agent-id")).toBeNull();
+  expect(JSON.parse(String(hireCall?.[1]?.body))).toMatchObject({ reportsTo: "agent-ceo" });
   expect(await screen.findByRole("heading", { name: "Reviewer" })).toBeInTheDocument();
   expect(screen.getByText("待审批")).toBeInTheDocument();
 }, 10000);

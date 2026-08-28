@@ -491,7 +491,7 @@ export interface CreateActivityPayload {
   action: string;
   entityType: string;
   entityId: string;
-  actorType?: "agent" | "user" | "system" | "board";
+  actorType?: "agent" | "user" | "system";
   agentId?: string | null;
   runId?: string | null;
   details?: Record<string, unknown> | null;
@@ -1165,7 +1165,6 @@ export interface AgentConfiguration {
   agentRuntimeType?: AgentRuntimeType;
   agentRuntimeConfig?: Record<string, unknown>;
   runtimeConfig: Record<string, unknown>;
-  permissions?: Record<string, boolean>;
   updatedAt?: string;
 }
 

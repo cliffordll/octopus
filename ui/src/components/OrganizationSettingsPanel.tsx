@@ -7,10 +7,14 @@ import { PluginsPage } from "../pages/PluginsPage";
 import { ErrorNotice } from "./ErrorNotice";
 import { RuntimeProviderSettings } from "./RuntimeProviderSettings";
 import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
+import { AccountSettingsSection } from "./AccountSettingsSection";
+import { MemberAccessSettings } from "./MemberAccessSettings";
 
-type SettingsSection = "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
+type SettingsSection = "account" | "members" | "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
+  { id: "account", eyebrow: "Human Account", label: "账户", description: "登录身份和 Session。" },
+  { id: "members", eyebrow: "Members & Access", label: "成员与权限", description: "成员、邀请和组织授权。" },
   { id: "providers", eyebrow: "LLM Providers", label: "供应商", description: "全局 LLM provider 和 model。" },
   { id: "heartbeats", eyebrow: "Heartbeat Monitor", label: "心跳", description: "智能体状态检测和运行诊断。" },
   { id: "storage", eyebrow: "Storage", label: "存储", description: "附件和产物存储配置。" },
@@ -95,7 +99,11 @@ export function OrganizationSettingsPanel({ orgId }: { orgId?: string }) {
         ))}
       </aside>
       <div className="settings-section-content">
-        {activeSection === "providers" ? (
+        {activeSection === "account" ? (
+          <AccountSettingsSection />
+        ) : activeSection === "members" ? (
+          <MemberAccessSettings orgId={orgId} />
+        ) : activeSection === "providers" ? (
           <RuntimeProviderSettings orgId={orgId} />
         ) : activeSection === "heartbeats" ? (
           <InstanceHeartbeatsPanel />

@@ -11101,3 +11101,199 @@ textarea {
   font-weight: 700;
   margin-right: 4px;
 }
+
+.auth-page {
+  align-items: center;
+  background: radial-gradient(circle at top, #14233a 0, #090b10 48%);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.auth-card {
+  background: #0d131d;
+  border: 1px solid #293448;
+  border-radius: 18px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+  width: min(420px, 100%);
+}
+
+.auth-card h1,
+.auth-card p {
+  margin-bottom: 6px;
+}
+
+.auth-mode-tabs {
+  background: #080c13;
+  border: 1px solid #273244;
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+}
+
+.auth-mode-tabs button {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #8f9caf;
+  cursor: pointer;
+  padding: 8px;
+}
+
+.auth-mode-tabs button.active {
+  background: #1a2b43;
+  color: #f0f6ff;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form label,
+.invite-creator label {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-back-link {
+  text-align: center;
+}
+
+.access-card {
+  align-items: center;
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 12px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.access-identity,
+.member-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.access-identity > span:last-child,
+.member-heading > span:nth-child(2),
+.invite-row > span:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.access-avatar {
+  align-items: center;
+  background: #1e4d80;
+  border-radius: 9px;
+  color: white;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 700;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.access-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.access-settings {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.invite-creator {
+  display: grid;
+  grid-template-columns: minmax(130px, 180px) auto minmax(180px, 1fr);
+  justify-content: stretch;
+}
+
+.access-scroll-area {
+  display: grid;
+  gap: 18px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.access-scroll-area h4 {
+  margin: 0 0 8px;
+}
+
+.member-list,
+.invite-list {
+  display: grid;
+  gap: 8px;
+}
+
+.member-row,
+.invite-row {
+  background: #0f1623;
+  border: 1px solid #273244;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.member-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
+.permission-summary,
+.permission-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-editor {
+  border-top: 1px solid #263145;
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.permission-grid label {
+  align-items: center;
+  background: #0a1019;
+  border: 1px solid #253147;
+  border-radius: 7px;
+  display: flex;
+  gap: 7px;
+  padding: 7px 9px;
+}
+
+.permission-editor > button {
+  justify-self: end;
+}
+
+.invite-row {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+@media (max-width: 760px) {
+  .invite-creator,
+  .member-heading,
+  .invite-row {
+    grid-template-columns: 1fr;
+  }
+
+  .access-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

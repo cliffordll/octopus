@@ -89,6 +89,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
       agentsApi.hire(orgId, {
         ...(name.trim() ? { name: name.trim() } : {}),
         role: effectiveRole,
+        ...(ceoActorId ? { reportsTo: ceoActorId } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(capabilities.trim() ? { capabilities: capabilities.trim() } : {}),
         agentRuntimeType: runtime,
@@ -96,7 +97,7 @@ export function AgentCreateForm({ onCreated, orgId }: { onCreated?: () => void; 
         ...(budgetMonthlyDollars.trim() ? { budgetMonthlyCents: Math.round(Number(budgetMonthlyDollars) * 100) } : {}),
         ...(metadata.trim() && metadata.trim() !== "{}" ? { metadata: readJsonObject(metadata, "Metadata") } : {}),
         ...(desiredSkills.trim() ? { desiredSkills: parseCsv(desiredSkills) } : {}),
-      }, ceoActorId),
+      }),
     onSuccess: (agent) => {
       void queryClient.invalidateQueries({ queryKey: ["agents", orgId] });
       void queryClient.invalidateQueries({ queryKey: ["approvals", orgId] });

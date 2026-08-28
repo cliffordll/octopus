@@ -1207,7 +1207,6 @@ export function AgentPage() {
   });
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
   const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
-  const permissionRows = Object.entries(configuration.data?.permissions ?? {});
   const runtimeAvailable = runtimeTestPassed(runtimeTestResult);
   const runtimeModelOptions: RuntimeModel[] = runtimeModels.data ?? [];
   const selectedRuntimeModel =
@@ -1876,22 +1875,6 @@ export function AgentPage() {
                           </div>
                         )}
                       </div>
-                    </div>
-                  </section>
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>权限</h2>
-                      <p className="muted">服务端返回的当前智能体权限快照。</p>
-                    </div>
-                    <div className="agent-permission-grid">
-                      {permissionRows.length > 0 ? permissionRows.map(([key, enabled]) => (
-                        <div className="agent-permission-item" key={key}>
-                          <span>{key}</span>
-                          <Badge>{enabled ? "允许" : "不允许"}</Badge>
-                        </div>
-                      )) : (
-                        <p className="muted">当前接口未返回权限明细。</p>
-                      )}
                     </div>
                   </section>
                   <section className="agent-config-section">
