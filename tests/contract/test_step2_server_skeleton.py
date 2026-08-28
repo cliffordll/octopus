@@ -26,9 +26,7 @@ def test_orgs_route_requires_actor_context() -> None:
     response = client.get("/api/orgs")
 
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Actor context is not configured for board-scoped org listing"
-    }
+    assert response.json() == {"detail": "Actor context is not configured"}
 
 
 def test_server_command_starts_uvicorn_with_configured_bindings(

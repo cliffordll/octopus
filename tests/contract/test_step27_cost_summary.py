@@ -284,9 +284,11 @@ async def test_cost_scope_rejects_cross_org_and_agent_impersonation(
     assert cross_code == 422
     assert "organization" in cross["detail"]
     assert impersonation_code == 403
-    assert "own cost" in impersonation["detail"]
+    assert (
+        impersonation["detail"] == "Agent cost reporting requires an active Run token"
+    )
     assert wrong_org_code == 403
-    assert "another organization" in wrong_org["detail"]
+    assert wrong_org["detail"] == "Principal cannot access this organization"
 
 
 async def test_run_cost_can_be_recorded_from_runtime_result(

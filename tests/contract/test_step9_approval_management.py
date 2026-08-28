@@ -50,14 +50,16 @@ async def _inject_test_actor(
 ) -> Response:
     actor_type = request.headers.get("x-test-actor-type")
     if actor_type:
+        effective_actor_type = "user" if actor_type == "board" else actor_type
         actor_id = request.headers.get("x-test-actor-id", "test-actor")
         request.state.actor = {
-            "type": actor_type,
+            "type": effective_actor_type,
             "id": actor_id,
             "orgId": request.headers.get("x-test-org-id"),
-            "isRoot": actor_type == "user",
+            "isRoot": effective_actor_type == "user",
+            "source": "legacy_contract_root" if actor_type == "board" else "test",
         }
-        if actor_type == "user":
+        if effective_actor_type == "user":
             async with request.app.state.session_factory() as session:
                 async with async_write_transaction(session):
                     now = datetime.now(UTC)

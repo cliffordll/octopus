@@ -19,8 +19,13 @@ from sqlalchemy import BigInteger, Table, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from starlette.responses import Response
 
-from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.clients import (
+    async_write_transaction,
+    create_database_engine,
+    create_session_factory,
+)
 from packages.database.migrations.runner import _build_config, upgrade_to_head
+from packages.database.queries.permissions import replace_permissions
 from packages.database.schema import (
     ActivityLog,
     Agent,
@@ -389,12 +394,12 @@ def test_upgrade_to_head_backfills_all_bundled_skills(tmp_path: Path) -> None:
         )
         connection.executemany(
             """
-            insert into agents (
-                id, org_id, name, workspace_key, role, status,
-                agent_runtime_type, agent_runtime_config, runtime_config,
-                budget_monthly_cents, spent_monthly_cents, permissions
-            )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                insert into agents (
+                    id, org_id, name, workspace_key, role, status,
+                    agent_runtime_type, agent_runtime_config, runtime_config,
+                    budget_monthly_cents, spent_monthly_cents
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -409,7 +414,6 @@ def test_upgrade_to_head_backfills_all_bundled_skills(tmp_path: Path) -> None:
                     json.dumps({}),
                     0,
                     0,
-                    json.dumps({}),
                 ),
                 (
                     "agent-2",
@@ -423,7 +427,6 @@ def test_upgrade_to_head_backfills_all_bundled_skills(tmp_path: Path) -> None:
                     json.dumps({}),
                     0,
                     0,
-                    json.dumps({}),
                 ),
             ],
         )
@@ -539,11 +542,10 @@ def test_run_purpose_migration_backfills_existing_passive_followup(
                 role,
                 status,
                 agent_runtime_type,
-                agent_runtime_config,
-                runtime_config,
-                budget_monthly_cents,
-                spent_monthly_cents,
-                permissions
+                    agent_runtime_config,
+                    runtime_config,
+                    budget_monthly_cents,
+                    spent_monthly_cents
             )
             values (
                 'agent-1',
@@ -553,10 +555,9 @@ def test_run_purpose_migration_backfills_existing_passive_followup(
                 'idle',
                 'process',
                 '{}',
-                '{}',
-                0,
-                0,
-                '{}'
+                    '{}',
+                    0,
+                    0
             )
             """
         )
@@ -679,6 +680,28 @@ async def _seed_org(
         session.add(org)
         await session.commit()
         return org.id
+
+
+async def _grant_agent_create_permission(
+    session_factory: async_sessionmaker,
+    *,
+    org_id: str,
+    agent_id: str,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            await replace_permissions(
+                session,
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="agent",
+                principal_id=agent_id,
+                permissions=[
+                    {"permission_key": "tasks:assign", "constraints": None},
+                    {"permission_key": "agents:create", "constraints": None},
+                ],
+                granted_by_user_id=None,
+            )
 
 
 async def test_issue_closeout_routes_accept_identifier_refs(
@@ -945,10 +968,10 @@ async def test_agent_routes_manage_lifecycle_and_hide_terminated_agents(
     assert detail_code == 200
     assert detail["chainOfCommand"] == []
     assert detail["access"]["taskAssignSource"] == "explicit_grant"
-    assert detail["access"]["membership"]["principalId"] == created["id"]
-    assert [grant["permissionKey"] for grant in detail["access"]["grants"]] == [
-        "tasks:assign"
-    ]
+    assert detail["access"]["role"]["principalId"] == created["id"]
+    assert [
+        permission["permissionKey"] for permission in detail["access"]["permissions"]
+    ] == ["tasks:assign"]
 
     patch_code, updated = await _request(
         app,
@@ -1140,7 +1163,7 @@ async def test_agent_hire_creates_pending_agent_and_approval_when_required(
     assert "not invokable" in wake_body["detail"].lower()
 
 
-async def test_ceo_agent_can_request_hire_with_board_approval(
+async def test_agent_with_create_permission_can_request_hire_with_board_approval(
     app: FastAPI,
     session_factory: async_sessionmaker,
 ) -> None:
@@ -1152,6 +1175,9 @@ async def test_ceo_agent_can_request_hire_with_board_approval(
         "POST",
         f"/api/orgs/{org_id}/agents",
         json={"name": "CEO", "role": "ceo"},
+    )
+    await _grant_agent_create_permission(
+        session_factory, org_id=org_id, agent_id=ceo["id"]
     )
 
     code, body = await _request(
@@ -1171,7 +1197,7 @@ async def test_ceo_agent_can_request_hire_with_board_approval(
     assert body["agent"]["reportsTo"] == ceo["id"]
 
 
-async def test_agent_hired_by_agent_uses_role_sequence_and_reports_to_creator(
+async def test_agent_with_create_permission_uses_role_sequence_and_reports_to_creator(
     app: FastAPI,
     session_factory: async_sessionmaker,
 ) -> None:
@@ -1181,6 +1207,9 @@ async def test_agent_hired_by_agent_uses_role_sequence_and_reports_to_creator(
         "POST",
         f"/api/orgs/{org_id}/agents",
         json={"name": "CEO", "role": "ceo"},
+    )
+    await _grant_agent_create_permission(
+        session_factory, org_id=org_id, agent_id=ceo["id"]
     )
 
     first_code, first = await _request(
@@ -3788,7 +3817,7 @@ async def test_agent_actor_cannot_invoke_another_agent(
         headers={"x-test-agent-id": caller["id"], "x-test-org-id": org_id},
     )
     assert code == 403
-    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
+    assert body["detail"] == "Missing organization permission: agents:manage"
 
 
 async def test_agent_actor_cannot_wakeup_itself(
@@ -3807,7 +3836,7 @@ async def test_agent_actor_cannot_wakeup_itself(
         headers={"x-test-agent-id": agent["id"], "x-test-org-id": org_id},
     )
     assert code == 403
-    assert body["detail"] == ("Agent cannot create Runs directly; use the current Run")
+    assert body["detail"] == "Missing organization permission: agents:manage"
 
 
 async def test_agent_cannot_list_other_organization(

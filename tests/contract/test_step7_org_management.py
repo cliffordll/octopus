@@ -33,10 +33,13 @@ async def _inject_test_actor(
 ) -> Response:
     actor_type = request.headers.get("x-test-actor-type")
     if actor_type:
+        is_root = actor_type == "board"
         request.state.actor = {
-            "type": actor_type,
+            "type": "user" if is_root else actor_type,
             "id": request.headers.get("x-test-actor-id", "test-actor"),
             "orgId": request.headers.get("x-test-org-id"),
+            "isRoot": is_root,
+            "source": "legacy_contract_root" if is_root else "test",
         }
     return await call_next(request)
 
@@ -131,8 +134,8 @@ async def test_org_list_missing_actor_returns_503(app: FastAPI) -> None:
 
 async def test_org_list_non_board_returns_403(app: FastAPI) -> None:
     code, body = await _http(app, "GET", "/api/orgs", actor_type="agent")
-    assert code == 403
-    assert "Board access required" in body["detail"]
+    assert code == 200
+    assert body == []
 
 
 async def test_org_detail_returns_200(app: FastAPI, session: AsyncSession) -> None:
@@ -207,7 +210,7 @@ async def test_org_create_non_board_returns_403(app: FastAPI) -> None:
         json={"name": "New Org"},
     )
     assert code == 403
-    assert "Board access required" in body["detail"]
+    assert body["detail"] == "Human access required"
 
 
 async def test_org_create_invalid_payload_returns_422(app: FastAPI) -> None:
@@ -246,7 +249,7 @@ async def test_org_create_writes_activity_record(
     assert record.entity_type == "organization"
     assert record.entity_id == body["id"]
     assert record.details == {"name": "Activity Org"}
-    assert record.actor_type == "board"
+    assert record.actor_type == "user"
 
 
 async def test_org_detail_missing_actor_returns_503(
@@ -264,7 +267,7 @@ async def test_org_detail_non_board_returns_403(
     org_id = await _seed_org(session)
     code, body = await _http(app, "GET", f"/api/orgs/{org_id}", actor_type="agent")
     assert code == 403
-    assert "Board access required" in body["detail"]
+    assert body["detail"] == "Principal cannot access this organization"
 
 
 async def test_org_detail_missing_returns_404(app: FastAPI) -> None:
@@ -356,7 +359,7 @@ async def test_org_update_non_board_returns_403(
         json={"name": "X"},
     )
     assert code == 403
-    assert "Board access required" in body["detail"]
+    assert body["detail"] == "Missing organization permission: organizations:manage"
 
 
 async def test_org_update_missing_actor_returns_503(
@@ -421,7 +424,7 @@ async def test_org_update_writes_activity_record(
     assert record.entity_type == "organization"
     assert record.entity_id == org_id
     assert record.details == {"name": "Activity Test"}
-    assert record.actor_type == "board"
+    assert record.actor_type == "user"
 
 
 async def test_org_update_empty_payload_no_activity(

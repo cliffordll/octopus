@@ -28,6 +28,9 @@ from server.identity import PrincipalRef
 from server.roles import RoleService
 
 
+USE_REAL_ACCESS = True
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     eng = create_async_engine(

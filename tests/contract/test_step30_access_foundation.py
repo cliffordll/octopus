@@ -34,6 +34,9 @@ from server.roles.management import RoleManagementService
 from server.services.agents import AgentService
 
 
+USE_REAL_ACCESS = True
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     value = create_database_engine("sqlite+aiosqlite:///:memory:")

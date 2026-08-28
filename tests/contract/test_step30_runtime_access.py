@@ -22,6 +22,9 @@ from server.roles import RoleService
 from server.services.runtime_access import RuntimeAccessResolver
 
 
+USE_REAL_ACCESS = True
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     value = create_database_engine("sqlite+aiosqlite:///:memory:")

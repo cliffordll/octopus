@@ -528,7 +528,7 @@ async def test_create_children_batch_checks_org_access_before_write(
     )
 
     assert code == 403
-    assert "another organization" in body["detail"]
+    assert body["detail"] == "Principal cannot access this issue's organization"
     children = (
         (await session.execute(select(Issue).where(Issue.parent_id == parent_id)))
         .scalars()
@@ -1590,7 +1590,7 @@ async def test_create_assigned_issue_queues_assignment_wakeup(
     assert run.trigger_detail == "system"
     assert run.context_snapshot is not None
     assert run.context_snapshot["triggeredBy"] == "user"
-    assert run.context_snapshot["actorId"] == "local-board"
+    assert run.context_snapshot["actorId"] == "legacy-contract-root"
     assert run.context_snapshot["forceFreshSession"] is False
     assert run.context_snapshot["issueId"] == body["id"]
     assert run.context_snapshot["source"] == "issue.create"
@@ -1693,14 +1693,23 @@ async def test_agent_duplicate_child_issue_create_does_not_queue_second_wakeup(
     parent_id = await _seed_issue(session, org_id, status="in_progress")
     agent_id = str(uuid.uuid4())
     async with async_transaction(session):
-        session.add(
-            Agent(
-                id=agent_id,
-                org_id=org_id,
-                name="Child Owner",
-                role="engineer",
-                status="idle",
-            )
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Child Owner",
+                    role="engineer",
+                    status="idle",
+                ),
+                Agent(
+                    id="agent-parent",
+                    org_id=org_id,
+                    name="Parent Owner",
+                    role="manager",
+                    status="idle",
+                ),
+            ]
         )
 
     payload = {
@@ -2175,6 +2184,23 @@ async def test_agent_cannot_change_another_agents_issue_status(
         status="in_progress",
         assignee_agent_id="parent-agent",
     )
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id="parent-agent",
+                    org_id=org_id,
+                    name="Parent Agent",
+                    role="engineer",
+                ),
+                Agent(
+                    id="child-agent",
+                    org_id=org_id,
+                    name="Child Agent",
+                    role="engineer",
+                ),
+            ]
+        )
 
     code, body = await _request(
         app,
@@ -3958,15 +3984,39 @@ async def test_parent_done_allows_accepted_cancelled_child(
     assert body["status"] == "done"
 
 
-async def test_agent_cannot_accept_incomplete_child_work(app: FastAPI) -> None:
+async def test_agent_cannot_accept_incomplete_child_work(
+    app: FastAPI, session: AsyncSession
+) -> None:
+    org_id = await _seed_org(session)
+    agent_id = "agent-accept-incomplete"
+    parent_id = await _seed_issue(session, org_id, status="in_progress")
+    child_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Agent(
+                    id=agent_id,
+                    org_id=org_id,
+                    name="Agent",
+                    role="engineer",
+                ),
+                Issue(
+                    id=child_id,
+                    org_id=org_id,
+                    title="Blocked child",
+                    status="blocked",
+                    parent_id=parent_id,
+                ),
+            ]
+        )
     code, body = await _request(
         app,
         "POST",
-        "/api/issues/parent-1/accept-incomplete",
-        json={"childIssueId": "child-1", "reason": "skip"},
+        f"/api/issues/{parent_id}/accept-incomplete",
+        json={"childIssueId": child_id, "reason": "skip"},
         headers={
-            "x-test-agent-id": "agent-1",
-            "x-test-org-id": "org-1",
+            "x-test-agent-id": agent_id,
+            "x-test-org-id": org_id,
             "x-test-run-id": "run-1",
         },
     )

@@ -33,6 +33,9 @@ from server.invitations import InvitationService
 from server.roles import RoleManagementService, RoleService
 
 
+USE_REAL_ACCESS = True
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     value = create_database_engine("sqlite+aiosqlite:///:memory:")

@@ -90,7 +90,7 @@ async def _post_json(app: FastAPI, path: str, payload: dict) -> tuple[int, dict]
     return response.status_code, response.json()
 
 
-async def test_approve_defaults_decided_by_user_id_to_board(
+async def test_approve_uses_authenticated_user_id(
     app: FastAPI, session: AsyncSession
 ) -> None:
     approval_id = await _seed_approval(session)
@@ -99,10 +99,10 @@ async def test_approve_defaults_decided_by_user_id_to_board(
 
     assert code == 200
     assert body["status"] == "approved"
-    assert body["decidedByUserId"] == "board"
+    assert body["decidedByUserId"] == "legacy-contract-root"
 
 
-async def test_request_revision_defaults_decided_by_user_id_to_board(
+async def test_request_revision_uses_authenticated_user_id(
     app: FastAPI, session: AsyncSession
 ) -> None:
     approval_id = await _seed_approval(session)
@@ -113,7 +113,7 @@ async def test_request_revision_defaults_decided_by_user_id_to_board(
 
     assert code == 200
     assert body["status"] == "revision_requested"
-    assert body["decidedByUserId"] == "board"
+    assert body["decidedByUserId"] == "legacy-contract-root"
 
 
 async def test_approve_already_approved_is_idempotent(
@@ -159,4 +159,4 @@ async def test_resolve_from_revision_requested_succeeds(
 
     assert code == 200
     assert body["status"] == "approved"
-    assert body["decidedByUserId"] == "board"
+    assert body["decidedByUserId"] == "legacy-contract-root"
