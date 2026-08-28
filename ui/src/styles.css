@@ -267,15 +267,18 @@ small {
   width: 28px;
 }
 
-.sidebar-settings {
+.sidebar-footer {
   bottom: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   left: 12px;
   padding-top: 16px;
   position: absolute;
   right: 12px;
 }
 
-.sidebar-settings button,
+.sidebar-settings-trigger,
 .organization-trigger {
   align-items: center;
   background: transparent;
@@ -292,9 +295,125 @@ small {
   width: 100%;
 }
 
-.sidebar-settings button:hover,
+.sidebar-settings-trigger:hover,
 .organization-trigger:hover {
   background: #111722;
+}
+
+.sidebar-account {
+  position: relative;
+}
+
+.sidebar-account-trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #cbd5e4;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  gap: 5px;
+  padding: 7px 4px;
+  width: 100%;
+}
+
+.sidebar-account-trigger:hover,
+.sidebar-account-trigger[aria-expanded="true"] {
+  background: #111722;
+  border-color: #273244;
+  color: #f1f5fb;
+}
+
+.sidebar-account-avatar {
+  align-items: center;
+  background: #224f80;
+  border: 1px solid #3f78b5;
+  border-radius: 50%;
+  color: #f4f8ff;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.sidebar-account-name {
+  font-size: 10px;
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-menu {
+  background: #111722;
+  border: 1px solid #2a3548;
+  border-radius: 12px;
+  bottom: 0;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 42%);
+  display: grid;
+  gap: 12px;
+  left: calc(100% + 10px);
+  min-width: 248px;
+  padding: 12px;
+  position: absolute;
+  text-align: left;
+  z-index: 120;
+}
+
+.sidebar-account-identity {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sidebar-account-identity > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-account-identity strong,
+.sidebar-account-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-identity small {
+  color: #8993a6;
+}
+
+.sidebar-account-menu > .status-pill {
+  justify-self: start;
+}
+
+.sidebar-account-actions {
+  border-top: 1px solid #273244;
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.sidebar-account-actions button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #c6d0df;
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 9px;
+  text-align: left;
+}
+
+.sidebar-account-actions button:hover {
+  background: #192231;
+  border-color: #2f7bd6;
+  color: #f4f8ff;
 }
 
 .settings-dialog {

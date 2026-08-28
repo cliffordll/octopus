@@ -1,12 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { authApi, isInteractiveHumanSession } from "../api/access";
-import { replaceAuthenticatedSession } from "../auth/sessionCache";
+import { AUTH_SESSION_STALE_TIME_MS, replaceAuthenticatedSession } from "../auth/sessionCache";
 import { ErrorNotice } from "./ErrorNotice";
 
 export function AccountSettingsSection() {
   const queryClient = useQueryClient();
-  const session = useQuery({ queryKey: ["auth-session"], queryFn: authApi.session });
+  const session = useQuery({
+    queryKey: ["auth-session"],
+    queryFn: authApi.session,
+    staleTime: AUTH_SESSION_STALE_TIME_MS,
+  });
   const signOut = useMutation({
     mutationFn: authApi.signOut,
     onSuccess: () => {

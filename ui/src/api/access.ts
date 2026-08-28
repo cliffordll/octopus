@@ -12,7 +12,11 @@ export interface AuthSession {
 }
 
 export function isInteractiveHumanSession(session: AuthSession | null | undefined): session is AuthSession {
-  return Boolean(session);
+  return Boolean(
+    session
+      && typeof session.user?.id === "string"
+      && typeof session.user.email === "string",
+  );
 }
 
 export interface OrganizationMember {

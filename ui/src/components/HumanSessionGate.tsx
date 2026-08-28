@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { authApi, isInteractiveHumanSession } from "../api/access";
+import { AUTH_SESSION_STALE_TIME_MS } from "../auth/sessionCache";
 import { ErrorNotice } from "./ErrorNotice";
 
 export function HumanSessionGate() {
@@ -8,7 +9,7 @@ export function HumanSessionGate() {
   const session = useQuery({
     queryKey: ["auth-session"],
     queryFn: authApi.session,
-    staleTime: 5_000,
+    staleTime: AUTH_SESSION_STALE_TIME_MS,
   });
 
   if (session.isLoading) {

@@ -10,7 +10,7 @@ import { InstanceHeartbeatsPanel } from "../pages/InstanceHeartbeatsPage";
 import { AccountSettingsSection } from "./AccountSettingsSection";
 import { MemberAccessSettings } from "./MemberAccessSettings";
 
-type SettingsSection = "account" | "members" | "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
+export type SettingsSection = "account" | "members" | "general" | "providers" | "heartbeats" | "storage" | "plugins" | "about";
 
 const SETTINGS_SECTIONS: Array<{ description: string; eyebrow: string; id: SettingsSection; label: string }> = [
   { id: "account", eyebrow: "Human Account", label: "账户", description: "登录身份和 Session。" },
@@ -73,8 +73,14 @@ function StorageSettingsSection({ current }: { current: (typeof SETTINGS_SECTION
   );
 }
 
-export function OrganizationSettingsPanel({ orgId }: { orgId?: string }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection>("providers");
+export function OrganizationSettingsPanel({
+  initialSection = "providers",
+  orgId,
+}: {
+  initialSection?: SettingsSection;
+  orgId?: string;
+}) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
   const [locale, setLocale] = useState<AppLocale>(() => getLocalePreference());
   const current = SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
 

@@ -60,6 +60,15 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(primaryNavigation.getByRole("link", { name: "智能体" })).toHaveAttribute("href", "/orgs/org-1/agents");
   expect(primaryNavigation.getByRole("link", { name: "组织" })).toHaveAttribute("href", "/orgs/org-1/structure");
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "当前用户：Test User" }));
+  const accountMenu = within(screen.getByRole("menu", { name: "账号菜单" }));
+  expect(accountMenu.getByText("Test User")).toBeInTheDocument();
+  expect(accountMenu.getByText("test@example.com")).toBeInTheDocument();
+  expect(accountMenu.getByText("本地 Session")).toBeInTheDocument();
+  await userEvent.click(accountMenu.getByRole("menuitem", { name: "账户设置" }));
+  const accountSettings = within(screen.getByRole("dialog", { name: "设置" }));
+  expect(accountSettings.getByRole("heading", { name: "账户" })).toBeInTheDocument();
+  await userEvent.click(accountSettings.getByRole("button", { name: "关闭设置" }));
   const agentNavigation = within(screen.getByRole("navigation", { name: "智能体导航" }));
   expect(agentNavigation.getByRole("heading", { name: "团队" })).toBeInTheDocument();
   expect(agentNavigation.queryByRole("link", { name: /新建智能体/ })).not.toBeInTheDocument();

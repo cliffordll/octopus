@@ -5,7 +5,8 @@ import { organizationsApi } from "../api/organizations";
 import { initializeLocalePreference, LOCALE_CHANGE_EVENT } from "../utils/locale";
 import { AgentCreateDialog } from "../pages/NewAgentPage";
 import { ProjectCreateDialog } from "../pages/ProjectsPage";
-import { OrganizationSettingsPanel } from "./OrganizationSettingsPanel";
+import { OrganizationSettingsPanel, type SettingsSection } from "./OrganizationSettingsPanel";
+import { SidebarAccountMenu } from "./SidebarAccountMenu";
 
 function organizationTarget(pathname: string, orgId: string) {
   const section = pathname.match(
@@ -21,6 +22,7 @@ export function AppShell() {
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("providers");
   const [locale, setLocale] = useState(() => initializeLocalePreference());
   const productMenuRef = useRef<HTMLDivElement>(null);
   const quickCreateRef = useRef<HTMLDivElement>(null);
@@ -201,12 +203,14 @@ export function AppShell() {
             <span className="nav-disabled"><span aria-hidden="true" className="nav-icon">O</span>组织</span>
           )}
         </nav>
-        <div className="sidebar-settings">
+        <div className="sidebar-footer">
           <button
             aria-label="设置"
+            className="sidebar-settings-trigger"
             onClick={() => {
               setOrganizationMenuOpen(false);
               setQuickCreateOpen(false);
+              setSettingsSection("providers");
               setSettingsOpen(true);
             }}
             type="button"
@@ -214,6 +218,12 @@ export function AppShell() {
             <span aria-hidden="true" className="nav-icon">S</span>
             <span>设置</span>
           </button>
+          <SidebarAccountMenu
+            onOpenAccount={() => {
+              setSettingsSection("account");
+              setSettingsOpen(true);
+            }}
+          />
         </div>
       </aside>
       <main className={`workspace ${isOrganizationWorkspace ? "workspace-org" : "workspace-global"}`} key={locale}>
@@ -237,7 +247,7 @@ export function AppShell() {
                 关闭
               </button>
             </div>
-            <OrganizationSettingsPanel orgId={selectedOrganizationId} />
+            <OrganizationSettingsPanel initialSection={settingsSection} orgId={selectedOrganizationId} />
           </div>
         </div>
       )}
