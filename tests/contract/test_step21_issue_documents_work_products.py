@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import uuid
 
@@ -105,6 +105,79 @@ async def test_work_product_capture_is_idempotent_on_external_id(
     assert len(first) == 1
     assert len(second) == 0  # deduped on externalId
     assert len(listed) == 1
+
+
+async def test_generated_scan_promotes_existing_closeout_product_to_primary(
+    app: tuple[FastAPI, async_sessionmaker],
+    tmp_path: Path,
+) -> None:
+    _, factory = app
+    org_id, issue_id = await _seed_issue(factory)
+    from server.services.workspaces import WorkspaceService
+
+    shared_cwd = tmp_path / "shared"
+    report = shared_cwd / "reports" / "final.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# Final report\n", encoding="utf-8")
+    snapshot = {
+        "issueId": issue_id,
+        "workspace": {
+            "octopusWorkspace": {
+                "id": "ws-shared",
+                "mode": "shared_workspace",
+                "cwd": str(shared_cwd),
+            }
+        },
+    }
+    runtime_product = {
+        "title": "reports/final.md",
+        "type": "document",
+        "provider": "octopus",
+        "externalId": "runtime-write:reports/final.md",
+        "isPrimary": False,
+        "metadata": {
+            "source": "codex_file_change_event",
+            "workspacePath": "reports/final.md",
+        },
+    }
+
+    async with factory() as session:
+        await WorkspaceService(session).persist_run_work_products(
+            run_id="run-1",
+            context_snapshot=snapshot,
+            products=[runtime_product],
+        )
+        session.add(
+            ActivityLog(
+                org_id=org_id,
+                actor_type="agent",
+                actor_id="agent-1",
+                action="issue.closeout_requested",
+                entity_type="issue",
+                entity_id=issue_id,
+                run_id="run-1",
+                details={
+                    "declaredWorkProducts": [
+                        {"path": "reports/final.md", "isPrimary": True}
+                    ]
+                },
+            )
+        )
+        await session.commit()
+
+    async with factory() as session:
+        promoted = await WorkspaceService(session).persist_generated_workspace_files(
+            run_id="run-1",
+            context_snapshot=snapshot,
+            since=datetime.now(UTC) + timedelta(minutes=1),
+        )
+        await session.commit()
+        listed = await WorkspaceService(session).list_work_products_for_issue(issue_id)
+
+    assert len(promoted) == 1
+    assert len(listed) == 1
+    assert listed[0]["title"] == "reports/final.md"
+    assert listed[0]["isPrimary"] is True
 
 
 async def test_work_product_archive_reuses_asset_for_identical_content(

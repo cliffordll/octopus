@@ -2329,9 +2329,11 @@ class WorkspaceService:
             else None
         )
         existing = await list_issue_work_products(self._session, issue.id)
-        seen_external_ids = {row.external_id for row in existing if row.external_id}
-        seen_workspace_paths = {
-            path
+        existing_by_external_id = {
+            row.external_id: row for row in existing if row.external_id
+        }
+        existing_by_workspace_path = {
+            path: row
             for row in existing
             for path in (_work_product_workspace_paths(row),)
             if path
@@ -2354,12 +2356,29 @@ class WorkspaceService:
             product_workspace_path = _payload_workspace_path(product)
             # Idempotent capture: a re-scan (backfill after a transient failure)
             # must not duplicate an already-registered artifact for this issue.
-            if external_id and external_id in seen_external_ids:
-                continue
-            if (
-                product_workspace_path
-                and product_workspace_path in seen_workspace_paths
-            ):
+            existing_capture = (
+                existing_by_external_id.get(external_id) if external_id else None
+            )
+            if existing_capture is None and product_workspace_path:
+                existing_capture = existing_by_workspace_path.get(
+                    product_workspace_path
+                )
+            if existing_capture is not None:
+                if bool(product.get("isPrimary")) and not existing_capture.is_primary:
+                    existing_capture = await self._merge_existing_work_product(
+                        existing_capture,
+                        product=product,
+                        run_id=run_id,
+                    )
+                    stored.append(self._to_work_product(existing_capture))
+                    if existing_capture.external_id:
+                        existing_by_external_id[existing_capture.external_id] = (
+                            existing_capture
+                        )
+                    if product_workspace_path:
+                        existing_by_workspace_path[product_workspace_path] = (
+                            existing_capture
+                        )
                 continue
             product = await self._archive_work_product_content(issue.org_id, product)
             content_identities = _payload_content_identities(product)
@@ -2378,9 +2397,9 @@ class WorkspaceService:
                     run_id=run_id,
                 )
                 if external_id:
-                    seen_external_ids.add(external_id)
+                    existing_by_external_id[external_id] = row
                 if product_workspace_path:
-                    seen_workspace_paths.add(product_workspace_path)
+                    existing_by_workspace_path[product_workspace_path] = row
                 for identity in _work_product_content_identities(row):
                     existing_by_content_identity[identity] = row
                 stored.append(self._to_work_product(row))
@@ -2409,9 +2428,9 @@ class WorkspaceService:
                 },
             )
             if external_id:
-                seen_external_ids.add(external_id)
+                existing_by_external_id[external_id] = row
             if product_workspace_path:
-                seen_workspace_paths.add(product_workspace_path)
+                existing_by_workspace_path[product_workspace_path] = row
             for identity in _work_product_content_identities(row):
                 existing_by_content_identity[identity] = row
             stored.append(self._to_work_product(row))
@@ -2509,12 +2528,17 @@ class WorkspaceService:
             _expected_work_product_paths(issue) if shared_workspace else set()
         )
         declared_primary_paths: set[str] = set()
+        promoted_products: list[IssueWorkProductData] = []
         if shared_workspace:
             expected_shared_paths.update(
                 await self._run_declared_work_product_paths(run_id, issue.id)
             )
             declared_primary_paths = await self._run_primary_work_product_paths(
                 run_id, issue.id
+            )
+            promoted_products = await self._promote_declared_primary_work_products(
+                issue.id,
+                declared_primary_paths,
             )
 
             issue_artifacts_dir = _string(workspace.get("issueArtifactsDir"))
@@ -2591,7 +2615,7 @@ class WorkspaceService:
                     }
                 )
         if not products:
-            return []
+            return promoted_products
         # Pick the primary deliverable from THIS run's own worktree (newest such
         # file), not "the first file scanned" — which, because the shared org
         # artifacts dir is scanned first and oldest-first, used to surface a stale
@@ -2616,11 +2640,37 @@ class WorkspaceService:
                 len(products) - 1,
             )
         products[primary_idx]["isPrimary"] = True
-        return await self.persist_run_work_products(
+        captured_products = await self.persist_run_work_products(
             run_id=run_id,
             context_snapshot=context_snapshot,
             products=products,
         )
+        return [*promoted_products, *captured_products]
+
+    async def _promote_declared_primary_work_products(
+        self,
+        issue_id: str,
+        declared_paths: set[str],
+    ) -> list[IssueWorkProductData]:
+        if not declared_paths:
+            return []
+        promoted: list[IssueWorkProductData] = []
+        for row in await list_issue_work_products(self._session, issue_id):
+            workspace_path = _work_product_workspace_paths(row)
+            if (
+                row.status not in {"active", "ready"}
+                or row.is_primary
+                or workspace_path not in declared_paths
+            ):
+                continue
+            updated = await update_issue_work_product(
+                self._session,
+                row.id,
+                {"is_primary": True},
+            )
+            if updated is not None:
+                promoted.append(self._to_work_product(updated))
+        return promoted
 
     async def _run_declared_work_product_paths(
         self, run_id: str, issue_id: str
@@ -2636,14 +2686,10 @@ class WorkspaceService:
         for details in result.scalars().all():
             if not isinstance(details, dict):
                 continue
-            declarations = details.get("workProductDeclarations")
-            if isinstance(declarations, list):
-                for item in declarations:
-                    if not isinstance(item, dict):
-                        continue
-                    value = item.get("path")
-                    if isinstance(value, str) and value.strip():
-                        paths.add(value.replace("\\", "/").strip())
+            for item in _activity_work_product_declarations(details):
+                value = item.get("path")
+                if isinstance(value, str) and value.strip():
+                    paths.add(value.replace("\\", "/").strip())
             for key in ("body", "comment", "note", "summary", "message"):
                 value = details.get(key)
                 if isinstance(value, str):
@@ -2664,11 +2710,8 @@ class WorkspaceService:
         for details in result.scalars().all():
             if not isinstance(details, dict):
                 continue
-            declarations = details.get("workProductDeclarations")
-            if not isinstance(declarations, list):
-                continue
-            for item in declarations:
-                if not isinstance(item, dict) or item.get("isPrimary") is not True:
+            for item in _activity_work_product_declarations(details):
+                if item.get("isPrimary") is not True:
                     continue
                 value = item.get("path")
                 if isinstance(value, str) and value.strip():
@@ -3293,6 +3336,17 @@ def _payload_workspace_path(product: Mapping[str, Any]) -> str | None:
             return value.replace("\\", "/")
     title = _string(product.get("title"))
     return title.replace("\\", "/") if title else None
+
+
+def _activity_work_product_declarations(
+    details: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    declarations: list[Mapping[str, Any]] = []
+    for key in ("workProductDeclarations", "declaredWorkProducts"):
+        value = details.get(key)
+        if isinstance(value, list):
+            declarations.extend(item for item in value if isinstance(item, dict))
+    return declarations
 
 
 def _work_product_workspace_paths(row: IssueWorkProduct) -> str | None:
