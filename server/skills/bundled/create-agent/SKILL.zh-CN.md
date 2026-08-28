@@ -12,7 +12,7 @@ description: 通过 `octopus` CLI 创建新的控制平面 agent，并遵守治�
 你需要具备以下权限之一：
 
 - board access。
-- 组织内 `canCreateAgents=true` 的 agent 权限。
+- 组织内显式授予的 `agents:create` 权限。
 
 如果没有权限，需要升级给 CEO 或 board 处理。
 

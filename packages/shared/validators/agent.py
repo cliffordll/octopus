@@ -30,11 +30,10 @@ _CREATE_FIELDS = {
     "agentRuntimeConfig",
     "runtimeConfig",
     "budgetMonthlyCents",
-    "permissions",
     "metadata",
 }
 _HIRE_FIELDS = _CREATE_FIELDS | {"sourceIssueId", "sourceIssueIds"}
-_UPDATE_FIELDS = (_CREATE_FIELDS - {"permissions"}) | {
+_UPDATE_FIELDS = _CREATE_FIELDS | {
     "replaceAgentRuntimeConfig",
     "status",
     "spentMonthlyCents",

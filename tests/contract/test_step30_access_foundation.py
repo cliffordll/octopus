@@ -15,22 +15,22 @@ from packages.database.clients import (
     create_session_factory,
 )
 from packages.database.migrations.runner import upgrade_to_head
-from packages.database.queries.access import (
-    replace_principal_permission_grants,
-)
+from packages.database.queries.permissions import replace_permissions
 from packages.database.queries.organizations import create_organization
 from packages.database.queries.users import ensure_user
 from packages.database.schema import Base, Agent
 from server.access import AccessPolicyService
+from server.auth.root_provisioning import RootProvisioningService
+from server.auth import LocalPasswordAuth
 from server.identity import (
     ApprovalRequesterMapper,
-    IdentityContextResolver,
     IssueAssigneeMapper,
-    LocalAccessBootstrapService,
     PrincipalRef,
     SystemIdentityContextFactory,
 )
-from server.membership import MemberAccessService, MemberService
+from server.identity.resolver import IdentityContextResolver
+from server.roles import RoleAccessService, RoleService
+from server.roles.management import RoleManagementService
 from server.services.agents import AgentService
 
 
@@ -50,24 +50,20 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker:
     return create_session_factory(engine)
 
 
-def test_access_foundation_tables_match_upstream_contract() -> None:
-    assert {
-        "user",
-        "organization_memberships",
-        "principal_permission_grants",
-        "instance_user_roles",
-    }.issubset(Base.metadata.tables)
+def test_access_foundation_tables_use_unified_access_model() -> None:
+    assert {"users", "roles", "permissions"}.issubset(Base.metadata.tables)
 
-    membership = Base.metadata.tables["organization_memberships"]
+    roles = Base.metadata.tables["roles"]
     assert {
-        "org_id",
+        "scope_type",
+        "scope_id",
         "principal_type",
         "principal_id",
         "status",
-        "membership_role",
-    }.issubset(membership.columns.keys())
-    assert "organization_memberships_org_principal_unique_idx" in {
-        constraint.name for constraint in membership.constraints
+        "role",
+    }.issubset(roles.columns.keys())
+    assert "roles_scope_principal_uq" in {
+        constraint.name for constraint in roles.constraints
     }
 
 
@@ -86,30 +82,24 @@ async def test_access_foundation_migration_creates_compatible_tables(
                     text(
                         "select name from sqlite_master "
                         "where type='table' and name in "
-                        "('user', 'organization_memberships', "
-                        "'principal_permission_grants', 'instance_user_roles')"
+                        "('users', 'roles', 'permissions')"
                     )
                 )
             }
             permission_indexes = {
                 row[1]
                 for row in await connection.execute(
-                    text("pragma index_list(principal_permission_grants)")
+                    text("pragma index_list(permissions)")
                 )
             }
     finally:
         await migrated_engine.dispose()
 
-    assert table_names == {
-        "user",
-        "organization_memberships",
-        "principal_permission_grants",
-        "instance_user_roles",
-    }
-    assert "principal_permission_grants_company_permission_idx" in permission_indexes
+    assert table_names == {"users", "roles", "permissions"}
+    assert "permissions_scope_key_idx" in permission_indexes
 
 
-async def test_user_and_agent_share_membership_service(
+async def test_user_and_agent_share_role_service(
     session_factory: async_sessionmaker,
 ) -> None:
     async with session_factory() as session:
@@ -120,30 +110,35 @@ async def test_user_and_agent_share_membership_service(
             session.add(agent)
             await session.flush()
 
-            members = MemberService(session)
-            user_membership = await members.ensure(
+            roles = RoleService(session)
+            user_role = await roles.ensure(
+                "organization",
                 org_id,
                 PrincipalRef(type="user", id="user-1"),
                 role="owner",
             )
-            agent_membership = await members.ensure(
+            agent_role = await roles.ensure(
+                "organization",
                 org_id,
                 PrincipalRef(type="agent", id=agent.id),
+                role="member",
             )
-            duplicate = await members.ensure(
+            duplicate = await roles.ensure(
+                "organization",
                 org_id,
                 PrincipalRef(type="agent", id=agent.id),
+                role="member",
             )
 
-            assert user_membership.principal_type == "user"
-            assert agent_membership.principal_type == "agent"
-            assert duplicate.id == agent_membership.id
-            assert await MemberAccessService(members).require_active(
-                org_id, PrincipalRef(type="agent", id=agent.id)
+            assert user_role.principal_type == "user"
+            assert agent_role.principal_type == "agent"
+            assert duplicate.id == agent_role.id
+            assert await RoleAccessService(roles).require_active(
+                "organization", org_id, PrincipalRef(type="agent", id=agent.id)
             )
 
 
-async def test_agent_creation_registers_membership_and_default_grant(
+async def test_agent_creation_registers_role_and_default_permission(
     session_factory: async_sessionmaker,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -156,11 +151,13 @@ async def test_agent_creation_registers_membership_and_default_grant(
             created = await agents.create_agent(
                 org_id,
                 {"name": "Engineer", "role": "engineer"},
-                actor_type="board",
-                actor_id="local-board",
+                actor_type="user",
+                actor_id="user-creator",
             )
             principal = PrincipalRef(type="agent", id=created["id"])
-            membership = await MemberService(session).get(org_id, principal)
+            access_role = await RoleService(session).get(
+                "organization", org_id, principal
+            )
             context = await IdentityContextResolver(session).resolve(
                 actor_type="agent",
                 actor_id=created["id"],
@@ -169,19 +166,20 @@ async def test_agent_creation_registers_membership_and_default_grant(
             )
             detail = await agents.get_detail(created["id"])
 
-            assert membership is not None
-            assert membership.status == "active"
-            assert membership.membership_role == "member"
+            assert access_role is not None
+            assert access_role.status == "active"
+            assert access_role.role == "member"
             assert context.permissions == frozenset({"tasks:assign"})
             assert detail is not None
-            assert detail["access"]["membership"] is not None
+            assert detail["access"]["role"] is not None
             assert detail["access"]["taskAssignSource"] == "explicit_grant"
-            assert [grant["permissionKey"] for grant in detail["access"]["grants"]] == [
-                "tasks:assign"
-            ]
+            assert [
+                permission["permissionKey"]
+                for permission in detail["access"]["permissions"]
+            ] == ["tasks:assign"]
 
 
-async def test_member_service_rejects_cross_org_agent(
+async def test_role_service_rejects_cross_org_agent(
     session_factory: async_sessionmaker,
 ) -> None:
     async with session_factory() as session:
@@ -193,13 +191,15 @@ async def test_member_service_rejects_cross_org_agent(
             await session.flush()
 
             with pytest.raises(ValueError, match="another organization"):
-                await MemberService(session).ensure(
+                await RoleService(session).ensure(
+                    "organization",
                     second_org,
                     PrincipalRef(type="agent", id=agent.id),
+                    role="member",
                 )
 
 
-async def test_context_resolver_combines_membership_and_permissions(
+async def test_context_resolver_combines_role_and_permissions(
     session_factory: async_sessionmaker,
 ) -> None:
     async with session_factory() as session:
@@ -209,13 +209,16 @@ async def test_context_resolver_combines_membership_and_permissions(
             session.add(agent)
             await session.flush()
             principal = PrincipalRef(type="agent", id=agent.id)
-            await MemberService(session).ensure(org_id, principal)
-            await replace_principal_permission_grants(
+            await RoleService(session).ensure(
+                "organization", org_id, principal, role="member"
+            )
+            await replace_permissions(
                 session,
-                org_id=org_id,
+                scope_type="organization",
+                scope_id=org_id,
                 principal_type="agent",
                 principal_id=agent.id,
-                grants=[{"permission_key": "tasks:assign", "scope": None}],
+                permissions=[{"permission_key": "tasks:assign", "constraints": None}],
                 granted_by_user_id=None,
             )
 
@@ -227,29 +230,121 @@ async def test_context_resolver_combines_membership_and_permissions(
             )
 
             assert context.principal == principal
-            assert context.has_active_membership
+            assert context.has_active_role
             assert context.permissions == frozenset({"tasks:assign"})
             AccessPolicyService().require_permission(context, org_id, "tasks:assign")
 
 
-async def test_local_bootstrap_creates_real_board_access(
+async def test_permission_constraints_fail_closed_until_supported(
     session_factory: async_sessionmaker,
 ) -> None:
     async with session_factory() as session:
         async with async_write_transaction(session):
-            org_id = await _seed_org(session)
-            await LocalAccessBootstrapService(session).ensure()
+            org_id = await _seed_org(session, key="constrained")
+            await _seed_user(session, "constrained-user")
+            principal = PrincipalRef(type="user", id="constrained-user")
+            await RoleService(session).ensure(
+                "organization", org_id, principal, role="member"
+            )
+            await replace_permissions(
+                session,
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="user",
+                principal_id=principal.id,
+                permissions=[
+                    {
+                        "permission_key": "tasks:assign",
+                        "constraints": {"projectIds": ["project-1"]},
+                    }
+                ],
+                granted_by_user_id=None,
+            )
             context = await IdentityContextResolver(session).resolve(
-                actor_type="board",
-                actor_id="local-board",
+                actor_type="user",
+                actor_id=principal.id,
                 org_id=org_id,
-                source="local_implicit",
+                source="test",
             )
 
-            assert context.principal == PrincipalRef(type="user", id="local-board")
-            assert context.membership_role == "owner"
-            assert context.is_instance_admin
-            assert AccessPolicyService().can_access_organization(context, org_id)
+            with pytest.raises(PermissionError, match="Missing permission"):
+                AccessPolicyService().require_permission(
+                    context, org_id, "tasks:assign"
+                )
+
+
+async def test_suspended_role_loses_access_immediately(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            org_id = await _seed_org(session, key="suspended")
+            await _seed_user(session, "suspended-user")
+            principal = PrincipalRef(type="user", id="suspended-user")
+            role = await RoleService(session).ensure(
+                "organization", org_id, principal, role="member"
+            )
+            managed = await RoleManagementService(session).update_status(
+                org_id, role.id, "suspended"
+            )
+            context = await IdentityContextResolver(session).resolve(
+                actor_type="user",
+                actor_id=principal.id,
+                org_id=org_id,
+                source="test",
+            )
+
+            assert managed is not None
+            assert managed.role.status == "suspended"
+            with pytest.raises(PermissionError):
+                AccessPolicyService().require_organization_access(context, org_id)
+
+
+async def test_root_provisioning_creates_explicit_root_role(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            user_id = await RootProvisioningService(session).create(
+                name="Root User",
+                email="root@example.com",
+                password="secure-password",
+            )
+            context = await IdentityContextResolver(session).resolve(
+                actor_type="user",
+                actor_id=user_id,
+                org_id=None,
+                source="session",
+            )
+
+            assert context.principal == PrincipalRef(type="user", id=user_id)
+            assert context.is_root
+
+
+async def test_root_provisioning_promotes_an_existing_local_account(
+    session_factory: async_sessionmaker,
+) -> None:
+    async with session_factory() as session:
+        async with async_write_transaction(session):
+            user_id, _token = await LocalPasswordAuth(session).register(
+                name="Existing User",
+                email="existing@example.com",
+                password="secure-password",
+            )
+            promoted_id = await RootProvisioningService(session).create(
+                name="Ignored Name",
+                email="existing@example.com",
+                password="secure-password",
+            )
+            context = await IdentityContextResolver(session).resolve(
+                actor_type="user",
+                actor_id=user_id,
+                org_id=None,
+                source="test",
+            )
+
+            assert promoted_id == user_id
+            assert context.is_root
 
 
 def test_principal_mappers_keep_compatibility_fields_encapsulated() -> None:

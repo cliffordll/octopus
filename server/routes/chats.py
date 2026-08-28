@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import StreamingResponse
 
@@ -45,6 +46,7 @@ from packages.shared.validators.chat import (
 )
 
 from ..dependencies.access import (
+    assert_organization_permission,
     assert_organization_access,
     require_actor_identity,
     require_organization_access,
@@ -56,6 +58,7 @@ from ..dependencies.database import (
     _cleanup_error_requires_invalidate,
     _invalidate_session,
     _run_shielded_cleanup,
+    get_session,
 )
 from ..services.chat_generation_locks import (
     cancel_active_chat_generation,
@@ -356,8 +359,12 @@ async def convert_chat_to_issue_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: ChatService = Depends(get_chat_service),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    await _get_conversation_or_404(id, request=request, service=service)
+    conversation = await _get_conversation_or_404(id, request=request, service=service)
+    await assert_organization_permission(
+        request, session, conversation["orgId"], "tasks:assign"
+    )
     try:
         payload = validate_convert_chat_to_issue(body)
         actor = require_actor_identity(request)
@@ -386,8 +393,12 @@ async def resolve_chat_operation_proposal_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: ChatService = Depends(get_chat_service),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    await _get_conversation_or_404(id, request=request, service=service)
+    conversation = await _get_conversation_or_404(id, request=request, service=service)
+    await assert_organization_permission(
+        request, session, conversation["orgId"], "tasks:assign"
+    )
     try:
         payload = validate_resolve_chat_operation_proposal(body)
         actor = require_actor_identity(request)

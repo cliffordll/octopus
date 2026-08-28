@@ -29,10 +29,14 @@ def validate_member_grants(body: dict[str, Any]) -> list[dict[str, Any]]:
             or item.get("permissionKey") not in PERMISSION_KEYS
         ):
             raise ValueError("Unsupported permission grant")
-        scope = item.get("scope")
-        if scope is not None and not isinstance(scope, dict):
-            raise ValueError("Grant scope must be an object or null")
-        grants.append({"permissionKey": item["permissionKey"], "scope": scope})
+        constraints = item.get("constraints")
+        if constraints is not None and not isinstance(constraints, dict):
+            raise ValueError("Permission constraints must be an object or null")
+        if constraints:
+            raise ValueError("Permission constraints are not supported yet")
+        grants.append(
+            {"permissionKey": item["permissionKey"], "constraints": constraints}
+        )
     return grants
 
 

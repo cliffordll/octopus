@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import replace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.pool import StaticPool
+from starlette.responses import Response
 
 from packages.database.clients import async_transaction
 from packages.database.schema import (
@@ -25,6 +26,21 @@ from packages.database.schema import (
     Organization,
 )
 from server.app import app as fastapi_app
+
+
+@fastapi_app.middleware("http")
+async def _inject_test_user(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    if request.headers.get("x-test-user-id"):
+        request.state.actor = {
+            "type": "user",
+            "id": "user-reviewer",
+            "userId": "user-reviewer",
+            "isRoot": True,
+            "source": "test",
+        }
+    return await call_next(request)
 
 
 @pytest.fixture
@@ -117,7 +133,12 @@ async def _request(
 ) -> tuple[int, Any]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.request(method, path, json=json)
+        response = await client.request(
+            method,
+            path,
+            json=json,
+            headers={"x-test-user-id": "user-reviewer"},
+        )
     return response.status_code, response.json()
 
 
@@ -144,9 +165,8 @@ async def test_add_approval_comment_and_list(
     assert create_code == 201
     assert created["body"] == "hi"
     assert created["approvalId"] == approval_id
-    # local_trusted board actor: not an agent
     assert created["authorAgentId"] is None
-    assert created["authorUserId"] == "local-board"
+    assert created["authorUserId"] == "user-reviewer"
 
     list_code, comments = await _request(
         app, "GET", f"/api/approvals/{approval_id}/comments"

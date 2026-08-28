@@ -339,7 +339,9 @@ class ApprovalService:
         values = {"status": status}
         if "decisionNote" in payload:
             values["decision_note"] = payload["decisionNote"]
-        if "decidedByUserId" in payload:
+        if actor_type == "user":
+            values["decided_by_user_id"] = actor_id
+        elif "decidedByUserId" in payload:
             values["decided_by_user_id"] = payload["decidedByUserId"]
         if "payload" in payload:
             values["payload"] = payload["payload"]

@@ -4,10 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.queries.access import has_instance_user_role
-from packages.database.queries.organization_memberships import (
-    list_principal_org_memberships,
-)
+from packages.database.queries.roles import list_principal_roles
+from packages.shared.constants.access import INSTANCE_SCOPE_ID
 
 if TYPE_CHECKING:
     from server.auth.contracts import AuthResult
@@ -37,19 +35,26 @@ class AuthenticatedActorProjector:
             raise ValueError("Authenticated request Actor must be a User or Agent")
 
         actor["userId"] = principal.id
-        memberships = await list_principal_org_memberships(
+        roles = await list_principal_roles(
             self._session,
             principal_type="user",
             principal_id=principal.id,
+            scope_type="organization",
             status="active",
         )
-        membership_org_ids = {membership.org_id for membership in memberships}
+        organization_ids = {role.scope_id for role in roles}
         if result.org_id is not None:
-            membership_org_ids.intersection_update({result.org_id})
-        actor["orgIds"] = sorted(membership_org_ids)
-        actor["isInstanceAdmin"] = await has_instance_user_role(
+            organization_ids.intersection_update({result.org_id})
+        actor["orgIds"] = sorted(organization_ids)
+        root_roles = await list_principal_roles(
             self._session,
-            user_id=principal.id,
-            role="instance_admin",
+            principal_type="user",
+            principal_id=principal.id,
+            scope_type="instance",
+            status="active",
+        )
+        actor["isRoot"] = any(
+            role.scope_id == INSTANCE_SCOPE_ID and role.role == "root"
+            for role in root_roles
         )
         return actor

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.shared.api_paths.goals import (
     GOAL_DEPENDENCIES_PATH,
@@ -13,10 +14,13 @@ from packages.shared.types.goal import Goal, GoalDependencies
 from packages.shared.validators.goal import validate_create_goal, validate_update_goal
 
 from ..dependencies.access import (
+    assert_organization_permission,
     assert_organization_access,
     require_actor_identity,
     require_organization_access,
 )
+from ..dependencies.database import get_session
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.goals import get_goal_service
 from ..services.goals import GoalConflictError, GoalService
 
@@ -47,7 +51,7 @@ async def create_goal_route(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("goals:manage")),
     service: GoalService = Depends(get_goal_service),
 ) -> Goal:
     try:
@@ -87,8 +91,12 @@ async def update_goal_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     service: GoalService = Depends(get_goal_service),
+    session: AsyncSession = Depends(get_session),
 ) -> Goal:
-    await _goal_or_404(id, request=request, service=service)
+    goal = await _goal_or_404(id, request=request, service=service)
+    await assert_organization_permission(
+        request, session, goal["orgId"], "goals:manage"
+    )
     try:
         payload = validate_update_goal(body)
         actor = require_actor_identity(request)
@@ -111,8 +119,12 @@ async def delete_goal_route(
     id: str,
     request: Request,
     service: GoalService = Depends(get_goal_service),
+    session: AsyncSession = Depends(get_session),
 ) -> Goal:
-    await _goal_or_404(id, request=request, service=service)
+    goal = await _goal_or_404(id, request=request, service=service)
+    await assert_organization_permission(
+        request, session, goal["orgId"], "goals:manage"
+    )
     actor = require_actor_identity(request)
     try:
         removed = await service.remove(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -18,7 +19,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 from starlette.responses import Response
 
-from packages.database.clients import async_transaction
+from packages.database.clients import async_transaction, async_write_transaction
+from packages.database.queries.users import ensure_user
 from packages.database.schema import (
     ActivityLog,
     Agent,
@@ -36,7 +38,10 @@ from packages.shared.validators.approval import (
     validate_resolve_approval,
     validate_resubmit_approval,
 )
+from packages.shared.constants.access import INSTANCE_SCOPE_ID
 from server.app import app as fastapi_app
+from server.identity import PrincipalRef
+from server.roles import RoleService
 
 
 @fastapi_app.middleware("http")
@@ -45,11 +50,34 @@ async def _inject_test_actor(
 ) -> Response:
     actor_type = request.headers.get("x-test-actor-type")
     if actor_type:
+        actor_id = request.headers.get("x-test-actor-id", "test-actor")
         request.state.actor = {
             "type": actor_type,
-            "id": request.headers.get("x-test-actor-id", "test-actor"),
+            "id": actor_id,
             "orgId": request.headers.get("x-test-org-id"),
+            "isRoot": actor_type == "user",
         }
+        if actor_type == "user":
+            async with request.app.state.session_factory() as session:
+                async with async_write_transaction(session):
+                    now = datetime.now(UTC)
+                    await ensure_user(
+                        session,
+                        {
+                            "id": actor_id,
+                            "name": actor_id,
+                            "email": f"{actor_id}@example.invalid",
+                            "email_verified": True,
+                            "created_at": now,
+                            "updated_at": now,
+                        },
+                    )
+                    await RoleService(session).ensure(
+                        "instance",
+                        INSTANCE_SCOPE_ID,
+                        PrincipalRef(type="user", id=actor_id),
+                        role="root",
+                    )
     return await call_next(request)
 
 
@@ -307,7 +335,7 @@ async def test_create_approval_route_returns_200_and_persists(
         app,
         "POST",
         f"/api/orgs/{org_id}/approvals",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-1",
         json={
             "type": "hire_agent",
@@ -336,7 +364,7 @@ async def test_create_approval_route_invalid_payload_returns_422(
         app,
         "POST",
         f"/api/orgs/{org_id}/approvals",
-        actor_type="board",
+        actor_type="user",
         json={"type": "hire_agent", "payload": {}, "workspaceConfig": {}},
     )
 
@@ -356,7 +384,7 @@ async def test_approve_approval_route_recovers_linked_issue(
         app,
         "POST",
         f"/api/approvals/{approval_id}/approve",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-1",
         json={"decisionNote": "approved", "decidedByUserId": "board-1"},
     )
@@ -401,7 +429,7 @@ async def test_approve_chat_issue_creation_creates_issue_and_system_message(
         app,
         "POST",
         f"/api/approvals/{approval_id}/approve",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-chat",
         json={"decisionNote": "approved"},
     )
@@ -442,7 +470,7 @@ async def test_approve_chat_issue_creation_finds_message_by_approval_id(
         app,
         "POST",
         f"/api/approvals/{approval_id}/approve",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-chat",
         json={},
     )
@@ -468,7 +496,7 @@ async def test_reject_approval_route_returns_200(
         app,
         "POST",
         f"/api/approvals/{approval_id}/reject",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-2",
         json={"decisionNote": "rejected", "decidedByUserId": "board-2"},
     )
@@ -487,7 +515,7 @@ async def test_request_revision_route_returns_200(
         app,
         "POST",
         f"/api/approvals/{approval_id}/request-revision",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-3",
         json={"decisionNote": "revise", "decidedByUserId": "board-3"},
     )
@@ -519,7 +547,7 @@ async def test_resubmit_route_returns_200_for_requesting_agent(
     assert body["payload"]["accessToken"] == "[REDACTED]"
 
 
-async def test_approve_route_non_board_returns_403(
+async def test_approve_route_without_organization_role_returns_403(
     app: FastAPI, session: AsyncSession
 ) -> None:
     org_id = await _seed_org(session)
@@ -535,7 +563,7 @@ async def test_approve_route_non_board_returns_403(
     )
 
     assert code == 403
-    assert "Board access required" in body["detail"]
+    assert "organization" in body["detail"]
 
 
 async def test_approve_route_missing_actor_context_returns_503(
@@ -564,7 +592,7 @@ async def test_create_approval_route_for_organization_returns_200(
         app,
         "POST",
         f"/api/orgs/{org_id}/approvals",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-1",
         json={"type": "hire_agent", "payload": {}},
     )
@@ -585,7 +613,7 @@ async def test_approve_approval_route_writes_activity_names(
         app,
         "POST",
         f"/api/approvals/{approval_id}/approve",
-        actor_type="board",
+        actor_type="user",
         actor_id="board-9",
         json={"decisionNote": "ok", "decidedByUserId": "board-9"},
     )

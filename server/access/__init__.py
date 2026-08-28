@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from .errors import AccessDeniedError, MembershipRequiredError
-from .grants import PermissionGrantSpec, PrincipalGrantService
+from .errors import AccessDeniedError, RoleRequiredError
+from .permission_service import PermissionService, PermissionSpec
 from .policy import AccessPolicyService
+from .scope_resolver import AccessScopeResolver, ScopedResource
 
 __all__ = [
     "AccessDeniedError",
     "AccessPolicyService",
-    "MembershipRequiredError",
-    "PermissionGrantSpec",
-    "PrincipalGrantService",
+    "AccessScopeResolver",
+    "RoleRequiredError",
+    "ScopedResource",
+    "PermissionService",
+    "PermissionSpec",
 ]

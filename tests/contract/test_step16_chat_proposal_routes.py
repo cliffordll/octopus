@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 import uuid
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
+from packages.database.queries.users import ensure_user
 from packages.database.schema import (
     Agent,
     Base,
@@ -20,6 +23,8 @@ from packages.database.schema import (
     Organization,
 )
 from server.app import create_app
+from server.identity import PrincipalRef
+from server.roles import RoleService
 
 
 def test_step16_chat_proposal_validators() -> None:
@@ -60,8 +65,43 @@ async def app(
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = create_session_factory(engine)
+    async with factory() as session:
+        now = datetime.now(UTC)
+        await ensure_user(
+            session,
+            {
+                "id": "user-chat-owner",
+                "name": "Chat Owner",
+                "email": "chat-owner@example.invalid",
+                "email_verified": True,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await RoleService(session).ensure(
+            "instance",
+            "instance",
+            PrincipalRef(type="user", id="user-chat-owner"),
+            role="root",
+        )
+        await session.commit()
     application = create_app()
     application.state.session_factory = factory
+
+    @application.middleware("http")
+    async def inject_test_user(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.headers.get("x-test-user-id"):
+            request.state.actor = {
+                "type": "user",
+                "id": "user-chat-owner",
+                "userId": "user-chat-owner",
+                "isRoot": True,
+                "source": "test",
+            }
+        return await call_next(request)
+
     try:
         yield application, factory
     finally:
@@ -78,7 +118,12 @@ async def _request(
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.request(method, path, json=json)
+        response = await client.request(
+            method,
+            path,
+            json=json,
+            headers={"x-test-user-id": "user-chat-owner"},
+        )
     return response.status_code, response.json()
 
 

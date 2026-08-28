@@ -11,6 +11,7 @@ from packages.database.queries.organizations import (
     create_organization,
     get_organization_by_id,
     list_organizations,
+    list_organizations_by_ids,
     update_organization,
 )
 from packages.database.queries.users import get_user_by_id
@@ -18,7 +19,7 @@ from packages.database.schema import Organization
 from packages.shared.constants.organization import OrganizationStatus
 from packages.shared.types.organization import OrganizationDetail, OrganizationSummary
 from server.identity import PrincipalRef
-from server.membership import MemberService
+from server.roles import RoleService
 
 ORG_UPDATE_TO_COLUMN: dict[str, str] = {
     "name": "name",
@@ -39,10 +40,19 @@ def _chat_issue_creation_mode(value: object) -> str:
 class OrgService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._members = MemberService(session)
+        self._roles = RoleService(session)
 
-    async def list(self) -> list[OrganizationSummary]:
-        rows = await list_organizations(self._session)
+    async def list(
+        self,
+        *,
+        organization_ids: tuple[str, ...] = (),
+        can_access_all: bool = False,
+    ) -> list[OrganizationSummary]:
+        rows = (
+            await list_organizations(self._session)
+            if can_access_all
+            else await list_organizations_by_ids(self._session, organization_ids)
+        )
         return [
             OrganizationSummary(
                 id=row.id,
@@ -93,25 +103,26 @@ class OrgService:
             entity_id=row.id,
             details=dict(payload),
         )
-        await self._ensure_creator_membership(
+        await self._ensure_creator_role(
             row.id,
             actor_type=actor_type,
             actor_id=actor_id,
         )
         return _to_detail(row)
 
-    async def _ensure_creator_membership(
+    async def _ensure_creator_role(
         self,
         org_id: str,
         *,
         actor_type: str,
         actor_id: str,
     ) -> None:
-        if actor_type not in {"board", "user"}:
+        if actor_type != "user":
             return
         if await get_user_by_id(self._session, actor_id) is None:
             return
-        await self._members.ensure(
+        await self._roles.ensure(
+            "organization",
             org_id,
             PrincipalRef(type="user", id=actor_id),
             role="owner",

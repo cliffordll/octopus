@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.queries.agents import get_agent_by_id
 from packages.database.queries.heartbeat import get_run
 from server.identity import PrincipalRef
-from server.membership import MemberAccessService, MemberService
+from server.roles import RoleAccessService, RoleService
 
 from .base import BaseTokenAuth
 from .contracts import AuthResult
@@ -73,7 +73,7 @@ class RunTokenAuth(BaseTokenAuth):
             issuer=config.issuer,
             audience=config.audience,
         )
-        self._members = MemberAccessService(MemberService(session))
+        self._roles = RoleAccessService(RoleService(session))
 
     async def authenticate_token(self, token: str) -> AuthResult | None:
         claims = self._tokens.decode(token)
@@ -96,6 +96,6 @@ class RunTokenAuth(BaseTokenAuth):
         if agent.org_id != org_id or agent.agent_runtime_type != claims["adapter_type"]:
             return None
         principal = PrincipalRef(type="agent", id=agent_id)
-        if await self._members.find_active(org_id, principal) is None:
+        if await self._roles.find_active("organization", org_id, principal) is None:
             return None
         return AuthResult(principal, "run_token", org_id, run.id)

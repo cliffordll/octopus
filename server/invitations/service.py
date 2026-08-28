@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.invites import (
     create_invite,
+    claim_invite,
     get_invite_by_id,
     get_invite_by_token_hash,
     list_org_invites,
@@ -15,13 +16,13 @@ from packages.database.queries.invites import (
 )
 from packages.database.schema import Invite
 from server.identity import PrincipalRef
-from server.membership import MemberService
+from server.roles import RoleService
 
 
 class InvitationService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._members = MemberService(session)
+        self._roles = RoleService(session)
 
     async def create(
         self,
@@ -66,27 +67,27 @@ class InvitationService:
         )
         if row.revoked_at is not None or expires_at <= now:
             raise ValueError("Invite is no longer active")
-        if row.accepted_at is not None:
-            membership = await self._members.get(
-                row.org_id or "", PrincipalRef(type="user", id=user_id)
-            )
-            if membership is None:
-                raise ValueError("Invite was already accepted")
-            return row
         if row.org_id is None or row.allowed_join_types not in {"human", "both"}:
             raise ValueError("Invite does not allow human members")
-        await self._members.ensure(
+        claimed = await claim_invite(
+            self._session,
+            row.id,
+            user_id=user_id,
+            accepted_at=now,
+        )
+        if claimed is None:
+            await self._session.refresh(row)
+            if row.accepted_by_user_id != user_id:
+                raise ValueError("Invite was already accepted")
+            return row
+        await self._roles.ensure(
+            "organization",
             row.org_id,
             PrincipalRef(type="user", id=user_id),
             role="member",
             status="active",
         )
-        updated = await update_invite(
-            self._session, row.id, {"accepted_at": now, "updated_at": now}
-        )
-        if updated is None:
-            raise RuntimeError("Invite disappeared during acceptance")
-        return updated
+        return claimed
 
     async def revoke(self, org_id: str, invite_id: str) -> Invite | None:
         row = await get_invite_by_id(self._session, invite_id)

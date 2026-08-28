@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from datetime import datetime
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +46,32 @@ async def update_invite(
         update(Invite)
         .where(Invite.id == invite_id)
         .values(**dict(fields))
+        .returning(Invite)
+    )
+    return result.scalar_one_or_none()
+
+
+async def claim_invite(
+    session: AsyncSession,
+    invite_id: str,
+    *,
+    user_id: str,
+    accepted_at: datetime,
+) -> Invite | None:
+    result = await session.execute(
+        update(Invite)
+        .where(
+            Invite.id == invite_id,
+            Invite.accepted_at.is_(None),
+            Invite.revoked_at.is_(None),
+            Invite.expires_at > accepted_at,
+        )
+        .values(
+            accepted_at=accepted_at,
+            accepted_by_user_id=user_id,
+            updated_at=accepted_at,
+        )
+        .execution_options(synchronize_session=False)
         .returning(Invite)
     )
     return result.scalar_one_or_none()

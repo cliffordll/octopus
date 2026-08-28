@@ -47,7 +47,6 @@ def upgrade() -> None:
         sa.Column("spent_monthly_cents", sa.Integer(), nullable=False),
         sa.Column("pause_reason", sa.Text(), nullable=True),
         sa.Column("paused_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("permissions", sa.JSON(), nullable=False),
         sa.Column("last_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("metadata", sa.JSON(), nullable=True),
         sa.Column(

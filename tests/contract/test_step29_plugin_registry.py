@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from starlette.responses import Response
 
 from packages.database.clients import create_database_engine, create_session_factory
 from packages.database.schema import (
@@ -48,6 +49,20 @@ async def app() -> AsyncIterator[tuple[FastAPI, async_sessionmaker]]:
     factory = create_session_factory(engine)
     application = create_app()
     application.state.session_factory = factory
+
+    @application.middleware("http")
+    async def inject_root(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request.state.actor = {
+            "type": "user",
+            "id": "plugin-root",
+            "userId": "plugin-root",
+            "isRoot": True,
+            "source": "test",
+        }
+        return await call_next(request)
+
     try:
         yield application, factory
     finally:

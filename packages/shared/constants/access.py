@@ -3,35 +3,56 @@ from __future__ import annotations
 from typing import Final, Literal
 
 
-MembershipPrincipalType = Literal["user", "agent"]
-MembershipStatus = Literal["pending", "active", "suspended"]
-InstanceUserRole = Literal["instance_admin"]
+AccessPrincipalType = Literal["user", "agent"]
+AccessScopeType = Literal["instance", "organization"]
+RoleName = Literal["root", "owner", "member"]
+RoleStatus = Literal["pending", "active", "suspended"]
 PermissionKey = Literal[
     "agents:create",
+    "agents:manage",
     "skills:manage",
     "users:invite",
     "users:manage_permissions",
     "tasks:assign",
-    "tasks:assign_scope",
-    "joins:approve",
+    "approvals:decide",
+    "organizations:manage",
+    "documents:manage",
+    "runtime:manage",
+    "costs:manage",
+    "projects:manage",
+    "goals:manage",
+    "workspaces:manage",
 ]
 
-MEMBERSHIP_PRINCIPAL_TYPES: Final[tuple[MembershipPrincipalType, ...]] = (
+INSTANCE_SCOPE_ID: Final[str] = "instance"
+
+ACCESS_PRINCIPAL_TYPES: Final[tuple[AccessPrincipalType, ...]] = (
     "user",
     "agent",
 )
-MEMBERSHIP_STATUSES: Final[tuple[MembershipStatus, ...]] = (
+ACCESS_SCOPE_TYPES: Final[tuple[AccessScopeType, ...]] = (
+    "instance",
+    "organization",
+)
+ROLE_NAMES: Final[tuple[RoleName, ...]] = ("root", "owner", "member")
+ROLE_STATUSES: Final[tuple[RoleStatus, ...]] = (
     "pending",
     "active",
     "suspended",
 )
-INSTANCE_USER_ROLES: Final[tuple[InstanceUserRole, ...]] = ("instance_admin",)
 PERMISSION_KEYS: Final[tuple[PermissionKey, ...]] = (
     "agents:create",
+    "agents:manage",
     "skills:manage",
     "users:invite",
     "users:manage_permissions",
     "tasks:assign",
-    "tasks:assign_scope",
-    "joins:approve",
+    "approvals:decide",
+    "organizations:manage",
+    "documents:manage",
+    "runtime:manage",
+    "costs:manage",
+    "projects:manage",
+    "goals:manage",
+    "workspaces:manage",
 )

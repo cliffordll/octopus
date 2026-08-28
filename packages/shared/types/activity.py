@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, NotRequired, TypedDict
 
-ActivityActorType = Literal["agent", "user", "system", "board"]
+ActivityActorType = Literal["agent", "user", "system"]
 
 
 class ActivityEvent(TypedDict):

@@ -281,8 +281,8 @@ class OrganizationImportService:
         model: str | None = None,
         collision: CollisionStrategy = "rename",
         dry_run: bool = False,
-        actor_type: str = "board",
-        actor_id: str = "board",
+        actor_type: str = "system",
+        actor_id: str = "organization_import",
     ) -> dict[str, Any]:
         manifest = parse_company_package(Path(root_path))
         warnings = list(manifest["warnings"])

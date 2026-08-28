@@ -5,7 +5,7 @@ from typing import Literal, cast
 
 
 PrincipalType = Literal["user", "agent", "system"]
-MembershipPrincipalType = Literal["user", "agent"]
+AccessPrincipalType = Literal["user", "agent"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,12 +21,11 @@ class PrincipalRef:
 
     @classmethod
     def from_actor(cls, actor_type: str, actor_id: str) -> PrincipalRef:
-        normalized_type = "user" if actor_type == "board" else actor_type
-        if normalized_type not in {"user", "agent", "system"}:
+        if actor_type not in {"user", "agent", "system"}:
             raise ValueError(f"Unsupported actor type: {actor_type}")
-        return cls(type=cast(PrincipalType, normalized_type), id=actor_id)
+        return cls(type=cast(PrincipalType, actor_type), id=actor_id)
 
-    def membership_type(self) -> MembershipPrincipalType:
+    def access_type(self) -> AccessPrincipalType:
         if self.type == "system":
-            raise ValueError("System principals do not have organization memberships")
-        return cast(MembershipPrincipalType, self.type)
+            raise ValueError("System principals do not have persisted access roles")
+        return cast(AccessPrincipalType, self.type)

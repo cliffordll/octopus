@@ -34,6 +34,7 @@ from packages.shared.api_paths.plugins import (
 from packages.shared.constants.plugins import PluginUiSlotType
 
 from ..dependencies.database import get_session
+from ..dependencies.access import require_root_access
 from ..plugins.catalog import (
     DEFAULT_PLUGIN_CATALOG_ROOT,
     PluginCatalog,
@@ -50,14 +51,18 @@ from ..plugins.worker_manager import PluginWorkerHandle, PluginWorkerManager
 router = APIRouter(tags=["plugins"])
 
 
-@router.get(PLUGIN_LIST_PATH)
+@router.get(PLUGIN_LIST_PATH, dependencies=[Depends(require_root_access)])
 async def list_plugins_route(
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
     return await PluginRegistryService(session).list_plugins()
 
 
-@router.post(PLUGIN_INSTALL_PATH, status_code=status.HTTP_201_CREATED)
+@router.post(
+    PLUGIN_INSTALL_PATH,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_root_access)],
+)
 async def install_plugin_route(
     body: dict[str, Any] = Body(...),
     session: AsyncSession = Depends(get_session),
@@ -78,7 +83,7 @@ async def install_plugin_route(
         ) from exc
 
 
-@router.delete(PLUGIN_DETAIL_PATH)
+@router.delete(PLUGIN_DETAIL_PATH, dependencies=[Depends(require_root_access)])
 async def uninstall_plugin_route(
     request: Request,
     pluginId: str,
@@ -107,7 +112,7 @@ async def list_example_plugins_route(request: Request) -> dict[str, Any]:
     return _catalog_response(catalog, examples_only=True)
 
 
-@router.get(PLUGIN_TOOLS_PATH)
+@router.get(PLUGIN_TOOLS_PATH, dependencies=[Depends(require_root_access)])
 async def list_plugin_tools_route(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -115,7 +120,7 @@ async def list_plugin_tools_route(
     return {"items": await _tool_dispatcher(request, session).discover_tools()}
 
 
-@router.get(PLUGIN_DETAIL_PATH)
+@router.get(PLUGIN_DETAIL_PATH, dependencies=[Depends(require_root_access)])
 async def get_plugin_route(
     pluginId: str,
     session: AsyncSession = Depends(get_session),
@@ -128,7 +133,7 @@ async def get_plugin_route(
         ) from exc
 
 
-@router.post(PLUGIN_ENABLE_PATH)
+@router.post(PLUGIN_ENABLE_PATH, dependencies=[Depends(require_root_access)])
 async def enable_plugin_route(
     request: Request,
     pluginId: str,
@@ -154,7 +159,7 @@ async def enable_plugin_route(
         ) from exc
 
 
-@router.post(PLUGIN_DISABLE_PATH)
+@router.post(PLUGIN_DISABLE_PATH, dependencies=[Depends(require_root_access)])
 async def disable_plugin_route(
     request: Request,
     pluginId: str,
@@ -176,7 +181,7 @@ async def disable_plugin_route(
         ) from exc
 
 
-@router.get(PLUGIN_CONFIG_PATH)
+@router.get(PLUGIN_CONFIG_PATH, dependencies=[Depends(require_root_access)])
 async def get_plugin_config_route(
     pluginId: str,
     session: AsyncSession = Depends(get_session),
@@ -189,7 +194,7 @@ async def get_plugin_config_route(
         ) from exc
 
 
-@router.post(PLUGIN_CONFIG_PATH)
+@router.post(PLUGIN_CONFIG_PATH, dependencies=[Depends(require_root_access)])
 async def save_plugin_config_route(
     pluginId: str,
     body: dict[str, Any] = Body(...),
@@ -206,7 +211,7 @@ async def save_plugin_config_route(
         ) from exc
 
 
-@router.post(PLUGIN_CONFIG_TEST_PATH)
+@router.post(PLUGIN_CONFIG_TEST_PATH, dependencies=[Depends(require_root_access)])
 async def test_plugin_config_route(
     request: Request,
     pluginId: str,
@@ -246,7 +251,7 @@ async def test_plugin_config_route(
         ) from exc
 
 
-@router.get(PLUGIN_HEALTH_PATH)
+@router.get(PLUGIN_HEALTH_PATH, dependencies=[Depends(require_root_access)])
 async def get_plugin_health_route(
     request: Request,
     pluginId: str,
@@ -278,7 +283,7 @@ async def get_plugin_health_route(
         ) from exc
 
 
-@router.get(PLUGIN_DASHBOARD_PATH)
+@router.get(PLUGIN_DASHBOARD_PATH, dependencies=[Depends(require_root_access)])
 async def get_plugin_dashboard_route(
     request: Request,
     pluginId: str,
@@ -317,7 +322,10 @@ async def get_plugin_dashboard_route(
         ) from exc
 
 
-@router.post(PLUGIN_TOOL_EXECUTE_PATH)
+@router.post(
+    PLUGIN_TOOL_EXECUTE_PATH,
+    dependencies=[Depends(require_root_access)],
+)
 async def execute_plugin_tool_route(
     request: Request,
     pluginId: str,
@@ -349,7 +357,10 @@ async def execute_plugin_tool_route(
         ) from exc
 
 
-@router.post("/api/plugins/{pluginId}/state/{key}")
+@router.post(
+    "/api/plugins/{pluginId}/state/{key}",
+    dependencies=[Depends(require_root_access)],
+)
 async def save_plugin_state_route(
     pluginId: str,
     key: str,
@@ -373,7 +384,7 @@ async def save_plugin_state_route(
         ) from exc
 
 
-@router.get(PLUGIN_JOBS_PATH)
+@router.get(PLUGIN_JOBS_PATH, dependencies=[Depends(require_root_access)])
 async def list_plugin_jobs_route(
     pluginId: str,
     session: AsyncSession = Depends(get_session),
@@ -386,7 +397,7 @@ async def list_plugin_jobs_route(
         ) from exc
 
 
-@router.post(PLUGIN_JOB_TRIGGER_PATH)
+@router.post(PLUGIN_JOB_TRIGGER_PATH, dependencies=[Depends(require_root_access)])
 async def trigger_plugin_job_route(
     request: Request,
     pluginId: str,
@@ -450,7 +461,7 @@ async def receive_plugin_webhook_route(
         ) from exc
 
 
-@router.get(PLUGIN_LOGS_PATH)
+@router.get(PLUGIN_LOGS_PATH, dependencies=[Depends(require_root_access)])
 async def list_plugin_logs_route(
     pluginId: str,
     session: AsyncSession = Depends(get_session),
@@ -468,7 +479,10 @@ async def list_plugin_logs_route(
         ) from exc
 
 
-@router.get(PLUGIN_UI_CONTRIBUTIONS_PATH)
+@router.get(
+    PLUGIN_UI_CONTRIBUTIONS_PATH,
+    dependencies=[Depends(require_root_access)],
+)
 async def list_plugin_ui_contributions_route(
     request: Request,
     slotType: PluginUiSlotType | None = None,
@@ -481,7 +495,7 @@ async def list_plugin_ui_contributions_route(
     )
 
 
-@router.post(PLUGIN_DATA_PATH)
+@router.post(PLUGIN_DATA_PATH, dependencies=[Depends(require_root_access)])
 async def plugin_bridge_data_route(
     request: Request,
     pluginId: str,
@@ -506,7 +520,7 @@ async def plugin_bridge_data_route(
         ) from exc
 
 
-@router.post(PLUGIN_ACTION_PATH)
+@router.post(PLUGIN_ACTION_PATH, dependencies=[Depends(require_root_access)])
 async def plugin_bridge_action_route(
     request: Request,
     pluginId: str,
@@ -534,7 +548,7 @@ async def plugin_bridge_action_route(
         ) from exc
 
 
-@router.get(PLUGIN_UI_STREAM_PATH)
+@router.get(PLUGIN_UI_STREAM_PATH, dependencies=[Depends(require_root_access)])
 async def plugin_ui_stream_route(
     request: Request,
     pluginId: str,

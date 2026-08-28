@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from ._base import Base, new_uuid
-from .access import InstanceUserRoleGrant, PrincipalPermissionGrant
+from .access import Permission, Role
 from .activity_log import ActivityLog
-from .auth import Account, Session, User, Verification
+from .auth import AuthSession, Credential, User, Verification
 from .agents import Agent
 from .agent_skills import AgentEnabledSkill
 from .agent_state import (
@@ -32,9 +32,8 @@ from .issues import Issue, IssueAttachment
 from .messenger import MessengerThreadUserState
 from .organizations import Organization
 from .organization_skills import OrganizationSkill
-from .organization_memberships import OrgMembership
 from .invites import Invite
-from .local_account_auth import ExternalUserBinding
+from .external_identities import ExternalIdentity
 from .plugins import (
     Plugin,
     PluginConfig,
@@ -72,14 +71,13 @@ __all__ = [
     "Base",
     "new_uuid",
     "User",
-    "Session",
-    "Account",
+    "AuthSession",
+    "Credential",
     "Verification",
-    "ExternalUserBinding",
+    "ExternalIdentity",
     "Invite",
-    "OrgMembership",
-    "PrincipalPermissionGrant",
-    "InstanceUserRoleGrant",
+    "Role",
+    "Permission",
     "ActivityLog",
     "Agent",
     "AgentEnabledSkill",

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.queries.access import (
-    has_instance_user_role,
-    list_principal_permission_grants,
-)
-from server.membership import MemberAccessService, MemberService
+from packages.shared.constants.access import INSTANCE_SCOPE_ID
+from server.access import PermissionService
+from server.roles import RoleAccessService, RoleService
 
 from .context import IdentityContext
 from .principal import PrincipalRef
@@ -15,7 +13,8 @@ from .principal import PrincipalRef
 class IdentityContextResolver:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._member_access = MemberAccessService(MemberService(session))
+        self._role_access = RoleAccessService(RoleService(session))
+        self._permissions = PermissionService(session)
 
     async def resolve(
         self,
@@ -32,34 +31,29 @@ class IdentityContextResolver:
                 "System request contexts must use SystemIdentityContextFactory"
             )
 
-        membership = None
-        grants = []
+        role = None
+        permissions = []
         if org_id is not None:
-            membership = await self._member_access.find_active(org_id, principal)
-            grants = list(
-                await list_principal_permission_grants(
-                    self._session,
-                    org_id=org_id,
-                    principal_type=principal.membership_type(),
-                    principal_id=principal.id,
-                )
+            role = await self._role_access.find_active(
+                "organization", org_id, principal
+            )
+            permissions = await self._permissions.list(
+                "organization", org_id, principal
             )
 
-        is_instance_admin = principal.type == "user" and await has_instance_user_role(
-            self._session,
-            user_id=principal.id,
-            role="instance_admin",
+        root_role = await self._role_access.find_active(
+            "instance", INSTANCE_SCOPE_ID, principal
         )
         return IdentityContext(
             principal=principal,
             org_id=org_id,
-            membership_id=membership.id if membership is not None else None,
-            membership_role=(
-                membership.membership_role if membership is not None else None
-            ),
-            permissions=frozenset(grant.permission_key for grant in grants),
-            permission_scopes={grant.permission_key: grant.scope for grant in grants},
+            role_id=role.id if role is not None else None,
+            role=role.role if role is not None else None,
+            permissions=frozenset(item.permission_key for item in permissions),
+            permission_constraints={
+                item.permission_key: item.constraints for item in permissions
+            },
             source=source,
             run_id=run_id,
-            is_instance_admin=is_instance_admin,
+            is_root=root_role is not None and root_role.role == "root",
         )

@@ -31,10 +31,13 @@ from packages.shared.validators.approval import (
 )
 
 from ..dependencies.approvals import get_approval_service
+from ..dependencies.approval_access import (
+    ApprovalOrganizationAccess,
+    require_approval_decision_access,
+)
 from ..dependencies.access import (
     assert_organization_access,
     require_actor_identity,
-    require_board_access,
     require_organization_access,
 )
 from ..services.approvals import ApprovalService
@@ -83,8 +86,7 @@ async def create_approval_route(
     request: Request,
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
-    __: None = Depends(require_organization_access),
+    _: None = Depends(require_organization_access),
     service: ApprovalService = Depends(get_approval_service),
 ) -> ApprovalDetail:
     try:
@@ -129,10 +131,9 @@ async def approve_approval_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: ApprovalOrganizationAccess = Depends(require_approval_decision_access),
     service: ApprovalService = Depends(get_approval_service),
 ) -> ApprovalDetail:
-    await _get_approval_detail(request, service, id)
     try:
         payload = validate_resolve_approval(body)
     except ValueError as exc:
@@ -166,10 +167,9 @@ async def reject_approval_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: ApprovalOrganizationAccess = Depends(require_approval_decision_access),
     service: ApprovalService = Depends(get_approval_service),
 ) -> ApprovalDetail:
-    await _get_approval_detail(request, service, id)
     try:
         payload = validate_resolve_approval(body)
     except ValueError as exc:
@@ -203,10 +203,9 @@ async def request_approval_revision_route(
     id: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: ApprovalOrganizationAccess = Depends(require_approval_decision_access),
     service: ApprovalService = Depends(get_approval_service),
 ) -> ApprovalDetail:
-    await _get_approval_detail(request, service, id)
     try:
         payload = validate_request_approval_revision(body)
     except ValueError as exc:

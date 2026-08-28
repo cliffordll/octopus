@@ -45,10 +45,13 @@ from packages.shared.validators.cost import (
 )
 
 from ..dependencies.access import (
-    assert_organization_access,
+    assert_organization_permission,
     require_actor_identity,
     require_organization_access,
 )
+from ..dependencies.database import get_session
+from ..dependencies.identity import require_organization_permission
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..dependencies.budgets import get_budget_service
 from ..dependencies.costs import get_cost_service
 from ..services.budgets import BudgetService
@@ -93,11 +96,18 @@ async def create_cost_event_route(
     request: Request,
     body: dict[str, Any] = Body(...),
     _: None = Depends(require_organization_access),
+    session: AsyncSession = Depends(get_session),
     service: CostService = Depends(get_cost_service),
 ) -> CostEvent:
     actor = require_actor_identity(request)
     try:
         payload = validate_create_cost_event(body)
+        if actor.actor_type == "user":
+            await assert_organization_permission(
+                request, session, orgId, "costs:manage"
+            )
+        elif actor.actor_type == "agent" and actor.run_id is None:
+            raise PermissionError("Agent cost reporting requires an active Run token")
         return await service.create_event(
             orgId,
             payload,
@@ -220,7 +230,7 @@ async def upsert_budget_policy_route(
     orgId: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("costs:manage")),
     service: BudgetService = Depends(get_budget_service),
 ) -> BudgetPolicySummary:
     actor = require_actor_identity(request)
@@ -248,7 +258,7 @@ async def resolve_budget_incident_route(
     incidentId: str,
     request: Request,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("costs:manage")),
     service: BudgetService = Depends(get_budget_service),
 ) -> BudgetIncident:
     actor = require_actor_identity(request)
@@ -275,7 +285,7 @@ async def resolve_budget_incident_route(
 async def patch_org_budget_route(
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_organization_access),
+    _: object = Depends(require_organization_permission("costs:manage")),
     service: BudgetService = Depends(get_budget_service),
 ) -> dict[str, int]:
     try:
@@ -296,12 +306,13 @@ async def patch_agent_budget_route(
     agentId: str,
     request: Request,
     body: dict[str, Any] = Body(...),
+    session: AsyncSession = Depends(get_session),
     service: BudgetService = Depends(get_budget_service),
 ) -> dict[str, int]:
     try:
         amount = validate_budget_amount_patch(body)
         org_id = await service.get_agent_org_id(agentId)
-        assert_organization_access(request, org_id)
+        await assert_organization_permission(request, session, org_id, "costs:manage")
         return await service.update_agent_budget(agentId, amount)
     except LookupError as exc:
         raise HTTPException(

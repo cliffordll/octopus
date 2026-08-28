@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.access import AccessDeniedError, AccessPolicyService
-from server.identity import IdentityContext, IdentityContextResolver
+from server.identity import IdentityContext
+from server.identity.resolver import IdentityContextResolver
+from packages.shared.constants.access import PermissionKey
 
 from .access import require_actor_identity
 from .database import get_session
@@ -34,15 +38,20 @@ async def get_identity_context(
     )
 
 
-def require_context_organization_access(
-    orgId: str,
-    context: IdentityContext = Depends(get_identity_context),
-) -> IdentityContext:
-    try:
-        AccessPolicyService().require_organization_access(context, orgId)
-    except AccessDeniedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Principal cannot access this organization",
-        ) from exc
-    return context
+def require_organization_permission(
+    permission: PermissionKey,
+) -> Callable[..., IdentityContext]:
+    def require_permission(
+        orgId: str,
+        context: IdentityContext = Depends(get_identity_context),
+    ) -> IdentityContext:
+        try:
+            AccessPolicyService().require_permission(context, orgId, permission)
+        except AccessDeniedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing organization permission: {permission}",
+            ) from exc
+        return context
+
+    return require_permission

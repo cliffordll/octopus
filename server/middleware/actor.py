@@ -40,10 +40,6 @@ class ActorContextMiddleware:
 
 
 def _set_actor_context(request: Request, settings: object) -> None:
-    cookie_name = getattr(settings, "auth_session_cookie_name", "octopus_session")
-    has_credential = bool(
-        request.headers.get("authorization") or request.cookies.get(cookie_name)
-    )
     if not hasattr(request.state, "actor") and getattr(
         settings, "local_trusted", False
     ):
@@ -61,17 +57,6 @@ def _set_actor_context(request: Request, settings: object) -> None:
                 "runId": run_id,
                 "source": "local_test_header",
             }
-    if (
-        not hasattr(request.state, "actor")
-        and getattr(settings, "local_trusted", False)
-        and not has_credential
-    ):
-        request.state.actor = {
-            "type": "board",
-            "id": "local-board",
-            "userId": "local-board",
-            "source": "local_implicit",
-        }
 
 
 async def actor_context_middleware(
@@ -128,4 +113,7 @@ def _session_csrf_allowed(request: Request) -> bool:
         method=request.method,
         origin=request.headers.get("origin"),
         request_url=str(request.url),
+        allow_loopback_proxy=bool(
+            getattr(request.app.state.settings, "local_trusted", False)
+        ),
     )

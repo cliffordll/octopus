@@ -19,7 +19,6 @@ from packages.database.queries.organizations import list_organizations
 
 from .services.heartbeat import HeartbeatService
 from .services.run_dispatch import RunDispatchService
-from .identity import LocalAccessBootstrapService
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +78,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.engine = engine
     app.state.session_factory = session_factory
-    if settings.local_trusted:
-        async with session_factory() as session:
-            async with async_write_transaction(session):
-                await LocalAccessBootstrapService(session).ensure()
-
     scheduler_task = None
     scheduler_stop_event = None
     if settings.heartbeat_scheduler_enabled:

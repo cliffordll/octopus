@@ -23,10 +23,10 @@ from packages.shared.validators.activity import (
 
 from ..dependencies.access import (
     assert_organization_access,
-    require_board_access,
     require_organization_access,
 )
 from ..dependencies.activity import get_activity_service
+from ..dependencies.identity import require_organization_permission
 from ..dependencies.heartbeat import get_heartbeat_service
 from ..services.activity import ActivityService
 from ..services.heartbeat import HeartbeatService
@@ -75,7 +75,7 @@ async def list_org_activity_route(
 async def create_org_activity_route(
     orgId: str,
     body: dict[str, Any] = Body(...),
-    _: None = Depends(require_board_access),
+    _: object = Depends(require_organization_permission("organizations:manage")),
     service: ActivityService = Depends(get_activity_service),
 ) -> ActivityEvent:
     try:

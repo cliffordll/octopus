@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.auth import (
-    create_session,
+    create_auth_session,
     delete_session,
     get_session_with_user,
     touch_session,
@@ -29,7 +29,7 @@ class SessionAuth:
     ) -> str:
         now = datetime.now(UTC)
         token = secrets.token_urlsafe(32)
-        await create_session(
+        await create_auth_session(
             self._session,
             {
                 "id": str(uuid.uuid4()),

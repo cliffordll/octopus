@@ -18,7 +18,7 @@ from server.access import AccessDeniedError
 from server.auth import RunTokenAuth, RunTokenConfig, RunTokenIssuer
 from server.identity import PrincipalRef
 from server.identity.system_access import SystemOperationAccess
-from server.membership import MemberService
+from server.roles import RoleService
 from server.services.runtime_access import RuntimeAccessResolver
 
 
@@ -163,7 +163,12 @@ async def _seed_running_run(
     )
     session.add(agent)
     await session.flush()
-    await MemberService(session).ensure(org_id, PrincipalRef(type="agent", id=agent.id))
+    await RoleService(session).ensure(
+        "organization",
+        org_id,
+        PrincipalRef(type="agent", id=agent.id),
+        role="member",
+    )
     run = HeartbeatRun(
         org_id=org_id,
         agent_id=agent.id,

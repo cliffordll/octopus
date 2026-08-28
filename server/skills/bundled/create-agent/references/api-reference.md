@@ -28,7 +28,7 @@ Internal/debug reference for the bundled `create-agent` skill.
 Auth:
 
 - board access, or
-- same-org agent auth with `canCreateAgents=true`
+- same-org agent auth with the explicit `agents:create` permission
 
 These endpoints return plain text. The CLI wraps them directly.
 
@@ -65,7 +65,7 @@ Representative shape:
     }
   },
   "permissions": {
-    "canCreateAgents": true
+    "agents:create": true
   },
   "updatedAt": "2026-04-19T12:00:00.000Z"
 }

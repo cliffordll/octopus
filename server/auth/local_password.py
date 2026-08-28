@@ -6,8 +6,8 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.queries.auth import (
-    create_account,
-    get_password_account,
+    create_credential,
+    get_password_credential,
     get_user_by_email,
 )
 from packages.database.queries.users import ensure_user
@@ -49,14 +49,14 @@ class LocalPasswordAuth:
                 "updated_at": now,
             },
         )
-        await create_account(
+        await create_credential(
             self._session,
             {
                 "id": str(uuid.uuid4()),
                 "account_id": normalized_email,
                 "provider_id": "credential",
                 "user_id": user_id,
-                "password": self._passwords.hash(password),
+                "password_hash": self._passwords.hash(password),
                 "created_at": now,
                 "updated_at": now,
             },
@@ -73,13 +73,13 @@ class LocalPasswordAuth:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> tuple[str, str]:
-        account = await get_password_account(self._session, email.strip().lower())
+        credential = await get_password_credential(self._session, email.strip().lower())
         if (
-            account is None
-            or account.password is None
-            or not self._passwords.verify(password, account.password)
+            credential is None
+            or credential.password_hash is None
+            or not self._passwords.verify(password, credential.password_hash)
         ):
             raise ValueError("Invalid email or password")
-        return account.user_id, await self._sessions.create(
-            account.user_id, ip_address=ip_address, user_agent=user_agent
+        return credential.user_id, await self._sessions.create(
+            credential.user_id, ip_address=ip_address, user_agent=user_agent
         )

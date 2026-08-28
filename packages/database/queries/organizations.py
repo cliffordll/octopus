@@ -19,6 +19,19 @@ async def list_organizations(session: AsyncSession) -> Sequence[Organization]:
     return result.scalars().all()
 
 
+async def list_organizations_by_ids(
+    session: AsyncSession, organization_ids: Sequence[str]
+) -> Sequence[Organization]:
+    if not organization_ids:
+        return []
+    result = await session.execute(
+        select(Organization)
+        .where(Organization.id.in_(organization_ids))
+        .order_by(Organization.created_at.desc(), Organization.id.desc())
+    )
+    return result.scalars().all()
+
+
 async def get_organization_by_id(
     session: AsyncSession, organization_id: str
 ) -> Organization | None:

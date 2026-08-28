@@ -165,7 +165,7 @@ class ChatService:
                     _chat_issue_creation_mode(org.default_chat_issue_creation_mode),
                 ),
                 "plan_mode": payload.get("planMode", False),
-                "created_by_user_id": actor_id if actor_type == "board" else None,
+                "created_by_user_id": actor_id if actor_type == "user" else None,
             },
         )
         for link in payload.get("contextLinks", []):
@@ -433,7 +433,7 @@ class ChatService:
             "description": proposal.get("description"),
             "priority": proposal.get("priority", "medium"),
             "createdByAgentId": actor_id if actor_type == "agent" else None,
-            "createdByUserId": actor_id if actor_type == "board" else None,
+            "createdByUserId": actor_id if actor_type == "user" else None,
             "originKind": "manual",
             "originId": conversation.id,
         }
@@ -536,7 +536,7 @@ class ChatService:
         current_payload["operationProposalState"] = {
             "status": status,
             "decisionNote": payload.get("decisionNote"),
-            "decidedByUserId": actor_id if actor_type == "board" else None,
+            "decidedByUserId": actor_id if actor_type == "user" else None,
             "decidedAt": datetime.now(UTC).isoformat(),
         }
         updated = await update_message(

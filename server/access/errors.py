@@ -1,9 +1,3 @@
-from __future__ import annotations
+from server.access_errors import AccessDeniedError, RoleRequiredError
 
-
-class AccessDeniedError(PermissionError):
-    pass
-
-
-class MembershipRequiredError(AccessDeniedError):
-    pass
+__all__ = ["AccessDeniedError", "RoleRequiredError"]

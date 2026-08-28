@@ -19,6 +19,7 @@ from .commands import (
     project,
     run_intelligence,
     runtime_provider,
+    root,
 )
 
 
@@ -46,4 +47,5 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_provider.configure(resources)
     chat.configure(resources)
     messenger.configure(resources)
+    root.configure(resources)
     return parser

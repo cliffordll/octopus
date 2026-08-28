@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from server.identity.context import IdentityContext
 
-from .errors import AccessDeniedError, MembershipRequiredError
+from .errors import AccessDeniedError, RoleRequiredError
 
 
 class AccessPolicyService:
@@ -11,20 +11,24 @@ class AccessPolicyService:
             return False
         if context.principal.type == "system":
             return bool(context.permissions)
-        return context.is_instance_admin or context.has_active_membership
+        return context.is_root or context.has_active_role
 
     def require_organization_access(
         self, context: IdentityContext, org_id: str
     ) -> None:
         if not self.can_access_organization(context, org_id):
-            raise MembershipRequiredError(
+            raise RoleRequiredError(
                 "Principal does not have active organization access"
             )
 
     def has_permission(self, context: IdentityContext, permission: str) -> bool:
-        if context.is_instance_admin:
+        if context.is_root or context.role == "owner":
             return True
-        return permission in context.permissions
+        if permission not in context.permissions:
+            return False
+        # Constraint evaluators are intentionally opt-in. Treat an unevaluated
+        # constraint as denied instead of silently widening it to full access.
+        return not context.permission_constraints.get(permission)
 
     def require_permission(
         self, context: IdentityContext, org_id: str, permission: str

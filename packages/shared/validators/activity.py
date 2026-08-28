@@ -29,7 +29,7 @@ _QUERY_FIELDS = {
     "limit",
     "offset",
 }
-_ACTOR_TYPES = {"agent", "user", "system", "board"}
+_ACTOR_TYPES = {"agent", "user", "system"}
 
 
 def validate_create_activity(payload: dict[str, Any]) -> CreateActivityPayload:
