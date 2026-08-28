@@ -51,6 +51,25 @@ async def list_org_memberships(
     return result.scalars().all()
 
 
+async def list_principal_org_memberships(
+    session: AsyncSession,
+    *,
+    principal_type: str,
+    principal_id: str,
+    status: str | None = None,
+) -> Sequence[OrgMembership]:
+    statement = select(OrgMembership).where(
+        OrgMembership.principal_type == principal_type,
+        OrgMembership.principal_id == principal_id,
+    )
+    if status is not None:
+        statement = statement.where(OrgMembership.status == status)
+    result = await session.execute(
+        statement.order_by(OrgMembership.created_at.desc(), OrgMembership.id.desc())
+    )
+    return result.scalars().all()
+
+
 async def ensure_org_membership_row(
     session: AsyncSession, fields: Mapping[str, Any]
 ) -> OrgMembership:

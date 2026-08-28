@@ -65,6 +65,14 @@ async def test_run_token_is_bound_to_active_run_agent_and_membership(
             assert authenticated.org_id == org_id
             assert authenticated.run_id == run.id
 
+            agent.status = "paused"
+            await session.flush()
+            assert (
+                await RunTokenAuth(session, config).authenticate(f"Bearer {token}")
+                is None
+            )
+
+            agent.status = "running"
             run.status = "succeeded"
             await session.flush()
             assert (
@@ -150,6 +158,7 @@ async def _seed_running_run(
         org_id=org_id,
         name="Engineer",
         role="engineer",
+        status="running",
         agent_runtime_type="codex_local",
     )
     session.add(agent)

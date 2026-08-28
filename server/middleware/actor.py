@@ -13,6 +13,7 @@ from server.auth import (
     is_trusted_session_origin,
 )
 from starlette.responses import JSONResponse
+from server.identity.actor_context import AuthenticatedActorProjector
 
 
 class ActorContextMiddleware:
@@ -39,7 +40,10 @@ class ActorContextMiddleware:
 
 
 def _set_actor_context(request: Request, settings: object) -> None:
-    has_credential = bool(request.headers.get("authorization") or request.cookies)
+    cookie_name = getattr(settings, "auth_session_cookie_name", "octopus_session")
+    has_credential = bool(
+        request.headers.get("authorization") or request.cookies.get(cookie_name)
+    )
     if not hasattr(request.state, "actor") and getattr(
         settings, "local_trusted", False
     ):
@@ -111,18 +115,9 @@ async def _resolve_authenticated_actor(request: Request, settings: object) -> No
                         audience=str(audience),
                     ).authenticate(str(authorization))
             if result is not None:
-                actor = {
-                    "type": result.principal.type,
-                    "id": result.principal.id,
-                    "orgId": result.org_id,
-                    "source": result.source,
-                }
-                if result.principal.type == "user":
-                    actor["userId"] = result.principal.id
-                elif result.principal.type == "agent":
-                    actor["agentId"] = result.principal.id
-                    actor["runId"] = result.run_id
-                request.state.actor = actor
+                request.state.actor = await AuthenticatedActorProjector(
+                    session
+                ).project(result)
 
 
 def _session_csrf_allowed(request: Request) -> bool:

@@ -141,6 +141,67 @@ def test_local_owner_can_manage_members_and_invites(
     assert inspected.json()["allowedJoinTypes"] == "human"
 
 
+def test_local_trusted_ignores_unrelated_cookies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "local-cookie.db"
+    monkeypatch.setenv("OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{database_path}")
+    monkeypatch.setenv("OCTOPUS_AUTO_MIGRATE", "1")
+    monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    monkeypatch.setenv("OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED", "0")
+
+    from server.app import create_app
+
+    with TestClient(create_app()) as client:
+        client.cookies.set("theme", "dark")
+        created = client.post("/api/orgs", json={"name": "Local Team"})
+
+    assert created.status_code == 200
+
+
+def test_session_user_can_access_only_active_membership_organizations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "session-membership.db"
+    monkeypatch.setenv("OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{database_path}")
+    monkeypatch.setenv("OCTOPUS_AUTO_MIGRATE", "1")
+    monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "1")
+    monkeypatch.setenv("OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED", "0")
+
+    from server.app import create_app
+
+    with TestClient(create_app()) as client:
+        member_org = client.post("/api/orgs", json={"name": "Member Team"}).json()
+        other_org = client.post("/api/orgs", json={"name": "Other Team"}).json()
+        invite = client.post(
+            f"/api/orgs/{member_org['id']}/invites",
+            json={"allowedJoinTypes": "human"},
+        ).json()
+        registered = client.post(
+            "/api/auth/sign-up/email",
+            json={
+                "name": "Member",
+                "email": "member@example.com",
+                "password": "secure-password",
+            },
+        )
+        accepted = client.post(
+            f"/api/invites/{invite['token']}/accept",
+            headers={"origin": "http://testserver"},
+        )
+        own_org = client.get(f"/api/orgs/{member_org['id']}/resources")
+        forbidden_org = client.get(f"/api/orgs/{other_org['id']}/resources")
+        forbidden_board = client.get("/api/orgs")
+
+    assert registered.status_code == 201
+    assert accepted.status_code == 200
+    assert own_org.status_code == 200
+    assert forbidden_org.status_code == 403
+    assert forbidden_board.status_code == 403
+
+
 async def test_local_password_and_session_authenticate_user(
     session_factory: async_sessionmaker,
 ) -> None:

@@ -439,6 +439,7 @@ server/auth/
 server/identity/
   principal.py
   context.py
+  actor_context.py
   resolver.py
   system_context.py
   system_access.py
@@ -503,6 +504,7 @@ server/access/
 - 实现 `LocalPasswordAuth`、`SessionAuth`、`ProxyTokenAuth`。
 - `ProxyTokenAuth` 通过 `OCTOPUS_PROXY_AUTH_SECRET`、`OCTOPUS_PROXY_AUTH_ISSUER`、`OCTOPUS_PROXY_AUTH_AUDIENCE` 启用；未完整配置时不接受代理 Token。
 - Human Session 使用 HttpOnly、SameSite Cookie，Cookie 写请求执行同源校验；匿名请求不建立认证数据库事务。
+- `AuthenticatedActorProjector` 在每次认证请求中读取当前 active Membership 和实例管理员状态，使既有组织路由继续消费统一 Actor 边界；Session 用户可访问自己的组织，但不能跨组织或冒充 Board。
 - 实现 Epaichat 外部身份绑定、邀请和成员管理。
 - 完成本地登录与成员管理 UI；代理调用不重复展示 Octopus 登录页面。
 
@@ -514,6 +516,7 @@ server/access/
 
 - 使用共享 `HmacJwtCodec` 实现 `RunTokenIssuer`、`RunTokenAuth`，并保持代理 Token 与 Run Token 的认证规则隔离。
 - Run Token 绑定 Agent、组织、Runtime 类型和处于 `running` 状态的 Run；Agent 还必须具有 active Membership。
+- Run Token 每次使用时重新检查 Run、Agent 和 Membership；Run 终态、Agent 暂停/终止或 Membership 失效后，无需等待 TTL 即拒绝后续请求。
 - `RuntimeAccessResolver` 在 Adapter 执行边界统一解析 Provider 配置和临时凭证，仅向声明支持本地 Agent JWT 的 Adapter 注入 `RUDDER_API_KEY`。
 - `SystemOperationAccess` 统一创建并校验组织范围内的 System Context；RunDispatch、RunExecution、RunRecovery 和 RunFinalization 已接入对应 capability。
 - `local_trusted` 的隐式 Board Actor 不再覆盖显式 Cookie 或 Bearer 凭证，生产访问链不接受开发测试 Header。

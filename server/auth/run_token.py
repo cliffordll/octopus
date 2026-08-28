@@ -84,7 +84,12 @@ class RunTokenAuth(BaseTokenAuth):
         org_id = str(claims["org_id"])
         run = await get_run(self._session, str(claims["run_id"]))
         agent = await get_agent_by_id(self._session, agent_id)
-        if run is None or agent is None or run.status != "running":
+        if (
+            run is None
+            or agent is None
+            or run.status != "running"
+            or agent.status != "running"
+        ):
             return None
         if run.agent_id != agent_id or run.org_id != org_id:
             return None

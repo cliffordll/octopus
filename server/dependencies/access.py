@@ -63,7 +63,8 @@ def require_board_access(request: Request) -> None:
             detail="Actor context is not configured for board-scoped org listing",
         )
     actor = require_actor_identity(request)
-    if actor.actor_type == "board":
+    raw_actor = getattr(request.state, "actor", None)
+    if actor.actor_type == "board" or bool(_actor_value(raw_actor, "isInstanceAdmin")):
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -74,6 +75,12 @@ def require_board_access(request: Request) -> None:
 def assert_organization_access(request: Request, org_id: str) -> None:
     actor = require_actor_identity(request)
     if actor.actor_type == "board":
+        return
+    raw_actor = getattr(request.state, "actor", None)
+    if bool(_actor_value(raw_actor, "isInstanceAdmin")):
+        return
+    org_ids = _actor_value(raw_actor, "orgIds")
+    if isinstance(org_ids, (list, tuple, set)) and org_id in org_ids:
         return
     if actor.actor_type == "agent" and actor.org_id == org_id:
         return
