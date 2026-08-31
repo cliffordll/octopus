@@ -92,6 +92,7 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     )
 
     assert "## Subtask Coordination" in prompt
+    assert "report directly to you" in prompt
     assert "Product-visible subtasks must be Octopus child issues" in prompt
     assert 'octopus issue create-children "OCT-42"' in prompt
     assert "--children-file" in prompt
@@ -102,7 +103,7 @@ def test_runtime_prompt_requires_real_child_issues_for_subtasks() -> None:
     assert "--parent-output-required" in prompt
     assert "The default policy treats child deliverables as the final outputs" in prompt
     assert "current wake comment or instruction is authoritative" in prompt
-    assert 'octopus agent list --org-id "$OCTOPUS_ORG_ID"' in prompt
+    assert 'octopus organization hierarchy --org-id "$OCTOPUS_ORG_ID"' in prompt
     assert (
         "Do not mark the parent issue done while child issues are still open" in prompt
     )

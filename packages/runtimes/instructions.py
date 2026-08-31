@@ -442,14 +442,15 @@ def _subtask_coordination_prompt(
             "## Subtask Coordination",
             "",
             "This issue asks for split or delegated work. Product-visible subtasks must be Octopus child issues.",
-            'List available agents first with `octopus agent list --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
+            'List available Human and Agent members first with `octopus organization hierarchy --org-id "$OCTOPUS_ORG_ID" --json` when you need to choose who should execute child issues.',
             f'Before creating any child issue, first check existing children with `octopus issue children "{issue_ref}" --include-work-products --json`.',
             *_child_split_persistence_guidance(context),
             "Write the complete set of real, parallel subtasks to a UTF-8 JSON file, then submit it in one atomic call; the CLI validates the whole file before sending any write request: "
             f'`octopus issue create-children "{issue_ref}" --children-file "<children.json>" --json`. '
-            "Each JSON array entry must contain `title` and `assigneeAgentId`. Do not create delegated siblings one at a time, and never test the command by creating a placeholder child on the real parent issue.",
+            "Each JSON array entry must contain `title` and exactly one of `assigneeAgentId` or `assigneeUserId`. Human work is tracked manually and does not create a Run. Do not create delegated siblings one at a time, and never test the command by creating a placeholder child on the real parent issue.",
             "The default policy treats child deliverables as the final outputs, but the parent Agent is always resumed after the child set settles so it can summarize the results and close the parent issue. Add `--parent-output-required` only when the current request explicitly requires a separate parent-owned final artifact. The current wake comment or instruction is authoritative for this batch; the original issue description is background context. Do not create a child whose job is to summarize, merge, or report on the other children.",
-            "Set `assigneeAgentId` explicitly in every delegated child entry. Prefer a suitable agent other than yourself when one is available.",
+            "Set exactly one assignee field in every delegated child entry. Use `assigneeAgentId` for automated execution and `assigneeUserId` when a Human must perform or confirm the work.",
+            "You may delegate only to active members who report directly to you in the organization hierarchy. If the needed executor is your peer or belongs to another manager, ask that manager to assign the work instead of creating the child yourself.",
             "Never assign a delegated child issue to yourself. If you will do that work inside the parent run, do not create a child issue for it.",
             "After the atomic child creation succeeds, Octopus queues the children immediately. Continue useful parent work and coordination while child Runs execute in parallel; finish the current parent Run naturally when there is no more useful work.",
             "Do not poll indefinitely for delegated children inside the current runtime process. Octopus creates a parent continuation after the effective child set settles.",

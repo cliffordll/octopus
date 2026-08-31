@@ -37,6 +37,12 @@ def configure(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -
     get_parser.add_argument("org_id")
     get_parser.set_defaults(handler=get_organization)
 
+    hierarchy_parser = actions.add_parser(
+        "hierarchy", help="List Human and Agent organization members"
+    )
+    hierarchy_parser.add_argument("--org-id", required=True)
+    hierarchy_parser.set_defaults(handler=list_organization_hierarchy)
+
     create_parser = actions.add_parser("create", help="Create an organization")
     create_parser.add_argument("--name", required=True)
     create_parser.add_argument("--description")
@@ -173,6 +179,10 @@ def list_organizations(_: argparse.Namespace, client: ApiClient) -> Any:
 
 def get_organization(args: argparse.Namespace, client: ApiClient) -> Any:
     return client.request("GET", f"/api/orgs/{args.org_id}")
+
+
+def list_organization_hierarchy(args: argparse.Namespace, client: ApiClient) -> Any:
+    return client.request("GET", f"/api/orgs/{args.org_id}/hierarchy")
 
 
 def create_organization(args: argparse.Namespace, client: ApiClient) -> Any:

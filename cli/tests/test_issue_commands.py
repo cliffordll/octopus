@@ -187,6 +187,29 @@ def test_issue_create_children_submits_one_atomic_batch() -> None:
     }
 
 
+def test_issue_create_children_supports_human_assignees() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"created": True, "children": []})
+
+    children = [{"title": "Human approval", "assigneeUserId": "user-1"}]
+    result = main(
+        [
+            "issue",
+            "create-children",
+            "PARENT-1",
+            "--children-json",
+            json.dumps(children),
+        ],
+        client=ApiClient(transport=httpx.MockTransport(handler)),
+    )
+
+    assert result == 0
+    assert json.loads(requests[0].read())["children"] == children
+
+
 def test_issue_create_children_reads_atomic_batch_from_utf8_file(
     tmp_path: Path,
 ) -> None:
