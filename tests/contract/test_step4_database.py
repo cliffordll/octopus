@@ -274,7 +274,9 @@ async def test_run_recovery_migration_repairs_partially_materialized_schema(
             "select id, idempotency_key from agent_wakeup_requests order by id"
         ).fetchall()
 
-    assert revision == ("20260827_000033",)
+    head = ScriptDirectory.from_config(_build_config(database_url)).get_current_head()
+    assert head is not None
+    assert revision == (head,)
     assert "process_exited_at" in run_columns
     assert "execution_owner_token" in run_columns
     assert "terminal_effects_pending" in run_columns

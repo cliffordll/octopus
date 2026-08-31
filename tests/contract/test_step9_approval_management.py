@@ -193,6 +193,9 @@ async def _seed_chat_issue_creation_approval(
     approval_id = str(uuid.uuid4())
     async with async_transaction(session):
         session.add(
+            Agent(id="agent-ceo", org_id=org_id, name="CEO", role="ceo", status="idle")
+        )
+        session.add(
             ChatConversation(
                 id=conversation_id,
                 org_id=org_id,
@@ -407,24 +410,15 @@ async def test_approve_chat_issue_creation_creates_issue_and_system_message(
         session, org_id
     )
     async with async_transaction(session):
-        session.add_all(
-            [
-                Agent(
-                    id="agent-ceo",
-                    org_id=org_id,
-                    name="CEO",
-                    role="ceo",
-                    status="idle",
-                ),
-                Agent(
-                    id="agent-engineer",
-                    org_id=org_id,
-                    name="Engineer",
-                    role="engineer",
-                    status="idle",
-                    reports_to="agent-ceo",
-                ),
-            ]
+        session.add(
+            Agent(
+                id="agent-engineer",
+                org_id=org_id,
+                name="Engineer",
+                role="engineer",
+                status="idle",
+                reports_to="agent-ceo",
+            )
         )
 
     code, body = await _request(

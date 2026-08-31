@@ -32,6 +32,7 @@ from packages.database.schema import (
     IssueComment,
     IssueWorkProduct,
     Organization,
+    Permission,
     Role,
     User,
 )
@@ -301,6 +302,51 @@ async def _seed_issue(
             )
         )
     return issue_id
+
+
+async def _seed_agent_reporting_line(
+    session: AsyncSession,
+    org_id: str,
+    manager_id: str,
+    child_agent_ids: list[str],
+) -> None:
+    manager_role_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(
+            Role(
+                id=manager_role_id,
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="agent",
+                principal_id=manager_id,
+                role="member",
+                status="active",
+            )
+        )
+        await session.flush()
+        session.add(
+            Permission(
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="agent",
+                principal_id=manager_id,
+                permission_key="tasks:assign",
+            )
+        )
+        session.add_all(
+            [
+                Role(
+                    scope_type="organization",
+                    scope_id=org_id,
+                    principal_type="agent",
+                    principal_id=child_id,
+                    role="member",
+                    status="active",
+                    reports_to=manager_role_id,
+                )
+                for child_id in child_agent_ids
+            ]
+        )
 
 
 async def _request(
@@ -603,7 +649,7 @@ async def test_create_children_batch_rejects_missing_or_cross_org_assignee(
             },
         )
         assert code == 422
-        assert "parent organization" in body["detail"]
+        assert "Issue agents must exist in the organization" in body["detail"]
 
     children = (
         (await session.execute(select(Issue).where(Issue.parent_id == parent_id)))
@@ -732,7 +778,11 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
     org_id = await _seed_org(session)
     parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
     agent_id = str(uuid.uuid4())
+    parent_agent_id = str(uuid.uuid4())
     async with async_transaction(session):
+        session.add(
+            Agent(id=parent_agent_id, org_id=org_id, name="Manager", role="ceo")
+        )
         session.add(
             Agent(
                 id=agent_id,
@@ -741,6 +791,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
                 role="engineer",
             )
         )
+    await _seed_agent_reporting_line(session, org_id, parent_agent_id, [agent_id])
 
     payload: CreateChildIssuesPayload = {
         "closeoutPolicy": {"version": 1, "mode": "child_outputs_are_final"},
@@ -753,7 +804,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
             parent_id,
             payload,
             actor_type="agent",
-            actor_id=str(uuid.uuid4()),
+            actor_id=parent_agent_id,
             run_id=first_parent_run_id,
         )
     async with async_transaction(session):
@@ -763,7 +814,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
             parent_id,
             payload,
             actor_type="agent",
-            actor_id=str(uuid.uuid4()),
+            actor_id=parent_agent_id,
             run_id=first_parent_run_id,
         )
     async with async_transaction(session):
@@ -773,7 +824,7 @@ async def test_create_children_batch_scopes_retries_to_parent_run(
             parent_id,
             payload,
             actor_type="agent",
-            actor_id=str(uuid.uuid4()),
+            actor_id=parent_agent_id,
             run_id=second_parent_run_id,
         )
 
@@ -954,6 +1005,7 @@ async def test_parent_run_and_children_are_dispatchable_concurrently(
             ]
         )
 
+    await _seed_agent_reporting_line(session, org_id, parent_agent_id, child_agent_ids)
     scheduled: list[str] = []
     monkeypatch.setattr(
         "server.routes.issues._schedule_dispatch",
@@ -1092,6 +1144,7 @@ async def test_recovery_does_not_block_already_dispatched_children(
                 ),
             ]
         )
+    await _seed_agent_reporting_line(session, org_id, parent_agent_id, [child_agent_id])
     monkeypatch.setattr("server.routes.issues._schedule_dispatch", lambda *_args: None)
     headers = {
         "x-test-agent-id": parent_agent_id,
@@ -1952,6 +2005,8 @@ async def test_create_issue_rejects_same_assignee_and_reviewer_agent(
 ) -> None:
     org_id = await _seed_org(session)
     agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(Agent(id=agent_id, org_id=org_id, name="Worker", role="engineer"))
 
     code, body = await _request(
         app,
@@ -1976,6 +2031,28 @@ async def test_create_in_review_issue_with_user_reviewer_does_not_queue_agent(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     org_id = await _seed_org(session)
+    reviewer_id = str(uuid.uuid4())
+    now = datetime.now(UTC)
+    async with async_transaction(session):
+        session.add(
+            User(
+                id=reviewer_id,
+                name="Reviewer",
+                email="reviewer@example.invalid",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            Role(
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="user",
+                principal_id=reviewer_id,
+                role="member",
+                status="active",
+            )
+        )
 
     code, body = await _request(
         app,
@@ -1984,7 +2061,7 @@ async def test_create_in_review_issue_with_user_reviewer_does_not_queue_agent(
         json={
             "title": "Human review",
             "status": "in_review",
-            "reviewerUserId": str(uuid.uuid4()),
+            "reviewerUserId": reviewer_id,
             "originKind": "manual",
         },
     )
@@ -2063,6 +2140,8 @@ async def test_update_issue_rejects_same_assignee_and_reviewer_agent(
 ) -> None:
     org_id = await _seed_org(session)
     agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add(Agent(id=agent_id, org_id=org_id, name="Worker", role="engineer"))
     issue_id = await _seed_issue(
         session,
         org_id,
