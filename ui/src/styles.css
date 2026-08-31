@@ -74,7 +74,7 @@ small {
   color: #edf2fa;
   font-size: var(--text-sm);
   font-weight: 600;
-  margin: 10px 0 0;
+  margin: 10px 0 24px;
   text-align: center;
 }
 
@@ -100,6 +100,27 @@ small {
 .product-menu-trigger {
   cursor: pointer;
   padding: 0;
+  position: relative;
+}
+
+.product-menu-chevron {
+  bottom: 2px;
+  color: #d7e8fc;
+  height: 10px;
+  pointer-events: none;
+  position: absolute;
+  right: 2px;
+  width: 10px;
+}
+
+.product-menu-trigger[aria-expanded="true"] .product-menu-chevron {
+  color: #edf2fa;
+  transform: rotate(180deg);
+}
+
+.product-menu-trigger:focus-visible {
+  outline: 2px solid #63b3ff;
+  outline-offset: 2px;
 }
 
 .product-menu-trigger:hover,
@@ -107,14 +128,8 @@ small {
   background: #1f69b9;
 }
 
-.product-subtitle, .muted {
+.muted {
   color: #8993a6;
-}
-
-.product-subtitle {
-  font-size: var(--text-xs);
-  margin: 2px 0 24px;
-  text-align: center;
 }
 
 .global-nav {
@@ -166,11 +181,6 @@ small {
   background: #111722;
   border-color: #2f7bd6;
   color: #f2f5fb;
-}
-
-.quick-create-trigger[aria-expanded="true"] .nav-icon {
-  background: #1f69b9;
-  color: #f6fbff;
 }
 
 .quick-create-menu {
@@ -253,6 +263,22 @@ small {
   color: #f6fbff;
 }
 
+.global-nav .sidebar-icon-link {
+  min-height: 48px;
+  padding: 12px;
+}
+
+.global-nav .sidebar-icon-link:focus-visible {
+  outline: 2px solid #63b3ff;
+  outline-offset: 2px;
+}
+
+.sidebar-nav-icon {
+  flex: none;
+  height: 24px;
+  width: 24px;
+}
+
 .nav-icon {
   align-items: center;
   background: #151b25;
@@ -298,6 +324,29 @@ small {
 .sidebar-settings-trigger:hover,
 .organization-trigger:hover {
   background: #111722;
+}
+
+.sidebar .sidebar-icon-button {
+  min-height: 48px;
+  padding: 12px;
+}
+
+.sidebar-icon-button:focus-visible {
+  outline: 2px solid #63b3ff;
+  outline-offset: 2px;
+}
+
+.sidebar-icon-button[aria-expanded="true"] {
+  background: #182235;
+  border-color: #2f7bd6;
+  color: #f2f5fb;
+}
+
+.sidebar-icon-button:disabled {
+  background: transparent;
+  border-color: transparent;
+  color: #556175;
+  cursor: not-allowed;
 }
 
 .sidebar-account {
@@ -10575,7 +10624,7 @@ pre {
     border-right: 0;
     padding: 18px;
   }
-  .product-mark, .product, .product-subtitle {
+  .product-mark, .product {
     display: inline-flex;
     margin: 0 10px 12px 0;
     vertical-align: middle;
@@ -10585,9 +10634,6 @@ pre {
     margin: 0 0 12px;
     padding: 0;
     position: relative;
-  }
-  .product-subtitle {
-    margin-bottom: 12px;
   }
   .workspace {
     overflow: visible;
@@ -10696,7 +10742,6 @@ pre {
 
 /* Global typography normalization. Keep page-specific layout, but use one type scale. */
 .muted,
-.product-subtitle,
 .agent-runtime,
 .agent-heartbeat,
 .agent-identity small,

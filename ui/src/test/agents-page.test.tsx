@@ -46,6 +46,14 @@ it("opens the first agent by default and creates one from the new agent flow", a
 
   renderApp("/orgs/org-1/agents");
   expect(await screen.findByRole("heading", { name: "Builder" })).toBeInTheDocument();
+  expect(screen.getByText("Octopus", { exact: true })).toBeInTheDocument();
+  expect(screen.queryByText("Control plane", { exact: true })).not.toBeInTheDocument();
+  for (const [name, title] of [["快速创建", "创建"], ["设置", "设置"]]) {
+    const button = screen.getByRole("button", { name, exact: true });
+    expect(button).toHaveAttribute("title", title);
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  }
   expect(screen.getByRole("navigation", { name: "智能体详情导航" })).toBeInTheDocument();
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
   const primaryNavigation = within(screen.getByRole("navigation", { name: "主导航" }));
@@ -75,7 +83,12 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(
     agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
-  await userEvent.click(screen.getByRole("button", { name: "组织菜单" }));
+  const organizationTrigger = screen.getByRole("button", { name: "组织菜单" });
+  expect(organizationTrigger).toHaveAttribute("title", "核心团队 · 切换组织");
+  expect(organizationTrigger.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  expect(organizationTrigger).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(organizationTrigger);
+  expect(organizationTrigger).toHaveAttribute("aria-expanded", "true");
   const organizationMenu = within(screen.getByRole("navigation", { name: "组织切换菜单" }));
   expect(organizationMenu.getByRole("link", { name: "组织设置" })).toHaveAttribute(
     "href",
@@ -87,6 +100,7 @@ it("opens the first agent by default and creates one from the new agent flow", a
   ).toHaveAttribute("href", "/orgs/org-2/agents");
 
   await userEvent.click(primaryNavigation.getByRole("button", { name: "快速创建" }));
+  expect(primaryNavigation.getByRole("button", { name: "快速创建" })).toHaveAttribute("aria-expanded", "true");
   await userEvent.click(screen.getByRole("button", { name: "创建智能体" }));
   await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
   expect(screen.getByLabelText(/智能体名称/)).toHaveValue("Suggested Agent");
@@ -620,7 +634,10 @@ it("opens global provider settings without an active organization", async () => 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/organizations");
+  expect(screen.getByRole("button", { name: "组织菜单" })).toHaveAttribute("title", "选择或创建组织");
+  expect(screen.getByRole("button", { name: "快速创建" })).toBeDisabled();
   await userEvent.click(await screen.findByRole("button", { name: "设置" }));
+  expect(screen.getByRole("button", { name: "设置", exact: true })).toHaveAttribute("aria-expanded", "true");
   const dialog = within(screen.getByRole("dialog", { name: "设置" }));
 
   expect(await dialog.findByRole("heading", { name: "模型供应商" })).toBeInTheDocument();
