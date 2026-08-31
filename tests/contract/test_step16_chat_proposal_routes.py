@@ -412,6 +412,55 @@ async def test_convert_chat_issue_proposal_keeps_explicit_assignee(
     assert result["issue"]["assigneeAgentId"] == "agent-ceo"
 
 
+async def test_convert_chat_issue_proposal_resolves_human_name_to_user_assignee(
+    app: tuple[FastAPI, async_sessionmaker],
+) -> None:
+    application, factory = app
+    org_id, conversation_id, message_id = await _seed_chat(
+        factory,
+        message_kind="issue_proposal",
+        structured_payload={
+            "issueProposal": {
+                "title": "Human issue",
+                "description": "Assign this task to human-1.",
+                "priority": "medium",
+                "assigneeAgentId": "human-1",
+            }
+        },
+    )
+    async with factory() as session:
+        now = datetime.now(UTC)
+        await ensure_user(
+            session,
+            {
+                "id": "user-human-1",
+                "name": "human-1",
+                "email": "human-1@example.invalid",
+                "email_verified": True,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        await RoleService(session).ensure(
+            "organization",
+            org_id,
+            PrincipalRef(type="user", id="user-human-1"),
+            role="member",
+        )
+        await session.commit()
+
+    code, result = await _request(
+        application,
+        "POST",
+        f"/api/chats/{conversation_id}/convert-to-issue",
+        json={"messageId": message_id},
+    )
+
+    assert code == 201
+    assert result["issue"]["assigneeAgentId"] is None
+    assert result["issue"]["assigneeUserId"] == "user-human-1"
+
+
 async def test_resolve_operation_proposal_updates_message_state(
     app: tuple[FastAPI, async_sessionmaker],
 ) -> None:

@@ -77,6 +77,7 @@ from packages.shared.types.issue import CreateIssuePayload
 from ._time import ensure_aware
 from .agents import prepare_agent_runtime_config
 from .budgets import BudgetService
+from .chat_issue_assignees import ChatIssueAssigneeResolver
 from .costs import CostService
 from .issues import IssueService
 from .runtime_providers import inject_runtime_provider_config
@@ -603,7 +604,10 @@ class ChatService:
     ) -> dict[str, Any]:
         direct = payload.get("proposal")
         if isinstance(direct, dict):
-            return _issue_proposal_from_payload(direct)
+            proposal = _issue_proposal_from_payload(direct)
+            return await ChatIssueAssigneeResolver(self._session).resolve(
+                conversation.org_id, proposal
+            )
         message_id = payload.get("messageId")
         message: ChatMessageRow | None = None
         if message_id is not None:
@@ -630,7 +634,9 @@ class ChatService:
                     conversation.org_id, message.replying_agent_id
                 ),
             }
-        return proposal
+        return await ChatIssueAssigneeResolver(self._session).resolve(
+            conversation.org_id, proposal
+        )
 
     async def add_message_and_reply(
         self,
@@ -1000,11 +1006,17 @@ class ChatService:
                     "create files. Do not run commands. Return a single JSON "
                     'object with summary, kind="issue_proposal", '
                     "and structuredPayload.issueProposal containing title, "
-                    "description, priority, assigneeAgentId, projectId, goalId, "
+                    "description, priority, assigneeAgentId or assigneeUserId, projectId, goalId, "
                     "or parentId when known. auto_create is a server-side issue "
                     "conversion mode, not permission for you to execute the "
                     "requested task. The UI/server will convert the proposal "
                     "according to the conversation issueCreationMode."
+                ),
+                (
+                    "Use assigneeUserId when the requested assignee is a Human and "
+                    "assigneeAgentId when it is an Agent. If only a member name is "
+                    "known, put that name in the correctly typed field; the server "
+                    "will resolve it to the organization member ID."
                 ),
                 (
                     "Multiple tasks in the same chat are parallel by default. "
