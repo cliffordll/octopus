@@ -31,6 +31,7 @@ export function MessengerPage() {
         <div>
           <p className="eyebrow">Messenger</p>
           <h1>消息中心</h1>
+          <p className="muted">查看对话消息、任务动态、审批和系统提醒。</p>
         </div>
       </header>
       <section className="panel">

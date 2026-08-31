@@ -78,11 +78,24 @@ it("opens the first agent by default and creates one from the new agent flow", a
   expect(accountSettings.getByRole("heading", { name: "账户" })).toBeInTheDocument();
   await userEvent.click(accountSettings.getByRole("button", { name: "关闭设置" }));
   const agentNavigation = within(screen.getByRole("navigation", { name: "智能体导航" }));
-  expect(agentNavigation.getByRole("heading", { name: "团队" })).toBeInTheDocument();
+  expect(agentNavigation.queryByRole("heading", { name: "团队" })).not.toBeInTheDocument();
+  expect(agentNavigation.getByRole("heading", { name: "智能体" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "团队", level: 2 })).toHaveLength(1);
   expect(agentNavigation.queryByRole("link", { name: /新建智能体/ })).not.toBeInTheDocument();
   expect(
     agentNavigation.getByRole("link", { name: /Builder/ }),
   ).toHaveAttribute("href", "/orgs/org-1/agents/agent-1");
+  const agentEntry = agentNavigation.getByRole("link", { name: /Builder/ });
+  expect(agentEntry.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  expect(agentEntry.querySelector(".context-entry-icon")?.textContent).toBe("");
+  expect(agentEntry).toHaveTextContent("工程");
+  expect(agentEntry).toHaveClass("active");
+  const agentAvatar = screen.getByRole("heading", { name: "Builder" }).closest("header")!.querySelector(".agent-avatar-lg")!;
+  expect(agentAvatar).toHaveAttribute("aria-hidden", "true");
+  expect(agentAvatar.textContent).toBe("");
+  expect(agentAvatar.querySelector("svg")).toHaveClass("sidebar-nav-icon");
+  expect(agentAvatar.querySelector("svg")?.innerHTML).toBe(agentEntry.querySelector("svg")?.innerHTML);
+  expect(screen.queryByRole("link", { name: "返回智能体列表" })).not.toBeInTheDocument();
   const organizationTrigger = screen.getByRole("button", { name: "组织菜单" });
   expect(organizationTrigger).toHaveAttribute("title", "核心团队 · 切换组织");
   expect(organizationTrigger.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
@@ -101,6 +114,14 @@ it("opens the first agent by default and creates one from the new agent flow", a
 
   await userEvent.click(primaryNavigation.getByRole("button", { name: "快速创建" }));
   expect(primaryNavigation.getByRole("button", { name: "快速创建" })).toHaveAttribute("aria-expanded", "true");
+  const createMenu = within(screen.getByRole("navigation", { name: "快速创建菜单" }));
+  for (const entry of [...createMenu.getAllByRole("link"), ...createMenu.getAllByRole("button")]) {
+    expect(entry.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(entry.textContent?.trim()).toMatch(/^创建(新聊天|新任务|智能体|新项目)$/);
+    expect(entry.querySelector(".context-entry-icon")).toBeNull();
+  }
+  expect(createMenu.getByRole("link", { name: "创建新聊天" })).toHaveAttribute("href", "/orgs/org-1/chats");
+  expect(createMenu.getByRole("link", { name: "创建新任务" })).toHaveAttribute("href", "/orgs/org-1/issues?create=1");
   await userEvent.click(screen.getByRole("button", { name: "创建智能体" }));
   await userEvent.click(await screen.findByRole("button", { name: "使用名称建议" }));
   expect(screen.getByLabelText(/智能体名称/)).toHaveValue("Suggested Agent");

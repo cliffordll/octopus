@@ -125,7 +125,20 @@ it("lists members, edits permissions, and creates invitations", async () => {
     expect.objectContaining({ method: "PATCH" }),
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "创建邀请" }));
+  const memberHeader = screen.getByRole("heading", { name: "组织成员" }).closest("header")!;
+  expect(memberHeader).toHaveClass("page-header");
+  expect(within(memberHeader).getByText("Organization Members")).toHaveClass("eyebrow");
+  for (const [name, eyebrow] of [["成员", "Members"], ["邀请", "Invitations"]]) {
+    const group = screen.getByRole("region", { name, exact: true });
+    expect(group).toHaveClass("panel", "access-section");
+    const heading = within(group).getByRole("heading", { name, level: 2 });
+    expect(heading.closest("header")).toHaveClass("org-section-header");
+    expect(within(group).getByText(eyebrow)).toHaveClass("eyebrow");
+  }
+  expect(screen.queryByText("邀请 Human")).not.toBeInTheDocument();
+  expect(screen.queryByText("智能体继续通过组织内创建流程加入。")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("新邀请链接")).not.toBeInTheDocument();
+  await userEvent.click(within(memberHeader).getByRole("button", { name: "创建邀请" }));
   expect(await screen.findByLabelText("新邀请链接")).toHaveValue(`${window.location.origin}/invite/token-1`);
 });
 
@@ -184,6 +197,9 @@ it("shows organization members on a dedicated organization page", async () => {
   renderApp("/orgs/org-1/members");
 
   expect(await screen.findByRole("heading", { name: "组织成员" })).toBeInTheDocument();
+  const membersRegion = screen.getByRole("region", { name: "组织成员" });
+  expect(membersRegion.parentElement).toHaveClass("org-content-full", "organization-members-content");
+  expect(membersRegion.querySelector("header")).toContainElement(screen.getByRole("button", { name: "创建邀请" }));
   expect(await screen.findByText("Owner")).toBeInTheDocument();
   const organizationNavigation = within(screen.getByRole("navigation", { name: "组织导航" }));
   expect(organizationNavigation.getByRole("link", { name: "成员" })).toHaveClass("active");

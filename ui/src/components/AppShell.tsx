@@ -152,11 +152,11 @@ export function AppShell() {
                 {quickCreateOpen && (
                   <nav aria-label="快速创建菜单" className="quick-create-menu">
                     <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/chats`}>
-                      <span aria-hidden="true" className="context-entry-icon">M</span>
+                      <SidebarIcon name="messages" />
                       创建新聊天
                     </Link>
                     <Link onClick={() => setQuickCreateOpen(false)} to={`/orgs/${selectedOrganizationId}/issues?create=1`}>
-                      <span aria-hidden="true" className="context-entry-icon">T</span>
+                      <SidebarIcon name="issues" />
                       创建新任务
                     </Link>
                     <button
@@ -166,7 +166,7 @@ export function AppShell() {
                       }}
                       type="button"
                     >
-                      <span aria-hidden="true" className="context-entry-icon">A</span>
+                      <SidebarIcon name="agents" />
                       创建智能体
                     </button>
                     <button
@@ -176,7 +176,7 @@ export function AppShell() {
                       }}
                       type="button"
                     >
-                      <span aria-hidden="true" className="context-entry-icon">P</span>
+                      <SidebarIcon name="projects" />
                       创建新项目
                     </button>
                   </nav>

@@ -123,15 +123,15 @@ export function ChatsPage() {
   return (
     <ChatsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <section className="chat-panel">
-        <header className="chat-thread-header">
+        <header className="page-header">
           <div>
+            <p className="eyebrow">New chat</p>
             <h1>新对话</h1>
-            <p>选择智能体后发送消息</p>
+            <p className="muted">选择智能体并发送第一条消息。</p>
           </div>
         </header>
         <div className="chat-empty-state">
           <h2>你想让智能体处理什么？</h2>
-          <p className="muted">选择智能体并发送第一条消息。</p>
         </div>
         <form className="form chat-composer" onSubmit={submit}>
           {agents.isSuccess && chatAgentList.length === 0 && (

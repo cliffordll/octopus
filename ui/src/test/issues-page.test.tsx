@@ -45,6 +45,8 @@ it("groups issues by status and creates issues for an organization", async () =>
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues");
+  const pageHeader = screen.getByRole("heading", { name: "工作列表" }).closest("header")!;
+  expect(within(pageHeader).getByText("查看任务分工与状态，跟进工作进度。")).toHaveClass("muted");
   expect(await screen.findByRole("link", { name: "实现登录流程" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
@@ -260,7 +262,9 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   renderApp("/orgs/org-1/issues");
 
   const taskNavigation = screen.getByRole("navigation", { name: "任务导航" });
-  expect(await within(taskNavigation).findByText("任务")).toBeInTheDocument();
+  expect(within(taskNavigation).queryByRole("heading", { name: "任务" })).not.toBeInTheDocument();
+  expect(within(taskNavigation).getByRole("heading", { name: "任务视图" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "任务", level: 2 })).toHaveLength(1);
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).toHaveAttribute("href", "/orgs/org-1/issues");
   expect(within(taskNavigation).getByRole("link", { name: "我的任务" })).toHaveAttribute(
     "href",
@@ -303,6 +307,11 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
     "/orgs/org-1/issues?projectId=project-empty",
   );
   expect(taskNavigation).not.toHaveTextContent("暂无任务");
+  for (const link of within(taskNavigation).getAllByRole("link")) {
+    expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(link.querySelector(".context-entry-icon")?.textContent?.trim()).toBe("");
+  }
+  expect(within(taskNavigation).getByRole("link", { name: /最近处理 1/ })).toHaveTextContent("OCT-9");
 
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");

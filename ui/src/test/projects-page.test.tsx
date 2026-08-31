@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 it("opens the first project for an organization with projects", async () => {
-  const project = { id: "project-1", orgId: "org-1", name: "控制台", status: "planned", urlKey: "console" };
+  const project = { id: "project-1", orgId: "org-1", name: "控制台", status: "planned", urlKey: "console", color: "#2366b4" };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") {
       return respond([project]);
@@ -25,7 +25,12 @@ it("opens the first project for an organization with projects", async () => {
     "/orgs/org-1/projects",
   );
   const organizationNavigation = screen.getByRole("navigation", { name: "组织导航" });
-  expect(within(organizationNavigation).getByText("组织")).toBeInTheDocument();
+  const organizationSidebar = organizationNavigation.closest("aside")!;
+  const sidebarTitle = organizationSidebar.querySelector(":scope > h2");
+  expect(sidebarTitle).toHaveTextContent("组织");
+  expect(sidebarTitle?.previousElementSibling).toHaveTextContent("Organization");
+  expect(sidebarTitle?.nextElementSibling).toBe(organizationNavigation);
+  expect(within(organizationNavigation).getByRole("heading", { name: "组织管理" })).toBeInTheDocument();
   expect(within(organizationNavigation).getByRole("link", { name: "组织架构" }))
     .toHaveAttribute("href", "/orgs/org-1/structure");
   expect(within(organizationNavigation).getByRole("link", { name: "组织架构" }))
@@ -46,6 +51,19 @@ it("opens the first project for an organization with projects", async () => {
     .toHaveClass("local-nav-project");
   expect(within(organizationNavigation).getByRole("link", { name: "控制台" }))
     .toHaveClass("local-nav-project-prominent");
+  const links = within(organizationNavigation).getAllByRole("link");
+  expect(links).toHaveLength(9);
+  for (const link of links) {
+    expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(link.querySelector(".context-entry-icon")?.textContent?.trim()).toBe("");
+  }
+  for (const [name, path] of [["成员", "members"], ["资源", "resources"], ["工作区", "workspaces"], ["目标", "goals"], ["技能", "skills"]]) {
+    expect(within(organizationNavigation).getByRole("link", { name, exact: true }))
+      .toHaveAttribute("href", `/orgs/org-1/${path}`);
+  }
+  const projectLink = within(organizationNavigation).getByRole("link", { name: "控制台" });
+  expect(projectLink).toHaveClass("active");
+  expect(projectLink.querySelector(".project-entry-icon")).toHaveStyle({ background: "#2366b4" });
   expect(within(organizationNavigation).queryByRole("link", { name: "审批" })).not.toBeInTheDocument();
   expect(within(organizationNavigation).queryByRole("link", { name: "设置" })).not.toBeInTheDocument();
 });

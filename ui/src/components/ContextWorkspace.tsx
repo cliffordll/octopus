@@ -8,6 +8,7 @@ import { readRecentIssues, RECENT_ISSUES_EVENT } from "../utils/recentIssues";
 import { roleLabel, statusLabel } from "../utils/display";
 import { Badge } from "./Badge";
 import { ErrorNotice } from "./ErrorNotice";
+import { SidebarIcon } from "./SidebarIcon";
 
 function ContextWorkspace({
   contentClassName = "",
@@ -108,16 +109,17 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
       sidebar={
         <>
           <section className="context-nav-section">
+            <h3>常用</h3>
             <NavLink className="context-action-entry new-chat-entry" end to={`/orgs/${orgId}/chats`}>
-              <span aria-hidden="true" className="context-entry-icon">+</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="create" /></span>
               <span>新建聊天</span>
             </NavLink>
             <NavLink className="context-action-entry" to={`/orgs/${orgId}/approvals`}>
-              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="approvals" /></span>
               <span>审批管理</span>
             </NavLink>
             <NavLink className="context-action-entry" to={`/orgs/${orgId}/messenger`}>
-              <span aria-hidden="true" className="context-entry-icon">M</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="inbox" /></span>
               <span>消息中心</span>
             </NavLink>
           </section>
@@ -132,7 +134,7 @@ export function ChatsWorkspace({ contentClassName = "", orgId, children }: Props
                 return (
                   <div className="chat-conversation-row" data-chat-conversation-row data-chat-id={chat.id} key={chat.id}>
                     <NavLink to={`/orgs/${orgId}/chats/${chat.id}`}>
-                      <span aria-hidden="true" className="context-entry-icon">C</span>
+                      <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="messages" /></span>
                       <span className="context-item-copy">
                         <strong title={chat.title}>{chat.title}</strong>
                         <small title={chat.latestReplyPreview ?? undefined}>
@@ -253,34 +255,34 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
       sidebar={
         <>
           <section className="context-nav-section">
-            <h3>任务</h3>
+            <h3>任务视图</h3>
             <NavLink
               className={() => location.pathname === issuesRootPath && !location.search ? "active" : ""}
               end
               to={issuesRootPath}
             >
-              <span aria-hidden="true" className="context-entry-icon">A</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="issues" /></span>
               <span>全部任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentMine ? "active" : ""}
               to={`${issuesRootPath}?mine=1`}
             >
-              <span aria-hidden="true" className="context-entry-icon">M</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="mine" /></span>
               <span>我的任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentStatus === "backlog" ? "active" : ""}
               to={`${issuesRootPath}?status=backlog`}
             >
-              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="draft" /></span>
               <span>草稿任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentView === "following" ? "active" : ""}
               to={`${issuesRootPath}?view=following`}
             >
-              <span aria-hidden="true" className="context-entry-icon">T</span>
+              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="following" /></span>
               <span>关注中</span>
             </NavLink>
           </section>
@@ -288,7 +290,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
             <h3>最近查看</h3>
             {visibleRecentIssues.map((issue) => (
               <NavLink key={issue.id} to={`/orgs/${orgId}/issues/${issue.id}`}>
-                <span aria-hidden="true" className="context-entry-icon">R</span>
+                <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="recent" /></span>
                 <span className="context-item-copy">
                   <strong>{issue.title}</strong>
                   <small>{issue.identifier ?? "未编号"}</small>
@@ -316,7 +318,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
                   className="context-entry-icon project-entry-icon"
                   style={{ background: project.color ?? undefined }}
                 >
-                  P
+                  <SidebarIcon name="projects" />
                 </span>
                 <span>{project.name}</span>
               </NavLink>
@@ -342,11 +344,11 @@ export function AgentsWorkspace({ contentClassName = "", orgId, children }: Prop
       sidebar={
         <>
           <section className="context-nav-section">
-            <h3>团队</h3>
+            <h3>智能体</h3>
             {agents.error && <ErrorNotice error={agents.error} />}
             {agentList.map((agent) => (
               <NavLink key={agent.id} to={`/orgs/${orgId}/agents/${agent.id}`}>
-                <span aria-hidden="true" className="context-entry-icon">A</span>
+                <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="agents" /></span>
                 <span className="context-item-copy">
                   <strong>{agent.name}</strong>
                   <small>{roleLabel(agent.role)}</small>

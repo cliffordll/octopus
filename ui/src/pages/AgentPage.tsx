@@ -10,6 +10,7 @@ import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
+import { SidebarIcon } from "../components/SidebarIcon";
 import { StatusPill } from "../components/StatusPill";
 import { formatDateTime, formatMoneyCents, roleLabel, sourceLabel, statusLabel } from "../utils/display";
 import { runDescriptor, runIssueLabel, runStatusLabel, runTerminalReasonLabel } from "../utils/runDisplay";
@@ -1388,9 +1389,8 @@ export function AgentPage() {
     <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
       <header className="page-header agent-page-header">
         <div className="agent-header-identity">
-          <div className="agent-avatar-lg">{agent.data?.name?.slice(0, 1).toUpperCase() ?? "A"}</div>
+          <div aria-hidden="true" className="agent-avatar-lg"><SidebarIcon name="agents" /></div>
           <div>
-            <Link className="back-link" to={`/orgs/${orgId}/agents`}>返回智能体列表</Link>
             <div className="agent-title-row">
               <h1>{agent.data?.name ?? "载入中..."}</h1>
               {agent.data && <Badge>{statusLabel(agent.data.status)}</Badge>}

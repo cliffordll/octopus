@@ -30,6 +30,10 @@ it("shows current reporting relationships in the organization structure", async 
   renderApp("/orgs/org-1/structure");
 
   expect(await screen.findByRole("heading", { name: "组织架构" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "组织", level: 2 })).toHaveLength(1);
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).queryByRole("heading", { name: "组织" })).not.toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("heading", { name: "组织管理" })).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("heading", { name: "项目" })).toBeInTheDocument();
   expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "工作区" }))
     .toHaveAttribute("href", "/orgs/org-1/workspaces");
   expect(within(screen.getByRole("navigation", { name: "组织导航" })).getByRole("link", { name: "成员" }))
@@ -284,7 +288,13 @@ it("shows organization cost reporting on the organization costs route", async ()
 
   renderApp("/orgs/org-1/costs");
 
-  expect((await screen.findAllByRole("heading", { name: "成本" })).length).toBeGreaterThanOrEqual(1);
+  const costHeading = await screen.findByRole("heading", { name: "成本", level: 1 });
+  const costHeader = costHeading.closest("header")!;
+  expect(costHeader).toHaveClass("page-header");
+  expect(costHeader.parentElement).toHaveClass("org-content-full");
+  expect(within(costHeader).getByText("Organization Costs")).toHaveClass("eyebrow");
+  expect(within(costHeader).getByText("按智能体、服务商、计费方和项目查看运行成本。")).toHaveClass("muted");
+  expect(screen.getAllByRole("heading", { name: "成本" })).toHaveLength(1);
   expect((await screen.findAllByText("$42.34")).length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("agent-1")).toBeInTheDocument();
   expect(screen.getByText("openai")).toBeInTheDocument();

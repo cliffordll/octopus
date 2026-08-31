@@ -120,6 +120,7 @@ export function IssuesPage() {
         <div>
           <p className="eyebrow">Issues</p>
           <h1>工作列表</h1>
+          <p className="muted">查看任务分工与状态，跟进工作进度。</p>
         </div>
           <div className="org-page-actions">
             <button

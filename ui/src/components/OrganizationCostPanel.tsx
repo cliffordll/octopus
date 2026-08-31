@@ -46,13 +46,6 @@ export function OrganizationCostPanel({ orgId }: { orgId: string }) {
   const byProject = useQuery({ queryKey: ["cost-by-project", orgId], queryFn: () => costsApi.byProject(orgId) });
   return (
     <section className="settings-empty-section settings-cost-section" aria-label="成本">
-      <div className="settings-section-heading-copy">
-        <p className="eyebrow">Costs</p>
-        <div className="runtime-provider-title-line">
-          <h3>成本</h3>
-          <p className="muted">按 agent、provider、biller 和 project 查看 runtime cost event。</p>
-        </div>
-      </div>
       {summary.error && <ErrorNotice error={summary.error} />}
       <div className="cost-settings-summary">
         <div><span>总成本</span><strong>{dollars(summary.data?.totalCostCents)}</strong></div>

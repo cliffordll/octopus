@@ -154,29 +154,30 @@ export function MemberAccessSettings({ orgId }: { orgId?: string }) {
 
   return (
     <section className="settings-empty-section access-settings" aria-label="组织成员">
-      <div className="settings-section-heading-copy">
-        <p className="eyebrow">Organization Members</p>
-        <div className="runtime-provider-title-line">
+      <header className="page-header members-page-header">
+        <div>
+          <p className="eyebrow">Organization Members</p>
           <h1>组织成员</h1>
           <p className="muted">管理成员、邀请和组织权限。Human 与智能体使用同一套授权规则。</p>
         </div>
-      </div>
-      {(members.error || invites.error) && <ErrorNotice error={members.error || invites.error} />}
-      <div className="invite-creator access-card">
-        <span><strong>邀请 Human</strong><small>智能体继续通过组织内创建流程加入。</small></span>
         <button disabled={createInvite.isPending} onClick={() => createInvite.mutate()} type="button">创建邀请</button>
-        {createdLink && <input aria-label="新邀请链接" readOnly value={createdLink} />}
-      </div>
+      </header>
+      {(members.error || invites.error) && <ErrorNotice error={members.error || invites.error} />}
+      {createdLink && <input aria-label="新邀请链接" readOnly value={createdLink} />}
       <div className="access-scroll-area">
-        <section>
-          <h4>成员</h4>
+        <section className="panel access-section" aria-labelledby="organization-members-title">
+          <header className="org-section-header">
+            <div><p className="eyebrow">Members</p><h2 id="organization-members-title">成员</h2></div>
+          </header>
           <div className="member-list">
             {members.isLoading && <p className="muted">正在加载成员...</p>}
             {members.data?.map((member) => <MemberRow key={member.id} member={member} orgId={orgId} />)}
           </div>
         </section>
-        <section>
-          <h4>邀请</h4>
+        <section className="panel access-section" aria-labelledby="organization-invites-title">
+          <header className="org-section-header">
+            <div><p className="eyebrow">Invitations</p><h2 id="organization-invites-title">邀请</h2></div>
+          </header>
           <div className="invite-list">
             {invites.data?.map((invite) => (
               <article className="invite-row" key={invite.id}>

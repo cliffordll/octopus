@@ -56,7 +56,20 @@ it("shows a composer and sends a first message through a selected agent", async 
   expect(await screen.findByRole("option", { name: "Builder (工程)" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "组织导航" })).not.toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: "消息导航" })).toBeInTheDocument();
+  const messageNavigation = within(screen.getByRole("navigation", { name: "消息导航" }));
+  for (const [name, path] of [["新建聊天", "chats"], ["审批管理", "approvals"], ["消息中心", "messenger"]]) {
+    const link = messageNavigation.getByRole("link", { name, exact: true });
+    expect(link).toHaveAttribute("href", `/orgs/org-1/${path}`);
+    expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(link.querySelector(".context-entry-icon")?.textContent).toBe("");
+  }
   expect(screen.getByRole("link", { name: /新建聊天/ })).toBeInTheDocument();
+  const pageHeader = screen.getByRole("heading", { name: "新对话", level: 1 }).closest("header")!;
+  expect(pageHeader).toHaveClass("page-header");
+  expect(within(pageHeader).getByText("New chat")).toHaveClass("eyebrow");
+  expect(within(pageHeader).getByText("选择智能体并发送第一条消息。")).toHaveClass("muted");
+  expect(screen.getAllByText("选择智能体并发送第一条消息。")).toHaveLength(1);
+  expect(within(pageHeader).queryByText("选择智能体后发送消息")).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "你想让智能体处理什么？" })).toBeInTheDocument();
   expect(screen.queryByLabelText("标题（可选）")).not.toBeInTheDocument();
   expect(screen.getByLabelText("消息输入")).toBeInTheDocument();
@@ -396,6 +409,9 @@ it("lists conversations without sidebar filters and identifies their selected ag
   const messageNavigation = screen.getByRole("navigation", { name: "消息导航" });
   expect(within(messageNavigation).queryByRole("heading", { name: "消息" })).not.toBeInTheDocument();
   expect(within(messageNavigation).getByRole("heading", { name: "对话" })).toBeInTheDocument();
+  expect(within(messageNavigation).getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["常用", "对话"]);
+  const commonSection = within(messageNavigation).getByRole("heading", { name: "常用" }).closest("section")!;
+  expect(within(commonSection).getAllByRole("link").map((link) => link.textContent?.trim())).toEqual(["新建聊天", "审批管理", "消息中心"]);
   expect(within(messageNavigation).getByRole("link", { name: /新建聊天/ })).toHaveClass("context-action-entry");
   expect(within(messageNavigation).getByRole("link", { name: "审批管理" })).toHaveAttribute(
     "href",
@@ -403,6 +419,10 @@ it("lists conversations without sidebar filters and identifies their selected ag
   );
   expect(await within(messageNavigation).findByText("这是最近一条回答，会在会话列表里只显示一行")).toBeInTheDocument();
   expect(messageNavigation).toHaveTextContent("发布计划");
+  const conversationLink = within(messageNavigation).getByRole("link", { name: /发布计划/ });
+  expect(conversationLink).toHaveAttribute("href", "/orgs/org-1/chats/chat-1");
+  expect(conversationLink.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  expect(conversationLink.querySelector(".context-entry-icon")?.textContent).toBe("");
   expect(messageNavigation).toHaveTextContent("归档调研");
   expect(messageNavigation).toHaveTextContent("设计讨论");
   expect(messageNavigation).toHaveTextContent("Designer");

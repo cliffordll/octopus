@@ -54,14 +54,45 @@ it("shows organization heartbeats by agent and supports heartbeat actions", asyn
   renderApp("/orgs/org-1/heartbeat-runs");
 
   expect(await screen.findByRole("heading", { name: "心跳" })).toBeInTheDocument();
+  const pageHeader = screen.getByRole("heading", { name: "心跳" }).closest("header")!;
+  expect(pageHeader).toHaveClass("page-header");
+  expect(pageHeader.parentElement).toHaveClass("org-content-full");
+  expect(within(pageHeader).getByText("Heartbeat Monitor")).toHaveClass("eyebrow");
+  expect(within(pageHeader).getByRole("link", { name: "运行分析" })).toHaveAttribute("href", "/orgs/org-1/run-intelligence");
   const row = await screen.findByTestId("org-heartbeat-row");
   expect(within(row).getByRole("link", { name: "Builder" })).toBeInTheDocument();
-  expect(within(row).getByText("检测中")).toBeInTheDocument();
+  expect(within(row).queryByText("检测中")).not.toBeInTheDocument();
+  const heartbeatToggle = within(row).getByRole("group", { name: "Builder 心跳开关" });
+  expect(within(heartbeatToggle).getByRole("button", { name: "启用" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(heartbeatToggle).getByRole("button", { name: "关闭" })).toHaveAttribute("aria-pressed", "false");
+  expect(within(row).queryByText(/^每 \d+s$/)).not.toBeInTheDocument();
+  expect(within(row).queryByText(/^最近运行 /)).not.toBeInTheDocument();
+  expect(within(row).queryByRole("link", { name: "智能体 ↗" })).not.toBeInTheDocument();
   expect(within(row).getByText("运行中")).toBeInTheDocument();
+  expect(within(row).queryByText("Live", { exact: true })).not.toBeInTheDocument();
+  const agentInfo = row.querySelector(".heartbeat-agent-cell")!;
+  expect(agentInfo).toContainElement(within(row).getByText("运行中"));
+  expect(agentInfo).toContainElement(within(row).getByText(/^运行 \d+ 天前$/));
+  const summaryLine = row.querySelector(".heartbeat-run-cell")!;
+  expect(summaryLine.children).toHaveLength(2);
+  expect(summaryLine.firstElementChild).toHaveTextContent("运行摘要");
+  expect(summaryLine.firstElementChild).toHaveClass("heartbeat-summary-label");
+  expect(summaryLine).toHaveTextContent("检查运行状态");
   expect(within(row).getByText("检查运行状态")).toBeInTheDocument();
   expect(screen.getByText(/automation · issue_passive_followup/)).toBeInTheDocument();
   expect(screen.getByText("OCT-1")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "运行记录" })).toBeInTheDocument();
+  const agentsSection = screen.getByRole("region", { name: "智能体" });
+  expect(within(agentsSection).getByRole("heading", { level: 2, name: "智能体" })).toBeInTheDocument();
+  expect(agentsSection).toContainElement(row);
+  const activitySection = screen.getByRole("region", { name: "运行记录" });
+  const activityList = within(activitySection).getByRole("list", { name: "最近运行记录" });
+  expect(within(activityList).getAllByRole("listitem")).toHaveLength(1);
+  const activityLink = within(activityList).getByRole("link");
+  expect(activityLink).toHaveClass("heartbeat-activity-row");
+  expect(activityLink).toHaveAttribute("href", "/orgs/org-1/agents/agent-1/runs/run-1");
+  expect(within(activityLink).getByText("Builder")).toBeInTheDocument();
+  expect(within(activityLink).getByText("检查运行状态")).toHaveAttribute("title", "检查运行状态");
 
   await userEvent.click(within(row).getByRole("button", { name: "关闭" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -108,10 +139,12 @@ it("enabling an organization heartbeat with no interval writes a default interva
   renderApp("/orgs/org-1/heartbeat-runs");
 
   const row = await screen.findByTestId("org-heartbeat-row");
-  expect(within(row).getByText("每 300s")).toBeInTheDocument();
+  expect(within(row).queryByText("每 300s")).not.toBeInTheDocument();
   expect(within(row).queryByText("未设置间隔")).not.toBeInTheDocument();
   expect(within(row).queryByText("每 0s")).not.toBeInTheDocument();
   expect(within(row).getByLabelText("Builder 状态检测间隔秒数")).toHaveValue(300);
+  expect(row.querySelector(".heartbeat-run-cell")?.firstElementChild).toHaveTextContent("运行摘要");
+  expect(within(row).getByText("暂无运行摘要")).toBeInTheDocument();
 
   await userEvent.click(within(row).getByRole("button", { name: "启用" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
