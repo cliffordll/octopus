@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Agent, IssueListItem, IssueStatus, ProjectDetail } from "../api/types";
+import type { OrganizationHierarchyMember } from "../api/access";
 import { Badge } from "./Badge";
 import { formatDateTime, priorityLabel, statusLabel } from "../utils/display";
 
@@ -31,9 +32,13 @@ function issueCreatedAt(issue: IssueListItem): string {
   return formatDateTime((issue as IssueWithCreatedAt).createdAt || issue.updatedAt);
 }
 
-function issueOwner(issue: IssueListItem, agentNameById: Map<string, string>): string {
+function issueOwner(
+  issue: IssueListItem,
+  agentNameById: Map<string, string>,
+  userNameById: Map<string, string>,
+): string {
   if (issue.assigneeAgentId) return agentNameById.get(issue.assigneeAgentId) ?? issue.assigneeAgentId;
-  if (issue.assigneeUserId) return issue.assigneeUserId;
+  if (issue.assigneeUserId) return userNameById.get(issue.assigneeUserId) ?? issue.assigneeUserId;
   return "未分配";
 }
 
@@ -45,12 +50,14 @@ function issueProject(issue: IssueListItem, projectNameById: Map<string, string>
 export function IssueStatusBoard({
   agents = [],
   issues,
+  members = [],
   orgId,
   projects = [],
   showProject = true,
 }: {
   agents?: Agent[];
   issues: IssueListItem[];
+  members?: OrganizationHierarchyMember[];
   orgId: string;
   projects?: Array<Pick<ProjectDetail, "id" | "name">>;
   showProject?: boolean;
@@ -58,6 +65,11 @@ export function IssueStatusBoard({
   const groupedIssues = issuesByStatus(issues);
   const activeIssueCount = issues.filter((issue) => !["done", "cancelled"].includes(issue.status)).length;
   const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+  const userNameById = new Map(
+    members
+      .filter((member) => member.principalType === "user")
+      .map((member) => [member.principalId, member.displayName]),
+  );
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
 
   return (
@@ -97,7 +109,7 @@ export function IssueStatusBoard({
                     <span className="project-issue-title">{issue.title}</span>
                     <dl className="project-issue-card-meta">
                       <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
-                      <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById)}</dd></div>
+                      <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById, userNameById)}</dd></div>
                       {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
                     </dl>
                     <span className="project-issue-card-action">查看详情 / 执行输出</span>

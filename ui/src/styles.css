@@ -5762,7 +5762,7 @@ button.danger {
   color: #d7deea;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(58px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: 70px minmax(0, 1fr) 190px 220px 160px;
   padding: 8px;
   text-decoration: none;
 }
@@ -5786,10 +5786,58 @@ button.danger {
   font-weight: 700;
 }
 
+.issue-subtask-assignee {
+  align-items: baseline;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.issue-subtask-assignee > span {
+  color: #8d9aaf;
+  font-size: 11px;
+}
+
+.issue-subtask-assignee > strong {
+  font-size: 12px;
+}
+
+.issue-subtask-product {
+  align-items: baseline;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.issue-subtask-product > span {
+  color: #8d9aaf;
+  font-size: 11px;
+}
+
+.issue-subtask-product > strong {
+  font-size: 12px;
+}
+
 .issue-subtask-meta {
   align-items: center;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .issue-subtask-row {
+    grid-template-columns: minmax(58px, auto) minmax(0, 1fr);
+  }
+
+  .issue-subtask-assignee,
+  .issue-subtask-product,
+  .issue-subtask-meta {
+    grid-column: 1 / -1;
+  }
 }
 
 .issue-run-actions {

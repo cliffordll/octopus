@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderApp, respond } from "./render-app";
@@ -72,7 +72,7 @@ it("groups issues by status and creates issues for an organization", async () =>
   await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
   const dialog = within(screen.getByRole("dialog", { name: "新建任务" }));
   await userEvent.type(dialog.getByLabelText("任务名称"), "核对发布说明");
-  await userEvent.selectOptions(dialog.getByLabelText("智能体"), "agent-1");
+  await userEvent.selectOptions(dialog.getByLabelText("负责人"), "agent:agent-1");
   expect(within(dialog.getByLabelText("Reviewer")).getByRole("option", { name: "Builder" })).toBeDisabled();
   await userEvent.selectOptions(dialog.getByLabelText("项目"), "project-1");
   await userEvent.selectOptions(dialog.getByLabelText("Reviewer"), "agent-2");
@@ -96,6 +96,84 @@ it("groups issues by status and creates issues for an organization", async () =>
       }),
     }),
   );
+});
+
+it("assigns tasks to Humans and filters the current Human inbox", async () => {
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/hierarchy") {
+      return respond([
+        {
+          id: "role-user-1",
+          orgId: "org-1",
+          principalType: "user",
+          principalId: "test-user",
+          displayName: "Human 1",
+          role: "member",
+          status: "active",
+          reportsTo: null,
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/issues?assigneeUserId=test-user" && init?.method === "GET") {
+      return respond([
+        {
+          id: "human-issue",
+          orgId: "org-1",
+          identifier: "OCT-2",
+          title: "人工确认发布",
+          status: "todo",
+          priority: "medium",
+          projectId: null,
+          goalId: null,
+          assigneeAgentId: null,
+          assigneeUserId: "test-user",
+          originKind: "delegation",
+          originId: null,
+          updatedAt: "2026-08-28T10:00:00Z",
+        },
+      ]);
+    }
+    if (path === "/api/orgs/org-1/issues" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/issues" && init?.method === "POST") {
+      return respond({ id: "human-issue", title: "人工确认发布" });
+    }
+    return respond([]);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderApp("/orgs/org-1/issues");
+  await userEvent.click(await screen.findByRole("button", { name: "新建任务" }));
+  const dialog = within(screen.getByRole("dialog", { name: "新建任务" }));
+  await userEvent.type(dialog.getByLabelText("任务名称"), "人工确认发布");
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/hierarchy",
+    expect.any(Object),
+  ));
+  await dialog.findByRole("option", { name: "Human 1（Human）" });
+  await userEvent.selectOptions(dialog.getByLabelText("负责人"), "user:test-user");
+  expect(dialog.getByLabelText("模型配置")).toBeDisabled();
+  await userEvent.click(dialog.getByRole("button", { name: "创建任务" }));
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/orgs/org-1/issues",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        title: "人工确认发布",
+        assigneeUserId: "test-user",
+        priority: "medium",
+        status: "todo",
+      }),
+    }),
+  );
+
+  await userEvent.click(screen.getByRole("link", { name: "我的任务" }));
+  expect(await screen.findByRole("link", { name: "人工确认发布" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "我的任务" })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
+  expect(screen.getByRole("link", { name: "人工确认发布" })).toHaveTextContent("Human 1");
 });
 
 it("groups task navigation by shortcuts, collapsed recent views, and project links", async () => {
@@ -184,6 +262,10 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   const taskNavigation = screen.getByRole("navigation", { name: "任务导航" });
   expect(await within(taskNavigation).findByText("任务")).toBeInTheDocument();
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).toHaveAttribute("href", "/orgs/org-1/issues");
+  expect(within(taskNavigation).getByRole("link", { name: "我的任务" })).toHaveAttribute(
+    "href",
+    "/orgs/org-1/issues?mine=1",
+  );
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues?status=backlog",

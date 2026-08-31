@@ -449,6 +449,7 @@ export interface IssueAttachment {
 export interface IssueFilters {
   status?: IssueStatus;
   assigneeAgentId?: string;
+  assigneeUserId?: string;
   projectId?: string;
   goalId?: string;
   parentId?: string;

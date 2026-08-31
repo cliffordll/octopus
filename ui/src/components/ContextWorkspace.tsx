@@ -225,6 +225,7 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
   const currentProjectId = currentSearch.get("projectId") ?? "";
   const currentStatus = currentSearch.get("status") ?? "";
   const currentView = currentSearch.get("view") ?? "";
+  const currentMine = currentSearch.get("mine") === "1";
   const issuesRootPath = `/orgs/${orgId}/issues`;
 
   useEffect(() => {
@@ -260,6 +261,13 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
             >
               <span aria-hidden="true" className="context-entry-icon">A</span>
               <span>全部任务</span>
+            </NavLink>
+            <NavLink
+              className={() => location.pathname === issuesRootPath && currentMine ? "active" : ""}
+              to={`${issuesRootPath}?mine=1`}
+            >
+              <span aria-hidden="true" className="context-entry-icon">M</span>
+              <span>我的任务</span>
             </NavLink>
             <NavLink
               className={() => location.pathname === issuesRootPath && currentStatus === "backlog" ? "active" : ""}

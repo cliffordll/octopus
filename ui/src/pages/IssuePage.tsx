@@ -5,6 +5,12 @@ import { Link, useParams } from "react-router-dom";
 
 import { activityApi } from "../api/activity";
 
+import { accessApi, authApi, type OrganizationHierarchyMember } from "../api/access";
+
+import { AUTH_SESSION_STALE_TIME_MS } from "../auth/sessionCache";
+
+import { organizationMembersWithAgentFallback } from "../utils/organizationMembers";
+
 import { agentsApi } from "../api/agents";
 
 import { goalsApi } from "../api/goals";
@@ -71,6 +77,8 @@ import { formatRuntimeLog } from "../utils/runtimeLog";
 
 const ISSUE_STATUSES: IssueStatus[] = ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"];
 
+const HUMAN_EXECUTION_STATUSES = new Set<IssueStatus>(["todo", "in_progress", "done", "blocked"]);
+
 const ISSUE_PRIORITIES: IssuePriority[] = ["critical", "high", "medium", "low"];
 
 const LIVE_RUN_REFETCH_MS = 1000;
@@ -107,6 +115,22 @@ function agentName(agentId: string | null | undefined, agentsById: Map<string, A
 
   return agentsById.get(agentId)?.name ?? agentId;
 
+}
+
+function issueAssigneeLabel(
+  issue: Pick<IssueDetail, "assigneeAgentId" | "assigneeUserId">,
+  membersByPrincipal: Map<string, OrganizationHierarchyMember>,
+  agentsById: Map<string, Agent>,
+): string {
+  if (issue.assigneeUserId) {
+    const member = membersByPrincipal.get(`user:${issue.assigneeUserId}`);
+    return `Human · ${member?.displayName ?? issue.assigneeUserId}`;
+  }
+  if (issue.assigneeAgentId) {
+    const member = membersByPrincipal.get(`agent:${issue.assigneeAgentId}`);
+    return `Agent · ${member?.displayName ?? agentName(issue.assigneeAgentId, agentsById)}`;
+  }
+  return "未分配";
 }
 
 function agentMentionToken(agent: Agent): string {
@@ -1684,6 +1708,10 @@ function IssuePropertiesPanel({
 
   issue,
 
+  executionOnly,
+
+  members,
+
   isUpdating,
 
   latestRunStatus,
@@ -1700,6 +1728,10 @@ function IssuePropertiesPanel({
 
   issue: IssueDetail;
 
+  executionOnly: boolean;
+
+  members: OrganizationHierarchyMember[];
+
   isUpdating: boolean;
 
   latestRunStatus?: HeartbeatRun["status"];
@@ -1712,9 +1744,23 @@ function IssuePropertiesPanel({
 
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
 
+  const membersByPrincipal = new Map(
+    members.map((member) => [`${member.principalType}:${member.principalId}`, member]),
+  );
+
+  const assigneeValue = issue.assigneeAgentId
+    ? `agent:${issue.assigneeAgentId}`
+    : issue.assigneeUserId
+      ? `user:${issue.assigneeUserId}`
+      : "";
+
+  const reviewerValue = issue.reviewerAgentId ? `agent:${issue.reviewerAgentId}` : "";
+
   const statusSelectDisabledReason = isLiveRun(latestRunStatus) ? "当前任务已有运行在执行中，运行结束后再调整阶段。" : "";
 
-  const statusSelectDisabled = isUpdating || Boolean(statusSelectDisabledReason);
+  const statusSelectDisabled = isUpdating
+    || Boolean(statusSelectDisabledReason)
+    || (executionOnly && issue.status === "in_review");
 
   return (
 
@@ -1752,7 +1798,9 @@ function IssuePropertiesPanel({
 
             {ISSUE_STATUSES.map((status) => {
 
-              const disabledReason = issueStatusOptionDisabledReason(issue, status);
+              const disabledReason = executionOnly && !HUMAN_EXECUTION_STATUSES.has(status)
+                ? "Human 负责人只能开始、继续、完成或阻塞自己的任务。"
+                : issueStatusOptionDisabledReason(issue, status);
 
               return (
 
@@ -1774,7 +1822,7 @@ function IssuePropertiesPanel({
 
           <span>优先级</span>
 
-          <select disabled={isUpdating} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
+          <select disabled={isUpdating || executionOnly} value={issue.priority} onChange={(event) => onUpdate({ priority: event.target.value as IssuePriority })}>
 
             {ISSUE_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priorityLabel(priority)}</option>)}
 
@@ -1788,21 +1836,21 @@ function IssuePropertiesPanel({
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
-            value={nullableSelectValue(issue.assigneeAgentId)}
+            value={assigneeValue}
 
             onChange={(event) => {
 
-              const nextAssigneeAgentId = event.target.value || null;
+              const [principalType, principalId] = event.target.value.split(":", 2);
 
               onUpdate({
 
-                assigneeAgentId: nextAssigneeAgentId,
+                assigneeAgentId: principalType === "agent" ? principalId : null,
 
-                assigneeUserId: null,
+                assigneeUserId: principalType === "user" ? principalId : null,
 
-                ...(nextAssigneeAgentId && nextAssigneeAgentId === issue.reviewerAgentId ? { reviewerAgentId: null, reviewerUserId: null } : {}),
+                ...(event.target.value && event.target.value === reviewerValue ? { reviewerAgentId: null, reviewerUserId: null } : {}),
 
               });
 
@@ -1812,7 +1860,11 @@ function IssuePropertiesPanel({
 
             <option value="">未分配</option>
 
-            {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            {members.filter((member) => member.status === "active").map((member) => (
+              <option key={member.id} value={`${member.principalType}:${member.principalId}`}>
+                {member.displayName}{member.principalType === "user" ? "（Human）" : ""}
+              </option>
+            ))}
 
           </select>
 
@@ -1830,26 +1882,48 @@ function IssuePropertiesPanel({
 
         )}
 
+        {issue.assigneeUserId && (
+
+          <div className="issue-property-row issue-property-link-row">
+
+            <span>Human 负责人</span>
+
+            <strong>{membersByPrincipal.get(`user:${issue.assigneeUserId}`)?.displayName ?? issue.assigneeUserId}</strong>
+
+          </div>
+
+        )}
+
         <label className="issue-property-row">
 
           <span>Reviewer</span>
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
-            value={nullableSelectValue(issue.reviewerAgentId)}
+            value={reviewerValue}
 
-            onChange={(event) => onUpdate({ reviewerAgentId: event.target.value || null, reviewerUserId: null })}
+            onChange={(event) => {
+              const reviewerAgentId = event.target.value.slice(6);
+              onUpdate({
+                reviewerAgentId: reviewerAgentId || null,
+                reviewerUserId: null,
+              });
+            }}
 
           >
 
             <option value="">不设置</option>
 
-            {agents.map((agent) => (
-
-              <option disabled={agent.id === issue.assigneeAgentId} key={agent.id} value={agent.id}>{agent.name}</option>
-))}
+            {members.filter((member) => member.status === "active" && member.principalType === "agent").map((member) => {
+              const value = `${member.principalType}:${member.principalId}`;
+              return (
+                <option disabled={value === assigneeValue} key={member.id} value={value}>
+                  {member.displayName}
+                </option>
+              );
+            })}
 
           </select>
 
@@ -1867,13 +1941,25 @@ function IssuePropertiesPanel({
 
         )}
 
+        {issue.reviewerUserId && (
+
+          <div className="issue-property-row issue-property-link-row">
+
+            <span>Human Reviewer</span>
+
+            <strong>{membersByPrincipal.get(`user:${issue.reviewerUserId}`)?.displayName ?? issue.reviewerUserId}</strong>
+
+          </div>
+
+        )}
+
         <label className="issue-property-row">
 
           <span>项目</span>
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
             value={nullableSelectValue(issue.projectId)}
 
@@ -1895,7 +1981,7 @@ function IssuePropertiesPanel({
 
           <select
 
-            disabled={isUpdating}
+            disabled={isUpdating || executionOnly}
 
             value={nullableSelectValue(issue.goalId)}
 
@@ -3868,6 +3954,14 @@ export function IssuePage() {
 
   const agents = useQuery({ queryKey: ["agents", orgId], queryFn: () => agentsApi.list(orgId) });
 
+  const hierarchy = useQuery({ queryKey: ["organization-hierarchy", orgId], queryFn: () => accessApi.hierarchy(orgId) });
+
+  const session = useQuery({
+    queryKey: ["auth-session"],
+    queryFn: authApi.session,
+    staleTime: AUTH_SESSION_STALE_TIME_MS,
+  });
+
   const goals = useQuery({ queryKey: ["goals", orgId], queryFn: () => goalsApi.list(orgId) });
 
   const issue = useQuery({ queryKey: ["issue", issueId], queryFn: () => issuesApi.get(issueId) });
@@ -4573,7 +4667,29 @@ export function IssuePage() {
 
   const agentList = Array.isArray(agents.data) ? agents.data : [];
 
+  const hierarchyMembers = Array.isArray(hierarchy.data) ? hierarchy.data : [];
+
+  const memberList = organizationMembersWithAgentFallback(hierarchyMembers, agentList, orgId);
+
+  const currentUserId = session.data?.user?.id ?? "";
+
+  const isAssignedHuman = Boolean(issue.data?.assigneeUserId);
+
+  const isCurrentHumanAssignee = Boolean(
+    currentUserId && issue.data?.assigneeUserId === currentUserId,
+  );
+
+  const currentMember = memberList.find(
+    (member) => member.principalType === "user" && member.principalId === currentUserId,
+  );
+
+  const humanExecutionOnly = isCurrentHumanAssignee && currentMember?.role !== "owner";
+
   const agentsById = new Map(agentList.map((agent) => [agent.id, agent]));
+
+  const membersByPrincipal = new Map(
+    memberList.map((member) => [`${member.principalType}:${member.principalId}`, member]),
+  );
 
   const mentionCandidates = mentionQuery
 
@@ -4689,6 +4805,8 @@ export function IssuePage() {
 
       {agents.error && <ErrorNotice error={agents.error} />}
 
+      {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
+
       {goals.error && <ErrorNotice error={goals.error} />}
 
       {projects.error && <ErrorNotice error={projects.error} />}
@@ -4727,7 +4845,7 @@ export function IssuePage() {
 
                 <div className="issue-header-actions">
 
-                  <button
+                  {!isAssignedHuman && <button
 
                     aria-disabled={executeBlockReason ? "true" : undefined}
 
@@ -4745,9 +4863,9 @@ export function IssuePage() {
 
                     {executeButtonLabel}
 
-                  </button>
+                  </button>}
 
-                  <button
+                  {!isAssignedHuman && <button
 
                     className="secondary small-button"
 
@@ -4763,7 +4881,35 @@ export function IssuePage() {
 
                     签出任务
 
-                  </button>
+                  </button>}
+
+                  {isAssignedHuman && isCurrentHumanAssignee && issue.data.status !== "done" && issue.data.status !== "cancelled" && (
+                    <button
+                      disabled={updateIssue.isPending || issue.data.status === "in_review"}
+                      title={issue.data.status === "in_review" ? "任务正在等待评审" : undefined}
+                      type="button"
+                      onClick={() => updateIssue.mutate({
+                        status: issue.data.status === "in_progress" ? "done" : "in_progress",
+                      })}
+                    >
+                      {issue.data.status === "in_progress" ? "提交完成" : "开始处理"}
+                    </button>
+                  )}
+
+                  {isAssignedHuman && isCurrentHumanAssignee && ["todo", "in_progress"].includes(issue.data.status) && (
+                    <button
+                      className="secondary small-button"
+                      disabled={updateIssue.isPending}
+                      type="button"
+                      onClick={() => updateIssue.mutate({ status: "blocked" })}
+                    >
+                      标记阻塞
+                    </button>
+                  )}
+
+                  {isAssignedHuman && !isCurrentHumanAssignee && (
+                    <Badge>等待 Human 负责人处理</Badge>
+                  )}
 
                   <button className="secondary small-button" type="button" onClick={() => navigator.clipboard?.writeText(issueDisplayId(issue.data))}>
 
@@ -4909,11 +5055,27 @@ export function IssuePage() {
 
                       <strong>{child.title}</strong>
 
+                      <span className="issue-subtask-assignee">
+
+                        <span>执行者</span>
+
+                        <strong>{issueAssigneeLabel(child, membersByPrincipal, agentsById)}</strong>
+
+                      </span>
+
+                      <span className="issue-subtask-product">
+
+                        <span>产物</span>
+
+                        <strong title={childPrimaryProductTitle(child) ?? undefined}>
+                          {childPrimaryProductTitle(child) ?? "—"}
+                        </strong>
+
+                      </span>
+
                       <span className="issue-subtask-meta">
 
                         <Badge>{child.status}</Badge>
-
-                        {childPrimaryProductTitle(child) && <Badge>产物 {childPrimaryProductTitle(child)}</Badge>}
 
                         <Badge>{child.priority}</Badge>
 
@@ -5482,9 +5644,13 @@ export function IssuePage() {
 
                 agents={agentList}
 
+                executionOnly={humanExecutionOnly}
+
                 goals={goalList}
 
                 issue={issue.data}
+
+                members={memberList}
 
                 isUpdating={updateIssue.isPending}
 
