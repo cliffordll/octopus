@@ -32,6 +32,8 @@ from packages.database.schema import (
     IssueComment,
     IssueWorkProduct,
     Organization,
+    Role,
+    User,
 )
 from packages.shared.types.issue import CreateChildIssuesPayload, IssueDetail
 from server.app import app as fastapi_app
@@ -41,6 +43,10 @@ from server.services.child_recovery import (
     ChildRecoveryUnavailable,
 )
 from server.services.issues import IssueService
+from server.services.issue_delegation import (
+    IssueDelegationAuthorizer,
+    IssueDelegationDenied,
+)
 from server.services.parent_child_control import (
     ParentChildControlAuthorizer,
     ParentChildControlContext,
@@ -115,6 +121,72 @@ async def test_parent_child_control_rejects_non_owner_agent_but_allows_board() -
         actor_id="local-board",
         run_id=None,
     )
+
+
+async def test_agent_delegation_is_limited_to_direct_reports(
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    manager_role_id = str(uuid.uuid4())
+    other_manager_role_id = str(uuid.uuid4())
+    direct_user_id = str(uuid.uuid4())
+    peer_agent_id = str(uuid.uuid4())
+    async with async_transaction(session):
+        session.add_all(
+            [
+                Role(
+                    id=manager_role_id,
+                    scope_type="organization",
+                    scope_id=org_id,
+                    principal_type="agent",
+                    principal_id="manager-agent",
+                    role="member",
+                    status="active",
+                ),
+                Role(
+                    id=other_manager_role_id,
+                    scope_type="organization",
+                    scope_id=org_id,
+                    principal_type="agent",
+                    principal_id="other-manager",
+                    role="member",
+                    status="active",
+                ),
+                Role(
+                    scope_type="organization",
+                    scope_id=org_id,
+                    principal_type="user",
+                    principal_id=direct_user_id,
+                    role="member",
+                    status="active",
+                    reports_to=manager_role_id,
+                ),
+                Role(
+                    scope_type="organization",
+                    scope_id=org_id,
+                    principal_type="agent",
+                    principal_id=peer_agent_id,
+                    role="member",
+                    status="active",
+                    reports_to=other_manager_role_id,
+                ),
+            ]
+        )
+
+    authorizer = IssueDelegationAuthorizer(session)
+    await authorizer.authorize(
+        org_id,
+        [{"title": "Human confirmation", "assigneeUserId": direct_user_id}],
+        actor_type="agent",
+        actor_id="manager-agent",
+    )
+    with pytest.raises(IssueDelegationDenied, match="direct reports"):
+        await authorizer.authorize(
+            org_id,
+            [{"title": "Peer work", "assigneeAgentId": peer_agent_id}],
+            actor_type="agent",
+            actor_id="manager-agent",
+        )
 
 
 async def test_child_replacement_requires_one_failed_retry_first() -> None:
@@ -425,6 +497,50 @@ async def test_create_children_batch_persists_once_and_reuses_on_retry(
         )
     assert len(children) == 2
     assert len(wakeups) == 2
+
+
+async def test_create_children_batch_assigns_human_without_creating_wakeup(
+    app: FastAPI,
+    session: AsyncSession,
+) -> None:
+    org_id = await _seed_org(session)
+    parent_id = await _seed_issue(session, org_id, title="Parent", status="in_progress")
+    user_id = "human-child"
+    now = datetime.now(UTC)
+    async with async_transaction(session):
+        session.add(
+            User(
+                id=user_id,
+                name="Human Child",
+                email="human-child@example.invalid",
+                email_verified=True,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            Role(
+                scope_type="organization",
+                scope_id=org_id,
+                principal_type="user",
+                principal_id=user_id,
+                role="member",
+                status="active",
+            )
+        )
+
+    code, body = await _request(
+        app,
+        "POST",
+        f"/api/issues/{parent_id}/children/batch",
+        json={"children": [{"title": "Human confirmation", "assigneeUserId": user_id}]},
+    )
+
+    assert code == 200
+    assert body["children"][0]["assigneeAgentId"] is None
+    assert body["children"][0]["assigneeUserId"] == user_id
+    wakeups = (await session.execute(select(AgentWakeupRequest))).scalars().all()
+    assert wakeups == []
 
 
 async def test_create_children_batch_rejects_duplicate_titles(

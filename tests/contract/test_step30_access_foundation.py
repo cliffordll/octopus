@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
@@ -19,11 +20,17 @@ from packages.database.queries.permissions import replace_permissions
 from packages.database.queries.organizations import create_organization
 from packages.database.queries.users import ensure_user
 from packages.database.schema import Base, Agent
-from server.access import AccessPolicyService
+from packages.shared.types.issue import IssueDetail
+from server.access import (
+    AccessDeniedError,
+    AccessPolicyService,
+    IssueUpdateAccessPolicy,
+)
 from server.auth.root_provisioning import RootProvisioningService
 from server.auth import LocalPasswordAuth
 from server.identity import (
     ApprovalRequesterMapper,
+    IdentityContext,
     IssueAssigneeMapper,
     PrincipalRef,
     SystemIdentityContextFactory,
@@ -469,6 +476,33 @@ def test_principal_mappers_keep_compatibility_fields_encapsulated() -> None:
                 "requested_by_agent_id": "agent-1",
             }
         )
+
+
+def test_assigned_human_can_execute_but_cannot_reassign_issue() -> None:
+    context = IdentityContext(
+        principal=PrincipalRef(type="user", id="human-1"),
+        org_id="org-1",
+        role_id="role-human-1",
+        role="member",
+    )
+    issue = cast(
+        IssueDetail,
+        {
+            "id": "issue-1",
+            "orgId": "org-1",
+            "assigneeAgentId": None,
+            "assigneeUserId": "human-1",
+        },
+    )
+    policy = IssueUpdateAccessPolicy()
+
+    policy.require(context, issue, {"status": "in_progress"})
+    policy.require(context, issue, {"status": "done", "comment": "Completed"})
+
+    with pytest.raises(AccessDeniedError, match="assigned Human"):
+        policy.require(context, issue, {"assigneeUserId": "human-2"})
+    with pytest.raises(AccessDeniedError, match="assigned Human"):
+        policy.require(context, issue, {"status": "cancelled"})
 
 
 def test_system_context_factory_rejects_unregistered_principal() -> None:

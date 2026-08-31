@@ -26,7 +26,6 @@ from packages.database.queries.issues import (
 from packages.database.queries.organizations import increment_issue_counter
 from packages.database.schema import (
     ActivityLog,
-    Agent,
     Asset,
     Issue,
     IssueAttachment,
@@ -65,6 +64,8 @@ from .documents import DocumentService
 from .goals import GoalService
 from .issue_completion import IssueCompletionGovernance
 from .issue_hierarchy import IssueHierarchyPolicy
+from .issue_delegation import IssueDelegationAuthorizer
+from .issue_participants import IssueParticipantService
 from .parent_closeout_governance import ParentCloseoutGovernance
 
 _REVIEWABLE_STATUSES = {"in_review", "blocked"}
@@ -93,6 +94,33 @@ def _require_distinct_assignee_and_reviewer(values: Mapping[str, Any]) -> None:
         and assignee_agent_id == reviewer_agent_id
     ):
         raise ValueError("reviewerAgentId must differ from assigneeAgentId")
+    assignee_user_id = values.get("assignee_user_id")
+    reviewer_user_id = values.get("reviewer_user_id")
+    if assignee_user_id and reviewer_user_id and assignee_user_id == reviewer_user_id:
+        raise ValueError("reviewerUserId must differ from assigneeUserId")
+
+
+def _normalize_dual_principal_update(
+    values: dict[str, Any], payload: Mapping[str, Any]
+) -> None:
+    for agent_api_field, user_api_field, agent_column, user_column in (
+        (
+            "assigneeAgentId",
+            "assigneeUserId",
+            "assignee_agent_id",
+            "assignee_user_id",
+        ),
+        (
+            "reviewerAgentId",
+            "reviewerUserId",
+            "reviewer_agent_id",
+            "reviewer_user_id",
+        ),
+    ):
+        if payload.get(agent_api_field):
+            values[user_column] = None
+        elif payload.get(user_api_field):
+            values[agent_column] = None
 
 
 def _reject_agent_self_delegated_child_issue(
@@ -185,6 +213,7 @@ class IssueService:
         *,
         status: str | None = None,
         assignee_agent_id: str | None = None,
+        assignee_user_id: str | None = None,
         project_id: str | None = None,
         goal_id: str | None = None,
         parent_id: str | None = None,
@@ -196,6 +225,7 @@ class IssueService:
             org_id,
             status=status,
             assignee_agent_id=assignee_agent_id,
+            assignee_user_id=assignee_user_id,
             project_id=project_id,
             goal_id=goal_id,
             parent_id=parent_id,
@@ -336,6 +366,14 @@ class IssueService:
 
         if parent.status in {"done", "cancelled"}:
             raise ValueError("Closed parent issue cannot create child issues")
+
+        await IssueDelegationAuthorizer(self._session).authorize(
+            parent.org_id,
+            payload["children"],
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+
         if parent.status in {"backlog", "todo"}:
             updated_parent = await update_issue(
                 self._session,
@@ -348,31 +386,9 @@ class IssueService:
             if updated_parent is not None:
                 parent = updated_parent
 
-        agent_ids: set[str] = set()
-        for child in payload["children"]:
-            assignee_agent_id = child.get("assigneeAgentId")
-            reviewer_agent_id = child.get("reviewerAgentId")
-            if isinstance(assignee_agent_id, str):
-                agent_ids.add(assignee_agent_id)
-            if isinstance(reviewer_agent_id, str):
-                agent_ids.add(reviewer_agent_id)
-        referenced_agents = (
-            (await self._session.execute(select(Agent).where(Agent.id.in_(agent_ids))))
-            .scalars()
-            .all()
+        await IssueParticipantService(self._session).validate_payloads(
+            parent.org_id, payload["children"]
         )
-        agents_by_id = {agent.id: agent for agent in referenced_agents}
-        invalid_agent_ids = sorted(
-            agent_id
-            for agent_id in agent_ids
-            if agent_id not in agents_by_id
-            or agents_by_id[agent_id].org_id != parent.org_id
-        )
-        if invalid_agent_ids:
-            raise ValueError(
-                "Child agents must exist in the parent organization: "
-                + ", ".join(invalid_agent_ids)
-            )
 
         children: list[IssueDetail] = []
         closeout_policy = payload.get(
@@ -492,6 +508,9 @@ class IssueService:
         closeout_policy: DelegationCloseoutPolicy | None = None,
         origin_kind: IssueOriginKind | None = None,
     ) -> IssueDetail:
+        await IssueParticipantService(self._session).validate_payloads(
+            org_id, [payload]
+        )
         values = {
             ISSUE_CREATE_TO_COLUMN[key]: value
             for key, value in payload.items()
@@ -572,6 +591,9 @@ class IssueService:
         current = await get_issue_by_id(self._session, issue_id)
         if current is None:
             return None
+        await IssueParticipantService(self._session).validate_payloads(
+            current.org_id, [payload]
+        )
 
         done_requested = payload.get("status") == "done" or (
             payload.get("status") == "in_review"
@@ -632,6 +654,7 @@ class IssueService:
             for key, value in payload.items()
             if key in ISSUE_UPDATE_TO_COLUMN
         }
+        _normalize_dual_principal_update(values, payload)
         next_project_id = payload.get("projectId", current.project_id)
         next_goal_id = payload.get("goalId", current.goal_id)
         if not next_project_id and not next_goal_id:
@@ -679,6 +702,9 @@ class IssueService:
             "assignee_agent_id": values.get(
                 "assignee_agent_id", current.assignee_agent_id
             ),
+            "assignee_user_id": values.get(
+                "assignee_user_id", current.assignee_user_id
+            ),
             "reviewer_agent_id": values.get(
                 "reviewer_agent_id", current.reviewer_agent_id
             ),
@@ -687,7 +713,15 @@ class IssueService:
             ),
         }
         _require_reviewer_for_in_review(effective_values)
-        if "assignee_agent_id" in values or "reviewer_agent_id" in values:
+        if any(
+            field in values
+            for field in (
+                "assignee_agent_id",
+                "assignee_user_id",
+                "reviewer_agent_id",
+                "reviewer_user_id",
+            )
+        ):
             _require_distinct_assignee_and_reviewer(effective_values)
         _apply_status_side_effects(values, previous_status=current.status)
 

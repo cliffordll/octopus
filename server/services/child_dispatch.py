@@ -44,6 +44,8 @@ class ChildDispatchCoordinator:
         for child in children:
             if not created and child["status"] not in {"todo", "in_progress"}:
                 continue
+            if child.get("assigneeUserId"):
+                continue
             queued = await self._queue_assignment(
                 self._heartbeat,
                 child,

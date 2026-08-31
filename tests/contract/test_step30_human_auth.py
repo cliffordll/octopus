@@ -172,6 +172,109 @@ def test_organization_owner_can_manage_members_and_invites(
     assert inspected.json()["allowedJoinTypes"] == "human"
 
 
+def test_assigned_human_executes_issue_without_agent_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "human-issue-execution.db"
+    monkeypatch.setenv("OCTOPUS_DATABASE_URL", f"sqlite+aiosqlite:///{database_path}")
+    monkeypatch.setenv("OCTOPUS_AUTO_MIGRATE", "1")
+    monkeypatch.setenv("OCTOPUS_LOCAL_TRUSTED", "0")
+    monkeypatch.setenv("OCTOPUS_HEARTBEAT_SCHEDULER_ENABLED", "0")
+
+    from server.app import create_app
+
+    mutation_headers = {"origin": "http://testserver"}
+    with TestClient(create_app()) as client:
+        owner = client.post(
+            "/api/auth/sign-up/email",
+            json={
+                "name": "Owner",
+                "email": "owner-human-issue@example.com",
+                "password": "secure-password",
+            },
+        ).json()["user"]
+        organization = client.post(
+            "/api/orgs",
+            json={"name": "Human Issue Team"},
+            headers=mutation_headers,
+        ).json()
+        invite = client.post(
+            f"/api/orgs/{organization['id']}/invites",
+            json={"allowedJoinTypes": "human"},
+            headers=mutation_headers,
+        ).json()
+        client.post("/api/auth/sign-out", headers=mutation_headers)
+        member = client.post(
+            "/api/auth/sign-up/email",
+            json={
+                "name": "Human Worker",
+                "email": "human-worker@example.com",
+                "password": "secure-password",
+            },
+        ).json()["user"]
+        client.post(
+            f"/api/invites/{invite['token']}/accept",
+            headers=mutation_headers,
+        )
+        client.post("/api/auth/sign-out", headers=mutation_headers)
+        client.post(
+            "/api/auth/sign-in/email",
+            json={
+                "email": "owner-human-issue@example.com",
+                "password": "secure-password",
+            },
+        )
+        created = client.post(
+            f"/api/orgs/{organization['id']}/issues",
+            json={
+                "title": "人工确认发布",
+                "assigneeUserId": member["id"],
+                "status": "todo",
+            },
+            headers=mutation_headers,
+        )
+        issue_id = created.json()["id"]
+        client.post("/api/auth/sign-out", headers=mutation_headers)
+        client.post(
+            "/api/auth/sign-in/email",
+            json={
+                "email": "human-worker@example.com",
+                "password": "secure-password",
+            },
+        )
+        started = client.patch(
+            f"/api/issues/{issue_id}",
+            json={"status": "in_progress"},
+            headers=mutation_headers,
+        )
+        assigned_issues = client.get(
+            f"/api/orgs/{organization['id']}/issues",
+            params={"assigneeUserId": member["id"]},
+        )
+        forbidden_reassignment = client.patch(
+            f"/api/issues/{issue_id}",
+            json={"assigneeUserId": owner["id"]},
+            headers=mutation_headers,
+        )
+        forbidden_agent_execution = client.post(
+            f"/api/issues/{issue_id}/execute",
+            json={},
+            headers=mutation_headers,
+        )
+        runs = client.get(f"/api/issues/{issue_id}/runs")
+
+    assert created.status_code == 200
+    assert started.status_code == 200
+    assert started.json()["status"] == "in_progress"
+    assert assigned_issues.status_code == 200
+    assert [issue["id"] for issue in assigned_issues.json()] == [issue_id]
+    assert forbidden_reassignment.status_code == 403
+    assert forbidden_agent_execution.status_code == 403
+    assert runs.status_code == 200
+    assert runs.json() == []
+
+
 def test_local_trusted_does_not_create_an_implicit_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

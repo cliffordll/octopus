@@ -24,6 +24,7 @@ async def list_org_issues(
     *,
     status: str | None = None,
     assignee_agent_id: str | None = None,
+    assignee_user_id: str | None = None,
     project_id: str | None = None,
     goal_id: str | None = None,
     parent_id: str | None = None,
@@ -35,6 +36,8 @@ async def list_org_issues(
         stmt = stmt.where(Issue.status == status)
     if assignee_agent_id is not None:
         stmt = stmt.where(Issue.assignee_agent_id == assignee_agent_id)
+    if assignee_user_id is not None:
+        stmt = stmt.where(Issue.assignee_user_id == assignee_user_id)
     if project_id is not None:
         stmt = stmt.where(Issue.project_id == project_id)
     if goal_id is not None:

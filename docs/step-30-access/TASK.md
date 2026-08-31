@@ -208,6 +208,24 @@ RunDispatchService 创建并启动 Run
 Run 终态、Agent 暂停或终止、Role 被禁用、组织不匹配时立即拒绝。
 Agent 不能凭 Token 冒充 Human 或访问其他组织。
 
+### Human 任务执行
+
+Human 与 Agent 都可以成为任务负责人，但执行方式不同：
+
+```text
+任务创建或父任务拆分
+  -> Agent 负责人：写 assignee_agent_id，进入 Wakeup / Run / Adapter 执行链
+  -> Human 负责人：写 assignee_user_id，进入“我的任务”，由本人手动处理
+```
+
+分配给 Human 的任务不创建 Wakeup、Heartbeat 或 Run。当前负责人可以在 UI
+中开始处理、标记阻塞、提交完成，并通过评论和附件登记过程与结果。普通 Member
+只能修改自己负责的任务执行状态和执行证据，不能借此重新分派任务、修改优先级或
+触发 Agent 执行；Owner 和具有 `tasks:assign` 权限的主体仍负责创建与分派任务。
+
+父任务批量拆分时，每个子任务必须且只能选择一种负责人：
+`assigneeAgentId` 或 `assigneeUserId`。两者不能同时存在。
+
 ### System
 
 Heartbeat、RunDispatch、RunRecovery、RunFinalization 使用注册过的
@@ -269,7 +287,8 @@ database queries                  只负责 SQL
 | Agent 创建、配置、唤醒 | `agents:create` / `agents:manage` |
 | 组织技能 | `skills:manage` |
 | Runtime Provider、模型密钥、环境诊断 | `runtime:manage` |
-| 任务创建、分派、执行与评审结论 | `tasks:assign` |
+| 任务创建、分派、Agent 执行与评审结论 | `tasks:assign` |
+| Human 处理自己负责的任务 | active Role + 当前 `assignee_user_id` |
 | 文档、交付物、附件 | `documents:manage` |
 | 项目、目标 | `projects:manage` / `goals:manage` |
 | Git 工作区、合并、提交、推送、清理 | `workspaces:manage` |
@@ -330,6 +349,9 @@ Agent 开放；客户端提交的 `cwd` 不能作为可信授权范围。
 - 普通 Member 只能执行显式授权能力。
 - Root 可管理实例和全部组织。
 - Agent 仅能通过有效 Run Token 在所属组织执行。
+- Owner 或有权限的 Agent 可把子任务分给 Human；Human 可在“我的任务”中手动完成。
+- Human 任务不会创建 Wakeup、Heartbeat、Run 或 Adapter 进程。
+- 普通 Human 只能更新自己负责的任务执行状态和证据，不能自行重新分派。
 - 关闭 `local_trusted` 与开启时都不存在隐式管理员。
 - SQLite 与 PostgreSQL 覆盖 Role 唯一性、权限替换和跨组织拒绝测试。
 - Route、Scope Resolver、Policy、Domain Service、Query 层职责清晰。
