@@ -45,30 +45,28 @@ it("groups issues by status and creates issues for an organization", async () =>
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/issues");
-  const pageHeader = screen.getByRole("heading", { name: "工作列表" }).closest("header")!;
-  expect(within(pageHeader).getByText("查看任务分工与状态，跟进工作进度。")).toHaveClass("muted");
+  const pageHeader = screen.getByRole("heading", { name: "全部任务" }).closest("header")!;
+  expect(within(pageHeader).getByText("Issues")).toHaveClass("eyebrow");
+  expect(within(pageHeader).getByText("查看组织内全部任务，按状态跟进执行进度与负责人。")).toHaveClass("muted");
   expect(await screen.findByRole("link", { name: "实现登录流程" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
   );
   const issueCard = screen.getByRole("link", { name: "实现登录流程" }).closest(".project-issue-status-row");
   expect(issueCard).not.toBeNull();
-  expect(issueCard).toHaveTextContent("创建时间");
-  expect(issueCard).toHaveTextContent("2026年5月28日 18:00");
-  expect(issueCard).toHaveTextContent("归属");
+  const columnHeaders = screen.getByText("任务编号 标题").parentElement!;
+  expect(within(columnHeaders).getByText("项目")).toBeInTheDocument();
+  expect(within(columnHeaders).getByText("执行者")).toBeInTheDocument();
+  expect(within(columnHeaders).getByText("优先级")).toBeInTheDocument();
+  expect(within(columnHeaders).getByText("更新时间")).toBeInTheDocument();
+  expect(issueCard).toHaveTextContent("OCT-1");
   expect(issueCard).toHaveTextContent("Builder");
   expect(screen.queryByLabelText("状态筛选")).not.toBeInTheDocument();
   const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
-  expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("1");
-  expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".summary-metric")).toHaveTextContent("1");
-  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
+  expect(within(issueSummary as HTMLElement).getByText("总数").closest(".project-summary-chip")).toHaveTextContent("1");
+  expect(within(issueSummary as HTMLElement).getByText("活跃").closest(".project-summary-chip")).toHaveTextContent("1");
   expect(screen.getByRole("heading", { name: "进行中" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "评审中" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "已完成" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "已取消" })).toBeInTheDocument();
 
   expect(screen.queryByLabelText("任务名称")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "新建任务" }));
@@ -175,7 +173,10 @@ it("assigns tasks to Humans and filters the current Human inbox", async () => {
   expect(await screen.findByRole("link", { name: "人工确认发布" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "我的任务" })).toHaveClass("active");
   expect(screen.getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
-  expect(screen.getByRole("link", { name: "人工确认发布" })).toHaveTextContent("Human 1");
+  expect(screen.getByRole("heading", { name: "我的任务" })).toBeInTheDocument();
+  expect(screen.getByText("查看当前账号负责的任务，集中跟进自己的工作。")).toBeInTheDocument();
+  expect(screen.queryByText("执行者")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "人工确认发布" })).not.toHaveTextContent("Human 1");
 });
 
 it("groups task navigation by shortcuts, collapsed recent views, and project links", async () => {
@@ -274,10 +275,7 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
     "href",
     "/orgs/org-1/issues?status=backlog",
   );
-  expect(within(taskNavigation).getByRole("link", { name: "关注中" })).toHaveAttribute(
-    "href",
-    "/orgs/org-1/issues?view=following",
-  );
+  expect(within(taskNavigation).queryByRole("link", { name: "关注中" })).not.toBeInTheDocument();
   expect(within(taskNavigation).getByText("最近查看")).toBeInTheDocument();
   expect(within(taskNavigation).getByRole("link", { name: /最近处理 1/ })).toHaveAttribute(
     "href",
@@ -316,8 +314,9 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "草稿任务" }));
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).toHaveClass("active");
   expect(within(taskNavigation).getByRole("link", { name: "全部任务" })).not.toHaveClass("active");
+  expect(screen.getByRole("heading", { name: "草稿任务" })).toBeInTheDocument();
+  expect(screen.getByText("查看尚未进入执行流程的草稿任务。")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "待处理" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "整理草稿" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-draft",
@@ -327,11 +326,6 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
     expect.objectContaining({ method: "GET" }),
   );
 
-  await userEvent.click(within(taskNavigation).getByRole("link", { name: "关注中" }));
-  expect(within(taskNavigation).getByRole("link", { name: "关注中" })).toHaveClass("active");
-  expect(screen.getByRole("heading", { name: "待规划" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "阻塞" })).toBeInTheDocument();
-
   await userEvent.click(within(taskNavigation).getByRole("link", { name: "空项目" }));
   expect(within(taskNavigation).getByRole("link", { name: "空项目" })).toHaveClass("active");
   expect(within(taskNavigation).getByRole("link", { name: "草稿任务" })).not.toHaveClass("active");
@@ -339,4 +333,10 @@ it("groups task navigation by shortcuts, collapsed recent views, and project lin
     "/api/orgs/org-1/issues?projectId=project-empty",
     expect.objectContaining({ method: "GET" }),
   );
+  expect(screen.getByRole("heading", { name: "空项目" })).toBeInTheDocument();
+  expect(screen.getByText("查看该项目关联的任务，按状态跟进执行进度。")).toBeInTheDocument();
+  const emptyMessage = screen.getByText("该项目暂无关联任务。");
+  const emptySurface = emptyMessage.closest(".issues-list-surface")!;
+  const emptySummary = within(emptySurface as HTMLElement).getByText("总数").closest(".project-issue-status-summary")!;
+  expect([...emptySurface.children].indexOf(emptySummary)).toBeLessThan([...emptySurface.children].indexOf(emptyMessage));
 });

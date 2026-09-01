@@ -47,21 +47,32 @@ function issueProject(issue: IssueListItem, projectNameById: Map<string, string>
   return projectNameById.get(issue.projectId) ?? issue.projectId;
 }
 
+function issueParent(issue: IssueListItem, issueById: Map<string, IssueListItem>): string {
+  if (!issue.parentId) return "—";
+  const parent = issueById.get(issue.parentId);
+  if (!parent) return issue.parentId;
+  return `${parent.identifier ?? "-"} ${parent.title}`;
+}
+
 export function IssueStatusBoard({
   agents = [],
+  emptyMessage = "暂无任务。",
   issues,
   layout = "board",
   members = [],
   orgId,
   projects = [],
+  showAssignee = true,
   showProject = true,
 }: {
   agents?: Agent[];
+  emptyMessage?: string | null;
   issues: IssueListItem[];
   layout?: "board" | "list";
   members?: OrganizationHierarchyMember[];
   orgId: string;
   projects?: Array<Pick<ProjectDetail, "id" | "name">>;
+  showAssignee?: boolean;
   showProject?: boolean;
 }) {
   const groupedIssues = issuesByStatus(issues);
@@ -74,30 +85,52 @@ export function IssueStatusBoard({
       .map((member) => [member.principalId, member.displayName]),
   );
   const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
+  const issueById = new Map(issues.map((issue) => [issue.id, issue]));
+  const showParent = layout === "list" && issues.some((issue) => Boolean(issue.parentId));
+  const listColumnClasses = [
+    showProject ? "has-project" : "",
+    showParent ? "has-parent" : "",
+    showAssignee ? "" : "hide-assignee",
+  ].filter(Boolean).join(" ");
 
   return (
     <>
-      <div className="project-issue-status-summary">
-        <div className="summary-metric"><span>总数</span><strong>{issues.length}</strong></div>
-        <div className="summary-metric"><span>活跃</span><strong>{activeIssueCount}</strong></div>
-        <div className="summary-metric"><span>阻塞</span><strong>{groupedIssues.blocked.length}</strong></div>
-        <div className="summary-metric"><span>已完成</span><strong>{groupedIssues.done.length}</strong></div>
+      <div className="project-issue-status-summary project-summary-toolbar">
+        <div aria-label="任务摘要" className="project-compact-summary" role="group">
+          <span className="project-summary-chip"><strong>{issues.length}</strong> 总数</span>
+          <span className="project-summary-chip"><strong>{activeIssueCount}</strong> 活跃</span>
+          <span className="project-summary-chip"><strong>{groupedIssues.blocked.length}</strong> 阻塞</span>
+          <span className="project-summary-chip"><strong>{groupedIssues.done.length}</strong> 已完成</span>
+        </div>
       </div>
-      <div className={`project-issue-status-groups${layout === "list" ? " project-issue-grouped-list" : ""}`}>
-        {visibleStatuses.map((issueStatus) => (
-          <section className="project-issue-status-group" key={issueStatus}>
-            <div className="project-issue-status-heading">
-              <div>
-                <span className={`status-dot status-${issueStatus}`} />
-                <h3>{issueStatusLabel(issueStatus)}</h3>
+      {layout === "list" && issues.length > 0 && (
+        <div aria-hidden="true" className={`project-issue-list-columns ${listColumnClasses}`.trim()}>
+          <span>任务编号 标题</span>
+          {showProject && <span>项目</span>}
+          {showParent && <span>父任务</span>}
+          {showAssignee && <span>执行者</span>}
+          <span>优先级</span>
+          <span>更新时间</span>
+        </div>
+      )}
+      {issues.length === 0 ? (
+        emptyMessage && <p className="issues-view-empty muted">{emptyMessage}</p>
+      ) : (
+        <div className={`project-issue-status-groups${layout === "list" ? " project-issue-grouped-list" : ""}`}>
+          {visibleStatuses.map((issueStatus) => (
+            <section className="project-issue-status-group" key={issueStatus}>
+              <div className="project-issue-status-heading">
+                <div>
+                  <span className={`status-dot status-${issueStatus}`} />
+                  <h3>{issueStatusLabel(issueStatus)}</h3>
+                </div>
+                <Badge>{groupedIssues[issueStatus].length}</Badge>
               </div>
-              <Badge>{groupedIssues[issueStatus].length}</Badge>
-            </div>
-            {groupedIssues[issueStatus].length === 0 ? (
-              <p className="muted">暂无任务。</p>
-            ) : (
-              <div className="project-issue-status-list">
-                {groupedIssues[issueStatus].map((issue) => (
+              {groupedIssues[issueStatus].length === 0 ? (
+                <p className="muted">暂无任务。</p>
+              ) : (
+                <div className={`project-issue-status-list ${listColumnClasses}`.trim()}>
+                  {groupedIssues[issueStatus].map((issue) => (
                   <Link
                     aria-label={issue.title}
                     className="project-issue-status-row"
@@ -110,12 +143,27 @@ export function IssueStatusBoard({
                           <span className="identifier">{issue.identifier ?? "-"}</span>
                           <span className="project-issue-title">{issue.title}</span>
                         </span>
-                        <span className="project-issue-list-owner" title={`负责人：${issueOwner(issue, agentNameById, userNameById)}`}>
-                          {issueOwner(issue, agentNameById, userNameById)}
-                        </span>
+                        {showProject && (
+                          <span className="project-issue-list-project" title={`项目：${issueProject(issue, projectNameById)}`}>
+                            {issueProject(issue, projectNameById)}
+                          </span>
+                        )}
+                        {showParent && (
+                          <span className="project-issue-list-parent" title={`父任务：${issueParent(issue, issueById)}`}>
+                            {issueParent(issue, issueById)}
+                          </span>
+                        )}
+                        {showAssignee && (
+                          <span className="project-issue-list-owner" title={`负责人：${issueOwner(issue, agentNameById, userNameById)}`}>
+                            {issueOwner(issue, agentNameById, userNameById)}
+                          </span>
+                        )}
                         <span className="project-issue-list-priority" title="优先级">
                           <Badge>{priorityLabel(issue.priority)}</Badge>
                         </span>
+                        <time className="project-issue-list-updated" dateTime={issue.updatedAt} title={`更新时间：${formatDateTime(issue.updatedAt)}`}>
+                          {formatDateTime(issue.updatedAt)}
+                        </time>
                       </>
                     ) : (
                       <>
@@ -134,12 +182,13 @@ export function IssueStatusBoard({
                       </>
                     )}
                   </Link>
-                ))}
-              </div>
-            )}
-          </section>
-        ))}
-      </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+      )}
     </>
   );
 }

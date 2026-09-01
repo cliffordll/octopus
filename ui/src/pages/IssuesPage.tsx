@@ -40,6 +40,7 @@ export function IssuesPage() {
   const status = STATUSES.includes(requestedStatus as IssueStatus) ? requestedStatus as IssueStatus | "" : "";
   const projectId = searchParams.get("projectId") ?? "";
   const mineOnly = searchParams.get("mine") === "1";
+  const followingOnly = searchParams.get("view") === "following";
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState(projectId);
@@ -65,7 +66,7 @@ export function IssuesPage() {
       ...(projectId ? { projectId } : {}),
       ...(mineOnly && session.data?.user?.id ? { assigneeUserId: session.data.user.id } : {}),
     }),
-    enabled: !mineOnly || Boolean(session.data?.user?.id),
+    enabled: (!mineOnly || Boolean(session.data?.user?.id)) && !followingOnly,
   });
   const create = useMutation({
     mutationFn: issuesApi.create.bind(null, orgId),
@@ -108,6 +109,34 @@ export function IssuesPage() {
   const assignableMembers = organizationMembersWithAgentFallback(memberList, agentList, orgId);
   const projectList = Array.isArray(projects.data) ? projects.data : [];
   const issueList = Array.isArray(issues.data) ? issues.data : [];
+  const selectedProject = projectList.find((project) => project.id === projectId);
+  const viewTitle = followingOnly
+    ? "关注中"
+    : projectId
+      ? selectedProject?.name ?? "项目任务"
+      : mineOnly
+        ? "我的任务"
+        : status === "backlog"
+          ? "草稿任务"
+          : "全部任务";
+  const viewDescription = followingOnly
+    ? "关注任务功能尚未开放"
+    : projectId
+      ? "查看该项目关联的任务，按状态跟进执行进度。"
+      : mineOnly
+        ? "查看当前账号负责的任务，集中跟进自己的工作。"
+        : status === "backlog"
+          ? "查看尚未进入执行流程的草稿任务。"
+          : "查看组织内全部任务，按状态跟进执行进度与负责人。";
+  const emptyMessage = followingOnly
+    ? "关注任务功能尚未开放。"
+    : projectId
+      ? "该项目暂无关联任务。"
+      : mineOnly
+        ? "当前没有分配给你的任务。"
+        : status === "backlog"
+          ? "暂无草稿任务。"
+          : "暂无任务。";
   useEffect(() => {
     if (shouldOpenCreate) {
       setSelectedProjectId(projectId);
@@ -116,14 +145,16 @@ export function IssuesPage() {
   }, [projectId, shouldOpenCreate]);
   return (
     <IssuesWorkspace contentClassName="org-content-full" orgId={orgId}>
-      <header className="page-header">
+      <header className="page-header issues-page-header">
         <div>
           <p className="eyebrow">Issues</p>
-          <h1>工作列表</h1>
-          <p className="muted">查看任务分工与状态，跟进工作进度。</p>
+          <h1>{viewTitle}</h1>
+          <p className="muted">{viewDescription}</p>
         </div>
+        {!followingOnly && (
           <div className="org-page-actions">
             <button
+              className="org-primary-action"
               type="button"
               onClick={() => {
                 setSelectedProjectId(projectId);
@@ -133,16 +164,29 @@ export function IssuesPage() {
               新建任务
             </button>
           </div>
+        )}
       </header>
       {agents.error && <ErrorNotice error={agents.error} />}
       {hierarchy.error && <ErrorNotice error={hierarchy.error} />}
       {projects.error && <ErrorNotice error={projects.error} />}
       {issues.error && <ErrorNotice error={issues.error} />}
       {create.error && <ErrorNotice error={create.error} />}
-      <section className="panel issue-table issue-status-board">
+      <section className="issue-table issue-status-board issues-list-surface">
         {issues.isLoading && <p className="muted">载入中...</p>}
-        {issues.isSuccess && issueList.length === 0 && <p className="muted">暂无任务。</p>}
-        <IssueStatusBoard agents={agentList} issues={issueList} members={assignableMembers} orgId={orgId} projects={projectList} />
+        {!followingOnly && (
+          <IssueStatusBoard
+            agents={agentList}
+            emptyMessage={issues.isSuccess ? emptyMessage : null}
+            issues={issueList}
+            layout="list"
+            members={assignableMembers}
+            orgId={orgId}
+            projects={projectList}
+            showAssignee={!mineOnly}
+            showProject={!projectId}
+          />
+        )}
+        {followingOnly && <p className="issues-view-empty muted">{emptyMessage}</p>}
       </section>
       {taskDialogOpen && (
         <div

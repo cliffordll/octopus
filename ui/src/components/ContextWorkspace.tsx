@@ -226,7 +226,6 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
   const currentSearch = new URLSearchParams(location.search);
   const currentProjectId = currentSearch.get("projectId") ?? "";
   const currentStatus = currentSearch.get("status") ?? "";
-  const currentView = currentSearch.get("view") ?? "";
   const currentMine = currentSearch.get("mine") === "1";
   const issuesRootPath = `/orgs/${orgId}/issues`;
 
@@ -277,13 +276,6 @@ export function IssuesWorkspace({ contentClassName = "", orgId, children }: Prop
             >
               <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="draft" /></span>
               <span>草稿任务</span>
-            </NavLink>
-            <NavLink
-              className={() => location.pathname === issuesRootPath && currentView === "following" ? "active" : ""}
-              to={`${issuesRootPath}?view=following`}
-            >
-              <span aria-hidden="true" className="context-entry-icon"><SidebarIcon name="following" /></span>
-              <span>关注中</span>
             </NavLink>
           </section>
           <section className="context-nav-section">
