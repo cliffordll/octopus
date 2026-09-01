@@ -1537,6 +1537,7 @@ def _to_list_item(row: Issue) -> IssueListItem:
         priority=cast(IssuePriority, row.priority),
         projectId=row.project_id,
         goalId=row.goal_id,
+        parentId=row.parent_id,
         assigneeAgentId=row.assignee_agent_id,
         assigneeUserId=row.assignee_user_id,
         createdByAgentId=row.created_by_agent_id,

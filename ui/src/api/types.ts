@@ -188,6 +188,7 @@ export interface IssueListItem {
   priority: IssuePriority;
   projectId: string | null;
   goalId: string | null;
+  parentId?: string | null;
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
   createdByAgentId: string | null;

@@ -50,6 +50,7 @@ function issueProject(issue: IssueListItem, projectNameById: Map<string, string>
 export function IssueStatusBoard({
   agents = [],
   issues,
+  layout = "board",
   members = [],
   orgId,
   projects = [],
@@ -57,12 +58,14 @@ export function IssueStatusBoard({
 }: {
   agents?: Agent[];
   issues: IssueListItem[];
+  layout?: "board" | "list";
   members?: OrganizationHierarchyMember[];
   orgId: string;
   projects?: Array<Pick<ProjectDetail, "id" | "name">>;
   showProject?: boolean;
 }) {
   const groupedIssues = issuesByStatus(issues);
+  const visibleStatuses = ISSUE_STATUSES.filter((status) => layout === "board" || groupedIssues[status].length > 0);
   const activeIssueCount = issues.filter((issue) => !["done", "cancelled"].includes(issue.status)).length;
   const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
   const userNameById = new Map(
@@ -80,8 +83,8 @@ export function IssueStatusBoard({
         <div className="summary-metric"><span>阻塞</span><strong>{groupedIssues.blocked.length}</strong></div>
         <div className="summary-metric"><span>已完成</span><strong>{groupedIssues.done.length}</strong></div>
       </div>
-      <div className="project-issue-status-groups">
-        {ISSUE_STATUSES.map((issueStatus) => (
+      <div className={`project-issue-status-groups${layout === "list" ? " project-issue-grouped-list" : ""}`}>
+        {visibleStatuses.map((issueStatus) => (
           <section className="project-issue-status-group" key={issueStatus}>
             <div className="project-issue-status-heading">
               <div>
@@ -101,18 +104,35 @@ export function IssueStatusBoard({
                     key={issue.id}
                     to={`/orgs/${orgId}/issues/${issue.id}`}
                   >
-                    <div className="project-issue-card-topline">
-                      <span className="identifier">{issue.identifier ?? "-"}</span>
-                      <Badge>阶段：{statusLabel(issue.status)}</Badge>
-                      <Badge>优先级：{priorityLabel(issue.priority)}</Badge>
-                    </div>
-                    <span className="project-issue-title">{issue.title}</span>
-                    <dl className="project-issue-card-meta">
-                      <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
-                      <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById, userNameById)}</dd></div>
-                      {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
-                    </dl>
-                    <span className="project-issue-card-action">查看详情 / 执行输出</span>
+                    {layout === "list" ? (
+                      <>
+                        <span className="project-issue-list-title" title={issue.title}>
+                          <span className="identifier">{issue.identifier ?? "-"}</span>
+                          <span className="project-issue-title">{issue.title}</span>
+                        </span>
+                        <span className="project-issue-list-owner" title={`负责人：${issueOwner(issue, agentNameById, userNameById)}`}>
+                          {issueOwner(issue, agentNameById, userNameById)}
+                        </span>
+                        <span className="project-issue-list-priority" title="优先级">
+                          <Badge>{priorityLabel(issue.priority)}</Badge>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="project-issue-card-topline">
+                          <span className="identifier">{issue.identifier ?? "-"}</span>
+                          <Badge>阶段：{statusLabel(issue.status)}</Badge>
+                          <Badge>优先级：{priorityLabel(issue.priority)}</Badge>
+                        </div>
+                        <span className="project-issue-title">{issue.title}</span>
+                        <dl className="project-issue-card-meta">
+                          <div><dt>创建时间</dt><dd>{issueCreatedAt(issue)}</dd></div>
+                          <div><dt>归属</dt><dd>{issueOwner(issue, agentNameById, userNameById)}</dd></div>
+                          {showProject && <div><dt>项目</dt><dd>{issueProject(issue, projectNameById)}</dd></div>}
+                        </dl>
+                        <span className="project-issue-card-action">查看详情 / 执行输出</span>
+                      </>
+                    )}
                   </Link>
                 ))}
               </div>

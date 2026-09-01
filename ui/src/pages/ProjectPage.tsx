@@ -8,6 +8,7 @@ import { projectsApi } from "../api/projects";
 import type {
   ExecutionWorkspace,
   ExecutionWorkspaceFiles,
+  Agent,
   IssueListItem,
   IssueWorkProduct,
   OrganizationResource,
@@ -20,6 +21,7 @@ import type {
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { IssueStatusBoard } from "../components/IssueStatusBoard";
+import { ProjectWorkspaceExplorer } from "../components/ProjectWorkspaceExplorer";
 import { formatDateTime, statusLabel } from "../utils/display";
 import { OrgWorkspace } from "./OrganizationPage";
 
@@ -200,29 +202,6 @@ function isWorkspaceArtifactProduct(product: IssueWorkProduct): boolean {
   return product.type !== "commit";
 }
 
-function workProductProjectType(type: string): string {
-  switch (type) {
-    case "commit":
-      return "代码提交";
-    case "pull_request":
-      return "Pull Request";
-    case "document":
-      return "文档";
-    case "artifact":
-      return "文件产物";
-    case "preview":
-      return "预览";
-    case "report":
-      return "报告";
-    default:
-      return type;
-  }
-}
-
-function projectArtifactIssueLabel(product: IssueWorkProduct, issues: Map<string, IssueListItem>): string {
-  const issue = issues.get(product.issueId);
-  return issue?.identifier ? `${issue.identifier} ${issue.title}` : issue?.title ?? product.issueId;
-}
 function normalizedWorkspacePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
 }
@@ -277,64 +256,7 @@ function productsByWorkspacePath(products: IssueWorkProduct[]): Map<string, Issu
   return grouped;
 }
 
-type WorkspaceFileTreeRow = {
-  depth: number;
-  node: WorkspaceFileTreeNode;
-};
-
-function flattenWorkspaceFileTree(nodes: WorkspaceFileTreeNode[], depth = 0): WorkspaceFileTreeRow[] {
-  return nodes.flatMap((node) => [
-    { depth, node },
-    ...(node.type === "directory" && node.children ? flattenWorkspaceFileTree(node.children, depth + 1) : []),
-  ]);
-}
-
-function WorkspaceFileTreeTable({ issues, nodes, orgId, productsByPath }: { issues: Map<string, IssueListItem>; nodes: WorkspaceFileTreeNode[]; orgId: string; productsByPath: Map<string, IssueWorkProduct[]> }) {
-  return (
-    <div className="project-workspace-file-tree-table" role="treegrid">
-      {flattenWorkspaceFileTree(nodes).map(({ depth, node }) => {
-        const nodeProducts = node.type === "file" ? productsByPath.get(normalizedWorkspacePath(node.path)) ?? [] : [];
-        const primaryProduct = nodeProducts[0];
-        return (
-          <div className={`project-workspace-file-row ${node.type} ${primaryProduct ? "has-products" : ""}`} key={node.path} role="row">
-            <div className="project-workspace-file-name" role="gridcell" style={{ "--depth": depth } as React.CSSProperties} title={node.path}>
-              <span className="project-workspace-file-icon" aria-hidden="true">{node.type === "directory" ? "D" : "F"}</span>
-              <span>{node.name}</span>
-            </div>
-            {primaryProduct ? (
-              <>
-                <span className="project-workspace-file-muted" role="gridcell">{typeof primaryProduct.byteSize === "number" ? formatFileSize(primaryProduct.byteSize) : typeof node.size === "number" ? formatFileSize(node.size) : ""}</span>
-                <span className="project-workspace-file-muted" role="gridcell">{formatDateTime(primaryProduct.createdAt)}</span>
-                <Link className="project-workspace-file-task" role="gridcell" title={projectArtifactIssueLabel(primaryProduct, issues)} to={`/orgs/${orgId}/issues/${primaryProduct.issueId}`}>{projectArtifactIssueLabel(primaryProduct, issues)}</Link>
-                <span className="project-workspace-file-title" role="gridcell" title={primaryProduct.summary ?? primaryProduct.title ?? undefined}>{primaryProduct.title || primaryProduct.summary || workProductProjectType(primaryProduct.type)}</span>
-                <span role="gridcell"><Badge>{workProductProjectType(primaryProduct.type)}</Badge></span>
-                <span role="gridcell"><Badge>{primaryProduct.status}</Badge></span>
-                <span className="project-workspace-file-primary" role="gridcell" title={nodeProducts.length > 1 ? `${nodeProducts.length} 个产物` : undefined}>{primaryProduct.isPrimary ? "主" : nodeProducts.length > 1 ? `${nodeProducts.length}` : ""}</span>
-              </>
-            ) : (
-              <>
-                <span className="project-workspace-file-muted" role="gridcell">{node.type === "file" && typeof node.size === "number" ? formatFileSize(node.size) : ""}</span>
-                <span className="project-workspace-file-muted" role="gridcell">{node.type === "file" ? formatDateTime(node.modifiedAt) : ""}</span>
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-                <span role="gridcell" />
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-function formatFileSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
-  return `${Math.round(size / 1024 / 102.4) / 10} MB`;
-}
-
-function ProjectWorkspaceDirectory({ issues, orgId, products, workspace }: { issues: Map<string, IssueListItem>; orgId: string; products: IssueWorkProduct[]; workspace: ExecutionWorkspace }) {
+function ProjectWorkspaceDirectory({ agents, issues, orgId, products, workspace }: { agents: Agent[]; issues: Map<string, IssueListItem>; orgId: string; products: IssueWorkProduct[]; workspace: ExecutionWorkspace }) {
   const files = useQuery<ExecutionWorkspaceFiles>({
     queryKey: ["execution-workspace-files", workspace.id],
     queryFn: () => projectsApi.executionWorkspaceFiles(workspace.id),
@@ -349,37 +271,25 @@ function ProjectWorkspaceDirectory({ issues, orgId, products, workspace }: { iss
       {!files.isLoading && files.data && !files.data.available && <p className="project-resource-empty muted">{files.data.error ?? "当前工作区目录不可浏览。"}</p>}
       {!files.isLoading && files.data?.available && fileTree.length === 0 && <p className="project-resource-empty muted">项目目录为空。</p>}
       {files.data?.available && fileTree.length > 0 && (
-        <>
-          <div className="project-workspace-file-tree-header" aria-hidden="true">
-            <span>文件名</span>
-            <span>大小</span>
-            <span>创建时间</span>
-            <span>任务</span>
-            <span>产物标题</span>
-            <span>类型</span>
-            <span>状态</span>
-            <span>标记</span>
-          </div>
-          <WorkspaceFileTreeTable issues={issues} nodes={fileTree} orgId={orgId} productsByPath={productsByPath} />
-        </>
+        <ProjectWorkspaceExplorer agents={agents} issues={issues} nodes={fileTree} orgId={orgId} productsByPath={productsByPath} />
       )}
     </section>
   );
 }
 function ProjectWorkspaceArtifacts({
+  agents,
   executionWorkspaces,
   issues,
   loading,
   orgId,
   products,
-  projectWorkspaces,
 }: {
+  agents: Agent[];
   executionWorkspaces: ExecutionWorkspace[];
   issues: IssueListItem[];
   loading: boolean;
   orgId: string;
   products: IssueWorkProduct[];
-  projectWorkspaces: ProjectWorkspace[];
 }) {
   const issueMap = new Map(issues.map((issue) => [issue.id, issue]));
   const executionWorkspaceMap = new Map(executionWorkspaces.map((workspace) => [workspace.id, workspace]));
@@ -390,48 +300,35 @@ function ProjectWorkspaceArtifacts({
     groupedProducts.set(key, [...(groupedProducts.get(key) ?? []), product]);
   }
   const workspaceIds = [...new Set([...executionWorkspaces.map((workspace) => workspace.id), ...groupedProducts.keys()])];
-  const primaryCount = artifactProducts.filter((product) => product.isPrimary).length;
 
   return (
     <section className="project-workspace-artifacts project-tab-panel-wide" aria-label="工作区产物">
-      <div className="project-workspace-artifacts-header">
-        <div>
-          <p className="eyebrow">WORKSPACE OUTPUTS</p>
-          <div className="project-workspace-title-line">
-            <h2>工作区</h2>
-            <span>按执行工作区查看项目目录与任务产物</span>
-          </div>
-        </div>
-        <div className="project-artifact-summary compact">
-          <span><strong>{artifactProducts.length}</strong> 产物</span>
-          <span><strong>{primaryCount}</strong> 主产物</span>
-          <span><strong>{projectWorkspaces.length}</strong> 代码来源</span>
-        </div>
-      </div>
-      {loading && <p className="muted">正在加载工作区产物...</p>}
-      {!loading && artifactProducts.length === 0 && <p className="project-resource-empty muted">暂无任务产物。任务完成并登记产物后会出现在这里。</p>}
-      <div className="project-artifact-workspace-list">
-        {workspaceIds.map((workspaceId) => {
-          const workspaceProducts = groupedProducts.get(workspaceId) ?? [];
-          if (workspaceProducts.length === 0 && workspaceId === "unassigned") return null;
-          const workspace = executionWorkspaceMap.get(workspaceId);
-          return (
-            <section className="project-artifact-workspace" key={workspaceId} aria-label={workspace?.name ?? "未绑定工作区"}>
-              <div className="project-artifact-workspace-heading">
-                <div>
-                  <strong>{workspace?.name ?? "未绑定工作区"}</strong>
-                  <span title={workspace?.cwd ?? undefined}>{workspace?.cwd ?? "未记录执行目录"}</span>
+      <div className="project-workspace-artifacts-body">
+        {loading && <p className="muted">正在加载工作区产物...</p>}
+        {!loading && artifactProducts.length === 0 && <p className="project-resource-empty muted">暂无任务产物。任务完成并登记产物后会出现在这里。</p>}
+        <div className="project-artifact-workspace-list">
+          {workspaceIds.map((workspaceId) => {
+            const workspaceProducts = groupedProducts.get(workspaceId) ?? [];
+            if (workspaceProducts.length === 0 && workspaceId === "unassigned") return null;
+            const workspace = executionWorkspaceMap.get(workspaceId);
+            return (
+              <section className="project-artifact-workspace" key={workspaceId} aria-label={workspace?.name ?? "未绑定工作区"}>
+                <div className="project-artifact-workspace-heading">
+                  <div>
+                    <strong>{workspace?.name ?? "未绑定工作区"}</strong>
+                    <span title={workspace?.cwd ?? undefined}>{workspace?.cwd ?? "未记录执行目录"}</span>
+                  </div>
+                  <div className="project-workspace-badges">
+                    {workspace?.mode && <Badge>{workspace.mode}</Badge>}
+                    {workspace?.status && <Badge>{workspace.status}</Badge>}
+                    <Badge>{workspaceProducts.length} 个产物</Badge>
+                  </div>
                 </div>
-                <div className="project-workspace-badges">
-                  {workspace?.mode && <Badge>{workspace.mode}</Badge>}
-                  {workspace?.status && <Badge>{workspace.status}</Badge>}
-                  <Badge>{workspaceProducts.length} 个产物</Badge>
-                </div>
-              </div>
-              {workspace && <ProjectWorkspaceDirectory issues={issueMap} orgId={orgId} products={workspaceProducts} workspace={workspace} />}
-            </section>
-        );
-      })}
+                {workspace && <ProjectWorkspaceDirectory agents={agents} issues={issueMap} orgId={orgId} products={workspaceProducts} workspace={workspace} />}
+              </section>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -962,7 +859,7 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
   );
   if (project.error) return <ErrorNotice error={project.error} />;
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <OrgWorkspace contentClassName={`org-content-full${activeTab === "workspace" ? " project-workspace-content" : ""}`} orgId={orgId}>
       <div className="project-detail-shell">
       <header className="page-header project-detail-header">
         <div className="project-header-identity">
@@ -970,7 +867,6 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             {(project.data?.name ?? "P").slice(0, 1).toUpperCase()}
           </span>
           <div className="project-detail-title">
-            <Link className="back-link" to={`/orgs/${orgId}/projects`}>返回项目列表</Link>
             <div className="project-heading-row">
               <h1>{project.data?.name ?? "载入中..."}</h1>
             </div>
@@ -1306,12 +1202,12 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
             {executionWorkspaces.error && <ErrorNotice error={executionWorkspaces.error} />}
             {issues.error && <ErrorNotice error={issues.error} />}
             <ProjectWorkspaceArtifacts
+              agents={agentList}
               executionWorkspaces={executionWorkspaceList}
               issues={projectIssues}
               loading={workProducts.isLoading || executionWorkspaces.isLoading || issues.isLoading}
               orgId={orgId}
               products={workProducts.data ?? []}
-              projectWorkspaces={projectWorkspaces}
             />
           </>}          {activeTab === "resources" && <section className="project-resources project-tab-panel-wide">
             <div className="project-resource-hero-card">
@@ -1517,19 +1413,13 @@ ${payload.compareUrl ?? "未识别远端 compare URL"}`);
               </div>
             )}
           </section>}
-          {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">PROJECT ISSUES</p>
-                <h2>任务</h2>
-                <p className="muted">按状态展示当前项目关联的任务。</p>
-              </div>
-            </div>
+          {activeTab === "issues" && <section className="panel project-issues project-tab-panel-wide" aria-label="项目任务">
             {issues.error && <ErrorNotice error={issues.error} />}
             {agents.error && <ErrorNotice error={agents.error} />}
             <div className="project-issues-body">
               {issues.isSuccess && projectIssues.length === 0 && <p className="muted">暂无关联任务。</p>}
               <IssueStatusBoard
+                layout="list"
                 agents={agentList}
                 issues={projectIssues}
                 orgId={orgId}

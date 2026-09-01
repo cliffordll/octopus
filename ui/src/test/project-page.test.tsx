@@ -1,11 +1,36 @@
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
+import type { IssueListItem, IssueWorkProduct } from "../api/types";
+import { ProjectWorkspaceExplorer } from "../components/ProjectWorkspaceExplorer";
 import { renderApp, respond } from "./render-app";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("hides the parent task column when the workspace has no parent tasks", () => {
+  const issue: IssueListItem = {
+    id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "独立任务", status: "done", priority: "medium",
+    projectId: "project-1", goalId: null, parentId: null, assigneeAgentId: null, assigneeUserId: null,
+    createdByAgentId: null, createdByUserId: null, originKind: "manual", originId: null, updatedAt: "2026-05-28T11:00:00Z",
+  };
+  const product = { issueId: issue.id } as IssueWorkProduct;
+  render(
+    <MemoryRouter>
+      <ProjectWorkspaceExplorer
+        agents={[]}
+        issues={new Map([[issue.id, issue]])}
+        nodes={[{ name: "README.md", path: "README.md", type: "file", size: 128, modifiedAt: "2026-05-28T11:00:00Z" }]}
+        orgId="org-1"
+        productsByPath={new Map([["README.md", [product]]])}
+      />
+    </MemoryRouter>,
+  );
+
+  expect(screen.queryByRole("button", { name: "按父任务排序" })).not.toBeInTheDocument();
 });
 
 it("updates a project and manages its resource attachments", async () => {
@@ -291,16 +316,25 @@ it("updates a project and manages its resource attachments", async () => {
   );
 
   await userEvent.click(within(screen.getByRole("navigation", { name: "项目详情导航" })).getByRole("link", { name: "任务" }));
+  const issuePanel = screen.getByRole("region", { name: "项目任务" });
+  expect(issuePanel).toHaveClass("panel", "project-issues");
+  expect(within(issuePanel).queryByText("PROJECT ISSUES")).not.toBeInTheDocument();
+  expect(within(issuePanel).queryByRole("heading", { name: "任务" })).not.toBeInTheDocument();
+  expect(within(issuePanel).queryByText("按状态展示当前项目关联的任务。")).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: "完成控制台导航" })).toHaveAttribute(
     "href",
     "/orgs/org-1/issues/issue-1",
   );
   const projectIssueCard = screen.getByRole("link", { name: "完成控制台导航" }).closest(".project-issue-status-row");
   expect(projectIssueCard).not.toBeNull();
-  expect(projectIssueCard).toHaveTextContent("创建时间");
-  expect(projectIssueCard).toHaveTextContent("2026年5月28日 18:00");
-  expect(projectIssueCard).toHaveTextContent("归属");
+  expect(projectIssueCard?.closest(".project-issue-grouped-list")).not.toBeNull();
+  expect(projectIssueCard).not.toHaveTextContent("创建时间");
+  expect(projectIssueCard).not.toHaveTextContent("归属");
+  expect(projectIssueCard).not.toHaveTextContent("阶段：");
+  expect(projectIssueCard).not.toHaveTextContent("查看详情 / 执行输出");
   expect(projectIssueCard).toHaveTextContent("Builder");
+  expect(projectIssueCard).toHaveTextContent("高");
+  expect(within(issuePanel).getAllByRole("heading", { level: 3 })).toHaveLength(3);
   const issueSummary = screen.getByText("总数").closest(".project-issue-status-summary");
   expect(issueSummary).not.toBeNull();
   expect(within(issueSummary as HTMLElement).getByText("总数").closest(".summary-metric")).toHaveTextContent("3");
@@ -431,9 +465,15 @@ it("shows project workspace artifacts as a directory tree", async () => {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/projects/project-1" && init?.method === "GET") return respond(project);
     if (path === "/api/orgs/org-1/projects" && init?.method === "GET") return respond([project]);
-    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([]);
+    if (path === "/api/orgs/org-1/agents" && init?.method === "GET") return respond([{
+      id: "agent-1", orgId: "org-1", name: "engineer-1", urlKey: "engineer-1", role: "engineer", title: null,
+      status: "active", agentRuntimeType: "codex_local", agentRuntimeConfig: {}, budgetMonthlyCents: 0, lastHeartbeatAt: null,
+    }]);
     if (path === "/api/orgs/org-1/issues?projectId=project-1" && init?.method === "GET") {
-      return respond([{ id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", assigneeAgentId: null, assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" }]);
+      return respond([
+        { id: "issue-parent", orgId: "org-1", identifier: "OCT-0", title: "控制台改版", status: "in_progress", priority: "high", projectId: "project-1", parentId: null, assigneeAgentId: null, assigneeUserId: null, createdAt: "2026-05-28T09:00:00Z", updatedAt: "2026-05-28T10:00:00Z" },
+        { id: "issue-1", orgId: "org-1", identifier: "OCT-1", title: "完成控制台导航", status: "done", priority: "high", projectId: "project-1", parentId: "issue-parent", assigneeAgentId: "agent-1", assigneeUserId: null, createdAt: "2026-05-28T10:00:00Z", updatedAt: "2026-05-28T11:00:00Z" },
+      ]);
     }
     if (path === "/api/execution-workspaces?orgId=org-1&projectId=project-1" && init?.method === "GET") return respond([executionWorkspace]);
     if (path === "/api/execution-workspaces/exec-1/files" && init?.method === "GET") {
@@ -464,17 +504,52 @@ it("shows project workspace artifacts as a directory tree", async () => {
   renderApp("/orgs/org-1/projects/project-1/workspace");
 
   const panel = await screen.findByRole("region", { name: "工作区产物" });
+  expect(panel.closest(".org-content")).toHaveClass("project-workspace-content");
+  expect(within(panel).queryByRole("heading", { name: "工作区" })).not.toBeInTheDocument();
+  expect(within(panel).queryByText("WORKSPACE OUTPUTS")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("按执行工作区查看项目目录与任务产物。")).not.toBeInTheDocument();
+  expect(within(panel).queryByText("代码来源")).not.toBeInTheDocument();
   expect(within(panel).getByText("共享运行")).toBeInTheDocument();
   const fileTree = await within(panel).findByRole("region", { name: "共享运行 文件树" });
+  const workspaceHeader = within(panel).getByText("共享运行").closest<HTMLElement>(".project-artifact-workspace-heading")!;
+  expect(workspaceHeader.nextElementSibling).toBe(fileTree);
+  expect(fileTree).not.toContainElement(workspaceHeader);
+  expect(within(workspaceHeader).getByText("shared_workspace")).toBeInTheDocument();
+  expect(fileTree.closest(".project-workspace-artifacts-body")).not.toBeNull();
+  expect(within(fileTree).queryByRole("tab", { name: "任务产物" })).not.toBeInTheDocument();
+  expect(within(fileTree).queryByRole("tab", { name: "全部文件" })).not.toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按文件名排序" })).toHaveAttribute("aria-pressed", "true");
+  expect(within(fileTree).getByRole("button", { name: "按更新时间排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按执行者排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("button", { name: "按父任务排序" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("separator", { name: "调整信息栏宽度" })).toHaveAttribute("aria-valuenow", "720");
   expect(within(fileTree).getByText("api")).toBeInTheDocument();
-  expect(within(fileTree).getByText("server.py")).toBeInTheDocument();
-  expect(within(fileTree).getByText("README.md")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "server.py" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "README.md" })).toBeInTheDocument();
   expect(within(fileTree).getByText("app")).toBeInTheDocument();
   expect(within(fileTree).getByText("routes")).toBeInTheDocument();
-  expect(within(fileTree).getByText("hello.py")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toBeInTheDocument();
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-1");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("完成控制台导航");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-1完成控制台导航");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("engineer-1");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("OCT-0");
+  expect(within(fileTree).getByRole("treeitem", { name: "hello.py" })).toHaveTextContent("控制台改版");
+  await userEvent.click(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" }));
+  expect(within(fileTree).getByRole("button", { name: "按任务编号 标题排序" })).toHaveAttribute("aria-pressed", "true");
+  expect(fileTree.querySelector(".file-context-browser")).toHaveClass("project-workspace-explorer");
+  expect(fileTree.querySelector(".file-browser")).toBeNull();
+  expect(within(fileTree).queryByRole("heading", { name: "文件与任务" })).not.toBeInTheDocument();
+  expect(within(fileTree).queryByText("创建时间")).not.toBeInTheDocument();
+  await userEvent.click(within(fileTree).getByRole("treeitem", { name: "hello.py" }));
   expect(within(fileTree).queryByText("696e0318-4c7a-4e18-9930-ee444bd6faa8")).not.toBeInTheDocument();
-  expect(within(fileTree).getByText("OCT-1 完成控制台导航")).toBeInTheDocument();
-  expect(within(fileTree).getByText("验收报告")).toBeInTheDocument();
+  expect(within(fileTree).getByText("OCT-1 · engineer-1 · 只读")).toBeInTheDocument();
+  expect(within(fileTree).getByRole("link", { name: "查看任务" })).toHaveAttribute("href", "/orgs/org-1/issues/issue-1");
+  expect(within(fileTree).getByTitle("验收报告 内容")).toHaveAttribute(
+    "src",
+    "/api/assets/696e0318-4c7a-4e18-9930-ee444bd6faa8/content",
+  );
   expect(within(panel).queryByText("执行产物")).not.toBeInTheDocument();
   expect(within(panel).queryByText("代码提交 abc1234")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/work-products", expect.objectContaining({ method: "GET" }));

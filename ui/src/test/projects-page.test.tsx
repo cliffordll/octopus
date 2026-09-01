@@ -20,10 +20,8 @@ it("opens the first project for an organization with projects", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/projects");
-  expect(await screen.findByRole("link", { name: "返回项目列表" })).toHaveAttribute(
-    "href",
-    "/orgs/org-1/projects",
-  );
+  expect(await screen.findByRole("heading", { name: "控制台", level: 1 })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "返回项目列表" })).not.toBeInTheDocument();
   const organizationNavigation = screen.getByRole("navigation", { name: "组织导航" });
   const organizationSidebar = organizationNavigation.closest("aside")!;
   const sidebarTitle = organizationSidebar.querySelector(":scope > h2");

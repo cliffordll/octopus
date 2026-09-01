@@ -113,9 +113,10 @@ it("shows the organization workspace file tree and editor", async () => {
   expect(await screen.findByRole("heading", { name: "工作区" })).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-files-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-editor-card")).toBeInTheDocument();
+  expect(screen.getByTestId("org-workspaces-files-card").closest(".file-browser")).toHaveClass("framed");
   expect(screen.getByRole("heading", { name: "文件" })).toBeInTheDocument();
-  expect(screen.getByText("组织工作区根目录")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "内容" })).toBeInTheDocument();
+  expect(screen.queryByText("组织工作区根目录")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "内容" })).not.toBeInTheDocument();
   expect(screen.queryByText("Project Workspaces")).not.toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "项目工作区" })).not.toBeInTheDocument();
   expect(await screen.findByText("artifacts")).toBeInTheDocument();
@@ -134,6 +135,8 @@ it("shows the organization workspace file tree and editor", async () => {
   expect([...topLevelOrder].sort((left, right) => left - right)).toEqual(topLevelOrder);
   await userEvent.click(screen.getByRole("button", { name: /artifacts/ }));
   await userEvent.click(await screen.findByRole("button", { name: /summary.md/ }));
+  expect(screen.getByRole("heading", { name: "summary.md · artifacts" })).toBeInTheDocument();
+  expect(screen.getByText("只读")).toBeInTheDocument();
   expect(await screen.findByLabelText("工作区文件内容")).toHaveValue("# Summary\n\nhello");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/workspace/files?path=artifacts",

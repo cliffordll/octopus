@@ -286,6 +286,7 @@ it("shows organization skills and edits the selected skill file", async () => {
   );
   await userEvent.click(screen.getByRole("button", { name: /SKILL.md/ }));
   const editor = await screen.findByLabelText("SKILL.md");
+  expect(editor.closest(".file-browser") as HTMLElement).toHaveClass("organization-skill-content-layout");
   await userEvent.type(editor, "{End}{Enter}Updated");
   await userEvent.click(screen.getByRole("button", { name: "保存" }));
 

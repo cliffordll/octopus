@@ -8,10 +8,11 @@ import { projectsApi } from "../api/projects";
 import type { OrganizationResource, OrganizationSkillFileInventoryEntry, OrganizationSkillListItem, OrganizationWorkspaceFileDetail, OrganizationWorkspaceFileEntry } from "../api/types";
 import { Badge } from "../components/Badge";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { FileBrowser } from "../components/FileBrowser";
 import { MemberAccessSettings } from "../components/MemberAccessSettings";
 import { OrganizationCostPanel } from "../components/OrganizationCostPanel";
 import { SidebarIcon } from "../components/SidebarIcon";
-import { sourceLabel, statusLabel } from "../utils/display";
+import { sourceLabel } from "../utils/display";
 
 export function OrganizationPage() {
   const { orgId = "" } = useParams();
@@ -1200,12 +1201,12 @@ export function OrganizationSkillsPage() {
                 {skillFile.error && <ErrorNotice error={skillFile.error} />}
                 {updateStatus.error && <ErrorNotice error={updateStatus.error} />}
                 {installUpdate.error && <ErrorNotice error={installUpdate.error} />}
-                <div className="organization-skill-content-layout">
-                  <aside className="organization-skill-files">
-                    <div className="organization-skill-files-header">
-                      <h3>文件</h3>
-                      <span>{selectedSkill.fileInventory.length}</span>
-                    </div>
+                <FileBrowser
+                  className="organization-skill-content-layout"
+                  fileTitle={selectedPath}
+                  fileStatus={skillFile.data?.editable ? "可编辑" : "只读"}
+                  sidebarCount={selectedSkill.fileInventory.length}
+                  sidebar={(
                     <SkillFileTree
                       expandedDirs={new Set(expandedSkillDirs[selectedSkill.id] ?? [])}
                       files={selectedSkill.fileInventory}
@@ -1213,31 +1214,26 @@ export function OrganizationSkillsPage() {
                       onSelect={(path) => selectSkillFile(selectedSkill.id, path)}
                       onToggle={(path) => toggleSkillDirectory(selectedSkill.id, path)}
                     />
-                  </aside>
-                  <div className="organization-skill-file-panel">
-                    <div className="organization-skill-file-toolbar">
-                      <div>
-                        <h3>{selectedPath}</h3>
-                        <p>{skillFile.data?.editable ? "可编辑" : "只读"}</p>
-                      </div>
-                      <button
-                        disabled={!selectedSkill.editable || !skillFile.data?.editable || saveFile.isPending}
-                        onClick={() => saveFile.mutate()}
-                        type="button"
-                      >
-                        保存
-                      </button>
-                    </div>
-                    <textarea
-                      aria-label={selectedPath}
-                      className="skill-yaml-textarea organization-skill-editor"
-                      readOnly={!selectedSkill.editable || !skillFile.data?.editable}
-                      value={draftContent}
-                      onChange={(event) => setDraftContent(event.target.value)}
-                    />
-                    {saveFile.error && <ErrorNotice error={saveFile.error} />}
-                  </div>
-                </div>
+                  )}
+                  actions={(
+                    <button
+                      disabled={!selectedSkill.editable || !skillFile.data?.editable || saveFile.isPending}
+                      onClick={() => saveFile.mutate()}
+                      type="button"
+                    >
+                      保存
+                    </button>
+                  )}
+                >
+                  <textarea
+                    aria-label={selectedPath}
+                    className="skill-yaml-textarea organization-skill-editor"
+                    readOnly={!selectedSkill.editable || !skillFile.data?.editable}
+                    value={draftContent}
+                    onChange={(event) => setDraftContent(event.target.value)}
+                  />
+                  {saveFile.error && <ErrorNotice error={saveFile.error} />}
+                </FileBrowser>
               </div>
             </>
           ) : (
@@ -1525,15 +1521,22 @@ export function OrganizationWorkspacesPage() {
       {projects.error && <ErrorNotice error={projects.error} />}
       {rootFiles.error && <ErrorNotice error={rootFiles.error} />}
       {selectedFile.error && <ErrorNotice error={selectedFile.error} />}
-      <div className="workspace-shell-layout">
-        <section className="workspace-files-card" data-testid="org-workspaces-files-card">
-          <div className="workspace-card-header">
-            <div>
-              <h2>文件</h2>
-              <p>{rootFiles.data?.rootExists === false ? "工作区不存在" : "组织工作区根目录"}</p>
-            </div>
-            <Badge>{sortedWorkspaceTree.length}</Badge>
-          </div>
+      <FileBrowser
+        actions={(
+          <>
+            {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
+            <button disabled title="当前暂只支持工作区预览" type="button">保存</button>
+          </>
+        )}
+        className="workspace-shell-layout"
+        fileStatus={selectedPath ? "只读" : "从左侧选择文件"}
+        fileTitle={workspaceHeaderPath(selectedPath)}
+        framed
+        sidebarCount={sortedWorkspaceTree.length}
+        sidebarWidth={300}
+        treeTestId="org-workspaces-files-card"
+        viewerTestId="org-workspaces-editor-card"
+        sidebar={(
           <div className="workspace-files-scroll">
             {rootFiles.isLoading && <p className="muted">加载工作区中...</p>}
             {rootFiles.data?.message && <p className="muted">{rootFiles.data.message}</p>}
@@ -1550,41 +1553,28 @@ export function OrganizationWorkspacesPage() {
               ))}
             </ul>
           </div>
-        </section>
-        <section className="workspace-editor-card" data-testid="org-workspaces-editor-card">
-          <div className="workspace-card-header workspace-editor-header">
-            <div>
-              <h2>内容</h2>
-              <p>{workspaceHeaderPath(selectedPath)}</p>
-            </div>
-            <div className="workspace-editor-actions">
-              {selectedPath && <span className="workspace-format-pill">{displayWorkspaceFileFormat(selectedPath, selectedDetail)}</span>}
-              <button disabled title="当前暂只支持工作区预览" type="button">保存</button>
-            </div>
+        )}
+      >
+        {!selectedPath ? (
+          <p className="muted">从左侧选择文件查看内容。</p>
+        ) : selectedFile.isLoading ? (
+          <p className="muted">加载文件中...</p>
+        ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
+          <div className="workspace-image-preview">
+            <img alt={selectedPath} src={selectedDetail.contentPath} />
           </div>
-          <div className="workspace-editor-body">
-            {!selectedPath ? (
-              <p className="muted">从左侧选择文件查看内容。</p>
-            ) : selectedFile.isLoading ? (
-              <p className="muted">加载文件中...</p>
-            ) : selectedDetail?.previewKind === "image" && selectedDetail.contentPath ? (
-              <div className="workspace-image-preview">
-                <img alt={selectedPath} src={selectedDetail.contentPath} />
-              </div>
-            ) : selectedDetail?.previewKind === "binary" ? (
-              <p className="muted">{selectedDetail.message ?? "二进制文件暂不预览。"}</p>
-            ) : (
-              <textarea
-                aria-label="工作区文件内容"
-                className="workspace-text-editor"
-                readOnly
-                spellCheck={false}
-                value={selectedDetail?.content ?? ""}
-              />
-            )}
-          </div>
-        </section>
-      </div>
+        ) : selectedDetail?.previewKind === "binary" ? (
+          <p className="muted">{selectedDetail.message ?? "二进制文件暂不预览。"}</p>
+        ) : (
+          <textarea
+            aria-label="工作区文件内容"
+            className="workspace-text-editor"
+            readOnly
+            spellCheck={false}
+            value={selectedDetail?.content ?? ""}
+          />
+        )}
+      </FileBrowser>
     </OrgWorkspace>
   );
 }

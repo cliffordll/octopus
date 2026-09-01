@@ -4043,6 +4043,7 @@ async def test_issue_parent_filter_and_depth_are_applied(
 
     assert code == 200
     assert [row["id"] for row in body] == [child["id"]]
+    assert body[0]["parentId"] == parent["id"]
 
 
 async def test_issue_create_rejects_parent_from_another_org(
