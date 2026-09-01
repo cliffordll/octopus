@@ -9,6 +9,7 @@ import type { AgentInboxItem, AgentMemoryFileEntry, AgentRole, AgentRuntimeEnvir
 import { Badge } from "../components/Badge";
 import { AgentsWorkspace } from "../components/ContextWorkspace";
 import { ErrorNotice } from "../components/ErrorNotice";
+import { FileBrowser } from "../components/FileBrowser";
 import { RuntimeConfigFields } from "../components/RuntimeConfigFields";
 import { SidebarIcon } from "../components/SidebarIcon";
 import { StatusPill } from "../components/StatusPill";
@@ -40,6 +41,16 @@ function inboxRelationshipLabel(relationship: AgentInboxItem["relationship"]): s
   if (relationship === "reviewer") return "评审";
   if (relationship === "mentioned") return "提及";
   return "执行";
+}
+
+function FileActionIcon({ name }: { name: "add" | "delete" | "save" }) {
+  return (
+    <svg aria-hidden="true" className="file-action-icon" fill="none" focusable="false" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 24 24">
+      {name === "add" && <><path d="M6 3h8l4 4v14H6Z" /><path d="M14 3v5h5" /></>}
+      {name === "delete" && <><path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" /></>}
+      {name === "save" && <><path d="M5 3h12l2 2v16H5Z" /><path d="M8 3v6h8V3M8 21v-7h8v7" /></>}
+    </svg>
+  );
 }
 
 function readJsonObject(value: string, label: string): Record<string, unknown> {
@@ -118,7 +129,7 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
   }
 
   return (
-    <div className="agent-property-list">
+    <div className="agent-property-list agent-policy-field-grid">
       <label className="agent-property-row">
         <span>状态检测</span>
         <select value={enabled ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("enabled", event.target.value === "enabled")}>
@@ -138,6 +149,17 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
         />
       </label>
       <label className="agent-property-row">
+        <span>最大并发运行数</span>
+        <input
+          aria-label="最大并发运行数"
+          min="1"
+          placeholder="3"
+          type="number"
+          value={numberConfigValueWithFallback(heartbeat, "maxConcurrentRuns", 3)}
+          onChange={(event) => setHeartbeatField("maxConcurrentRuns", event.target.value ? Number(event.target.value) : "")}
+        />
+      </label>
+      <label className="agent-property-row">
         <span>允许手动诊断</span>
         <select value={wakeOnDemand ? "enabled" : "disabled"} onChange={(event) => setHeartbeatField("wakeOnDemand", event.target.value === "enabled")}>
           <option value="enabled">启用</option>
@@ -150,17 +172,6 @@ function HeartbeatConfigFields({ value, onChange }: HeartbeatConfigFieldsProps) 
           <option value="enabled">启用</option>
           <option value="disabled">关闭</option>
         </select>
-      </label>
-      <label className="agent-property-row">
-        <span>最大并发运行数</span>
-        <input
-          aria-label="最大并发运行数"
-          min="1"
-          placeholder="3"
-          type="number"
-          value={numberConfigValueWithFallback(heartbeat, "maxConcurrentRuns", 3)}
-          onChange={(event) => setHeartbeatField("maxConcurrentRuns", event.target.value ? Number(event.target.value) : "")}
-        />
       </label>
     </div>
   );
@@ -178,6 +189,15 @@ function runtimeTestPassed(result: AgentRuntimeEnvironmentTestResult | null) {
   const statusPassed = ["ok", "pass", "passed", "success", "succeeded", "warning"].includes(status);
   const hasFailedCheck = result.checks.some((check) => ["failed", "fail", "error"].includes((check.status ?? "").toLowerCase()));
   return statusPassed && !hasFailedCheck;
+}
+
+function runtimeTestFailureReason(result: AgentRuntimeEnvironmentTestResult | null) {
+  if (!result || runtimeTestPassed(result)) return "";
+  const failedCheck = result.checks.find((check) => ["failed", "fail", "error"].includes((check.status ?? "").toLowerCase()));
+  const check = failedCheck ?? result.checks.find((item) => item.message || item.hint);
+  if (!check) return "运行环境检查未通过";
+  const detail = [check.message, check.hint].filter(Boolean).join("；");
+  return [check.label ?? check.id, detail].filter(Boolean).join("：") || "运行环境检查未通过";
 }
 
 function parseCsv(value: string): string[] {
@@ -847,7 +867,7 @@ export function AgentPage() {
   const [pendingSkillActionKey, setPendingSkillActionKey] = useState("");
   const [runtimeTestResult, setRuntimeTestResult] = useState<AgentRuntimeEnvironmentTestResult | null>(null);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
-  const [heartbeatPolicyExpanded, setHeartbeatPolicyExpanded] = useState(false);
+  const [configHistoryExpanded, setConfigHistoryExpanded] = useState(false);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [resetSessionDialogOpen, setResetSessionDialogOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
@@ -860,6 +880,7 @@ export function AgentPage() {
   const [memoryLayer, setMemoryLayer] = useState<"memory" | "life">("memory");
   const [memoryDirectoryPath, setMemoryDirectoryPath] = useState("");
   const [selectedMemoryPath, setSelectedMemoryPath] = useState("");
+  const [showMemoryForm, setShowMemoryForm] = useState(false);
   const [newMemoryFilePath, setNewMemoryFilePath] = useState("");
   const [memoryCreateError, setMemoryCreateError] = useState("");
   const [memoryDraft, setMemoryDraft] = useState("");
@@ -880,25 +901,10 @@ export function AgentPage() {
     queryFn: () => agentsApi.inbox(agentId),
     enabled: activeTab === "dashboard",
   });
-  const configuration = useQuery({
-    queryKey: ["agent-configuration", agentId],
-    queryFn: () => agentsApi.configuration(agentId),
-    enabled: activeTab === "configuration",
-  });
   const configRevisions = useQuery({
     queryKey: ["agent-config-revisions", agentId],
     queryFn: () => agentsApi.configRevisions(agentId),
-    enabled: activeTab === "configuration",
-  });
-  const taskSessions = useQuery({
-    queryKey: ["agent-task-sessions", agentId],
-    queryFn: () => agentsApi.taskSessions(agentId),
-    enabled: activeTab === "configuration" || activeTab === "runs",
-  });
-  const adapterMetadata = useQuery({
-    queryKey: ["adapter-metadata", orgId, runtime],
-    queryFn: () => agentsApi.adapterMetadata(orgId, runtime),
-    enabled: activeTab === "configuration" && Boolean(orgId && runtime),
+    enabled: activeTab === "configuration" && configHistoryExpanded,
   });
   const adapters = useQuery({
     queryKey: ["runtime-adapters", orgId],
@@ -1005,7 +1011,9 @@ export function AgentPage() {
   const testRuntime = useMutation({
     mutationFn: () => agentsApi.testAdapterEnvironment(orgId, runtime, validatedAgentRuntimeConfig(runtime, agentRuntimeConfig)),
     onSuccess: (result) => setRuntimeTestResult(result),
-    onError: () => setRuntimeTestResult(null),
+    onError: () => {
+      setRuntimeTestResult(null);
+    },
   });
   const syncSkills = useMutation({
     mutationFn: (nextDesiredSkills?: string[]) => agentsApi.syncSkills(agentId, nextDesiredSkills ?? parseCsv(desiredSkills)),
@@ -1097,7 +1105,6 @@ export function AgentPage() {
         title: title.trim() || null,
         role,
         capabilities: capabilities.trim() || null,
-        desiredSkills: parseCsv(desiredSkills),
         agentRuntimeType: runtime,
         agentRuntimeConfig: validatedAgentRuntimeConfig(runtime, agentRuntimeConfig),
         replaceAgentRuntimeConfig: true,
@@ -1155,6 +1162,18 @@ export function AgentPage() {
     setAgentRuntimeConfig(JSON.stringify(next, null, 2));
     setConfigurationError(null);
   }
+  function setRuntimeLiveProbe(enabled: boolean) {
+    const next = readJsonObjectSafe(agentRuntimeConfig);
+    if (enabled) next.liveProbe = true;
+    else delete next.liveProbe;
+    updateAgentRuntimeConfig(next);
+  }
+  function setRuntimeProbeTimeout(value: string) {
+    const next = readJsonObjectSafe(agentRuntimeConfig);
+    if (value) next.probeTimeoutSec = Number(value);
+    else delete next.probeTimeoutSec;
+    updateAgentRuntimeConfig(next);
+  }
   function updateRuntimeConfig(next: Record<string, unknown>) {
     setRuntimeConfig(JSON.stringify(next, null, 2));
     setConfigurationError(null);
@@ -1208,8 +1227,9 @@ export function AgentPage() {
     refetchInterval: selectedRun?.status === "running" ? 5000 : false,
   });
   const revisionRows = Array.isArray(configRevisions.data) ? configRevisions.data : [];
-  const taskSessionRows = Array.isArray(taskSessions.data) ? taskSessions.data : [];
   const runtimeAvailable = runtimeTestPassed(runtimeTestResult);
+  const runtimeFailureReason = runtimeTestFailureReason(runtimeTestResult);
+  const runtimeRequestError = testRuntime.error instanceof Error ? testRuntime.error.message : testRuntime.error ? "请求失败" : "";
   const runtimeModelOptions: RuntimeModel[] = runtimeModels.data ?? [];
   const selectedRuntimeModel =
     supportsRuntimeModels(runtime)
@@ -1247,8 +1267,6 @@ export function AgentPage() {
   const selectedFileContent = selectedBundleFile.data?.content;
   const selectedInstructionContent = selectedFileContent?.trim() ? selectedFileContent : (selectedInstruction?.content ?? selectedFileContent ?? "");
   const memoryEntries = memoryFiles.data?.entries ?? [];
-  const memoryRootPath = memoryFiles.data?.rootPath ?? "未返回";
-  const memoryCurrentDirectory = memoryFiles.data?.directoryPath || "/";
   const sortedMemoryEntries = useMemo(
     () => [...memoryEntries].sort((left, right) => {
       if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
@@ -1282,6 +1300,8 @@ export function AgentPage() {
     setMemoryDraft("");
     setMemoryDirectoryPath("");
     setMemoryCreateError("");
+    setShowMemoryForm(false);
+    setNewMemoryFilePath("");
   }, [memoryLayer]);
   function toggleInstructionDir(path: string) {
     setExpandedInstructionDirs((current) => {
@@ -1337,6 +1357,17 @@ export function AgentPage() {
     setMemoryCreateError("");
     upsertMemoryFile.mutate({ path, content: "" });
     setNewMemoryFilePath("");
+    setShowMemoryForm(false);
+  }
+  function openMemoryForm() {
+    setNewMemoryFilePath("");
+    setMemoryCreateError("");
+    setShowMemoryForm(true);
+  }
+  function closeMemoryForm() {
+    setShowMemoryForm(false);
+    setNewMemoryFilePath("");
+    setMemoryCreateError("");
   }
   function selectMemoryEntry(entry: AgentMemoryFileEntry) {
     if (entry.isDirectory) {
@@ -1386,7 +1417,7 @@ export function AgentPage() {
   }
   if (agent.error) return <ErrorNotice error={agent.error} />;
   return (
-    <AgentsWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <AgentsWorkspace contentClassName="org-content-full agent-detail-content" orgId={orgId}>
       <header className="page-header agent-page-header">
         <div className="agent-header-identity">
           <div aria-hidden="true" className="agent-avatar-lg"><SidebarIcon name="agents" /></div>
@@ -1407,22 +1438,27 @@ export function AgentPage() {
         {agent.data && (
           <div className="agent-header-actions">
             <button className="secondary" disabled={operationalDisabled} onClick={() => setTaskDialogOpen(true)} type="button">分配任务</button>
-            {activeTab === "configuration" && (
-              <button className="secondary" disabled={resetSession.isPending} onClick={() => setResetSessionDialogOpen(true)} type="button">
-                重置会话
-              </button>
-            )}
             {canChat ? (
               <Link className="button secondary" to={`/orgs/${orgId}/chats?agentId=${encodeURIComponent(agentId)}`}>聊天</Link>
             ) : (
               <button className="secondary" disabled type="button">聊天</button>
             )}
-            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => action.mutate("pause")}>暂停</button>
-            <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
-            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
-            <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
             <button className="secondary" disabled={isPaused || operationalDisabled || wakeup.isPending} title="立即执行一次心跳检查，有待办任务时才启动运行" type="button" onClick={() => wakeup.mutate()}>立即唤醒</button>
-            <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行诊断</button>
+            <details className="agent-header-more">
+              <summary className="button secondary">更多操作</summary>
+              <div className="agent-header-more-menu" role="menu">
+                {activeTab === "configuration" && (
+                  <button className="secondary" disabled={resetSession.isPending} onClick={() => setResetSessionDialogOpen(true)} type="button">
+                    重置会话
+                  </button>
+                )}
+                <button disabled={isPaused || operationalDisabled} type="button" onClick={() => action.mutate("pause")}>暂停</button>
+                <button className="secondary" disabled={!isPaused} type="button" onClick={() => action.mutate("resume")}>恢复</button>
+                <button disabled={isPaused || operationalDisabled} type="button" onClick={() => invoke.mutate()}>运行诊断</button>
+                <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("terminate")}>终止</button>
+                <button className="danger" disabled={isTerminated} type="button" onClick={() => action.mutate("archive")}>归档</button>
+              </div>
+            </details>
           </div>
         )}
       </header>
@@ -1434,21 +1470,59 @@ export function AgentPage() {
         <>
           <nav aria-label="智能体详情导航" className="detail-tabs">
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/dashboard`}>概览</NavLink>
+            <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/profile`}>说明</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/memory`}>记忆</NavLink>
-            <NavLink to={`/orgs/${orgId}/agents/${agentId}/configuration`}>配置</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/skills`}>技能</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/runs`}>运行记录</NavLink>
             <NavLink to={`/orgs/${orgId}/agents/${agentId}/budget`}>预算</NavLink>
           </nav>
           {activeTab === "dashboard" && <div className="agent-dashboard">
-            <div className="agent-dashboard-column">
-              <section className="panel agent-latest-run-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Latest Run</p>
-                    <h2>最近运行</h2>
+            {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
+            <div className="project-summary-toolbar agent-overview-summary">
+              <div aria-label="智能体概览统计" className="project-compact-summary" role="group">
+                <span className="project-summary-chip"><strong>{inbox.data?.length ?? 0}</strong> 待办</span>
+                <span className="project-summary-chip"><strong>{runtimeState.data?.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong> 最近运行</span>
+                <span className="project-summary-chip"><strong>{runtimeState.data?.sessionDisplayId ?? "暂无"}</strong> 会话</span>
+                <span className="project-summary-chip"><strong>{(runtimeState.data?.totalInputTokens ?? 0) + (runtimeState.data?.totalOutputTokens ?? 0)}</strong> Tokens</span>
+                <span className="project-summary-chip"><strong>{formatMoneyCents(runtimeState.data?.totalCostCents ?? 0)}</strong> 费用</span>
+                <span className="project-summary-chip"><strong>{formatDateTime(agent.data.lastHeartbeatAt)}</strong> 最近心跳</span>
+              </div>
+            </div>
+            <div className="agent-overview-grid">
+              <section className="panel agent-inbox-card agent-overview-panel">
+                <div className="panel-heading agent-overview-panel-heading">
+                  <h2>待办任务</h2>
+                  <Badge>{inbox.data?.length ?? 0}</Badge>
+                </div>
+                {inbox.error && <ErrorNotice error={inbox.error} />}
+                {inbox.isLoading && <p className="muted">载入中...</p>}
+                {inbox.data && inbox.data.length === 0 && <p className="agent-overview-empty muted">暂无待办任务。</p>}
+                {inbox.data && inbox.data.length > 0 && (
+                  <div className="agent-inbox-list">
+                    {inbox.data.map((item) => (
+                      <Link className="agent-inbox-row" key={`${item.relationship}-${item.issueId}`} to={`/orgs/${orgId}/issues/${item.issueId}`}>
+                        <div>
+                          <div className="agent-inbox-title-row">
+                            <strong>{item.identifier ?? item.issueId.slice(0, 8)}</strong>
+                            <span>{item.title}</span>
+                          </div>
+                          {item.commentPreview && <p className="agent-inbox-comment">{item.commentPreview}</p>}
+                        </div>
+                        <div className="agent-inbox-meta">
+                          <Badge>{inboxRelationshipLabel(item.relationship)}</Badge>
+                          <StatusPill status={item.status}>{statusLabel(item.status)}</StatusPill>
+                          <span>{item.priority}</span>
+                          <span>{formatDateTime(item.updatedAt)}</span>
+                        </div>
+                      </Link>
+                    ))}
                   </div>
+                )}
+              </section>
+              <section className="panel agent-latest-run-card agent-overview-panel">
+                <div className="panel-heading agent-overview-panel-heading">
+                  <h2>最近运行</h2>
                 </div>
                 <div className="agent-latest-run-title-row">
                   {selectedRun ? (
@@ -1461,77 +1535,10 @@ export function AgentPage() {
                   )}
                 </div>
                 <p className="muted agent-latest-run-summary" title={compactRunSummary(selectedRun)}>{compactRunSummary(selectedRun)}</p>
-                <dl className="detail-grid compact">
+                <dl className="detail-grid compact agent-overview-run-details">
                   <div><dt>来源</dt><dd>{selectedRun?.invocationSource ? sourceLabel(selectedRun.invocationSource) : "-"}</dd></div>
                   <div><dt>开始时间</dt><dd>{formatRunTime(selectedRun?.startedAt)}</dd></div>
                   <div><dt>结束时间</dt><dd>{formatRunTime(selectedRun?.finishedAt)}</dd></div>
-                  <div><dt>最近心跳</dt><dd>{formatDateTime(agent.data.lastHeartbeatAt)}</dd></div>
-                </dl>
-              </section>
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Runtime</p>
-                    <h2>运行状态</h2>
-                  </div>
-                </div>
-                {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-                {runtimeState.data && (
-                  <div className="agent-summary-grid">
-                    <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
-                    <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                    <div className="summary-metric"><span>Tokens</span><strong>{runtimeState.data.totalInputTokens + runtimeState.data.totalOutputTokens}</strong></div>
-                    <div className="summary-metric"><span>Cost</span><strong>{formatMoneyCents(runtimeState.data.totalCostCents)}</strong></div>
-                  </div>
-                )}
-              </section>
-            </div>
-            <div className="agent-dashboard-column">
-              <section className="panel agent-inbox-card">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Inbox</p>
-                    <h2>待办收件箱</h2>
-                  </div>
-                  <Badge>{inbox.data?.length ?? 0}</Badge>
-                </div>
-                {inbox.error && <ErrorNotice error={inbox.error} />}
-                {inbox.isLoading && <p className="muted">载入中...</p>}
-                {inbox.data && inbox.data.length === 0 && <p className="muted">暂无待办事项。</p>}
-                {inbox.data && inbox.data.length > 0 && (
-                  <div className="agent-inbox-list">
-                    {inbox.data.map((item) => (
-                      <Link className="agent-inbox-row" key={`${item.relationship}-${item.issueId}`} to={`/orgs/${orgId}/issues/${item.issueId}`}>
-                        <div>
-                          <div className="agent-inbox-title-row">
-                            <Badge>{inboxRelationshipLabel(item.relationship)}</Badge>
-                            <strong>{item.identifier ?? item.issueId.slice(0, 8)}</strong>
-                          </div>
-                          <p>{item.title}</p>
-                          {item.commentPreview && <p className="agent-inbox-comment">{item.commentPreview}</p>}
-                        </div>
-                        <div className="agent-inbox-meta">
-                          <StatusPill status={item.status}>{statusLabel(item.status)}</StatusPill>
-                          <span>{item.priority}</span>
-                          <span>{formatDateTime(item.updatedAt)}</span>
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </section>
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Profile</p>
-                    <h2>智能体档案</h2>
-                  </div>
-                </div>
-                <dl className="agent-properties">
-                  <div><dt>职务</dt><dd>{agent.data.title ?? "未设置"}</dd></div>
-                  <div><dt>角色</dt><dd>{roleLabel(agent.data.role)}</dd></div>
-                  <div><dt>上级</dt><dd>{hierarchyManager?.displayName ?? "组织负责人"}</dd></div>
-                  <div><dt>能力</dt><dd>{agent.data.capabilities ?? "未设置"}</dd></div>
                 </dl>
               </section>
             </div>
@@ -1542,35 +1549,68 @@ export function AgentPage() {
             {selectedBundleFile.error && <ErrorNotice error={selectedBundleFile.error} />}
             {upsertInstruction.error && <ErrorNotice error={upsertInstruction.error} />}
             {deleteInstruction.error && <ErrorNotice error={deleteInstruction.error} />}
-            <div className="agent-instructions-grid">
-              <aside aria-label="说明文件列表" className="instruction-files-card">
-                <div className="instruction-card-header">
-                  <div>
-                    <p className="eyebrow">FILES</p>
-                    <h2>文件</h2>
-                  </div>
+            <FileBrowser
+              actions={selectedInstruction ? (
+                <>
                   <button
-                    aria-expanded={showInstructionForm}
-                    aria-label="新增文件"
-                    className="icon-button"
-                    onClick={() => (showInstructionForm ? closeInstructionForm() : openInstructionForm())}
+                    aria-label="删除文件"
+                    className="file-action-icon-button is-danger"
+                    disabled={selectedInstruction.isEntryFile || selectedBundleFile.data?.editable === false || deleteInstruction.isPending}
+                    onClick={() => deleteInstruction.mutate(selectedInstruction.path)}
+                    title="删除文件"
                     type="button"
                   >
-                    +
+                    <FileActionIcon name="delete" />
                   </button>
+                  <button
+                    aria-label="保存文件"
+                    className="file-action-icon-button is-primary"
+                    disabled={selectedBundleFile.data?.editable === false || upsertInstruction.isPending}
+                    onClick={() => upsertInstruction.mutate({ path: selectedInstruction.path, content: instructionDraft })}
+                    title="保存文件"
+                    type="button"
+                  >
+                    <FileActionIcon name="save" />
+                  </button>
+                </>
+              ) : undefined}
+              className="agent-instruction-browser"
+              fileStatus={selectedInstruction ? (selectedBundleFile.data?.editable === false ? "只读" : "可编辑") : "从左侧选择文件"}
+              fileTitle={selectedInstruction?.path ?? "未选择文件"}
+              framed
+              sidebarActions={(
+                <div className="file-browser-create-control">
+                  <button
+                    aria-expanded={showInstructionForm}
+                    aria-haspopup="dialog"
+                    aria-label="新增文件"
+                    className="file-action-icon-button is-create"
+                    onClick={() => (showInstructionForm ? closeInstructionForm() : openInstructionForm())}
+                    title="新增文件"
+                    type="button"
+                  >
+                    <FileActionIcon name="add" />
+                  </button>
+                  {showInstructionForm && (
+                    <form aria-label="新建文件" className="instruction-create-form instruction-create-popover" onSubmit={appendInstruction} role="dialog">
+                      <label>
+                        文件名
+                        <input autoFocus value={newInstructionName} onChange={(event) => setNewInstructionName(event.target.value)} required />
+                      </label>
+                      <div className="instruction-create-actions">
+                        <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
+                        <button className="small-button" disabled={upsertInstruction.isPending} type="submit">确认</button>
+                      </div>
+                    </form>
+                  )}
                 </div>
-                {showInstructionForm && (
-                  <form className="instruction-create-form" onSubmit={appendInstruction}>
-                    <label>
-                      文件名
-                      <input value={newInstructionName} onChange={(event) => setNewInstructionName(event.target.value)} required />
-                    </label>
-                    <div className="instruction-create-actions">
-                      <button className="secondary small-button" onClick={closeInstructionForm} type="button">取消</button>
-                      <button className="small-button" disabled={upsertInstruction.isPending} type="submit">确认</button>
-                    </div>
-                  </form>
-                )}
+              )}
+              sidebarCount={instructionDocs.length}
+              sidebarLabel="说明文件列表"
+              sidebarTitle="文件"
+              sidebarWidth={220}
+              viewerLabel="说明文件内容"
+              sidebar={(
                 <InstructionFileTree
                   expandedDirs={expandedInstructionDirs}
                   files={instructionDocs}
@@ -1578,89 +1618,114 @@ export function AgentPage() {
                   onToggle={toggleInstructionDir}
                   selectedPath={selectedInstruction?.path ?? ""}
                 />
-              </aside>
-              <article aria-label="说明文件内容" className="instruction-content-card">
-                {selectedInstruction ? (
-                  <>
-                    <textarea
-                      aria-label="说明文件内容"
-                      className="instruction-content-editor"
-                      readOnly={selectedBundleFile.data?.editable === false}
-                      value={instructionDraft}
-                      onChange={(event) => setInstructionDraft(event.target.value)}
-                    />
-                    <div className="instruction-create-actions">
-                      <button
-                        className="danger"
-                        disabled={selectedInstruction.isEntryFile || selectedBundleFile.data?.editable === false || deleteInstruction.isPending}
-                        onClick={() => deleteInstruction.mutate(selectedInstruction.path)}
-                        type="button"
-                      >
-                        删除文件
-                      </button>
-                      <button
-                        disabled={selectedBundleFile.data?.editable === false || upsertInstruction.isPending}
-                        onClick={() => upsertInstruction.mutate({ path: selectedInstruction.path, content: instructionDraft })}
-                        type="button"
-                      >
-                        保存文件
-                      </button>
-                    </div>
-                  </>
-                ) : selectedInstructionContent ? (
-                  <pre>{selectedInstructionContent}</pre>
-                ) : (
-                  <div className="instruction-empty-content" />
-                )}
-              </article>
-            </div>
+              )}
+            >
+              {selectedInstruction ? (
+                <textarea
+                  aria-label="说明文件内容"
+                  className="instruction-content-editor"
+                  readOnly={selectedBundleFile.data?.editable === false}
+                  value={instructionDraft}
+                  onChange={(event) => setInstructionDraft(event.target.value)}
+                />
+              ) : selectedInstructionContent ? (
+                <pre>{selectedInstructionContent}</pre>
+              ) : (
+                <p className="muted instruction-empty-content">从左侧选择文件查看内容。</p>
+              )}
+            </FileBrowser>
           </section>}
           {activeTab === "memory" && <section aria-label="Agent Memory" className="agent-instructions-page agent-memory-page">
             {memoryFiles.error && <ErrorNotice error={memoryFiles.error} />}
             {selectedMemoryFile.error && <ErrorNotice error={selectedMemoryFile.error} />}
             {upsertMemoryFile.error && <ErrorNotice error={upsertMemoryFile.error} />}
             {deleteMemoryFile.error && <ErrorNotice error={deleteMemoryFile.error} />}
-            <div className="agent-instructions-grid">
-              <aside aria-label="记忆文件列表" className="instruction-files-card memory-files-card">
-                <div className="instruction-card-header">
-                  <div>
-                    <p className="eyebrow">{memoryLayer === "memory" ? "DAILY NOTES" : "LIFE MEMORY"}</p>
-                    <h2>记忆</h2>
+            <FileBrowser
+              actions={selectedMemoryPath ? (
+                <>
+                  <button
+                    aria-label="删除文件"
+                    className="file-action-icon-button is-danger"
+                    disabled={deleteMemoryFile.isPending}
+                    onClick={() => deleteMemoryFile.mutate(selectedMemoryPath)}
+                    title="删除文件"
+                    type="button"
+                  >
+                    <FileActionIcon name="delete" />
+                  </button>
+                  <button
+                    aria-label="保存文件"
+                    className="file-action-icon-button is-primary"
+                    disabled={upsertMemoryFile.isPending}
+                    onClick={() => upsertMemoryFile.mutate({ path: selectedMemoryPath, content: memoryDraft })}
+                    title="保存文件"
+                    type="button"
+                  >
+                    <FileActionIcon name="save" />
+                  </button>
+                </>
+              ) : undefined}
+              className="agent-memory-browser"
+              fileStatus={selectedMemoryPath ? "可编辑" : "从左侧选择文件"}
+              fileTitle={selectedMemoryPath ? (selectedMemoryPath.split("/").at(-1) ?? selectedMemoryPath) : "未选择文件"}
+              framed
+              sidebarActions={(
+                <>
+                  <div aria-label="记忆类型" className="segmented-control memory-browser-layer-switch" role="group">
+                    <button className={memoryLayer === "memory" ? "active" : ""} onClick={() => setMemoryLayer("memory")} type="button">Daily</button>
+                    <button className={memoryLayer === "life" ? "active" : ""} onClick={() => setMemoryLayer("life")} type="button">Life</button>
                   </div>
-                </div>
-                <div className="segmented-control">
-                  <button className={memoryLayer === "memory" ? "active" : ""} onClick={() => setMemoryLayer("memory")} type="button">Daily</button>
-                  <button className={memoryLayer === "life" ? "active" : ""} onClick={() => setMemoryLayer("life")} type="button">Life</button>
-                </div>
-                <form className="instruction-create-form" onSubmit={createMemoryFile}>
-                  <label>
-                    文件路径
-                    <input
-                      placeholder={defaultMemoryFileName()}
-                      value={newMemoryFilePath}
-                      onChange={(event) => setNewMemoryFilePath(event.target.value)}
-                    />
-                  </label>
-                  <button className="small-button" disabled={upsertMemoryFile.isPending} type="submit">新建</button>
-                </form>
-                {memoryCreateError && <p className="field-warning">{memoryCreateError}</p>}
-                {memoryDirectoryPath && (
-                  <div className="instruction-directory">
+                  <div className="file-browser-create-control">
                     <button
-                      className="instruction-directory-button"
-                      onClick={goMemoryDirectoryUp}
+                      aria-expanded={showMemoryForm}
+                      aria-haspopup="dialog"
+                      aria-label="新增文件"
+                      className="file-action-icon-button is-create"
+                      onClick={() => (showMemoryForm ? closeMemoryForm() : openMemoryForm())}
+                      title="新增文件"
                       type="button"
                     >
-                      <span className="instruction-file-label">
-                        <span>{memoryCurrentDirectory}</span>
-                      </span>
-                      <span className="instruction-directory-toggle" aria-hidden="true">上级</span>
+                      <FileActionIcon name="add" />
                     </button>
+                    {showMemoryForm && (
+                      <form aria-label="新建记忆文件" className="instruction-create-form instruction-create-popover" onSubmit={createMemoryFile} role="dialog">
+                        <label>
+                          文件路径
+                          <input
+                            autoFocus
+                            placeholder={defaultMemoryFileName()}
+                            value={newMemoryFilePath}
+                            onChange={(event) => setNewMemoryFilePath(event.target.value)}
+                          />
+                        </label>
+                        {memoryCreateError && <p className="field-warning">{memoryCreateError}</p>}
+                        <div className="instruction-create-actions">
+                          <button className="secondary small-button" onClick={closeMemoryForm} type="button">取消</button>
+                          <button className="small-button" disabled={upsertMemoryFile.isPending} type="submit">确认</button>
+                        </div>
+                      </form>
+                    )}
                   </div>
-                )}
+                </>
+              )}
+              sidebarCount={memoryEntries.length}
+              sidebarLabel="记忆文件列表"
+              sidebarTitle="文件"
+              sidebarWidth={260}
+              viewerLabel="记忆文件内容"
+              sidebar={(
                 <div className="instruction-file-tree">
                   {memoryFiles.isLoading && <p className="muted">加载中...</p>}
                   {memoryFiles.data?.message && <p className="muted">{memoryFiles.data.message}</p>}
+                  {memoryDirectoryPath && (
+                    <button aria-label="返回上级目录" className="instruction-file-button" onClick={goMemoryDirectoryUp} type="button">
+                      <span className="instruction-file-label">
+                        <span className="instruction-directory-icon" aria-hidden="true">D</span>
+                        <span>..</span>
+                      </span>
+                      <small>上级目录</small>
+                    </button>
+                  )}
                   {sortedMemoryEntries.map((entry) => (
                     <button
                       className={`instruction-file-button ${selectedMemoryPath === entry.path ? "selected" : ""}`}
@@ -1677,66 +1742,37 @@ export function AgentPage() {
                     </button>
                   ))}
                 </div>
-              </aside>
-              <article aria-label="记忆文件内容" className="instruction-content-card">
-                <div className="memory-root-path">
-                  <span>根目录</span>
-                  <strong title={memoryRootPath}>{memoryRootPath}</strong>
-                </div>
-                {selectedMemoryPath ? (
-                  <>
-                    <div className="instruction-card-header">
-                      <div>
-                        <h2>{selectedMemoryPath.split("/").at(-1) ?? selectedMemoryPath}</h2>
-                        <p className="muted">{memoryLayer}/{selectedMemoryPath}</p>
-                      </div>
-                    </div>
-                    <textarea
-                      aria-label="记忆文件内容"
-                      className="instruction-content-editor"
-                      value={memoryDraft}
-                      onChange={(event) => setMemoryDraft(event.target.value)}
-                    />
-                    <div className="instruction-create-actions">
-                      <button
-                        className="danger"
-                        disabled={deleteMemoryFile.isPending}
-                        onClick={() => deleteMemoryFile.mutate(selectedMemoryPath)}
-                        type="button"
-                      >
-                        删除文件
-                      </button>
-                      <button
-                        disabled={upsertMemoryFile.isPending}
-                        onClick={() => upsertMemoryFile.mutate({ path: selectedMemoryPath, content: memoryDraft })}
-                        type="button"
-                      >
-                        保存文件
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="instruction-empty-content" />
-                )}
-              </article>
-            </div>
+              )}
+            >
+              {selectedMemoryPath ? (
+                <textarea
+                  aria-label="记忆文件内容"
+                  className="instruction-content-editor"
+                  value={memoryDraft}
+                  onChange={(event) => setMemoryDraft(event.target.value)}
+                />
+              ) : (
+                <p className="muted instruction-empty-content">从左侧选择记忆文件查看内容。</p>
+              )}
+            </FileBrowser>
           </section>}
           {activeTab === "configuration" && (
-            <div className="agent-configuration-layout">
-              <form className="panel agent-config-card" onSubmit={submit}>
-                <div className="panel-heading">
+            <div className="agent-configuration-page">
+              <form className="panel agent-config-card agent-configuration-layout" id="agent-configuration-form" onSubmit={submit}>
+                <div className="agent-configuration-header">
                   <div>
-                    <p className="eyebrow">Configuration</p>
-                    <h2>基础配置</h2>
+                    <p className="eyebrow">AGENT SETTINGS</p>
+                    <h2>配置</h2>
                   </div>
+                  <button disabled={!adapters.isSuccess || save.isPending} type="submit">保存配置</button>
                 </div>
-                <div className="agent-config-sections">
+                <div className="agent-configuration-content">
+                  <div className="agent-config-sections agent-configuration-groups">
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
-                      <h2>身份</h2>
-                      <p className="muted">智能体的名称、职责和组织汇报关系。</p>
+                      <h2>基本设置</h2>
                     </div>
-                    <div className="agent-property-list">
+                    <div className="agent-property-list agent-config-field-grid">
                       <label className="agent-property-row"><span>智能体名称</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label>
                       <label className="agent-property-row"><span>职务</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
                       <label className="agent-property-row">
@@ -1752,15 +1788,65 @@ export function AgentPage() {
                           <Link to={`/orgs/${orgId}/structure`}>在组织架构中调整</Link>
                         </span>
                       </div>
-                      <label className="agent-property-row agent-property-row-start"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
+                      <label className="agent-property-row agent-property-row-start agent-config-field-wide"><span>能力描述</span><textarea value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></label>
                     </div>
                   </section>
                   <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>智能体运行时</h2>
-                      <p className="muted">选择本地或外部运行适配器，并维护适配器配置。</p>
+                    <div className="agent-config-section-heading agent-config-section-heading-actions">
+                      <div className="agent-runtime-heading-title" role="status">
+                        <h2>运行时</h2>
+                        {runtimeTestResult && (
+                          <>
+                            <StatusPill status={runtimeAvailable ? "completed" : "failed"}>{runtimeAvailable ? "可用" : "不可用"}</StatusPill>
+                            {!runtimeAvailable && <span className="agent-runtime-test-error" title={runtimeFailureReason}>{runtimeFailureReason}</span>}
+                          </>
+                        )}
+                        {testRuntime.error && (
+                          <>
+                            <StatusPill status="failed">不可用</StatusPill>
+                            <span className="agent-runtime-test-error" title={runtimeRequestError}>{runtimeRequestError}</span>
+                          </>
+                        )}
+                      </div>
+                      <div className="agent-runtime-heading-controls">
+                        {["codex_local", "claude_local", "opencode_local", "openclaw_local"].includes(runtime) && (
+                          <>
+                            <label className="agent-runtime-live-probe-control">
+                              <input
+                                checked={readJsonObjectSafe(agentRuntimeConfig).liveProbe === true}
+                                type="checkbox"
+                                onChange={(event) => setRuntimeLiveProbe(event.target.checked)}
+                              />
+                              <span>启动运行时检查</span>
+                            </label>
+                            {readJsonObjectSafe(agentRuntimeConfig).liveProbe === true && (
+                              <label className="agent-runtime-probe-timeout-control">
+                                <span>检查超时</span>
+                                <input
+                                  aria-label="运行时检查超时秒数"
+                                  min="1"
+                                  placeholder="5"
+                                  type="number"
+                                  value={String(readJsonObjectSafe(agentRuntimeConfig).probeTimeoutSec ?? "")}
+                                  onChange={(event) => setRuntimeProbeTimeout(event.target.value)}
+                                />
+                                <span>秒</span>
+                              </label>
+                            )}
+                          </>
+                        )}
+                        <button
+                          className="secondary small-button"
+                          disabled={testRuntime.isPending}
+                          onClick={runRuntimeTest}
+                          title="检测当前运行时配置、命令、工作目录和认证是否可用"
+                          type="button"
+                        >
+                          执行检查
+                        </button>
+                      </div>
                     </div>
-                    <div className="agent-property-list">
+                    <div className="agent-property-list agent-runtime-primary-grid">
                       <label className="agent-property-row">
                         <span>Runtime</span>
                         <select disabled={!adapters.isSuccess} value={runtime} onChange={(event) => changeRuntime(event.target.value as AgentRuntimeType)}>
@@ -1799,177 +1885,79 @@ export function AgentPage() {
                       <RuntimeConfigFields
                         advancedEditor={(
                           <details className="runtime-config-advanced">
-                            <summary>高级 JSON</summary>
+                            <summary>运行时 JSON</summary>
                             <label>
-                              Agent runtime config
+                              <span className="sr-only">运行时 JSON</span>
                               <textarea className="config-editor" value={agentRuntimeConfig} onChange={(event) => setAgentRuntimeConfig(event.target.value)} />
                             </label>
                           </details>
                         )}
                         runtime={runtime}
+                        showLiveProbeField={false}
+                        showProbeTimeoutField={false}
                         value={readJsonObjectSafe(agentRuntimeConfig)}
                         onChange={updateAgentRuntimeConfig}
                       />
                     </div>
-                    <div className="agent-runtime-test-row">
-                      <button className="secondary" disabled={testRuntime.isPending} onClick={runRuntimeTest} type="button">
-                        测试运行时
-                      </button>
-                      {runtimeTestResult && (
-                        <div className={runtimeAvailable ? "success-notice compact" : "error-notice compact"} role="status">
-                          <strong>{runtimeAvailable ? "智能体运行时可用" : "智能体运行时不可用"}</strong>
-                          {runtimeTestResult.checks.length > 0 && (
-                            <ul>
-                              {runtimeTestResult.checks.map((check) => (
-                                <li key={check.id ?? check.label ?? check.message}>
-                                  <span>{check.label ?? check.id ?? "检查项"}</span>
-                                  <StatusPill status={check.status}>{check.status ? statusLabel(check.status) : "未知"}</StatusPill>
-                                  {check.message && <span>{check.message}</span>}
-                                  {check.hint && <small>{check.hint}</small>}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-                      {testRuntime.error && <ErrorNotice error={testRuntime.error} />}
-                    </div>
                   </section>
                   <section className="agent-config-section">
                     <div className="agent-config-section-heading">
-                      <h2>心跳与运行策略</h2>
-                      <p className="muted">技能偏好和运行上下文策略。</p>
+                      <h2>运行策略</h2>
                     </div>
-                    <div className="agent-property-list">
-                      <label className="agent-property-row"><span>期望技能</span><input value={desiredSkills} onChange={(event) => setDesiredSkills(event.target.value)} /></label>
-                      <div className="runtime-config-panel agent-policy-subsection">
-                        <div className="runtime-config-summary">
-                          <div className="runtime-config-summary-text">
-                            <h3>心跳策略</h3>
-                            <span className="muted">心跳检查、手动诊断和并发限制</span>
-                            <small>默认每 300s 检查一次；有可执行任务时才启动运行，允许手动诊断</small>
-                          </div>
-                          <button
-                            aria-label={heartbeatPolicyExpanded ? "收起心跳策略" : "展开心跳策略"}
-                            className="secondary small-button"
-                            onClick={() => setHeartbeatPolicyExpanded((current) => !current)}
-                            type="button"
-                          >
-                            {heartbeatPolicyExpanded ? "收起配置" : "个性化配置"}
-                          </button>
-                        </div>
-                        {heartbeatPolicyExpanded && (
-                          <div className="runtime-config-fields agent-policy-expanded-panel">
-                            <HeartbeatConfigFields
-                              value={readJsonObjectSafe(runtimeConfig)}
-                              onChange={updateRuntimeConfig}
-                            />
-                            <details className="runtime-config-advanced agent-policy-json">
-                              <summary>高级 JSON</summary>
-                              <label className="agent-property-row agent-property-row-start">
-                                <span>Runtime config</span>
-                                <textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} />
-                              </label>
-                            </details>
-                          </div>
-                        )}
-                      </div>
+                    <div className="agent-policy-expanded-panel">
+                      <HeartbeatConfigFields
+                        value={readJsonObjectSafe(runtimeConfig)}
+                        onChange={updateRuntimeConfig}
+                      />
+                      <details className="runtime-config-advanced agent-policy-json">
+                        <summary>策略 JSON</summary>
+                        <label className="agent-property-row agent-property-row-start">
+                          <span className="sr-only">策略 JSON</span>
+                          <textarea className="config-editor" value={runtimeConfig} onChange={(event) => setRuntimeConfig(event.target.value)} />
+                        </label>
+                      </details>
                     </div>
                   </section>
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>API 密钥</h2>
-                      <p className="muted">密钥不在页面明文保存；运行时通过环境变量、本地 CLI 登录或后续真实 secret 绑定提供。</p>
-                    </div>
-                    <div className="agent-summary-grid">
-                      <div className="summary-metric"><span>本地 Agent JWT</span><strong>{adapterMetadata.data?.supportsLocalAgentJwt ? "支持" : "未开启"}</strong></div>
-                    </div>
-                  </section>
-                </div>
-                {configurationError && <p className="error-notice">{configurationError}</p>}
-                {save.error && <ErrorNotice error={save.error} />}
-                <div className="agent-property-actions">
-                  <button disabled={!adapters.isSuccess || save.isPending} type="submit">保存配置</button>
+                  </div>
+                  {configurationError && <p className="error-notice">{configurationError}</p>}
+                  {save.error && <ErrorNotice error={save.error} />}
                 </div>
               </form>
-              <div className="panel agent-config-card">
-                <div className="panel-heading">
+              <details
+                className="panel agent-config-history-panel"
+                onToggle={(event) => setConfigHistoryExpanded(event.currentTarget.open)}
+              >
+                <summary className="agent-configuration-header">
                   <div>
-                    <p className="eyebrow">Snapshot Runtime History</p>
-                    <h2>运行快照</h2>
+                    <p className="eyebrow">CONFIG HISTORY</p>
+                    <h2>配置历史</h2>
+                  </div>
+                </summary>
+                <div className="agent-config-history-body">
+                  {configRevisions.error && <ErrorNotice error={configRevisions.error} />}
+                  {rollbackRevision.error && <ErrorNotice error={rollbackRevision.error} />}
+                  {configRevisions.isLoading && <p className="muted">正在加载配置历史...</p>}
+                  {configRevisions.isSuccess && revisionRows.length === 0 && <p className="muted">暂无配置版本。</p>}
+                  <div className="list">
+                    {revisionRows.map((revision) => (
+                      <article className="row agent-config-revision-row" key={revision.id}>
+                        <div className="agent-config-revision-meta">
+                          <strong>{revision.id}</strong>
+                          <span className="muted">{revision.createdAt || "未记录创建时间"}</span>
+                        </div>
+                        <button
+                          className="secondary"
+                          disabled={rollbackRevision.isPending}
+                          onClick={() => rollbackRevision.mutate(revision.id)}
+                          type="button"
+                        >
+                          回滚
+                        </button>
+                      </article>
+                    ))}
                   </div>
                 </div>
-                <div className="agent-config-sections">
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>配置快照</h2>
-                      <p className="muted">当前智能体配置的服务端快照。</p>
-                    </div>
-                    {configuration.error && <ErrorNotice error={configuration.error} />}
-                    {configuration.data && (
-                      <div className="agent-summary-grid">
-                        <div className="summary-metric"><span>状态</span><strong>{configuration.data.status ? statusLabel(configuration.data.status) : "未知"}</strong></div>
-                        <div className="summary-metric"><span>角色</span><strong>{configuration.data.role ? roleLabel(configuration.data.role) : "未知"}</strong></div>
-                        <div className="summary-metric"><span>运行时</span><strong>{configuration.data.agentRuntimeType ?? "未知"}</strong></div>
-                        <div className="summary-metric"><span>更新时间</span><strong>{formatDateTime(configuration.data.updatedAt)}</strong></div>
-                      </div>
-                    )}
-                  </section>
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>Runtime State</h2>
-                      <p className="muted">当前运行会话和最近一次运行状态。</p>
-                    </div>
-                    {runtimeState.error && <ErrorNotice error={runtimeState.error} />}
-                    {resetSession.error && <ErrorNotice error={resetSession.error} />}
-                    {taskSessions.error && <ErrorNotice error={taskSessions.error} />}
-                    {runtimeState.data && (
-                      <div className="agent-summary-grid">
-                        <div className="summary-metric"><span>Session</span><strong>{runtimeState.data.sessionDisplayId ?? "暂无"}</strong></div>
-                        <div className="summary-metric"><span>Last Run</span><strong>{runtimeState.data.lastRunStatus ? statusLabel(runtimeState.data.lastRunStatus) : "暂无"}</strong></div>
-                      </div>
-                    )}
-                    <div className="list">
-                      {taskSessionRows.map((session) => (
-                        <article className="row" key={session.id}>
-                          <div>
-                            <strong>{session.taskKey}</strong>
-                            <p className="muted">{session.sessionDisplayId ?? "暂无会话"} · {formatDateTime(session.updatedAt)}</p>
-                          </div>
-                          <StatusPill status={session.status}>{statusLabel(session.status)}</StatusPill>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                  <section className="agent-config-section">
-                    <div className="agent-config-section-heading">
-                      <h2>Config Revisions</h2>
-                      <p className="muted">可回滚的配置版本历史。</p>
-                    </div>
-                    {configRevisions.error && <ErrorNotice error={configRevisions.error} />}
-                    {rollbackRevision.error && <ErrorNotice error={rollbackRevision.error} />}
-                    {configRevisions.isSuccess && revisionRows.length === 0 && <p className="muted">暂无配置版本。</p>}
-                    <div className="list">
-                      {revisionRows.map((revision) => (
-                        <article className="row agent-config-revision-row" key={revision.id}>
-                          <div className="agent-config-revision-meta">
-                            <strong>{revision.id}</strong>
-                            <span className="muted">{revision.createdAt || "未记录创建时间"}</span>
-                          </div>
-                          <button
-                            className="secondary"
-                            disabled={rollbackRevision.isPending}
-                            onClick={() => rollbackRevision.mutate(revision.id)}
-                            type="button"
-                          >
-                            回滚
-                          </button>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              </div>
+              </details>
             </div>
           )}
           {activeTab === "budget" && (

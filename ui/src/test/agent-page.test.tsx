@@ -170,9 +170,16 @@ it("controls an agent from its overview and shows runtime status", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1");
   const heading = await screen.findByRole("heading", { name: "Builder" });
-  expect(await screen.findByRole("heading", { name: "待办收件箱" })).toBeInTheDocument();
+  expect(heading.closest(".agent-detail-content")).not.toBeNull();
+  expect(await screen.findByRole("heading", { name: "待办任务" })).toBeInTheDocument();
   expect(screen.getByText("Wire inbox")).toBeInTheDocument();
   expect(screen.getByText("Please update the implementation plan before continuing.")).toBeInTheDocument();
+  const overviewSummary = screen.getByRole("group", { name: "智能体概览统计" });
+  expect(overviewSummary).toHaveTextContent(/1\s*待办/);
+  expect(overviewSummary).toHaveTextContent(/成功\s*最近运行/);
+  expect(overviewSummary).toHaveTextContent(/session-1\s*会话/);
+  expect(screen.queryByRole("heading", { name: "运行状态" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "智能体档案" })).not.toBeInTheDocument();
   const header = heading.closest("header");
   expect(header).not.toBeNull();
   expect(within(header!).getByText("空闲")).toBeInTheDocument();
@@ -181,14 +188,24 @@ it("controls an agent from its overview and shows runtime status", async () => {
     "href",
     "/orgs/org-1/chats?agentId=agent-1",
   );
+  expect(within(header!).getByRole("button", { name: "立即唤醒" })).toBeInTheDocument();
+  await userEvent.click(within(header!).getByText("更多操作"));
   expect(within(header!).getByRole("button", { name: "暂停" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "恢复" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "终止" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "归档" })).toBeInTheDocument();
-  expect(within(header!).getByRole("button", { name: "立即唤醒" })).toBeInTheDocument();
   expect(within(header!).getByRole("button", { name: "运行诊断" })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: "暂停" })).toHaveLength(1);
   const tabs = screen.getByRole("navigation", { name: "智能体详情导航" });
+  expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "概览",
+    "配置",
+    "说明",
+    "记忆",
+    "技能",
+    "运行记录",
+    "预算",
+  ]);
   expect(within(tabs).getByRole("link", { name: "说明" })).toHaveAttribute(
     "href",
     "/orgs/org-1/agents/agent-1/profile",
@@ -214,7 +231,12 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(within(instructionsPanel).getByRole("button", { name: "MEMORY.md" })).toBeInTheDocument();
   expect(within(instructionsPanel).getByRole("button", { name: "NOTES.md" })).toBeInTheDocument();
   expect(within(screen.getByRole("complementary", { name: "说明文件列表" })).queryByText("managedInstructionFiles")).not.toBeInTheDocument();
-  const instructionContent = screen.getByRole("article", { name: "说明文件内容" });
+  const instructionContent = screen.getByRole("region", { name: "说明文件内容" });
+  expect(within(instructionContent).getByRole("heading", { name: "SOUL.md" })).toBeInTheDocument();
+  expect(within(instructionContent).getByText("可编辑")).toBeInTheDocument();
+  const instructionToolbar = within(instructionContent).getByRole("button", { name: "保存文件" }).closest(".file-preview-toolbar");
+  expect(instructionToolbar).not.toBeNull();
+  expect(within(instructionToolbar as HTMLElement).getByRole("button", { name: "删除文件" })).toBeInTheDocument();
   expect(await within(instructionContent).findByDisplayValue(/Ship product changes/)).toBeInTheDocument();
   await userEvent.click(within(instructionsPanel).getByRole("button", { name: "AGENTS.md" }));
   expect(within(instructionContent).queryByText("暂无内容")).not.toBeInTheDocument();
@@ -223,7 +245,10 @@ it("controls an agent from its overview and shows runtime status", async () => {
   expect(await within(instructionContent).findByDisplayValue(/Tool policy/)).toBeInTheDocument();
   const instructionFiles = screen.getByRole("complementary", { name: "说明文件列表" });
   await userEvent.click(within(instructionFiles).getByRole("button", { name: "新增文件" }));
-  expect(within(instructionFiles).getByLabelText("文件名")).toHaveValue("NEW.md");
+  const createFileDialog = within(instructionFiles).getByRole("dialog", { name: "新建文件" });
+  expect(createFileDialog.closest(".file-browser-sidebar-actions")).not.toBeNull();
+  expect(createFileDialog.closest(".file-browser-sidebar-body")).toBeNull();
+  expect(within(createFileDialog).getByLabelText("文件名")).toHaveValue("NEW.md");
   expect(within(instructionFiles).queryByLabelText("路径")).not.toBeInTheDocument();
   expect(within(instructionFiles).queryByLabelText("内容")).not.toBeInTheDocument();
   await userEvent.clear(within(instructionFiles).getByLabelText("文件名"));
@@ -255,9 +280,17 @@ it("controls an agent from its overview and shows runtime status", async () => {
   );
   await userEvent.click(within(tabs).getByRole("link", { name: "记忆" }));
   const memoryPanel = screen.getByRole("region", { name: "Agent Memory" });
-  expect(await within(memoryPanel).findByRole("heading", { name: "记忆" })).toBeInTheDocument();
-  await userEvent.type(within(memoryPanel).getByLabelText("文件路径"), "2026-06-08.md");
-  await userEvent.click(within(memoryPanel).getByRole("button", { name: "新建" }));
+  expect(await within(memoryPanel).findByRole("heading", { name: "文件" })).toBeInTheDocument();
+  const memoryTypeSwitch = within(memoryPanel).getByRole("group", { name: "记忆类型" });
+  const addMemoryFileButton = within(memoryPanel).getByRole("button", { name: "新增文件" });
+  expect(memoryTypeSwitch.closest(".file-browser-sidebar-actions")).not.toBeNull();
+  expect(memoryTypeSwitch.nextElementSibling).toContainElement(addMemoryFileButton);
+  await userEvent.click(addMemoryFileButton);
+  const createMemoryDialog = within(memoryPanel).getByRole("dialog", { name: "新建记忆文件" });
+  expect(createMemoryDialog.closest(".file-browser-sidebar-actions")).not.toBeNull();
+  expect(createMemoryDialog.closest(".file-browser-sidebar-body")).toBeNull();
+  await userEvent.type(within(createMemoryDialog).getByLabelText("文件路径"), "2026-06-08.md");
+  await userEvent.click(within(createMemoryDialog).getByRole("button", { name: "确认" }));
   expect(await within(memoryPanel).findByText("文件已存在：2026-06-08.md")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
     "/api/agents/agent-1/memory/file",
@@ -267,7 +300,9 @@ it("controls an agent from its overview and shows runtime status", async () => {
     }),
   );
   await userEvent.click(within(memoryPanel).getByRole("button", { name: /2026-06-08\.md/ }));
-  const memoryContent = screen.getByRole("article", { name: "记忆文件内容" });
+  const memoryContent = screen.getByRole("region", { name: "记忆文件内容" });
+  expect(within(memoryContent).getByRole("heading", { name: "2026-06-08.md" })).toBeInTheDocument();
+  expect(within(memoryContent).getByText("可编辑")).toBeInTheDocument();
   expect(await within(memoryContent).findByDisplayValue(/Daily memory note/)).toBeInTheDocument();
   fireEvent.change(within(memoryContent).getByLabelText("记忆文件内容"), { target: { value: "Updated daily memory" } });
   await userEvent.click(within(memoryContent).getByRole("button", { name: "保存文件" }));
@@ -335,8 +370,9 @@ it("disables runtime actions for agents pending approval", async () => {
   expect(screen.getByText("该智能体待审批，审批通过前不能运行、唤醒、聊天或分配任务。")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "分配任务" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "聊天" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "立即唤醒" })).toBeDisabled();
+  await userEvent.click(screen.getByText("更多操作"));
+  expect(screen.getByRole("button", { name: "暂停" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "运行诊断" })).toBeDisabled();
 });
 
@@ -548,15 +584,20 @@ it("saves supported agent configuration and shows heartbeat runs tab", async () 
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByRole("heading", { name: "身份" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "API 密钥" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "基本设置" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "运行时" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "运行策略" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("期望技能")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "API 密钥" })).not.toBeInTheDocument();
   await userEvent.clear(await screen.findByLabelText("智能体名称"));
   await userEvent.type(screen.getByLabelText("智能体名称"), "Builder 2");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "codex_local");
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"openai/gpt-5"}' } });
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  const commandInput = screen.getByLabelText("启动命令");
+  expect(commandInput.closest(".runtime-config-fields")).toHaveClass("runtime-config-fields--four");
+  expect(commandInput.closest("label")).toHaveTextContent("默认：codex");
+  expect(commandInput).toHaveAttribute("placeholder", "留空使用 codex");
+  fireEvent.change(screen.getByLabelText("运行时 JSON"), { target: { value: '{"model":"openai/gpt-5"}' } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -651,8 +692,8 @@ it("saves heartbeat policy from the agent configuration form", async () => {
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
-  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  expect(await screen.findByRole("heading", { name: "运行策略" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "展开运行策略" })).not.toBeInTheDocument();
   const interval = screen.getByLabelText("状态检测间隔秒数");
   expect(interval).toHaveValue(120);
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
@@ -701,20 +742,19 @@ it("materializes the default heartbeat policy from the agent configuration form"
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
-  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  expect(await screen.findByRole("heading", { name: "运行策略" })).toBeInTheDocument();
   expect(screen.getByLabelText("状态检测")).toHaveValue("enabled");
   expect(screen.queryByLabelText("定时运行诊断")).not.toBeInTheDocument();
   expect(screen.getByLabelText("状态检测间隔秒数")).toHaveValue(300);
   expect(screen.getByLabelText("允许手动诊断")).toHaveValue("enabled");
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("enabled");
   expect(screen.getByLabelText("最大并发运行数")).toHaveValue(3);
-  await userEvent.click(screen.getByText("高级 JSON"));
-  const runtimeConfigJson = String((screen.getByLabelText("Runtime config") as HTMLTextAreaElement).value);
-  expect(runtimeConfigJson).toContain('"enabled": true');
-  expect(runtimeConfigJson).toContain('"intervalSec": 300');
-  expect(runtimeConfigJson).toContain('"runDiagnosticsOnTimer": false');
-  expect(runtimeConfigJson).toContain('"wakeOnDemand": true');
+  await userEvent.click(screen.getByText("策略 JSON", { selector: "summary" }));
+  const policyConfigJson = String((screen.getByLabelText("策略 JSON") as HTMLTextAreaElement).value);
+  expect(policyConfigJson).toContain('"enabled": true');
+  expect(policyConfigJson).toContain('"intervalSec": 300');
+  expect(policyConfigJson).toContain('"runDiagnosticsOnTimer": false');
+  expect(policyConfigJson).toContain('"wakeOnDemand": true');
 
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
@@ -750,8 +790,7 @@ it("maps a legacy timer diagnostic policy to disabled preflight when saving", as
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
 
-  expect(await screen.findByRole("heading", { name: "心跳策略" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "展开心跳策略" }));
+  expect(await screen.findByRole("heading", { name: "运行策略" })).toBeInTheDocument();
   expect(screen.getByLabelText("空跑预检查")).toHaveValue("disabled");
   expect(screen.queryByLabelText("定时运行诊断")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -775,11 +814,12 @@ it("fills built-in process demo config from the runtime form", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByRole("heading", { name: "智能体运行时" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "运行时" })).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  expect(screen.getByText("内置 process demo")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "使用内置 demo" }));
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  expect(screen.getByText("内置进程示例")).toBeInTheDocument();
+  expect(screen.getByLabelText("启动命令").closest(".runtime-config-fields")).toHaveClass("runtime-config-fields--four");
+  await userEvent.click(screen.getByRole("button", { name: "使用示例" }));
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
   const updateCall = fetchMock.mock.calls.find(([path, init]) => path === "/api/agents/agent-1" && init?.method === "PATCH");
@@ -816,8 +856,8 @@ it("validates opencode local model before saving agent configuration", async () 
   expect(within(await screen.findByLabelText("Runtime")).queryByRole("option", { name: "claude_local" })).not.toBeInTheDocument();
   await userEvent.selectOptions(await screen.findByLabelText("Runtime"), "opencode_local");
   expect(screen.getByLabelText("模型配置")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: "{}" } });
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  fireEvent.change(screen.getByLabelText("运行时 JSON"), { target: { value: "{}" } });
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
   expect(screen.getByText("模型必须使用 provider/model 格式，例如 openai/gpt-5。")).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalledWith(
@@ -940,7 +980,7 @@ it("toggles opencode local skip permissions without replacing other extra args",
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  await userEvent.click(await screen.findByRole("button", { name: "个性化配置" }));
+  await userEvent.click(await screen.findByRole("button", { name: "高级参数" }));
   const checkbox = await screen.findByLabelText("跳过 OpenCode 权限确认");
   expect(checkbox).toBeChecked();
   expect(screen.getByText(/仅适用于本地可信开发环境/)).toBeInTheDocument();
@@ -979,17 +1019,22 @@ it("tests agent runtime availability from configuration", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  await screen.findByRole("heading", { name: "智能体运行时" });
-  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+  await screen.findByRole("heading", { name: "运行时" });
+  await userEvent.click(screen.getByRole("checkbox", { name: "启动运行时检查" }));
+  const probeTimeout = screen.getByRole("spinbutton", { name: "运行时检查超时秒数" });
+  expect(probeTimeout.closest(".agent-runtime-heading-controls")).not.toBeNull();
+  expect(probeTimeout).toHaveAttribute("placeholder", "5");
+  await userEvent.type(probeTimeout, "8");
+  await userEvent.click(screen.getByRole("button", { name: "执行检查" }));
 
-  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
-  expect(screen.getAllByText("CWD").length).toBeGreaterThan(0);
-  expect(screen.getByText("ok")).toBeInTheDocument();
+  expect(await screen.findByText("可用")).toBeInTheDocument();
+  expect(screen.queryByText("检查结果")).not.toBeInTheDocument();
+  expect(screen.queryByText("ok")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/orgs/org-1/adapters/codex_local/test-environment",
     expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ agentRuntimeConfig: { model: "openai/gpt-5" } }),
+      body: JSON.stringify({ agentRuntimeConfig: { model: "openai/gpt-5", liveProbe: true, probeTimeoutSec: 8 } }),
     }),
   );
 });
@@ -1034,14 +1079,15 @@ it("updates http runtime config from dedicated runtime fields", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByText("HTTP endpoint runtime")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Endpoint URL")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  const url = await screen.findByLabelText("Endpoint URL");
+  expect(await screen.findByText("HTTP 接口参数")).toBeInTheDocument();
+  expect(screen.queryByLabelText("接口地址")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  const url = await screen.findByLabelText("接口地址");
+  expect(url.closest(".runtime-config-fields")).toHaveClass("runtime-config-fields--three");
   await userEvent.clear(url);
   await userEvent.type(url, "https://runtime.example/execute");
-  await userEvent.selectOptions(screen.getByLabelText("HTTP method"), "PUT");
-  const timeout = screen.getByLabelText("Timeout seconds");
+  await userEvent.selectOptions(screen.getByLabelText("请求方法"), "PUT");
+  const timeout = screen.getByLabelText("请求超时（秒）");
   await userEvent.clear(timeout);
   await userEvent.type(timeout, "45");
   await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -1074,13 +1120,12 @@ it("shows runtime test failures from configuration", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  await screen.findByRole("heading", { name: "智能体运行时" });
-  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+  await screen.findByRole("heading", { name: "运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "执行检查" }));
 
-  expect(await screen.findByText("智能体运行时不可用")).toBeInTheDocument();
-  expect(screen.getByText("认证")).toBeInTheDocument();
-  expect(screen.getByText("missing key")).toBeInTheDocument();
-  expect(screen.getByText("配置 provider key")).toBeInTheDocument();
+  expect(await screen.findByText("不可用")).toBeInTheDocument();
+  expect(screen.getByText("认证：missing key；配置 provider key")).toBeInTheDocument();
+  expect(screen.queryByText("检查结果")).not.toBeInTheDocument();
 });
 
 it("treats runtime warnings as available when no checks fail", async () => {
@@ -1105,16 +1150,15 @@ it("treats runtime warnings as available when no checks fail", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  await screen.findByRole("heading", { name: "智能体运行时" });
-  await userEvent.click(screen.getByRole("button", { name: "测试运行时" }));
+  await screen.findByRole("heading", { name: "运行时" });
+  await userEvent.click(screen.getByRole("button", { name: "执行检查" }));
 
-  expect(await screen.findByText("智能体运行时可用")).toBeInTheDocument();
-  expect(screen.getByText("Authentication")).toBeInTheDocument();
-  expect(screen.getByText("警告")).toBeInTheDocument();
-  expect(screen.queryByText("智能体运行时不可用")).not.toBeInTheDocument();
+  expect(await screen.findByText("可用")).toBeInTheDocument();
+  expect(screen.queryByText("Authentication")).not.toBeInTheDocument();
+  expect(screen.queryByText("不可用")).not.toBeInTheDocument();
 });
 
-it("shows configuration revisions, rolls back, and resets runtime session", async () => {
+it("loads configuration history on demand, rolls back, and resets runtime session", async () => {
   const agent = { id: "agent-1", orgId: "org-1", name: "Builder", role: "engineer", status: "idle", agentRuntimeType: "process", agentRuntimeConfig: {}, runtimeConfig: {}, budgetMonthlyCents: 0, capabilities: null, reportsTo: null };
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     if (path === "/api/agents/agent-1" && init?.method === "GET") return respond(agent);
@@ -1136,10 +1180,27 @@ it("shows configuration revisions, rolls back, and resets runtime session", asyn
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByRole("heading", { name: "配置快照" })).toBeInTheDocument();
-  expect(await screen.findByText("2026年5月28日 16:00")).toBeInTheDocument();
-  expect(await screen.findByText("issue-1")).toBeInTheDocument();
-  expect(await screen.findByText("Config Revisions")).toBeInTheDocument();
+  const configurationHeading = await screen.findByRole("heading", { name: "配置" });
+  const configurationLayout = configurationHeading.closest(".agent-configuration-layout");
+  expect(configurationLayout).not.toBeNull();
+  expect(configurationLayout).toHaveAttribute("id", "agent-configuration-form");
+  expect(within(configurationLayout as HTMLElement).getByRole("button", { name: "保存配置" })).toBeInTheDocument();
+  const configurationGroups = (configurationLayout as HTMLElement).querySelector(".agent-configuration-groups");
+  expect(configurationGroups).not.toBeNull();
+  expect(configurationGroups?.querySelectorAll(":scope > .agent-config-section")).toHaveLength(3);
+  expect(within(configurationGroups as HTMLElement).getByRole("heading", { name: "基本设置" })).toBeInTheDocument();
+  expect(within(configurationGroups as HTMLElement).getByRole("heading", { name: "运行时" })).toBeInTheDocument();
+  expect(within(configurationGroups as HTMLElement).getByRole("heading", { name: "运行策略" })).toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/agents/agent-1/config-revisions",
+    expect.objectContaining({ method: "GET" }),
+  );
+  expect(within(configurationLayout as HTMLElement).queryByRole("heading", { name: "配置快照" })).not.toBeInTheDocument();
+  expect(within(configurationLayout as HTMLElement).queryByRole("heading", { name: "运行状态" })).not.toBeInTheDocument();
+  const configHistory = screen.getByRole("heading", { name: "配置历史" }).closest("details");
+  expect(configHistory).not.toBeNull();
+  expect(configurationLayout).not.toContainElement(configHistory);
+  await userEvent.click(screen.getByRole("heading", { name: "配置历史" }));
   expect(await screen.findByText("revision-1")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "回滚" }));
   await userEvent.click(screen.getByRole("button", { name: "重置会话" }));
@@ -1200,7 +1261,7 @@ it("shows an empty skill list without placeholder skills", async () => {
   expect(screen.queryByRole("button", { name: "Show" })).not.toBeInTheDocument();
 });
 
-it("manages skills from agent configuration", async () => {
+it("manages skills from the agent skills page", async () => {
   const agent = {
     id: "agent-1",
     orgId: "org-1",
@@ -1339,7 +1400,7 @@ it("manages skills from agent configuration", async () => {
   vi.stubGlobal("fetch", fetchMock);
 
   renderApp("/orgs/org-1/agents/agent-1/configuration");
-  expect(await screen.findByRole("heading", { name: "基础配置" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "基本设置" })).toBeInTheDocument();
   expect(screen.queryByText("Runtime Adapter")).not.toBeInTheDocument();
   expect(screen.queryByText("运行环境")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "测试环境" })).not.toBeInTheDocument();

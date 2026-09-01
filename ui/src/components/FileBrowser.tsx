@@ -9,10 +9,13 @@ type FileBrowserProps = {
   fileTitle: ReactNode;
   framed?: boolean;
   sidebar: ReactNode;
+  sidebarActions?: ReactNode;
   sidebarCount?: ReactNode;
+  sidebarLabel?: string;
   sidebarTitle?: ReactNode;
   sidebarWidth?: number;
   treeTestId?: string;
+  viewerLabel?: string;
   viewerTestId?: string;
 };
 
@@ -24,10 +27,13 @@ export function FileBrowser({
   fileTitle,
   framed = false,
   sidebar,
+  sidebarActions,
   sidebarCount,
+  sidebarLabel,
   sidebarTitle = "文件",
   sidebarWidth = 188,
   treeTestId,
+  viewerLabel,
   viewerTestId,
 }: FileBrowserProps) {
   return (
@@ -35,14 +41,17 @@ export function FileBrowser({
       className={`file-browser${framed ? " framed" : ""}${className ? ` ${className}` : ""}`}
       style={{ "--file-browser-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
-      <aside className="file-browser-sidebar" data-testid={treeTestId}>
+      <aside aria-label={sidebarLabel} className="file-browser-sidebar" data-testid={treeTestId}>
         <div className="file-browser-sidebar-header">
-          <h3>{sidebarTitle}</h3>
-          {sidebarCount !== undefined && <span>{sidebarCount}</span>}
+          <div className="file-browser-sidebar-heading">
+            <h3>{sidebarTitle}</h3>
+            {sidebarCount !== undefined && <span>{sidebarCount}</span>}
+          </div>
+          {sidebarActions && <div className="file-browser-sidebar-actions">{sidebarActions}</div>}
         </div>
         <div className="file-browser-sidebar-body">{sidebar}</div>
       </aside>
-      <FilePreview actions={actions} className="file-browser-viewer" status={fileStatus} testId={viewerTestId} title={fileTitle}>
+      <FilePreview actions={actions} ariaLabel={viewerLabel} className="file-browser-viewer" status={fileStatus} testId={viewerTestId} title={fileTitle}>
         {children}
       </FilePreview>
     </div>

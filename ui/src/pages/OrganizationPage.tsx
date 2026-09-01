@@ -133,7 +133,7 @@ export function OrganizationPage() {
 export function OrganizationCostsPage() {
   const { orgId = "" } = useParams();
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full organization-fullscreen-detail organization-costs-content" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Organization Costs</p>
@@ -1509,7 +1509,7 @@ export function OrganizationWorkspacesPage() {
   const selectedDetail = selectedFile.data as OrganizationWorkspaceFileDetail | undefined;
 
   return (
-    <OrgWorkspace contentClassName="org-content-full" orgId={orgId}>
+    <OrgWorkspace contentClassName="org-content-full organization-fullscreen-detail organization-workspaces-content" orgId={orgId}>
       <header className="page-header">
         <div>
           <p className="eyebrow">Workspaces</p>

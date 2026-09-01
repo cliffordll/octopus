@@ -138,10 +138,10 @@ it("opens the first agent by default and creates one from the new agent flow", a
   await userEvent.type(screen.getByLabelText("标题"), "Runtime owner");
   await userEvent.type(screen.getByLabelText("能力说明"), "Own runtime rollout");
   await userEvent.type(screen.getByLabelText("月度预算（美元）"), "50");
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  fireEvent.change(screen.getByLabelText("Agent runtime config"), { target: { value: '{"model":"provider/model"}' } });
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  fireEvent.change(screen.getByLabelText("运行时 JSON"), { target: { value: '{"model":"provider/model"}' } });
   fireEvent.change(screen.getByLabelText("Metadata"), { target: { value: '{"team":"runtime"}' } });
-  await userEvent.type(screen.getByLabelText("期望技能"), "review,debug");
+  expect(screen.queryByLabelText("期望技能")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -157,7 +157,6 @@ it("opens the first agent by default and creates one from the new agent flow", a
         agentRuntimeConfig: { model: "provider/model" },
         budgetMonthlyCents: 5000,
         metadata: { team: "runtime" },
-        desiredSkills: ["review", "debug"],
       }),
     }),
   );
@@ -321,12 +320,20 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
   renderApp("/orgs/org-1/agents/new");
   await userEvent.type(await screen.findByLabelText(/智能体名称/), "OpenClaw Agent");
   await userEvent.selectOptions(screen.getByLabelText("Runtime"), "openclaw_gateway");
-  expect(screen.getByText("使用推荐默认配置")).toBeInTheDocument();
-  expect(screen.queryByLabelText("Gateway URL")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "个性化配置" }));
-  await userEvent.type(await screen.findByLabelText("Gateway URL"), "wss://gateway.example/ws");
-  await userEvent.type(screen.getByLabelText("Auth token"), "secret-token");
-  await userEvent.selectOptions(screen.getByLabelText("Session key strategy"), "issue");
+  expect(screen.getByText("需配置网关地址 · 默认按任务建立会话 · 超时 120 秒")).toBeInTheDocument();
+  expect(screen.queryByLabelText("网关地址")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "高级参数" }));
+  const gatewayUrl = await screen.findByLabelText("网关地址");
+  expect(gatewayUrl.closest(".runtime-config-fields")).toHaveClass("runtime-config-fields--gateway");
+  expect(screen.getByLabelText("连接超时（秒）").closest("label")).toHaveClass("runtime-config-field-half");
+  expect(screen.getByLabelText("等待超时（秒）").closest("label")).toHaveClass("runtime-config-field-half");
+  await userEvent.type(gatewayUrl, "wss://gateway.example/ws");
+  const authToken = screen.getByLabelText("认证令牌");
+  expect(authToken).toHaveAttribute("type", "password");
+  await userEvent.type(authToken, "secret-token");
+  await userEvent.selectOptions(screen.getByLabelText("会话策略"), "issue");
+  await userEvent.type(screen.getByLabelText("连接超时（秒）"), "150");
+  await userEvent.type(screen.getByLabelText("等待超时（秒）"), "90");
   await userEvent.click(screen.getByRole("button", { name: "新建智能体" }));
 
   expect(fetchMock).toHaveBeenCalledWith(
@@ -342,6 +349,8 @@ it("builds openclaw gateway config from dedicated runtime fields", async () => {
           url: "wss://gateway.example/ws",
           authToken: "secret-token",
           sessionKeyStrategy: "issue",
+          timeoutSec: 150,
+          waitTimeoutMs: 90000,
         },
       }),
     }),

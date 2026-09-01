@@ -110,7 +110,8 @@ it("shows the organization workspace file tree and editor", async () => {
 
   renderApp("/orgs/org-1/workspaces");
 
-  expect(await screen.findByRole("heading", { name: "工作区" })).toBeInTheDocument();
+  const workspaceHeading = await screen.findByRole("heading", { name: "工作区" });
+  expect(workspaceHeading.closest(".org-content")).toHaveClass("organization-fullscreen-detail", "organization-workspaces-content");
   expect(screen.getByTestId("org-workspaces-files-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-editor-card")).toBeInTheDocument();
   expect(screen.getByTestId("org-workspaces-files-card").closest(".file-browser")).toHaveClass("framed");
@@ -294,7 +295,7 @@ it("shows organization cost reporting on the organization costs route", async ()
   const costHeading = await screen.findByRole("heading", { name: "成本", level: 1 });
   const costHeader = costHeading.closest("header")!;
   expect(costHeader).toHaveClass("page-header");
-  expect(costHeader.parentElement).toHaveClass("org-content-full");
+  expect(costHeader.parentElement).toHaveClass("org-content-full", "organization-fullscreen-detail", "organization-costs-content");
   expect(within(costHeader).getByText("Organization Costs")).toHaveClass("eyebrow");
   expect(within(costHeader).getByText("按智能体、服务商、计费方和项目查看运行成本。")).toHaveClass("muted");
   expect(screen.getAllByRole("heading", { name: "成本" })).toHaveLength(1);
